@@ -160,10 +160,11 @@ describe('SiteHomeShell home bar', () => {
   // "The button is inside the strip" is not the property that matters — WHERE the strip lands is,
   // and the test above stays green wherever the host is mounted. On the hub the same mechanism was
   // hosted one component too high for a whole round of this branch and rendered ABOVE the workspace
-  // switcher; nothing was red. This is the mirror of the hub's own order test
-  // (`sites/hub/src/components/workspace/__tests__/workspaceShellHomeBar.test.tsx`): the strip
-  // follows the workspace bar and precedes the content the site renders below it. Hoist
-  // `HomeBarHost` to wrap `<WorkspaceBar>` too and the first comparison flips.
+  // switcher; nothing was red. This is the mirror of the hub's own order test (its
+  // `workspaceShellHomeBar.test.tsx`, which pins the strip below the head of the hub's workspace
+  // column now that the hub's switcher lives in its header): the strip follows the workspace bar
+  // and precedes the content the site renders below it. Hoist `HomeBarHost` to wrap
+  // `<WorkspaceBar>` too and the first comparison flips.
   it('draws the strip below the workspace bar and above the content', async () => {
     renderShell(
       <>
@@ -174,9 +175,9 @@ describe('SiteHomeShell home bar', () => {
       </>,
     )
     const strip = await screen.findByTestId('home-bar')
-    // The workspace bar itself carries no test id (`WorkspaceBar` is a pair of plain
-    // `adh-home__toolbar*` divs), so this test points at it through the WorkspacePicker mocked
-    // above, which renders inside it — a node in the bar is enough to fix the bar's position.
+    // The workspace bar itself carries no test id (`WorkspaceBar` is one plain `adh-home__toolbar`
+    // div), so this test points at it through the WorkspacePicker mocked above, which renders
+    // inside it — a node in the bar is enough to fix the bar's position.
     const picker = screen.getByTestId('picker')
     const content = screen.getByText('content')
     // MASKED, not `toBe`: `compareDocumentPosition` returns a bitmask, and a strict compare holds

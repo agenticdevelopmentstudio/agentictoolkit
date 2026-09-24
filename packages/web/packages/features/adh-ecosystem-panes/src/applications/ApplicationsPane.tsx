@@ -26,23 +26,81 @@ import {
   appToInput,
   appValidate,
 } from "./ApplicationDetail";
+import { CRUD_KEYS, type Crud, type SchemaGrant } from "./permission-model";
 import type { RenderTransferSection } from "../transfer-seam";
 
-/** JSON with every object's keys sorted, so two equal values always serialise identically. */
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(value, (_key, v: unknown) =>
-    v && typeof v === "object" && !Array.isArray(v)
-      ? Object.fromEntries(Object.entries(v).sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)))
-      : v,
-  );
+/** Whether two grant lists hold the same grants, whatever order the list and its objects' keys
+ *  are in. Order-blind because plain `JSON.stringify` was key-order sensitive: a `tables` map
+ *  loaded from the server and the same map rebuilt by an edit-and-undo serialised differently,
+ *  so Save lit up with nothing changed.
+ *
+ *  Compared field by field, copying nothing and stopping at the first difference, because this
+ *  runs on EVERY render — `dirty` calls `appDiffers` — and the key-sorted canonical JSON it
+ *  replaced (both lists copied and `localeCompare`-sorted, then a sorted copy of every object in
+ *  them) cost 7-16x the plain stringify before it: 13.6ms a render at 50 grants of 100 tables.
+ *  An unedited draft costs nothing at all: `appToInput` hands the draft its base's array, and
+ *  the two stay the same array until an edit replaces it.
+ *
+ *  Grants are one per schema — `addGrant` refuses a second, and the backend returns one per
+ *  bucket — so `schemaId` pairs them. The partner is looked for at the same index first, which
+ *  is where an edit leaves it (`updateGrant` maps in place), and searched for only when the order
+ *  differs: a scan that is quadratic in the number of grants, a handful, where a Map to look it
+ *  up in would be an allocation on every render. The loops are index loops for the same reason:
+ *  `find`, `every` and `for...of` each allocate a closure or an iterator per call. */
+function sameGrants(a: readonly SchemaGrant[], b: readonly SchemaGrant[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const grant = a[i]!;
+    const sameIndex = b[i]!;
+    const partner =
+      sameIndex.schemaId === grant.schemaId ? sameIndex : findGrant(b, grant.schemaId);
+    if (!partner || !sameGrant(grant, partner)) return false;
+  }
+  return true;
 }
 
-/** The grant set in a form that ignores order. Plain `JSON.stringify` was key-order sensitive:
- *  a `tables` map loaded from the server and the same map rebuilt by an edit-and-undo serialised
- *  differently, so Save lit up with nothing changed. Grants are one per schema, so `schemaId`
- *  orders the list. */
-function grantsKey(grants: ApplicationInput["schemaGrants"]): string {
-  return canonicalJson([...grants].sort((x, y) => x.schemaId.localeCompare(y.schemaId)));
+function findGrant(grants: readonly SchemaGrant[], schemaId: string): SchemaGrant | undefined {
+  for (let i = 0; i < grants.length; i++) {
+    if (grants[i]!.schemaId === schemaId) return grants[i];
+  }
+  return undefined;
+}
+
+function sameGrant(a: SchemaGrant, b: SchemaGrant): boolean {
+  return a === b || (sameCrud(a.permissions, b.permissions) && sameTables(a.tables, b.tables));
+}
+
+/** The same table ids with equal grants: every id of `a` looked up in `b`, then the counts
+ *  compared, so insertion order — what `JSON.stringify` saw — plays no part. `Object.hasOwn`
+ *  rather than `in`, which would find a table named `constructor` on every object. */
+function sameTables(a: SchemaGrant["tables"], b: SchemaGrant["tables"]): boolean {
+  if (a === b) return true;
+  let unmatched = 0;
+  for (const id in a) {
+    if (!Object.hasOwn(a, id)) continue;
+    if (!Object.hasOwn(b, id)) return false;
+    const x = a[id];
+    const y = b[id];
+    if (x !== y && (!x || !y || x.level !== y.level || !sameCrud(x.permissions, y.permissions))) {
+      return false;
+    }
+    unmatched++;
+  }
+  for (const id in b) {
+    if (Object.hasOwn(b, id)) unmatched--;
+  }
+  return unmatched === 0;
+}
+
+/** `CRUD_KEYS`, not the four names spelled out, so a capability added to `Crud` is compared too. */
+function sameCrud(a: Crud, b: Crud): boolean {
+  if (a === b) return true;
+  for (let i = 0; i < CRUD_KEYS.length; i++) {
+    const key = CRUD_KEYS[i]!;
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
 }
 
 export function appDiffers(a: ApplicationInput, b: ApplicationInput): boolean {
@@ -50,7 +108,7 @@ export function appDiffers(a: ApplicationInput, b: ApplicationInput): boolean {
     a.identifier.trim() !== b.identifier.trim() ||
     a.name.trim() !== b.name.trim() ||
     a.kind !== b.kind ||
-    grantsKey(a.schemaGrants) !== grantsKey(b.schemaGrants)
+    !sameGrants(a.schemaGrants, b.schemaGrants)
   );
 }
 

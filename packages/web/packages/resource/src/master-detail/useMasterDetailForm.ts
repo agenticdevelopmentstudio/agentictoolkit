@@ -27,11 +27,13 @@ export interface MasterDetailFormConfig<TItem, TInput> {
   getId: (item: TItem) => string;
   blank: () => TInput;
   toInput: (item: TItem) => TInput;
-  /** `others` = every row except the selected one (for uniqueness checks). `base` = the draft's
-   *  baseline (the stored record's input, or `blank()` on create), so a rule can grandfather a
-   *  value the user did not touch — a row the BACKEND wrote need not satisfy a client-side format
-   *  rule, and holding every other field's Save hostage to it is how the team pane shipped with
-   *  Save permanently greyed out on the auto-provisioned `participants` / `admins` teams. */
+  /** `others` = every row except the selected one (for uniqueness checks). `base` = the selected
+   *  record's STORED input, and null while creating, so a rule can grandfather a value the user did
+   *  not touch — a row the BACKEND wrote need not satisfy a client-side format rule, and holding
+   *  every other field's Save hostage to it is how the team pane shipped with Save permanently
+   *  greyed out on the auto-provisioned `participants` / `admins` teams. Null on create because a
+   *  new record has nothing stored to grandfather: compare with `unchangedFromStored`, which is
+   *  false for a null stored value, so a create is held to every rule. */
   validate: (draft: TInput, others: TItem[], base: TInput | null) => string | null;
   /** True when the draft differs from its baseline. */
   differs: (a: TInput, b: TInput) => boolean;
@@ -117,6 +119,11 @@ export function useMasterDetailForm<TItem, TInput>(
       ? config.toInput(selected)
       : null;
   const others = rows.filter((r) => config.getId(r) !== selectedId);
+  // What `validate` is told the record was stored with. NOT `base`: on create `base` is `blank()`,
+  // the baseline `dirty` measures a new draft against, and nothing was ever stored. Handing it to
+  // `validate` let a blank draft "match its stored value" — userValidate exempts an unchanged email
+  // from every email rule, so a new user with no email passed as though "" were on record.
+  const stored: TInput | null = creating ? null : base;
 
   const dirty = Boolean(draft) && Boolean(base) && config.differs(draft!, base!);
   // Why Save can't fire, as the REASON string `config.validate` already returns rather than the
@@ -126,7 +133,7 @@ export function useMasterDetailForm<TItem, TInput>(
   // eleven panes greying Save out with no explanation anywhere. Now it rides in `actions` next to
   // `canSave` and ButtonBar renders it beside the button. Not gated on `dirty`: a create opens on
   // a blank draft that is already blocked, and that is exactly when the reason is instruction.
-  const blockedReason = draft ? config.validate(draft, others, base) : null;
+  const blockedReason = draft ? config.validate(draft, others, stored) : null;
   const valid = Boolean(draft) && blockedReason === null;
   // dirty && valid ONLY. The in-flight term is NOT folded in here: `canSave` is a statement about
   // the DRAFT, and every consumer hands it to ButtonBar → SaveCancelButtons, which already renders
@@ -229,7 +236,7 @@ export function useMasterDetailForm<TItem, TInput>(
     // Already in flight — swallow the duplicate. Reporting `false` is right for the exit guard
     // too: nothing has been persisted YET, so leaving now would still lose the edit.
     if (savingRef.current) return false;
-    const problem = config.validate(draft, others, base);
+    const problem = config.validate(draft, others, stored);
     if (problem) {
       setError(problem);
       return false;

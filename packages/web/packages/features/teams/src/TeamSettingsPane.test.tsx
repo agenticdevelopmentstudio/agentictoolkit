@@ -50,4 +50,28 @@ describe("TeamSettingsPane", () => {
     fireEvent.change(id, { target: { value: "not-reverse-domain" } });
     await waitFor(() => expect(save).toBeDisabled());
   });
+
+  // "Untouched" is decided by the shared `unchangedFromStored`, which trims BOTH sides. This
+  // validator used to compare the stored slug raw, so a stored slug carrying whitespace never
+  // counted as untouched and Save stayed dark on it exactly as on `participants` before the fix.
+  it("counts a stored slug carrying whitespace as untouched", async () => {
+    const provisioned = { ...TEAM, identifier: " participants " } as Team;
+    render(<TeamSettingsPane teamId="t1" items={[provisioned]} refresh={() => {}} />);
+    const name = await screen.findByLabelText("Display name");
+    const save = screen.getByRole("button", { name: /save/i });
+    fireEvent.change(name, { target: { value: "Participants" } });
+    await waitFor(() => expect(save).toBeEnabled());
+  });
+
+  // Only the FORMAT is grandfathered. `validateTeamIdentifier` also holds the required rule, and
+  // clearing a provisioned team's slug must still be refused as required, not waved through.
+  it("still requires an identifier on a provisioned team", async () => {
+    const provisioned = { ...TEAM, identifier: "participants" } as Team;
+    render(<TeamSettingsPane teamId="t1" items={[provisioned]} refresh={() => {}} />);
+    const id = await screen.findByLabelText("Identifier");
+    const save = screen.getByRole("button", { name: /save/i });
+    fireEvent.change(id, { target: { value: "" } });
+    await waitFor(() => expect(save).toBeDisabled());
+    expect(screen.getByText("Identifier is required.")).toBeTruthy();
+  });
 });

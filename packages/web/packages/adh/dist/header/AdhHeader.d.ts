@@ -56,21 +56,23 @@ export type AdhHeaderProps = AdhHeaderAuthProps & {
     /** Replaces the default `sites`-driven switcher in the header's lead slot.
      *
      *  This is the seam that keeps the header registry-free: a consumer whose site
-     *  switcher must resolve a private registry (recents, workspaces, dev-tools
-     *  flyouts) renders it itself and passes it here, from its own package. The
+     *  switcher must resolve a private registry (recents, workspaces) renders it
+     *  itself and passes it here, from its own package. The
      *  default and the slot are mutually exclusive by
      *  construction: when this is set the default is not rendered at all. */
     siteSwitcher?: ReactNode;
     /** A second dropdown rendered immediately AFTER the switcher, on the same row.
      *
      *  Its own slot rather than something the caller folds into `siteSwitcher`,
-     *  because the point of it is that the two menus are INDEPENDENT: a host may fill
-     *  this with the dev-tools menu (`DevToolsMenu`; SiteHeader no longer does — its
-     *  Debug Options row lives in the avatar menu), which appears only in a dev build or for an admin,
-     *  and the switcher beside it must render identically either way. A caller that
-     *  nested the two would put the disappearing thing inside the one that must not
-     *  change. Empty/absent on every other host, and absent here whenever the menu
-     *  is locked — the row simply holds one child then. */
+     *  because the point of it is that the two menus are INDEPENDENT: a menu a host
+     *  shows only to some visitors (a dev build, an admin) can sit here while the
+     *  switcher beside it renders identically either way. A caller that nested the two
+     *  would put the disappearing thing inside the one that must not change.
+     *
+     *  SiteHeader leaves it empty. The dev-tools dropdown it used to hold was deleted
+     *  when the repo owner asked for its bug glyph gone from beside the site name; the
+     *  one row in it anybody used is `onDebugOptions` now, at the account end of the
+     *  bar. Absent, the row simply holds one child. */
     debugMenu?: ReactNode;
     /** Optional page/section title, shown centered in the bar. */
     pageTitle?: string;
@@ -132,11 +134,18 @@ export type AdhHeaderProps = AdhHeaderAuthProps & {
      *  no route map, so whoever knows the registry (and whether the current site
      *  carries `/<slug>/profile`) hands it in; absent omits the row. */
     profileHref?: string;
-    /** Opens the Debug console from the avatar menu's last row — `AvatarMenu`'s own
-     *  `onDebugOptions`. Absent omits the row. Who is offered it (a dev build, an adh
-     *  admin) is the caller's to decide; this header only draws the door. */
+    /** Opens the Debug console. The header draws ONE door for it, whichever the auth
+     *  state allows: signed in, the avatar menu's last row (`AvatarMenu`'s own
+     *  `onDebugOptions`); signed out, a "Debug Options" icon button after login / join —
+     *  a signed-out visitor has no account menu, and without the button they would have
+     *  no way into the console at all, including the way to switch OFF a console flag
+     *  they saved earlier. Neither while the session is still resolving: which door
+     *  applies is not known yet. Absent draws no door. Who is offered it (a dev build,
+     *  an adh admin) is the caller's to decide; this header only draws the door. */
     onDebugOptions?: () => void;
-    /** The Debug row's secondary text ("Sim: prod") — `AvatarMenu`'s `debugOptionsHint`. */
+    /** The door's secondary text ("Sim: prod") — `AvatarMenu`'s `debugOptionsHint`, and
+     *  the signed-out button's description. Never part of either door's name, which
+     *  stays "Debug Options". */
     debugOptionsHint?: string;
     /** The words in the full-width strip above the bar. Defaults to
      *  {@link DEFAULT_PREVIEW_NOTICE}. The package draws the strip; the host supplies

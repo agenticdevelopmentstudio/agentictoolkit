@@ -11,7 +11,6 @@ import {
   Bot,
   Boxes,
   Briefcase,
-  Bug,
   Building,
   ChefHat,
   CircleHelp,
@@ -56,7 +55,6 @@ import {
   Package,
   Plug,
   Rocket,
-  Route,
   School,
   ScrollText,
   Send,
@@ -159,19 +157,16 @@ var ICONS = {
   // submenu already wears — a topic that duplicates one of its children's icons
   // reads as that child promoted, rather than as the group it is.
   learn: Lightbulb,
-  // --- Chrome rows (the auth-conditional top section, + the dev-only tools
-  //     appended after the Marketing/Main sites submenus) ---
+  // --- Chrome rows (the auth-conditional top section) ---
   home: House,
   workspaces: Boxes,
   recents: History,
   login: LogIn,
   signup: UserPlus,
-  routes: Route,
-  debug: Bug,
-  // --- Remaining MAIN family sites (websites/main/), for the dev "Main sites"
-  //     submenu. The rest of the family (hub, bitbag, community, cookbook,
-  //     devteam, help, myagenticteams, news, personaregistry, toolkit) is mapped
-  //     among the Hub-core rows above. ---
+  // --- Remaining MAIN family sites (websites/main/), for the admin section's
+  //     consoles and the fleet tree's operations rows. The rest of the family
+  //     (hub, bitbag, community, cookbook, devteam, help, myagenticteams, news,
+  //     personaregistry, toolkit) is mapped among the Hub-core rows above. ---
   admin: ShieldCheck,
   // operations console
   api: Code,
@@ -182,10 +177,10 @@ var ICONS = {
   status: Activity,
   // system status / pulse
   support: LifeBuoy,
-  // --- MARKETING family sites (websites/marketing/), for the dev "Marketing
-  //     sites" submenu. Where a site mirrors a hub feature, it reuses the
-  //     FEATURE_META glyph so the menu matches the workspace rail. ('narratives'
-  //     is mapped among the Hub-core rows above.) ---
+  // --- MARKETING family sites (websites/marketing/), for the fleet tree's
+  //     `{ site }` rows and the Recents fold below. Where a site mirrors a hub
+  //     feature, it reuses the FEATURE_META glyph so the menu matches the workspace
+  //     rail. ('narratives' is mapped among the Hub-core rows above.) ---
   academy: GraduationCap,
   authentication: Fingerprint,
   // customer auth / identity

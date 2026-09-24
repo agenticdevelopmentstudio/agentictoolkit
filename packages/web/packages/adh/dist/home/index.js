@@ -45,6 +45,11 @@ import { Avatar, AvatarImage, AvatarFallback } from "@agenticdevelopertoolkit/ui
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
+
+// src/profile/frame.ts
+var PROFILE_FRAME_CLASS = "mx-auto max-w-2xl px-4 py-16 sm:px-6";
+
+// src/profile/ProfileNotFound.tsx
 import { jsx, jsxs } from "react/jsx-runtime";
 function initials(name) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("");
@@ -80,7 +85,7 @@ function ProfileNotFound() {
     e.preventDefault();
     void handleSearch(query);
   };
-  return /* @__PURE__ */ jsx("main", { className: "mx-auto max-w-2xl px-4 py-16 sm:px-6", children: /* @__PURE__ */ jsxs("div", { className: "rounded-xl border border-apt-border bg-apt-bg p-8", children: [
+  return /* @__PURE__ */ jsx("main", { className: PROFILE_FRAME_CLASS, children: /* @__PURE__ */ jsxs("div", { className: "rounded-xl border border-apt-border bg-apt-bg p-8", children: [
     /* @__PURE__ */ jsx("h1", { className: "font-serif text-2xl font-medium text-apt-text sm:text-3xl", children: "Profile not found" }),
     /* @__PURE__ */ jsx("p", { className: "mt-3 text-apt-text-muted", children: "This profile doesn't exist, or its owner has chosen not to show it to you." }),
     /* @__PURE__ */ jsxs("div", { className: "mt-8", children: [
@@ -188,7 +193,7 @@ function ProfileNotFound() {
 
 // src/profile/ProfileView.tsx
 import { siteUrl, siteProdUrl } from "@agentic-toolkit/adh-registry";
-import { UserCard } from "@agenticdevelopertoolkit/ui/blocks/user-card";
+import { UserCard, UserCardSkeleton } from "@agenticdevelopertoolkit/ui/blocks/user-card";
 
 // src/header/useClientHost.ts
 import { useEffect, useState as useState2 } from "react";
@@ -264,7 +269,7 @@ function ProfileView({
   const shown = shown0 ?? principal;
   const hostname = useClientHost();
   const fullProfileHref = siteId === "hub" ? null : hostname ? siteUrl("hub", `/${encodeURIComponent(shown.slug)}/profile`, hostname) : siteProdUrl("hub", `/${encodeURIComponent(shown.slug)}/profile`);
-  return /* @__PURE__ */ jsxs2("main", { className: "mx-auto max-w-2xl px-4 py-16 sm:px-6", children: [
+  return /* @__PURE__ */ jsxs2("main", { className: PROFILE_FRAME_CLASS, children: [
     /* @__PURE__ */ jsx2(UserCard, { user: shown }),
     shown.description && /* @__PURE__ */ jsx2("p", { className: "mt-4 text-apt-text-muted", children: shown.description }),
     children,
@@ -323,7 +328,7 @@ function ProfileFallback({ slug, siteId, section }) {
     return /* @__PURE__ */ jsx3(ProfileView, { principal: state.principal, siteId, upgrade: false, children: section?.(state.principal) });
   if (viewerPending) return null;
   if (state.status === "missing") return /* @__PURE__ */ jsx3(ProfileNotFound, {});
-  return /* @__PURE__ */ jsx3("main", { className: "mx-auto max-w-2xl px-4 py-16 sm:px-6", children: /* @__PURE__ */ jsx3("p", { className: "text-apt-text-muted", children: "Couldn't load this profile. Reload the page to try again." }) });
+  return /* @__PURE__ */ jsx3("main", { className: PROFILE_FRAME_CLASS, children: /* @__PURE__ */ jsx3("p", { className: "text-apt-text-muted", children: "Couldn't load this profile. Reload the page to try again." }) });
 }
 
 // src/home/SiteHomeShell.tsx
@@ -360,23 +365,19 @@ function WorkspacePicker({
 }
 
 // src/home/WorkspaceBar.tsx
-import { jsx as jsx5, jsxs as jsxs3 } from "react/jsx-runtime";
+import { jsx as jsx5 } from "react/jsx-runtime";
 function WorkspaceBar({
   workspaces,
   selected,
-  onSelect,
-  action
+  onSelect
 }) {
   return (
-    // Three tracks, not a flex row: the label+picker group sits in the middle one so it is centred
-    // on the BAR, not merely centred in what the action leaves over. A flex row can't do this —
-    // the hub's action is `ml-auto`, so the group it pushes right of centre is off-centre by
-    // exactly the action's width, and a site that passes no action would centre it differently
-    // again. The empty first and third tracks are what make the two cases identical.
-    /* @__PURE__ */ jsxs3("div", { className: "adh-home__toolbar", children: [
-      /* @__PURE__ */ jsx5("div", { className: "adh-home__toolbar-control", children: /* @__PURE__ */ jsx5(WorkspacePicker, { workspaces, selected, onSelect }) }),
-      action
-    ] })
+    // The picker is the bar's ONLY child, and a DIRECT one; the CSS depends on both. The bar is a
+    // flex row that centres what it holds, so a sibling would share the row and pull the chooser
+    // off centre. And `.adh-home__toolbar > *` is what lets a long name truncate, so it has to land
+    // on the picker's own root: under the flex wrapper that used to sit here it didn't, and a long
+    // name overflowed the bar instead (see adh-components.css).
+    /* @__PURE__ */ jsx5("div", { className: "adh-home__toolbar", children: /* @__PURE__ */ jsx5(WorkspacePicker, { workspaces, selected, onSelect }) })
   );
 }
 
@@ -481,7 +482,7 @@ function workspacePathTail(pathname) {
 }
 
 // src/home/SiteHomeShell.tsx
-import { Fragment, jsx as jsx6, jsxs as jsxs4 } from "react/jsx-runtime";
+import { Fragment, jsx as jsx6, jsxs as jsxs3 } from "react/jsx-runtime";
 var loadWorkspaces = () => workspacesApi.list();
 function SiteHomeShell({
   workspaceSlug,
@@ -517,7 +518,7 @@ function SiteHomeShell({
     }
     return /* @__PURE__ */ jsx6(ProfileFallback, { slug: workspaceSlug, siteId });
   }
-  return /* @__PURE__ */ jsxs4(Fragment, { children: [
+  return /* @__PURE__ */ jsxs3(Fragment, { children: [
     /* @__PURE__ */ jsx6(
       WorkspaceBar,
       {
@@ -526,7 +527,7 @@ function SiteHomeShell({
         onSelect
       }
     ),
-    /* @__PURE__ */ jsxs4(HomeBarHost, { children: [
+    /* @__PURE__ */ jsxs3(HomeBarHost, { children: [
       error !== null && workspaces === null && /* @__PURE__ */ jsx6(TopicSelectHint, { title: "Couldn't load your workspaces. Reload the page to try again." }),
       resolved === null && /* @__PURE__ */ jsx6(TopicSelectHint, { title: "No workspaces yet \u2014 create one from the hub to get started." }),
       resolved !== void 0 && resolved !== null && resolved === workspaceSlug && workspace !== null && children({
@@ -592,7 +593,6 @@ function WorkspaceOrProfileGate({ children }) {
 export {
   SiteHomeRoute,
   SiteHomeShell,
-  WorkspaceBar,
   WorkspaceOrProfileGate,
   WorkspacePicker,
   defineSiteHome,

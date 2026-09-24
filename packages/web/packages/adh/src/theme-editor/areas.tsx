@@ -7,14 +7,22 @@ import type { ComponentType } from 'react'
 // with a matching `external` because it holds module-level state (the header's
 // `envOverride` listener Set; the footer's legal-modal open-once flags), so a relative
 // specifier would inline a private copy and fork it. See verify-bundle-boundaries.py.
+// The header's workspaces context is state of that kind, and the header preview below
+// replaces it: a private copy would be a second context, which the switcher never reads.
 //
 // The names are adh's REGISTRY-BOUND chrome, not the registry-free primitives these two
 // barrels also publish under confusingly close names: `SiteMenuSwitcher` (renamed from
 // this source's `SiteSwitcher`, which would now bind the toolkit's own unrelated
 // `SiteSwitcher`) and `SiteFooter` (renamed from `AdhFooter`, likewise). The previews
-// below pass adh's props — `currentSiteId`, and a footer that mounts
-// the chat dock this file's preview CSS hides — so the primitives are not substitutes.
-import { SiteHeader, SiteMenuSwitcher } from '@agentic-toolkit/adh/header'
+// below pass adh's props — `currentSiteId`, and the footer's `specimen` — so the
+// primitives are not substitutes.
+import {
+  SiteHeader,
+  SiteMenuSwitcher,
+  WorkspacesMenuProvider,
+  useWorkspacesMenu,
+  type WorkspacesMenu,
+} from '@agentic-toolkit/adh/header'
 import type { HeaderAuthSource } from '@agentic-toolkit/adh/header-auth'
 import { SiteFooter } from '@agentic-toolkit/adh/footer'
 import { Button } from '@agenticdevelopertoolkit/ui/components/button'
@@ -75,6 +83,26 @@ const usePreviewHeaderAuth: HeaderAuthSource = () => ({
   onLogout: () => {},
 })
 
+// The workspaces the preview's header offers, in place of the page's. On the hub the page's
+// workspaces provider sits above the Debug console, and a signed-in header on such a host
+// swaps its site menu for the workspace switcher (SiteMenuSwitcher) — so the preview, signed
+// in by the canned source above, listed the REAL user's workspaces, and picking one switched
+// the page behind the console to it and saved it as that user's preferred workspace.
+//
+// Canned rows in the real list's shape: the hub names a personal workspace after its owner,
+// and there are two rows so that a current and a non-current one are both there to style.
+// The inert `select` stands in for the host's switch, and it also keeps the menu off each
+// row's `href`, which is where a menu without one goes. Module scope, so every render gets
+// the one object and the menu does not rebuild its rows each time.
+const PREVIEW_WORKSPACES: WorkspacesMenu = {
+  workspaces: [
+    { id: 'preview:ada', label: 'Ada Lovelace', href: '#', current: true },
+    { id: 'preview:engine', label: 'Analytical Engine', href: '#' },
+  ],
+  loading: false,
+  select: () => {},
+}
+
 function HeaderPreview() {
   // Unlike `SiteMenuPreview` below, this DOES render a path to the Debug console: `SiteHeader`
   // wires `useDebugOptions` into the avatar menu's last row, and the preview user above is
@@ -86,7 +114,7 @@ function HeaderPreview() {
   // (`header/devToolsEntries.ts`) is `DEV_BUILD` directly, and the site-theme editor only ever
   // renders when that flag is set — "no path to the console" is `SiteMenuPreview`'s
   // guarantee, not this one's.
-  return (
+  const header = (
     <SiteHeader
       siteId="hub"
       navLinks={[
@@ -105,22 +133,35 @@ function HeaderPreview() {
       onSettings={() => {}}
     />
   )
+  // The canned workspaces (PREVIEW_WORKSPACES) replace the page's, and only where the page
+  // has some: a host without them (every satellite) shows the site menu in that slot, so
+  // its preview must too. What the editor styles here is what the page shows.
+  const pageHasWorkspaces = useWorkspacesMenu() != null
+  return pageHasWorkspaces ? (
+    <WorkspacesMenuProvider value={PREVIEW_WORKSPACES}>{header}</WorkspacesMenuProvider>
+  ) : (
+    header
+  )
 }
 
 function FooterPreview() {
   return (
     <div className="tep-preview">
       {/* Preview-only: hide the (recursive) theme switcher. The two-class selector
-          outranks its single-class default — no !important.
-
-          bitbag is NOT hidden this way and can't be: he portals himself to
-          `document.body`, so he is not a descendant of `.tep-preview` and a scoped
-          rule never matches him. Hiding him from here used to work and silently
-          stopped when the portal landed — a second, full-size, live dock over the
-          console previewing him. `chat={false}` doesn't mount him at all. */}
+          outranks its single-class default — no !important. */}
       <style>{`.tep-preview .adh-theme-switcher { display: none; }`}</style>
+      {/* A `specimen`, because the page's own footer is on the page too, and what there
+          must be one of — the menus' ids, the dialogs, bitbag — this copy leaves to that
+          one (SiteFooterProps.specimen). On the page's ids, both copyright buttons opened
+          the page's menu, and it opened at this copy's caret, whichever was clicked.
+
+          bitbag is NOT hidden the way the theme switcher is, and can't be: he portals
+          himself to `document.body`, so he is not a descendant of `.tep-preview` and a
+          scoped rule never matches him. Hiding him from here used to work and silently
+          stopped when the portal landed — a second, full-size, live dock over the
+          console previewing him. A specimen doesn't mount him at all. */}
       <SiteFooter
-        chat={false}
+        specimen
         links={[
           { label: 'GitHub', href: '#' },
           { label: 'Status', href: '#' },

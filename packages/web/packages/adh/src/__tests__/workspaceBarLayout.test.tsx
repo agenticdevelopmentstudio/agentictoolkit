@@ -1,19 +1,23 @@
 /// <reference types="@testing-library/jest-dom/vitest" />
 //
-// The workspace chooser's PLACEMENT in the bar every home-route templated site renders. It is
-// centred, and it has to be centred the same way whether or not the bar carries a trailing action
-// — the hub's bar has one ("New Organization"), every feature site's has none, and the fleet's
-// point is that the switcher is in the same place on all of them.
+// The workspace chooser's PLACEMENT in the bar a feature site's workspace route renders
+// (SiteHomeShell's; the hub's switcher lives in its header now). It is centred, and a name too
+// long for the bar truncates at the trigger's ellipsis instead of overflowing the bar.
 //
-// That is a CSS grid (`1fr auto 1fr`, the group pinned to track 2), so jsdom cannot see the
-// centring itself: it resolves no layout. What it CAN see is the structure the centring depends
-// on — that the label and the trigger are one group, that the group is the middle-track element,
-// and that a trailing action stays OUTSIDE it (an action swept into the group would be centred
-// along with it, and would shift the group left by its own width). These assertions fail on the
-// flat flex row this replaced, where the three were siblings.
+// Both are CSS: a flex row that centres its one child, and a `min-width: 0` on that child. jsdom
+// resolves no layout, so it cannot see either. What it CAN see is the structure both depend on,
+// plus the rules themselves as source text. The picker must be the bar's ONLY child, because a
+// sibling would share the row and pull it off centre. It must also be a DIRECT child, because
+// `min-width: 0` lands on whatever the bar holds and only helps on the picker's own root. The
+// `display: flex` wrapper this replaced carried a `min-width: 0` of its own while the picker's
+// root inside it kept its floor, so a long name overflowed the bar (by 200px at a 390px viewport,
+// in Chromium). The direct-child assertion fails on that shape.
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, afterEach } from "vitest";
 import { render, cleanup, screen } from "@testing-library/react";
 import { WorkspaceBar } from "../home/WorkspaceBar";
+import { WorkspacePicker } from "../home/WorkspacePicker";
 import type { WorkspaceOption } from "../home/WorkspaceOption";
 
 afterEach(cleanup);
@@ -23,64 +27,53 @@ const WORKSPACES: WorkspaceOption[] = [
   { slug: "acme", name: "Acme" },
 ];
 
-const control = (container: HTMLElement) => container.querySelector(".adh-home__toolbar-control");
-
 describe("WorkspaceBar layout", () => {
-  it("holds the trigger in ONE centred group, with no visible label", () => {
+  it("holds the picker as its ONE direct child, with no visible label", () => {
     const { container } = render(
       <WorkspaceBar workspaces={WORKSPACES} selected="mine" onSelect={() => {}} />,
     );
+    const bar = container.querySelector(".adh-home__toolbar");
+    expect(bar).not.toBeNull();
 
-    const group = control(container);
-    expect(group).not.toBeNull();
-    // The bar is the group's parent, not the trigger's, which is what lets one `grid-column: 2`
-    // centre it.
-    expect(group!.parentElement).toHaveClass("adh-home__toolbar");
-    expect(group!.querySelector(".adh-home__toolbar-label")).toBeNull();
-    expect(group!).toContainElement(screen.getByRole("button", { name: "Workspace" }));
+    // ONE: the row centres what it holds, so any sibling (a label, the old trailing action) would
+    // pull the chooser off centre.
+    expect(bar!.children).toHaveLength(1);
+    expect(bar!.querySelector(".adh-home__toolbar-label")).toBeNull();
+    expect(bar!.firstElementChild).toContainElement(
+      screen.getByRole("button", { name: "Workspace" }),
+    );
+
+    // DIRECT: that child is the picker's own root, not a wrapper of ours around it. The old
+    // `.adh-home__toolbar-control` wrapper passes every assertion above and fails this one.
+    // Compared against the picker rendered alone rather than against PopupMenu's classes, so
+    // this stays a test of the bar and not of PopupMenu's markup.
+    const alone = render(
+      <WorkspacePicker workspaces={WORKSPACES} selected="mine" onSelect={() => {}} />,
+    ).container.firstElementChild!;
+    expect(bar!.firstElementChild!.tagName).toBe(alone.tagName);
+    expect(bar!.firstElementChild!.className).toBe(alone.className);
+  });
+});
+
+// jsdom resolves no layout, and vitest hands a CSS import back as an empty string, so the two
+// rules the layout rests on are read as source text (the useHeaderLinksCollapsed.test.ts idiom),
+// comments stripped so a comment quoting a rule cannot satisfy a match.
+describe("the workspace bar's rules", () => {
+  const css = readFileSync(
+    resolve(import.meta.dirname, "../styles/adh-components.css"),
+    "utf8",
+  ).replace(/\/\*[\s\S]*?\*\//g, "");
+
+  it("centres its content in a flex row", () => {
+    const rule = css.match(/\.adh-home__toolbar\s*\{([^}]*)\}/);
+    expect(rule, "no `.adh-home__toolbar {` rule in adh-components.css; did it move?").not.toBeNull();
+    expect(rule![1]).toMatch(/display:\s*flex;/);
+    expect(rule![1]).toMatch(/justify-content:\s*center;/);
   });
 
-  it("leaves a trailing action outside the group, as the bar's own child", () => {
-    const { container } = render(
-      <WorkspaceBar
-        workspaces={WORKSPACES}
-        selected="mine"
-        onSelect={() => {}}
-        action={<button type="button">New Organization</button>}
-      />,
-    );
-
-    const group = control(container)!;
-    const action = screen.getByRole("button", { name: "New Organization" });
-    // Outside the centred track, and a direct child of the bar — so it lands in track 3 by flow
-    // and the group's position does not depend on how wide it is.
-    expect(group).not.toContainElement(action);
-    expect(action.parentElement).toHaveClass("adh-home__toolbar");
-  });
-
-  it("puts the group in the same place with and without an action", () => {
-    // The centring's whole claim: the hub's bar and a feature site's bar place the chooser
-    // identically. In the DOM that is the group being the bar's FIRST child either way — the
-    // action appends after it and never displaces it (in a flex row it did, by its own width).
-    const bare = render(<WorkspaceBar workspaces={WORKSPACES} selected="mine" onSelect={() => {}} />);
-    const bareIndex = [...control(bare.container)!.parentElement!.children].indexOf(
-      control(bare.container)!,
-    );
-    cleanup();
-
-    const withAction = render(
-      <WorkspaceBar
-        workspaces={WORKSPACES}
-        selected="mine"
-        onSelect={() => {}}
-        action={<button type="button">New Organization</button>}
-      />,
-    );
-    const actionIndex = [...control(withAction.container)!.parentElement!.children].indexOf(
-      control(withAction.container)!,
-    );
-
-    expect(actionIndex).toBe(bareIndex);
-    expect(actionIndex).toBe(0);
+  it("lets its child shrink below the name's width, so a long name truncates", () => {
+    // Without it the picker's root floors at the full name: a name wider than the bar overflows
+    // both edges of a centred row instead of reaching the trigger's ellipsis.
+    expect(css).toMatch(/\.adh-home__toolbar\s*>\s*\*\s*\{[^}]*min-width:\s*0;/);
   });
 });

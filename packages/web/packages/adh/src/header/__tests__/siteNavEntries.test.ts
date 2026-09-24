@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { buildSiteNavEntries, SITE_NAV_SECTION } from '../siteNavEntries'
-import { DEBUG_SECTION } from '../debugSiteGroups'
-import { FLEET_SECTION } from '../fleetMenuGroups'
+import { ADMIN_SECTION, FLEET_SECTION } from '../fleetMenuGroups'
 import type { NavLink } from '../NavLink'
 
 // The site menu's phone-only rows: the destinations the header bar drops below 768px
@@ -93,14 +92,14 @@ describe('buildSiteNavEntries', () => {
 
   it('carries a section distinct from every other the menu renders', () => {
     // The popover rules a divider wherever adjacent entries disagree on `section`. If
-    // this collided with the fleet tree (1) or the dev tools (2), the site's own nav
-    // would silently merge into that block instead of standing as its own group.
+    // this collided with the fleet tree (1) or the admin consoles (2), the site's own
+    // nav would silently merge into that block instead of standing as its own group.
     const out = buildSiteNavEntries(HUB_NAV, { homeHref: '/x', pathname: '/' })
 
     expect(new Set(out.map((e) => e.section))).toEqual(new Set([SITE_NAV_SECTION]))
     expect(SITE_NAV_SECTION).not.toBe(0) // SiteMenu's auth top section
     expect(SITE_NAV_SECTION).not.toBe(FLEET_SECTION)
-    expect(SITE_NAV_SECTION).not.toBe(DEBUG_SECTION)
+    expect(SITE_NAV_SECTION).not.toBe(ADMIN_SECTION)
   })
 
   it('gives every row a key of its own, so two labels at one href cannot collide', () => {

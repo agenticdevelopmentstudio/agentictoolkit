@@ -29,7 +29,6 @@ function FooterMenu({
         type: "button",
         popoverTarget: id,
         "aria-label": ariaLabel,
-        "aria-haspopup": "menu",
         className: `${triggerClassName} adh-footer__menu-trigger`,
         children: [
           label,
@@ -77,16 +76,6 @@ function AdhFooter({ links = [], copyright, trailing, className }) {
             className: link.className
           },
           `menu:${link.menuId}`
-        ) : "popoverTarget" in link ? /* @__PURE__ */ jsx(
-          "button",
-          {
-            type: "button",
-            popoverTarget: link.popoverTarget,
-            "aria-label": link.ariaLabel,
-            className: ["adh-footer__link adh-footer__sites-trigger", link.className].filter(Boolean).join(" "),
-            children: link.label
-          },
-          `popover:${link.popoverTarget}`
         ) : /* @__PURE__ */ jsx(
           Link,
           {
@@ -105,6 +94,7 @@ function AdhFooter({ links = [], copyright, trailing, className }) {
 }
 
 // src/footer/SiteFooter.tsx
+import { useId } from "react";
 import {
   AdhFooter as ToolkitFooter,
   FooterMenu as FooterMenu2
@@ -221,6 +211,7 @@ function SitesPopover() {
 
 // src/footer/LegalModals.tsx
 import { useEffect, useState } from "react";
+import { isModifiedClick } from "@agenticdevelopertoolkit/ui/lib/navigation-guard";
 import { LEGAL_EFFECTIVE_DATE, TermsBody, PrivacyBody } from "@agentic-toolkit/adh/legal";
 import { jsx as jsx6, jsxs as jsxs5 } from "react/jsx-runtime";
 var TERMS_DIALOG_ID = "adh-terms-dialog";
@@ -258,7 +249,7 @@ function PrivacyModal() {
 }
 function openLegalModal(dialogId) {
   return (e) => {
-    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (e.defaultPrevented || isModifiedClick(e)) return;
     const el = document.getElementById(dialogId);
     if (el && "showPopover" in el) {
       e.preventDefault();
@@ -266,6 +257,11 @@ function openLegalModal(dialogId) {
     }
   };
 }
+
+// src/footer/useFooterRestOffset.ts
+import { useLayoutEffect } from "react";
+var REST_SLOT_HOST_CLASS = "adh-footer__rest-slot-host";
+var REST_SLOT_SELECTOR = `.adh-footer--with-chat .${REST_SLOT_HOST_CLASS}`;
 
 // src/footer/SiteFooter.tsx
 import { Fragment, jsx as jsx7, jsxs as jsxs6 } from "react/jsx-runtime";
@@ -292,10 +288,15 @@ var PRIVACY = {
   onSelect: openLegalModal(PRIVACY_DIALOG_ID),
   prefetch: false
 };
-var LEGAL_LINKS = [
-  { ...TERMS, className: "adh-footer__link--no-popover" },
+var legalLinks = (menuId) => [
+  { ...TERMS, className: `adh-footer__link--no-popover ${REST_SLOT_HOST_CLASS}` },
   { ...PRIVACY, className: "adh-footer__link--no-popover" },
-  { label: "Legal", menuId: LEGAL_MENU_ID, items: [TERMS, PRIVACY], className: "adh-footer__legal" }
+  {
+    label: "Legal",
+    menuId,
+    items: [TERMS, PRIVACY],
+    className: `adh-footer__legal ${REST_SLOT_HOST_CLASS}`
+  }
 ];
 function buildVersionLabel(live) {
   const version = live?.version ?? process.env.NEXT_PUBLIC_ADH_SITE_VERSION ?? "";
@@ -304,32 +305,49 @@ function buildVersionLabel(live) {
   if (!label) return null;
   return /* @__PURE__ */ jsx7("span", { title: sha || void 0, children: label });
 }
-function SiteFooter({ links = [], chat = true, live }) {
+function SiteFooter({ links = [], chat = true, live, specimen = false }) {
+  const withChat = chat && !specimen;
+  const version = buildVersionLabel(live);
+  const instance = useId().replace(/[^\w-]/g, "");
+  const copyrightMenuId = specimen ? `${COPYRIGHT_MENU_ID}-${instance}` : COPYRIGHT_MENU_ID;
+  const legalMenuId = specimen ? `${LEGAL_MENU_ID}-${instance}` : LEGAL_MENU_ID;
   return /* @__PURE__ */ jsxs6(Fragment, { children: [
     /* @__PURE__ */ jsx7(
       ToolkitFooter,
       {
-        className: chat ? "adh-footer--with-chat" : void 0,
-        links: [...links, ...LEGAL_LINKS],
-        copyright: /* @__PURE__ */ jsx7(
-          FooterMenu2,
-          {
-            id: COPYRIGHT_MENU_ID,
-            triggerClassName: "adh-footer__copyright-trigger",
-            label: /* @__PURE__ */ jsxs6(Fragment, { children: [
-              COPYRIGHT_PREFIX,
-              /* @__PURE__ */ jsx7("span", { className: "adh-footer__brand-link", children: BRAND_LABEL })
-            ] }),
-            items: COPYRIGHT_MENU
-          }
-        ),
-        trailing: chat ? /* @__PURE__ */ jsx7(FooterChat, {}) : null
+        className: withChat ? "adh-footer--with-chat" : void 0,
+        links: [...links, ...legalLinks(legalMenuId)],
+        copyright: /* @__PURE__ */ jsxs6(Fragment, { children: [
+          /* @__PURE__ */ jsx7(
+            FooterMenu2,
+            {
+              id: copyrightMenuId,
+              triggerClassName: "adh-footer__copyright-trigger",
+              label: /* @__PURE__ */ jsxs6(Fragment, { children: [
+                COPYRIGHT_PREFIX,
+                /* @__PURE__ */ jsx7("span", { className: "adh-footer__brand-link", children: BRAND_LABEL })
+              ] }),
+              items: COPYRIGHT_MENU
+            }
+          ),
+          /* @__PURE__ */ jsxs6("span", { className: "adh-footer__copyright-fallback", children: [
+            COPYRIGHT_PREFIX,
+            /* @__PURE__ */ jsx7("a", { className: "adh-footer__brand-link", href: BRAND_HREF, children: BRAND_LABEL }),
+            version && /* @__PURE__ */ jsxs6("span", { className: "adh-footer__copyright-version", children: [
+              " \xB7 ",
+              version
+            ] })
+          ] })
+        ] }),
+        trailing: withChat ? /* @__PURE__ */ jsx7(FooterChat, {}) : null
       }
     ),
-    /* @__PURE__ */ jsx7(AboutModal, { version: buildVersionLabel(live) }),
-    /* @__PURE__ */ jsx7(SitesPopover, {}),
-    /* @__PURE__ */ jsx7(TermsModal, {}),
-    /* @__PURE__ */ jsx7(PrivacyModal, {})
+    !specimen && /* @__PURE__ */ jsxs6(Fragment, { children: [
+      /* @__PURE__ */ jsx7(AboutModal, { version }),
+      /* @__PURE__ */ jsx7(SitesPopover, {}),
+      /* @__PURE__ */ jsx7(TermsModal, {}),
+      /* @__PURE__ */ jsx7(PrivacyModal, {})
+    ] })
   ] });
 }
 

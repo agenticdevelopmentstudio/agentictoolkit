@@ -3,7 +3,7 @@
 
 // src/profile/ProfileView.tsx
 import { siteUrl, siteProdUrl } from "@agentic-toolkit/adh-registry";
-import { UserCard } from "@agenticdevelopertoolkit/ui/blocks/user-card";
+import { UserCard, UserCardSkeleton } from "@agenticdevelopertoolkit/ui/blocks/user-card";
 
 // src/header/useClientHost.ts
 import { useEffect, useState } from "react";
@@ -12,6 +12,9 @@ function useClientHost() {
   useEffect(() => setHost(window.location.host), []);
   return host;
 }
+
+// src/profile/frame.ts
+var PROFILE_FRAME_CLASS = "mx-auto max-w-2xl px-4 py-16 sm:px-6";
 
 // src/profile/useViewerPrincipal.ts
 import { useEffect as useEffect2, useState as useState2 } from "react";
@@ -101,7 +104,7 @@ function ProfileView({
   const shown = shown0 ?? principal;
   const hostname = useClientHost();
   const fullProfileHref = siteId === "hub" ? null : hostname ? siteUrl("hub", `/${encodeURIComponent(shown.slug)}/profile`, hostname) : siteProdUrl("hub", `/${encodeURIComponent(shown.slug)}/profile`);
-  return /* @__PURE__ */ jsxs("main", { className: "mx-auto max-w-2xl px-4 py-16 sm:px-6", children: [
+  return /* @__PURE__ */ jsxs("main", { className: PROFILE_FRAME_CLASS, children: [
     /* @__PURE__ */ jsx(UserCard, { user: shown }),
     shown.description && /* @__PURE__ */ jsx("p", { className: "mt-4 text-apt-text-muted", children: shown.description }),
     children,
@@ -114,6 +117,9 @@ function ProfileView({
       }
     ) })
   ] });
+}
+function ProfileSkeleton() {
+  return /* @__PURE__ */ jsx("main", { className: PROFILE_FRAME_CLASS, children: /* @__PURE__ */ jsx(UserCardSkeleton, {}) });
 }
 
 // src/profile/ProfileNotFound.tsx
@@ -159,7 +165,7 @@ function ProfileNotFound() {
     e.preventDefault();
     void handleSearch(query);
   };
-  return /* @__PURE__ */ jsx2("main", { className: "mx-auto max-w-2xl px-4 py-16 sm:px-6", children: /* @__PURE__ */ jsxs2("div", { className: "rounded-xl border border-apt-border bg-apt-bg p-8", children: [
+  return /* @__PURE__ */ jsx2("main", { className: PROFILE_FRAME_CLASS, children: /* @__PURE__ */ jsxs2("div", { className: "rounded-xl border border-apt-border bg-apt-bg p-8", children: [
     /* @__PURE__ */ jsx2("h1", { className: "font-serif text-2xl font-medium text-apt-text sm:text-3xl", children: "Profile not found" }),
     /* @__PURE__ */ jsx2("p", { className: "mt-3 text-apt-text-muted", children: "This profile doesn't exist, or its owner has chosen not to show it to you." }),
     /* @__PURE__ */ jsxs2("div", { className: "mt-8", children: [
@@ -310,11 +316,12 @@ function ProfileFallback({ slug, siteId, section }) {
     return /* @__PURE__ */ jsx3(ProfileView, { principal: state.principal, siteId, upgrade: false, children: section?.(state.principal) });
   if (viewerPending) return null;
   if (state.status === "missing") return /* @__PURE__ */ jsx3(ProfileNotFound, {});
-  return /* @__PURE__ */ jsx3("main", { className: "mx-auto max-w-2xl px-4 py-16 sm:px-6", children: /* @__PURE__ */ jsx3("p", { className: "text-apt-text-muted", children: "Couldn't load this profile. Reload the page to try again." }) });
+  return /* @__PURE__ */ jsx3("main", { className: PROFILE_FRAME_CLASS, children: /* @__PURE__ */ jsx3("p", { className: "text-apt-text-muted", children: "Couldn't load this profile. Reload the page to try again." }) });
 }
 export {
   ProfileFallback,
   ProfileNotFound,
+  ProfileSkeleton,
   ProfileView,
   useViewerPrincipal
 };

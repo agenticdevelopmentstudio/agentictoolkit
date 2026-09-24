@@ -96,11 +96,12 @@ export type SiteHeaderProps = Omit<
    *  reason, as `previewNotice` above. */
   previewDetail?: string
   /** Curated route map. UNREAD since the header stopped mounting the dev-tools
-   *  dropdown ({@link DevToolsMenu}), whose "Routes" flyout was its only reader: the
-   *  bug glyph that opened it came out of the bar, and its Debug Options row moved to
-   *  the avatar menu. Kept, not removed, because sites across the fleet pass it and
-   *  `DevToolsMenu` is still exported for any host that wants the dropdown back.
-   *  @deprecated Nothing in SiteHeader reads it. */
+   *  dropdown, whose "Routes" flyout was its only reader: the bug glyph that opened it
+   *  came out of the bar, its Debug Options row moved to the account end of the header
+   *  (see `useDebugOptions`), and the dropdown itself was then deleted with nothing
+   *  left to mount it. Kept, not removed, only because sites across the fleet still
+   *  pass it — dropping it here would break their builds for no behaviour gained.
+   *  @deprecated Nothing reads it. */
   routes?: RouteSection[]
   /** The signed-in user's personal workspace slug, forwarded to the site-switcher as
    *  the in-hub slug fallback on the slug-less workspace routes (`/home`, `/settings/*`).
@@ -142,8 +143,8 @@ export type SiteHeaderProps = Omit<
  * site list, so a non-adh consumer can use it. Everything registry-shaped lives
  * HERE: the site's display name, the env-aware hub login/signup/settings hrefs, the
  * concept-site "Details" affordance, and adh's real {@link SiteMenuSwitcher} (the
- * marketing/workspace menu taxonomy with its recents, workspaces and dev-tools
- * flyouts), injected through the header's `siteSwitcher` slot.
+ * marketing/workspace menu taxonomy with its recents and workspaces flyouts),
+ * injected through the header's `siteSwitcher` slot.
  *
  * The AUTH wiring is injected too, and for the same reason the switcher is: which
  * session a site reads is the site's business, not the header's. Task 6.2 folded the
@@ -205,10 +206,13 @@ export function SiteHeader({
   // through to `undefined` below, so the row is correctly omitted rather than dead.
   const overlay = useSettingsOverlay()
   const resolvedOnSettings = onSettings ?? (user != null ? overlay?.openSettings : undefined)
-  // The avatar menu's last row. It used to be a bug-glyph dropdown of its own beside the
+  // The Debug Options door. It used to be a bug-glyph dropdown of its own beside the
   // site menu; that glyph is gone by the repo owner's instruction, and Debug Options —
-  // the one row in it anybody reached for — is the end of the account menu now. Same
-  // gate as before (dev build, or an adh admin), so a production visitor gets no row.
+  // the one row in it anybody reached for — lives at the account end of the header now:
+  // the avatar menu's last row signed in, a Debug Options button beside login / join
+  // signed out (AdhHeader draws whichever applies from the one `onDebugOptions`). Same
+  // gate as the dropdown's (a dev build on a dev host, or an adh admin), so an ordinary
+  // production visitor gets neither.
   const debugOptions = useDebugOptions(userIsAdmin)
   // Auth-dependent nav resolved HERE, after the source decided signed-in-or-not, so a
   // page's header component doesn't need its own useAuth() read just to vary its nav.
@@ -302,9 +306,10 @@ export function SiteHeader({
             personalSlug={personalSlug}
             hubOffersFeature={hubOffersFeature}
             authenticated={user != null}
-            // Appends the admin consoles to the family tree, and nothing else — the
-            // rest of the menu is identical for an admin. See SiteMenu's `userIsAdmin`
-            // for why showing the rows is not the same as granting the access.
+            // Appends the admin consoles — below the family tree, or below the hub's
+            // workspace list — and nothing else: the rest of either menu is identical
+            // for an admin. See SiteMenu's `userIsAdmin` for why showing the rows is
+            // not the same as granting the access.
             userIsAdmin={userIsAdmin}
             onSettings={resolvedOnSettings}
             settingsHref={switcherSettingsHref}

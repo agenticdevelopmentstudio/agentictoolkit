@@ -49,11 +49,12 @@ export type SiteHeaderProps = Omit<AdhHeaderAuthProps, 'user' | 'onLogin' | 'onL
      *  reason, as `previewNotice` above. */
     previewDetail?: string;
     /** Curated route map. UNREAD since the header stopped mounting the dev-tools
-     *  dropdown ({@link DevToolsMenu}), whose "Routes" flyout was its only reader: the
-     *  bug glyph that opened it came out of the bar, and its Debug Options row moved to
-     *  the avatar menu. Kept, not removed, because sites across the fleet pass it and
-     *  `DevToolsMenu` is still exported for any host that wants the dropdown back.
-     *  @deprecated Nothing in SiteHeader reads it. */
+     *  dropdown, whose "Routes" flyout was its only reader: the bug glyph that opened it
+     *  came out of the bar, its Debug Options row moved to the account end of the header
+     *  (see `useDebugOptions`), and the dropdown itself was then deleted with nothing
+     *  left to mount it. Kept, not removed, only because sites across the fleet still
+     *  pass it — dropping it here would break their builds for no behaviour gained.
+     *  @deprecated Nothing reads it. */
     routes?: RouteSection[];
     /** The signed-in user's personal workspace slug, forwarded to the site-switcher as
      *  the in-hub slug fallback on the slug-less workspace routes (`/home`, `/settings/*`).
@@ -94,8 +95,8 @@ export type SiteHeaderProps = Omit<AdhHeaderAuthProps, 'user' | 'onLogin' | 'onL
  * site list, so a non-adh consumer can use it. Everything registry-shaped lives
  * HERE: the site's display name, the env-aware hub login/signup/settings hrefs, the
  * concept-site "Details" affordance, and adh's real {@link SiteMenuSwitcher} (the
- * marketing/workspace menu taxonomy with its recents, workspaces and dev-tools
- * flyouts), injected through the header's `siteSwitcher` slot.
+ * marketing/workspace menu taxonomy with its recents and workspaces flyouts),
+ * injected through the header's `siteSwitcher` slot.
  *
  * The AUTH wiring is injected too, and for the same reason the switcher is: which
  * session a site reads is the site's business, not the header's. Task 6.2 folded the

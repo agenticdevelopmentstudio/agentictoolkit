@@ -16,7 +16,11 @@ import {
 import { ChevronDown } from 'lucide-react'
 import { type NavLinkIcon } from './NavLink'
 import { cn, noAutofillProps } from '@agenticdevelopertoolkit/ui'
-import { confirmNavigation, GUARDED_NAV_ATTR } from '@agenticdevelopertoolkit/ui/lib/navigation-guard'
+import {
+  confirmNavigation,
+  GUARDED_NAV_ATTR,
+  isModifiedClick,
+} from '@agenticdevelopertoolkit/ui/lib/navigation-guard'
 import { useShortcut, chordFromEvent, sameChord } from '@agenticdevelopertoolkit/ui/hooks/useShortcut'
 import {
   DropdownMenu,
@@ -48,15 +52,16 @@ const GUARDED_NAV_PROPS = { [GUARDED_NAV_ATTR]: '' }
  *  className-bearing component. */
 export type PopoverIcon = NavLinkIcon
 
-/** One destination row. `href` makes the row a real link (middle-click /
- *  open-in-new-tab work); omit it for an informational, non-navigable row (e.g.
- *  a dynamic-segment pattern that has no single destination). `key` is a stable
- *  per-instance id; `current` flags the user's current location (aria-current);
- *  `description` is an optional tagline; `icon` is an optional leading glyph.
- *  `onSelect` makes the row an action rather than a destination — it runs INSTEAD
- *  of navigation (no `href` needed) and takes priority over the popover's
- *  `onChoose`, so a single popover can mix links with commands (e.g. "Debug
- *  Options" opening a floating window). */
+/** One row. `href` makes the row a real link (middle-click / open-in-new-tab work).
+ *  `onSelect` makes it an action rather than a destination — it runs INSTEAD of
+ *  navigation (no `href` needed) and takes priority over the popover's `onChoose`, so a
+ *  single popover can mix links with commands (Help, opening the help panel). A row with
+ *  NEITHER has nothing to do when chosen: it is still a menuitem the arrow keys land on,
+ *  and Enter or a click on it closed the menu and went nowhere — which is what the
+ *  "Loading…" and "No workspaces yet" rows did. A line of text in the list is a
+ *  {@link PopoverNotice}, never an item. `key` is a stable per-instance id; `current`
+ *  flags the user's current location (aria-current); `description` is an optional
+ *  tagline; `icon` is an optional leading glyph. */
 export type PopoverItem = {
   key: string
   label: string
@@ -94,6 +99,23 @@ export type PopoverEntry =
       current?: boolean
     }
 
+/** A line of text standing where rows would be — "Loading…", "No workspaces yet", "Couldn't
+ *  load your workspaces". NOT a row: never highlighted, never reached by the arrow keys, never
+ *  searched, never chosen, and not a menuitem to assistive tech. It is a polite status instead,
+ *  so a notice whose text changes while the menu is open (loading → failed) is announced.
+ *  `section` places it among the rows exactly like an entry (dividers and headings included);
+ *  `key` is its identity, and keeping it across a text change is what keeps it ONE live region.
+ *
+ *  Its own type rather than a flag on {@link PopoverItem}, because an item is a thing you can
+ *  choose — the empty and loading states were items once, and each was a menuitem that closed
+ *  the menu and went nowhere. */
+export type PopoverNotice = { kind: 'notice'; section: number; key: string; text: string }
+
+/** Everything the list can hold: the rows, and the notices that stand in for rows that are
+ *  not there. {@link PopoverEntry} stays rows-only, so code that walks a menu's ROWS
+ *  (useSiteMenu, anything narrowing on `kind`) never has to account for a line of text. */
+export type PopoverListEntry = PopoverEntry | PopoverNotice
+
 /** Imperative handle handed to slot render-props so they can close the menu —
  *  optionally WITHOUT restoring focus to the trigger, when they're handing focus
  *  off to another surface (a dialog/popover) that owns Escape-to-dismiss. */
@@ -110,8 +132,9 @@ export type PopoverSearchCommand = {
 }
 
 export type NavigationPopoverProps = {
-  /** The ordered top-level entries (resolved: hrefs + current flags applied). */
-  entries: PopoverEntry[]
+  /** The ordered top-level entries (resolved: hrefs + current flags applied), with any
+   *  {@link PopoverNotice} placed among them where the rows it stands in for would be. */
+  entries: PopoverListEntry[]
   /** Accessible label for the trigger button (e.g. "Storage — switch site"). */
   triggerLabel: string
   /** Replaces the trigger's default "{label} ⌄" content. */
@@ -208,17 +231,13 @@ function topicItem(entry: Extract<PopoverEntry, { kind: 'topic' }>): PopoverItem
   }
 }
 
-/** Should a row click be left to the browser (new tab / download) rather than
- *  intercepted for in-app navigation? True for modified or non-primary clicks. */
-function isModifiedClick(event: MouseEvent): boolean {
-  return (
-    event.defaultPrevented ||
-    event.button !== 0 ||
-    event.metaKey ||
-    event.ctrlKey ||
-    event.shiftKey ||
-    event.altKey
-  )
+/** Should a row click be left alone rather than intercepted for in-app navigation?
+ *  A modified or non-primary click is the browser's (new tab / download), and one
+ *  that something earlier already handled (`defaultPrevented`) is not ours to turn
+ *  into a navigation either. The modifier rule is the shared {@link isModifiedClick};
+ *  `defaultPrevented` is this menu's own addition, so it is spelled here. */
+function leaveClickAlone(event: MouseEvent): boolean {
+  return event.defaultPrevented || isModifiedClick(event)
 }
 
 // The browse highlight as ONE value, so illegal combinations (a submenu item
@@ -242,11 +261,11 @@ type NavState =
  * (case-insensitive substring, matched chars underlined), each result shown as
  * "{area} → {item}".
  *
- * This is the reusable base behind {@link SiteSwitcher} (family sites) and the
- * SiteMenu's Routes flyout (a site's own routes, see routeEntries.ts). Subclasses
- * supply the resolved {@link PopoverEntry} structure, the trigger content, how to
- * navigate a chosen item, and any command-row trailing control / special search
- * command.
+ * This is the reusable base behind the header's switchers: {@link SiteMenu} (the
+ * family launcher), {@link WorkspaceMenu} (the signed-in hub's workspaces) and
+ * {@link SiteSwitcher} (a plain caller-supplied site list). Subclasses supply the
+ * resolved {@link PopoverEntry} structure, the trigger content, how to navigate a
+ * chosen item, and any command-row trailing control / special search command.
  */
 export function NavigationPopover({
   entries,
@@ -274,9 +293,8 @@ export function NavigationPopover({
   const [nav, setNav] = useState<NavState>({ kind: 'none' })
   const [searchIndex, setSearchIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
-  // Per-instance id namespace, so two popovers on one page (e.g. the SiteSwitcher's
-  // main menu + its own Routes flyout) don't collide on row ids / aria-controls,
-  // and the scroll effect's getElementById targets THIS instance's rows.
+  // Per-instance id namespace, so two popovers on one page don't collide on row ids /
+  // aria-controls, and the scroll effect's getElementById targets THIS instance's rows.
   const uid = useId()
   // Only auto-scroll the highlight into view when it moved by keyboard/typing —
   // never on mouse hover, which would let scrollIntoView shift a new row under
@@ -376,9 +394,11 @@ export function NavigationPopover({
         // so it precedes the children it names.
         if (e.href !== undefined) out.push({ item: topicItem(e), area: null })
         for (const item of e.items) out.push({ item, area: e.label })
-      } else {
+      } else if (e.kind === 'leaf') {
         out.push({ item: e.item, area: null })
       }
+      // A notice is not a destination, so it is never a search result: typing "load" into
+      // a menu that is still loading must not offer "Loading…" as somewhere to go.
     }
     return out
   }, [entries])
@@ -408,7 +428,7 @@ export function NavigationPopover({
   }, [close, searchCommand])
 
   // Pointer moved onto the menu's non-row CHROME — the command field, the footer,
-  // the empty-state line. Those sit inside the popup but outside the list, so
+  // the empty-state line, a notice. Those sit inside the popup but are not rows, so
   // `DropdownMenuContent`'s onMouseLeave never fires for them and a topic disclosed on
   // the way down stays disclosed, looking exactly as if the pointer were still on its
   // row. Clearing the cursor closes the flyout and drops the row highlight together.
@@ -475,6 +495,8 @@ export function NavigationPopover({
   // the top opens the previous topic at its BOTTOM item; a non-topic sibling ⇒ no
   // change (no wrap). At the top level they walk the entries, wrapping, and
   // collapse any open submenu so the highlight never sits on an orphaned flyout.
+  // A notice is stepped over: it is text, not a row, and a highlight resting on it
+  // would be a row Enter could "choose".
   function moveSel(dir: 1 | -1): void {
     navByKeyboard.current = true
     if (nav.kind === 'sub') {
@@ -500,7 +522,12 @@ export function NavigationPopover({
     const n = entries.length
     if (!n) return
     const cur = nav.kind === 'none' ? null : nav.entry
-    const nextEntry = cur === null ? (dir > 0 ? 0 : n - 1) : (cur + dir + n) % n
+    let nextEntry = cur === null ? (dir > 0 ? 0 : n - 1) : (cur + dir + n) % n
+    for (let hops = 0; hops < n && entries[nextEntry]?.kind === 'notice'; hops++) {
+      nextEntry = (nextEntry + dir + n) % n
+    }
+    // Nothing but notices (a list with no rows at all): there is nothing to highlight.
+    if (entries[nextEntry]?.kind === 'notice') return
     setNav({ kind: 'top', entry: nextEntry, open: false })
   }
 
@@ -539,7 +566,9 @@ export function NavigationPopover({
     }
     if (nav.kind === 'none') return
     const entry = entries[nav.entry]
-    if (!entry) return
+    // moveSel steps over a notice, so the highlight never rests on one; this keeps a
+    // stale cursor (the list changed under it) from turning text into a choice.
+    if (!entry || entry.kind === 'notice') return
     if (nav.kind === 'top') {
       if (entry.kind === 'topic') {
         // A NAVIGABLE topic is a destination that also groups: Enter goes there,
@@ -664,7 +693,7 @@ export function NavigationPopover({
           setNav({ kind: 'sub', entry: entryIndex, item: j })
         }}
         onClick={(event) => {
-          if (isModifiedClick(event)) return
+          if (leaveClickAlone(event)) return
           event.preventDefault()
           chooseItem(item)
         }}
@@ -777,6 +806,24 @@ export function NavigationPopover({
                 </>
               )
 
+              if (entry.kind === 'notice') {
+                // Text where the rows would be, styled as the empty-search line it is a
+                // sibling of. No id, no data-nav: nothing points the highlight at it.
+                return (
+                  <Fragment key={`notice-${entry.key}`}>
+                    {sep}
+                    <p
+                      className="adh-nav-popover__empty"
+                      role="status"
+                      aria-live="polite"
+                      onMouseMove={leaveRows}
+                    >
+                      {entry.text}
+                    </p>
+                  </Fragment>
+                )
+              }
+
               if (entry.kind === 'topic') {
                 return (
                   <Fragment key={`topic-${index}`}>
@@ -811,7 +858,7 @@ export function NavigationPopover({
                               aria-current={entry.current ? 'page' : undefined}
                               {...GUARDED_NAV_PROPS}
                               onClick={(event) => {
-                                if (isModifiedClick(event)) return
+                                if (leaveClickAlone(event)) return
                                 // Navigate instead of following the href, so this
                                 // takes the same chooseItem path (SPA + SSO) as every
                                 // other row. Nothing has to suppress the disclosure a
@@ -891,7 +938,7 @@ export function NavigationPopover({
                       setNav({ kind: 'top', entry: index, open: false })
                     }}
                     onClick={(event) => {
-                      if (isModifiedClick(event)) return
+                      if (leaveClickAlone(event)) return
                       event.preventDefault()
                       chooseItem(entry.item)
                     }}
@@ -953,7 +1000,7 @@ export function NavigationPopover({
                     setSearchIndex(index)
                   }}
                   onClick={(event) => {
-                    if (isModifiedClick(event)) return
+                    if (leaveClickAlone(event)) return
                     event.preventDefault()
                     chooseItem(item)
                   }}

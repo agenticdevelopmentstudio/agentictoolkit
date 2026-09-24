@@ -10,20 +10,36 @@ export type SlideDirection = 'forward' | 'back'
  *  which never goes through here — keeps the browser's default of no animation at all. */
 export const SLIDE_ATTR = 'data-adh-slide'
 
-/** How long a slide waits for the destination to render before letting the transition finish
- *  anyway. A route that is still fetching after this long is showing its loading state, which
- *  is a fine thing to have slid in; holding the screen frozen for longer is not. */
+/** How long a slide waits for the destination to COMMIT before it gives the slide up.
+ *
+ *  A route with a loading boundary commits its skeleton almost at once, and a skeleton is a
+ *  fine thing to slide in: the "new" side of a view transition is live, so the page streams
+ *  into it mid-slide. A dynamic route WITHOUT one commits nothing until its data arrives: the
+ *  Profile row's own destination, the hub's /[workspace]/profile, awaits its principal fetch
+ *  and first shipped with no loading boundary above it. When the wait ran out the transition
+ *  used to finish anyway, with the "new" capture still the OLD page — the old page slid over a
+ *  copy of itself for 280 ms and then the real one cut in. So running out SKIPS the transition
+ *  (`skipTransition()`): the screen unfreezes and the destination simply cuts in when it
+ *  lands. 1.5 s because a screen frozen any longer is worse than a lost slide. */
 const RENDER_TIMEOUT_MS = 1500
 
-/** Pairs of paths this module slid between, newest last — what lets Back slide the other way
- *  between exactly those two pages and no others. Bounded: a long session must not grow it. */
+/** Pairs of paths this module slid between, newest last. They decide WHETHER a history step
+ *  slides — only one between exactly two such pages does — and never which way it goes: that
+ *  is the history position's to say (see `SlideTransitions`). Bounded: a long session must not
+ *  grow it. */
 const slides: Array<{ from: string; to: string }> = []
 const MAX_SLIDES = 20
 
 /** The path React has actually COMMITTED, as opposed to the one in the address bar — which
  *  Back changes before the page does. Written by `SlideTransitions`' effect. */
 let renderedPath: string | null = null
-const waiters = new Set<{ path: string; resolve: () => void }>()
+/** Where that committed page sits in the session history (`navigation.currentEntry.index`,
+ *  read when it commits), or null without the Navigation API. What a traversal's destination
+ *  is compared against to tell Back from Forward. */
+let renderedIndex: number | null = null
+/** Slides waiting for their destination to commit; each resolves `true` when it does, `false`
+ *  when the wait times out or is abandoned. */
+const waiters = new Set<{ path: string; resolve: (rendered: boolean) => void }>()
 
 /** The app router's push, registered by the mounted `SlideTransitions`. Held here rather than
  *  taken as an argument so a caller — the avatar menu, which is rendered in places with no app
@@ -32,49 +48,94 @@ const waiters = new Set<{ path: string; resolve: () => void }>()
  *  caller's own link navigates exactly as it would have. */
 let push: ((href: string) => void) | null = null
 
+type NavigationWindow = Window & { navigation?: { currentEntry: { index: number } | null } }
+
+/** The current session-history entry's position, from the Navigation API. Null where the API
+ *  is missing, or reports an entry outside the list (index -1): plain `history` has no notion
+ *  of position at all, which is why a missing API means no reverse slide rather than a guess. */
+function currentEntryIndex(): number | null {
+  const index = (window as NavigationWindow).navigation?.currentEntry?.index
+  return typeof index === 'number' && index >= 0 ? index : null
+}
+
 function markRendered(path: string): void {
   renderedPath = path
+  renderedIndex = currentEntryIndex()
   for (const w of waiters) {
     if (w.path === path) {
       waiters.delete(w)
-      w.resolve()
+      w.resolve(true)
     }
   }
 }
 
-function untilRendered(path: string): Promise<void> {
-  if (renderedPath === path) return Promise.resolve()
+function untilRendered(path: string): Promise<boolean> {
+  if (renderedPath === path) return Promise.resolve(true)
   return new Promise((resolve) => {
     const waiter = { path, resolve }
     waiters.add(waiter)
     setTimeout(() => {
-      if (waiters.delete(waiter)) resolve()
+      if (waiters.delete(waiter)) resolve(false)
     }, RENDER_TIMEOUT_MS)
   })
 }
 
-type ViewTransitionDocument = Document & {
-  startViewTransition?: (update: () => Promise<void> | void) => { finished: Promise<void> }
+/** End every pending wait now, as a timeout would — see the popstate listener. */
+function abandonWaits(): void {
+  for (const w of waiters) w.resolve(false)
+  waiters.clear()
 }
 
-/** Whether a slide can run here: the View Transitions API exists, and the reader has not asked
- *  for less motion. Where it cannot, callers navigate exactly as they did before. */
+type ViewTransitionDocument = Document & {
+  startViewTransition?: (update: () => Promise<void> | void) => {
+    finished: Promise<void>
+    skipTransition(): void
+  }
+}
+
+/**
+ * Whether a slide can run here: the View Transitions API exists, and the reader has not asked
+ * for less motion — in the Appearance settings first, then the OS. Where it cannot, callers
+ * navigate exactly as they did before.
+ *
+ * The Appearance choice has to be honoured HERE, not left to the stylesheet. It lands on
+ * <html> as `data-reduce-motion` — "on", "off", or absent for "auto", which follows the OS —
+ * and the themes' accessibility rules that zero animation durations under it select `*`,
+ * `*::before` and `*::after`, none of which matches a `::view-transition-*` pseudo-element. So
+ * a reader who chose "on" still got the slide, and one who chose "off" (keep motion even
+ * though the OS asks for less) never did.
+ */
 export function canSlide(): boolean {
   if (typeof document === 'undefined') return false
   if (typeof (document as ViewTransitionDocument).startViewTransition !== 'function') return false
+  const choice = document.documentElement.dataset.reduceMotion
+  if (choice === 'on') return false
+  if (choice === 'off') return true
   return !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 }
 
-function runSlide(direction: SlideDirection, target: string, update: () => void): void {
+/** The slide that owns SLIDE_ATTR right now — the one started last. */
+let activeSlide: object | null = null
+
+/** Play one slide around `update`, which makes the navigation from inside the transition and
+ *  returns whether it did: false (a stale Back — see `SlideTransitions`) means nothing is on
+ *  its way, so the transition is skipped at once instead of waiting for `target`. */
+function runSlide(direction: SlideDirection, target: string, update: () => boolean): void {
   const root = document.documentElement
+  const token = {}
+  activeSlide = token
   root.setAttribute(SLIDE_ATTR, direction)
   const transition = (document as ViewTransitionDocument).startViewTransition!(async () => {
-    update()
-    await untilRendered(target)
+    if (!update() || !(await untilRendered(target))) transition.skipTransition()
   })
   void transition.finished.finally(() => {
-    // Only clear our own mark: a second slide started meanwhile owns the attribute now.
-    if (root.getAttribute(SLIDE_ATTR) === direction) root.removeAttribute(SLIDE_ATTR)
+    // Only clear our own mark: a slide started meanwhile owns the attribute now. By identity,
+    // not by the attribute's value — two quick Backs are two 'back' slides, and the first one
+    // finishing (skipped, as the second's start skips it) would otherwise strip the mark the
+    // second one's animation is keyed on.
+    if (activeSlide !== token) return
+    activeSlide = null
+    root.removeAttribute(SLIDE_ATTR)
   })
 }
 
@@ -101,26 +162,35 @@ export function slideNavigate(href: string): boolean {
   if (from === to) return false
   slides.push({ from, to })
   if (slides.length > MAX_SLIDES) slides.shift()
-  runSlide('forward', to, () => navigate(href))
+  runSlide('forward', to, () => {
+    navigate(href)
+    return true
+  })
   return true
 }
 
-/** Which way a history step between two paths slides, if it is one this module slid. */
-export function slideDirectionFor(from: string, to: string): SlideDirection | null {
-  for (let i = slides.length - 1; i >= 0; i--) {
-    const s = slides[i]!
-    if (s.to === from && s.from === to) return 'back'
-    if (s.from === from && s.to === to) return 'forward'
-  }
-  return null
+/** Whether this module slid between `a` and `b`, either way round. */
+function slidBetween(a: string, b: string): boolean {
+  return slides.some((s) => (s.from === a && s.to === b) || (s.from === b && s.to === a))
 }
 
 /** Marks a popstate this module re-dispatched itself, so its own listener lets it through. */
 const REPLAYED = Symbol('adh-slide-replayed')
+type ReplayedPopState = PopStateEvent & { [REPLAYED]?: true }
 
 /**
- * Render-free. Tracks the committed path for `slideNavigate`, and plays the reverse slide when
- * the browser's history steps between two pages that were slid between.
+ * Render-free. Tracks the committed path for `slideNavigate`, and plays a slide when the
+ * browser's history steps between two pages that were slid between.
+ *
+ * WHICH WAY comes from the history POSITION, never from the pair. The pair only says the two
+ * pages were slid between; a step over it can run either way. Reading the direction off the
+ * pair's orientation played the PUSH animation on Back in the avatar menu: slide /acme →
+ * /acme/profile (the Profile row), go home with the Home row (a plain push, so history reads
+ * /acme, /acme/profile, /acme), press Back — /acme to /acme/profile is the pair's own
+ * orientation, so it slid "forward" while the reader went back, and Forward onto that plain
+ * /acme entry played the pop. `navigation.currentEntry` is already the destination by the time
+ * `popstate` fires, so its index against the committed page's says which way the reader went.
+ * No Navigation API ⇒ no position ⇒ no slide, rather than a guess.
  *
  * WHY BACK HAS TO BE HELD FOR A FRAME: a view transition photographs the OLD page at the next
  * frame after it starts. On Back the app router starts rendering the destination the moment
@@ -131,6 +201,19 @@ const REPLAYED = Symbol('adh-slide-replayed')
  * transition's update callback, once the old page is safely captured. Only a step between a
  * slid pair is held; every other popstate — including the unsaved-changes guard's same-URL
  * sentinel — passes straight through untouched.
+ *
+ * A HELD STEP CAN GO STALE before that callback runs. A second Back or Forward inside those
+ * frames (key repeat, a mouse's back button double-firing, a slow device) is usually not held
+ * itself — a Forward straight back to the page still on screen is no step at all from the
+ * committed page's point of view — so it reaches the router first. Replaying the first step's
+ * captured state after it handed Next the first destination's tree under the URL the second
+ * step left in the address bar; Next wrote that tree into the entry, and the slide sat out the
+ * whole render timeout waiting for a path that never committed. So every traversal is counted,
+ * a held one is dropped at release if another arrived meanwhile or the address bar has moved
+ * on, and a live one replays the CURRENT entry's `history.state` rather than the copy captured
+ * with the event. A new traversal also ends any slide still waiting for its page to commit:
+ * that page is no longer where history is going, and the wait would only freeze the screen
+ * until it timed out.
  */
 export function SlideTransitions(): null {
   const pathname = usePathname()
@@ -149,19 +232,24 @@ export function SlideTransitions(): null {
   }, [pathname])
 
   useEffect(() => {
+    // Traversals this listener has seen, replays excluded: a held step compares it on release.
+    let traversals = 0
     const onPopState = (e: PopStateEvent) => {
-      if ((e as PopStateEvent & { [REPLAYED]?: true })[REPLAYED]) return
+      if ((e as ReplayedPopState)[REPLAYED]) return
+      const seen = ++traversals
+      abandonWaits()
       const from = renderedPath
       const to = window.location.pathname
-      if (!from || from === to || !canSlide()) return
-      const direction = slideDirectionFor(from, to)
-      if (!direction) return
+      if (!from || from === to || !canSlide() || !slidBetween(from, to)) return
+      const index = currentEntryIndex()
+      if (index === null || renderedIndex === null || index === renderedIndex) return
       e.stopImmediatePropagation()
-      const state: unknown = e.state
-      runSlide(direction, to, () => {
-        const replay = new PopStateEvent('popstate', { state }) as PopStateEvent & { [REPLAYED]?: true }
+      runSlide(index < renderedIndex ? 'back' : 'forward', to, () => {
+        if (traversals !== seen || window.location.pathname !== to) return false
+        const replay: ReplayedPopState = new PopStateEvent('popstate', { state: window.history.state })
         replay[REPLAYED] = true
         window.dispatchEvent(replay)
+        return true
       })
     }
     window.addEventListener('popstate', onPopState, { capture: true })

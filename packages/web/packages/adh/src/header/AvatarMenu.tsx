@@ -1,5 +1,6 @@
 'use client'
 
+import { useId } from 'react'
 import Link from 'next/link'
 import { ChevronDown, Home, LogOut, Settings, User as UserIcon, Wrench } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@agenticdevelopertoolkit/ui/components/avatar'
@@ -11,7 +12,11 @@ import {
   DropdownMenuLinkItem,
   DropdownMenuSeparator,
 } from '@agenticdevelopertoolkit/ui/components/dropdown-menu'
-import { slideNavigate } from '../layout/SlideNavigation'
+import { isModifiedClick } from '@agenticdevelopertoolkit/ui/lib/navigation-guard'
+// By PACKAGE PATH: this module ships in the `header` entry, and `slideNavigate` slides only
+// when it sees the `push` the `layout` entry's SlideTransitions registered. That needs the
+// same module copy, which a relative '../layout/SlideNavigation' would fork (tsup.config.ts).
+import { slideNavigate } from '@agentic-toolkit/adh/layout/SlideNavigation'
 
 export type AvatarMenuUser = {
   /** What this account is CALLED — the personal name when one is known, else the
@@ -55,8 +60,9 @@ export type AvatarMenuProps = {
    *  Options" row; absent ⇒ no row. The caller owns the gate (dev build, or an adh
    *  admin) and the console — this component only offers the door. */
   onDebugOptions?: () => void
-  /** Secondary text on the Debug row ("Sim: prod"), kept out of its label so the
-   *  row's accessible name is stably "Debug Options". */
+  /** Secondary text on the Debug row ("Sim: prod"). Shown, but kept out of the row's
+   *  NAME — it is the row's accessible description instead — so the name is stably
+   *  "Debug Options" whether or not production is being simulated. */
   debugOptionsHint?: string
 }
 
@@ -108,6 +114,9 @@ export function AvatarMenu({
   onDebugOptions,
   debugOptionsHint,
 }: AvatarMenuProps) {
+  // The Debug row's name and description, by reference (see that row).
+  const debugLabelId = useId()
+  const debugHintId = useId()
   const avatarInner = (
     <Avatar className="adh-avatar-menu-trigger__avatar">
       {user.imageUrl && <AvatarImage src={user.imageUrl} alt={user.name} />}
@@ -124,9 +133,9 @@ export function AvatarMenu({
       <span className="adh-avatar-menu__item-label">User Settings</span>
     </>
   )
-  // `onSettings` WINS over `settingsHref`, the same precedence SiteMenu's commandTrailing
-  // applies (SiteMenu.tsx: `authenticated && onSettings ? … : authenticated && settingsHref ?
-  // …`). SiteHeader passes both — a resolved `onSettings` (its own prop, else the settings
+  // `onSettings` WINS over `settingsHref`, the same precedence the switchers' settings gear
+  // applies (`settingsTrailing` in menuChrome.tsx, shared by SiteMenu and WorkspaceMenu).
+  // SiteHeader passes both — a resolved `onSettings` (its own prop, else the settings
   // overlay's openSettings once signed in) and whatever `settingsHref` its caller supplied —
   // and only suppresses the href for the switcher. Ordering them the other way round here made
   // one header answer the same click two ways: the switcher opened the in-page overlay while
@@ -183,8 +192,7 @@ export function AvatarMenu({
               <Link
                 href={profileHref}
                 onClick={(e) => {
-                  if (e.defaultPrevented || e.button !== 0) return
-                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+                  if (e.defaultPrevented || isModifiedClick(e)) return
                   if (slideNavigate(profileHref)) e.preventDefault()
                 }}
               />
@@ -214,15 +222,31 @@ export function AvatarMenu({
           </>
         )}
         {/* Last, and after Log out: it is a developer's tool, not an account
-            destination, so it sits apart from the rows every visitor uses. */}
+            destination, so it sits apart from the rows every visitor uses.
+
+            Named by its label span and DESCRIBED by the hint, both by reference. A
+            menuitem with neither takes its name from all of its text, which made it
+            "Debug OptionsSim: prod" while production was being simulated — a row a
+            screen reader, a voice command ("click Debug Options") and a role query
+            could no longer find by its name, in exactly the state a developer most
+            needs to get back into the console to leave. */}
         {onDebugOptions && (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onDebugOptions} className="adh-avatar-menu__item">
+            <DropdownMenuItem
+              onClick={onDebugOptions}
+              className="adh-avatar-menu__item"
+              aria-labelledby={debugLabelId}
+              aria-describedby={debugOptionsHint ? debugHintId : undefined}
+            >
               <Wrench className="adh-avatar-menu__item-icon" />
-              <span className="adh-avatar-menu__item-label">Debug Options</span>
+              <span id={debugLabelId} className="adh-avatar-menu__item-label">
+                Debug Options
+              </span>
               {debugOptionsHint && (
-                <span className="adh-avatar-menu__item-hint">{debugOptionsHint}</span>
+                <span id={debugHintId} className="adh-avatar-menu__item-hint">
+                  {debugOptionsHint}
+                </span>
               )}
             </DropdownMenuItem>
           </>

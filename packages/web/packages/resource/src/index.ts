@@ -107,6 +107,9 @@ export { MasterDetailLeaf } from "./master-detail/MasterDetailLeaf";
 export { useMasterDetailLevel } from "./master-detail/useMasterDetailLevel";
 export { useMasterDetailForm } from "./master-detail/useMasterDetailForm";
 export type { MasterDetailForm, MasterDetailFormConfig } from "./master-detail/useMasterDetailForm";
+// The stored-value exemption every `validate` above shares, so the validators that grandfather a
+// value differ only in which checks they skip, never in what counts as "untouched".
+export { unchangedFromStored } from "./master-detail/unchangedFromStored";
 
 // Single-record editing: the Cancel/Save bar a config pane wears, and the registry that
 // carries "this pane has unsaved edits" to the exits a pane cannot guard for itself. Both

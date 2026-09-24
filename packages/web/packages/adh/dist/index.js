@@ -3,9 +3,11 @@
 "use client";
 
 // src/header/AdhHeader.tsx
-import "react";
+import { useId as useId4 } from "react";
+import { Wrench as Wrench2 } from "lucide-react";
 
 // src/header/AvatarMenu.tsx
+import { useId } from "react";
 import Link from "next/link";
 import { ChevronDown, Home, LogOut, Settings, User as UserIcon, Wrench } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@agenticdevelopertoolkit/ui/components/avatar";
@@ -17,59 +19,8 @@ import {
   DropdownMenuLinkItem,
   DropdownMenuSeparator
 } from "@agenticdevelopertoolkit/ui/components/dropdown-menu";
-
-// src/layout/SlideNavigation.tsx
-import { useEffect } from "react";
-import { usePathname, useRouter } from "next/navigation";
-var SLIDE_ATTR = "data-adh-slide";
-var RENDER_TIMEOUT_MS = 1500;
-var slides = [];
-var MAX_SLIDES = 20;
-var renderedPath = null;
-var waiters = /* @__PURE__ */ new Set();
-var push = null;
-function untilRendered(path) {
-  if (renderedPath === path) return Promise.resolve();
-  return new Promise((resolve) => {
-    const waiter = { path, resolve };
-    waiters.add(waiter);
-    setTimeout(() => {
-      if (waiters.delete(waiter)) resolve();
-    }, RENDER_TIMEOUT_MS);
-  });
-}
-function canSlide() {
-  if (typeof document === "undefined") return false;
-  if (typeof document.startViewTransition !== "function") return false;
-  return !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-}
-function runSlide(direction, target, update) {
-  const root = document.documentElement;
-  root.setAttribute(SLIDE_ATTR, direction);
-  const transition = document.startViewTransition(async () => {
-    update();
-    await untilRendered(target);
-  });
-  void transition.finished.finally(() => {
-    if (root.getAttribute(SLIDE_ATTR) === direction) root.removeAttribute(SLIDE_ATTR);
-  });
-}
-function pathOf(href) {
-  return new URL(href, window.location.href).pathname;
-}
-function slideNavigate(href) {
-  const navigate = push;
-  if (!navigate || !canSlide()) return false;
-  const from = window.location.pathname;
-  const to = pathOf(href);
-  if (from === to) return false;
-  slides.push({ from, to });
-  if (slides.length > MAX_SLIDES) slides.shift();
-  runSlide("forward", to, () => navigate(href));
-  return true;
-}
-
-// src/header/AvatarMenu.tsx
+import { isModifiedClick } from "@agenticdevelopertoolkit/ui/lib/navigation-guard";
+import { slideNavigate } from "@agentic-toolkit/adh/layout/SlideNavigation";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 function firstNameOf(name) {
   return name.trim().split(/\s+/)[0] || name;
@@ -88,6 +39,8 @@ function AvatarMenu({
   onDebugOptions,
   debugOptionsHint
 }) {
+  const debugLabelId = useId();
+  const debugHintId = useId();
   const avatarInner = /* @__PURE__ */ jsxs(Avatar, { className: "adh-avatar-menu-trigger__avatar", children: [
     user.imageUrl && /* @__PURE__ */ jsx(AvatarImage, { src: user.imageUrl, alt: user.name }),
     /* @__PURE__ */ jsx(AvatarFallback, { children: initialsOf(user.name) || /* @__PURE__ */ jsx(UserIcon, { className: "adh-avatar-menu-trigger__fallback-icon" }) })
@@ -124,8 +77,7 @@ function AvatarMenu({
             {
               href: profileHref,
               onClick: (e) => {
-                if (e.defaultPrevented || e.button !== 0) return;
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                if (e.defaultPrevented || isModifiedClick(e)) return;
                 if (slideNavigate(profileHref)) e.preventDefault();
               }
             }
@@ -157,11 +109,20 @@ function AvatarMenu({
       ] }),
       onDebugOptions && /* @__PURE__ */ jsxs(Fragment, { children: [
         /* @__PURE__ */ jsx(DropdownMenuSeparator, {}),
-        /* @__PURE__ */ jsxs(DropdownMenuItem, { onClick: onDebugOptions, className: "adh-avatar-menu__item", children: [
-          /* @__PURE__ */ jsx(Wrench, { className: "adh-avatar-menu__item-icon" }),
-          /* @__PURE__ */ jsx("span", { className: "adh-avatar-menu__item-label", children: "Debug Options" }),
-          debugOptionsHint && /* @__PURE__ */ jsx("span", { className: "adh-avatar-menu__item-hint", children: debugOptionsHint })
-        ] })
+        /* @__PURE__ */ jsxs(
+          DropdownMenuItem,
+          {
+            onClick: onDebugOptions,
+            className: "adh-avatar-menu__item",
+            "aria-labelledby": debugLabelId,
+            "aria-describedby": debugOptionsHint ? debugHintId : void 0,
+            children: [
+              /* @__PURE__ */ jsx(Wrench, { className: "adh-avatar-menu__item-icon" }),
+              /* @__PURE__ */ jsx("span", { id: debugLabelId, className: "adh-avatar-menu__item-label", children: "Debug Options" }),
+              debugOptionsHint && /* @__PURE__ */ jsx("span", { id: debugHintId, className: "adh-avatar-menu__item-hint", children: debugOptionsHint })
+            ]
+          }
+        )
       ] })
     ] })
   ] });
@@ -199,8 +160,8 @@ import "react";
 import {
   Fragment as Fragment3,
   useCallback,
-  useEffect as useEffect2,
-  useId,
+  useEffect,
+  useId as useId2,
   useMemo,
   useRef,
   useState
@@ -209,7 +170,7 @@ import { ChevronDown as ChevronDown2 } from "lucide-react";
 
 // src/header/NavLink.tsx
 import Link2 from "next/link";
-import { usePathname as usePathname2 } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { jsx as jsx3 } from "react/jsx-runtime";
 function pathMatches(pathname, pattern) {
   if (pattern === pathname) return true;
@@ -220,7 +181,7 @@ function pathMatches(pathname, pattern) {
   return false;
 }
 function NavLinkItem({ link }) {
-  const pathname = usePathname2() ?? "";
+  const pathname = usePathname() ?? "";
   const matchers = link.matchPaths ?? [link.href];
   const active = matchers.some((m) => pathMatches(pathname, m));
   return /* @__PURE__ */ jsx3(
@@ -237,7 +198,11 @@ function NavLinkItem({ link }) {
 
 // src/header/NavigationPopover.tsx
 import { cn, noAutofillProps } from "@agenticdevelopertoolkit/ui";
-import { confirmNavigation, GUARDED_NAV_ATTR } from "@agenticdevelopertoolkit/ui/lib/navigation-guard";
+import {
+  confirmNavigation,
+  GUARDED_NAV_ATTR,
+  isModifiedClick as isModifiedClick2
+} from "@agenticdevelopertoolkit/ui/lib/navigation-guard";
 import { useShortcut, chordFromEvent, sameChord } from "@agenticdevelopertoolkit/ui/hooks/useShortcut";
 import {
   DropdownMenu as DropdownMenu2,
@@ -287,8 +252,8 @@ function topicItem(entry) {
     current: entry.current
   };
 }
-function isModifiedClick(event) {
-  return event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+function leaveClickAlone(event) {
+  return event.defaultPrevented || isModifiedClick2(event);
 }
 function NavigationPopover({
   entries,
@@ -311,7 +276,7 @@ function NavigationPopover({
   const [nav, setNav] = useState({ kind: "none" });
   const [searchIndex, setSearchIndex] = useState(0);
   const inputRef = useRef(null);
-  const uid = useId();
+  const uid = useId2();
   const navByKeyboard = useRef(false);
   const suppressFocusRestore = useRef(false);
   const close = useCallback((opts) => {
@@ -365,7 +330,7 @@ function NavigationPopover({
       if (e.kind === "topic") {
         if (e.href !== void 0) out.push({ item: topicItem(e), area: null });
         for (const item of e.items) out.push({ item, area: e.label });
-      } else {
+      } else if (e.kind === "leaf") {
         out.push({ item: e.item, area: null });
       }
     }
@@ -394,14 +359,14 @@ function NavigationPopover({
   const disclosed = nav.kind === "sub" ? nav.entry : nav.kind === "top" && nav.open ? nav.entry : null;
   const activeKey = searching ? cmdActive ? "cmd" : searchActive >= 0 ? `s${searchActive}` : null : nav.kind === "sub" ? `e${nav.entry}s${nav.item}` : nav.kind === "top" ? `e${nav.entry}` : null;
   const activeId = activeKey ? `${uid}-${activeKey}` : void 0;
-  useEffect2(() => {
+  useEffect(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => {
       if (document.activeElement !== inputRef.current) inputRef.current?.focus();
     });
     return () => cancelAnimationFrame(frame);
   }, [open, nav, searching]);
-  useEffect2(() => {
+  useEffect(() => {
     if (!navByKeyboard.current || !activeKey) return;
     document.getElementById(`${uid}-${activeKey}`)?.scrollIntoView({ block: "nearest" });
   }, [uid, activeKey, query]);
@@ -426,7 +391,11 @@ function NavigationPopover({
     const n = entries.length;
     if (!n) return;
     const cur = nav.kind === "none" ? null : nav.entry;
-    const nextEntry = cur === null ? dir > 0 ? 0 : n - 1 : (cur + dir + n) % n;
+    let nextEntry = cur === null ? dir > 0 ? 0 : n - 1 : (cur + dir + n) % n;
+    for (let hops = 0; hops < n && entries[nextEntry]?.kind === "notice"; hops++) {
+      nextEntry = (nextEntry + dir + n) % n;
+    }
+    if (entries[nextEntry]?.kind === "notice") return;
     setNav({ kind: "top", entry: nextEntry, open: false });
   }
   function discloseRight() {
@@ -454,7 +423,7 @@ function NavigationPopover({
     }
     if (nav.kind === "none") return;
     const entry = entries[nav.entry];
-    if (!entry) return;
+    if (!entry || entry.kind === "notice") return;
     if (nav.kind === "top") {
       if (entry.kind === "topic") {
         if (entry.href) {
@@ -550,7 +519,7 @@ function NavigationPopover({
           setNav({ kind: "sub", entry: entryIndex, item: j });
         },
         onClick: (event) => {
-          if (isModifiedClick(event)) return;
+          if (leaveClickAlone(event)) return;
           event.preventDefault();
           chooseItem(item);
         },
@@ -638,6 +607,21 @@ function NavigationPopover({
                   divider && /* @__PURE__ */ jsx4("div", { className: "adh-dropdown-menu__separator", role: "separator" }),
                   heading && /* @__PURE__ */ jsx4(DropdownMenuLabel, { className: "adh-nav-popover__section-label", children: heading })
                 ] });
+                if (entry.kind === "notice") {
+                  return /* @__PURE__ */ jsxs3(Fragment3, { children: [
+                    sep,
+                    /* @__PURE__ */ jsx4(
+                      "p",
+                      {
+                        className: "adh-nav-popover__empty",
+                        role: "status",
+                        "aria-live": "polite",
+                        onMouseMove: leaveRows,
+                        children: entry.text
+                      }
+                    )
+                  ] }, `notice-${entry.key}`);
+                }
                 if (entry.kind === "topic") {
                   return /* @__PURE__ */ jsxs3(Fragment3, { children: [
                     sep,
@@ -662,7 +646,7 @@ function NavigationPopover({
                                   "aria-current": entry.current ? "page" : void 0,
                                   ...GUARDED_NAV_PROPS,
                                   onClick: (event) => {
-                                    if (isModifiedClick(event)) return;
+                                    if (leaveClickAlone(event)) return;
                                     event.preventDefault();
                                     chooseItem(topicItem(entry));
                                   }
@@ -716,7 +700,7 @@ function NavigationPopover({
                         setNav({ kind: "top", entry: index, open: false });
                       },
                       onClick: (event) => {
-                        if (isModifiedClick(event)) return;
+                        if (leaveClickAlone(event)) return;
                         event.preventDefault();
                         chooseItem(entry.item);
                       },
@@ -766,7 +750,7 @@ function NavigationPopover({
                       setSearchIndex(index);
                     },
                     onClick: (event) => {
-                      if (isModifiedClick(event)) return;
+                      if (leaveClickAlone(event)) return;
                       event.preventDefault();
                       chooseItem(item);
                     },
@@ -926,7 +910,7 @@ function SiteSwitcher({
 }
 
 // src/header/PreviewNotice.tsx
-import { useEffect as useEffect3, useId as useId2, useRef as useRef2, useState as useState2 } from "react";
+import { useEffect as useEffect2, useId as useId3, useRef as useRef2, useState as useState2 } from "react";
 import { ChevronDown as ChevronDown3, TriangleAlert } from "lucide-react";
 import { jsx as jsx8, jsxs as jsxs5 } from "react/jsx-runtime";
 var DEFAULT_PREVIEW_NOTICE = "Developer Preview Release";
@@ -936,9 +920,9 @@ function PreviewNotice({
   detail = DEFAULT_PREVIEW_DETAIL
 }) {
   const [open, setOpen] = useState2(false);
-  const panelId = useId2();
+  const panelId = useId3();
   const triggerRef = useRef2(null);
-  useEffect3(() => {
+  useEffect2(() => {
     if (!open) return;
     const onClick = (e) => {
       if (triggerRef.current?.contains(e.target)) return;
@@ -979,7 +963,7 @@ function PreviewNotice({
 // src/header/AdhHeader.tsx
 import { Badge } from "@agenticdevelopertoolkit/ui/components/badge";
 import { HelpEnabled } from "@agenticdevelopertoolkit/ui/components/help-enabled";
-import { jsx as jsx9, jsxs as jsxs6 } from "react/jsx-runtime";
+import { Fragment as Fragment5, jsx as jsx9, jsxs as jsxs6 } from "react/jsx-runtime";
 function AdhHeader({
   siteName,
   siteNameHref = "/",
@@ -1084,19 +1068,40 @@ function AdhHeader({
             onDebugOptions,
             debugOptionsHint
           }
-        ) : /* @__PURE__ */ jsx9(
-          AuthButtons,
-          {
-            loginHref,
-            signupHref,
-            onLogin,
-            onSignup
-          }
-        ),
+        ) : /* @__PURE__ */ jsxs6(Fragment5, { children: [
+          /* @__PURE__ */ jsx9(
+            AuthButtons,
+            {
+              loginHref,
+              signupHref,
+              onLogin,
+              onSignup
+            }
+          ),
+          onDebugOptions && /* @__PURE__ */ jsx9(DebugOptionsButton, { onOpen: onDebugOptions, hint: debugOptionsHint })
+        ] }),
         trailingNavLinks.map((link) => /* @__PURE__ */ jsx9(NavLinkItem, { link }, link.href + link.label))
       ] })
     ] })
   ] });
+}
+function DebugOptionsButton({ onOpen, hint }) {
+  const hintId = useId4();
+  return /* @__PURE__ */ jsxs6(
+    "button",
+    {
+      type: "button",
+      className: "adh-header__icon-button",
+      "aria-label": "Debug Options",
+      "aria-describedby": hint ? hintId : void 0,
+      title: hint ? `Debug Options \u2014 ${hint}` : void 0,
+      onClick: onOpen,
+      children: [
+        /* @__PURE__ */ jsx9(Wrench2, { "aria-hidden": true }),
+        hint && /* @__PURE__ */ jsx9("span", { id: hintId, hidden: true, children: hint })
+      ]
+    }
+  );
 }
 
 // src/footer/AdhFooter.tsx
@@ -1126,7 +1131,6 @@ function FooterMenu({
         type: "button",
         popoverTarget: id,
         "aria-label": ariaLabel,
-        "aria-haspopup": "menu",
         className: `${triggerClassName} adh-footer__menu-trigger`,
         children: [
           label,
@@ -1174,16 +1178,6 @@ function AdhFooter({ links = [], copyright, trailing, className }) {
             className: link.className
           },
           `menu:${link.menuId}`
-        ) : "popoverTarget" in link ? /* @__PURE__ */ jsx10(
-          "button",
-          {
-            type: "button",
-            popoverTarget: link.popoverTarget,
-            "aria-label": link.ariaLabel,
-            className: ["adh-footer__link adh-footer__sites-trigger", link.className].filter(Boolean).join(" "),
-            children: link.label
-          },
-          `popover:${link.popoverTarget}`
         ) : /* @__PURE__ */ jsx10(
           Link4,
           {

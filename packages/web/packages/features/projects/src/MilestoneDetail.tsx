@@ -6,7 +6,7 @@ import { Field } from "@agenticdevelopertoolkit/ui/blocks/field";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Textarea } from "@agenticdevelopertoolkit/ui/components/textarea";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
-import { DetailSection } from "@agentic-toolkit/resource";
+import { DetailSection, unchangedFromStored } from "@agentic-toolkit/resource";
 import type { Milestone } from "@agentic-toolkit/data/projects";
 
 /**
@@ -78,7 +78,9 @@ export function milestoneDiffers(a: MilestoneDraft, b: MilestoneDraft): boolean 
  */
 // A record that keeps the name it was stored with is never refused for it: the client folds case,
 // but the backend's unique index is on the raw column, so "Sprint 12" and "sprint 12" can both
-// exist — and each would otherwise block Save on every unrelated edit, forever.
+// exist — and each would otherwise block Save on every unrelated edit, forever. Whether it KEPT the
+// name is `unchangedFromStored`'s call, shared with every other stored-value exemption; a create
+// has no stored name, so the uniqueness check always runs on one.
 export function milestoneValidate(
   draft: MilestoneDraft,
   takenNames: string[],
@@ -86,7 +88,10 @@ export function milestoneValidate(
 ): string | null {
   const name = draft.name.trim();
   if (!name) return "Name is required.";
-  if (name !== storedName?.trim() && takenNames.some((n) => n.trim().toLowerCase() === name.toLowerCase())) {
+  if (
+    !unchangedFromStored(name, storedName) &&
+    takenNames.some((n) => n.trim().toLowerCase() === name.toLowerCase())
+  ) {
     return `A milestone named "${name}" already exists in this project.`;
   }
   return null;

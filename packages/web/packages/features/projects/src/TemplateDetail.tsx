@@ -11,7 +11,7 @@ import { Select } from "@agenticdevelopertoolkit/ui/components/select";
 import { Textarea } from "@agenticdevelopertoolkit/ui/components/textarea";
 import { TagSetField } from "@agenticdevelopertoolkit/ui/blocks/tag-set-field";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
-import { DetailSection } from "@agentic-toolkit/resource";
+import { DetailSection, unchangedFromStored } from "@agentic-toolkit/resource";
 import {
   projectBodyOf,
   workItemBodyOf,
@@ -276,7 +276,9 @@ function cardProblem(c: TemplateCardDraft, where: string): string | null {
  */
 // A record that keeps the name it was stored with is never refused for it: the client folds case,
 // but the backend's unique index is on the raw column, so "Sprint 12" and "sprint 12" can both
-// exist — and each would otherwise block Save on every unrelated edit, forever.
+// exist — and each would otherwise block Save on every unrelated edit, forever. Whether it KEPT the
+// name is `unchangedFromStored`'s call, shared with every other stored-value exemption; a create
+// has no stored name, so the uniqueness check always runs on one.
 export function templateValidate(
   draft: TemplateDraft,
   taken: { name: string; kind: TemplateKind }[],
@@ -285,7 +287,7 @@ export function templateValidate(
   const d = templateNormalize(draft);
   if (!d.name) return "Name is required.";
   if (
-    d.name !== storedName?.trim() &&
+    !unchangedFromStored(d.name, storedName) &&
     taken.some(
       (t) => t.kind === d.kind && t.name.trim().toLowerCase() === d.name.toLowerCase(),
     )

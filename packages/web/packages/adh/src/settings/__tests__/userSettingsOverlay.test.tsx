@@ -116,6 +116,25 @@ describe('UserSettingsOverlay — tab switch and close both route through the un
   })
 })
 
+describe('UserSettingsOverlay — sized by the shared dialog’s classes, never an inline style', () => {
+  // It used to carry its own copy of the phone sheet as an inline style behind a hand-typed
+  // `(max-width: 639px)` query. A style beats every class at every width, so that copy overrode
+  // the shared dialog wholesale, and flipped at a different width than Tailwind's `sm`. The sheet
+  // is now DialogContent's `sheetOnPhone`, and the desktop footprint `sm:` classes that give way
+  // to it at exactly that line.
+  it('asks the shared dialog for its phone sheet and sizes the desktop footprint with sm: classes', () => {
+    render(<UserSettingsOverlay open onOpenChange={vi.fn()} />)
+    const popup = screen.getByRole('dialog')
+    const classes = popup.className.split(/\s+/)
+    expect(classes).toContain('max-sm:inset-0')
+    expect(classes).toContain('max-sm:h-dvh')
+    expect(classes).toContain('sm:w-[min(72rem,calc(100vw-2rem))]')
+    expect(classes).toContain('sm:h-[min(56rem,calc(100dvh-2rem))]')
+    for (const prop of ['width', 'height', 'maxWidth', 'maxHeight', 'borderWidth', 'paddingTop'] as const)
+      expect(popup.style[prop], prop).toBe('')
+  })
+})
+
 describe('useSettingsOverlay — the `| null` contract', () => {
   it('returns null when there is no provider above it', () => {
     const { result } = renderHook(() => useSettingsOverlay())

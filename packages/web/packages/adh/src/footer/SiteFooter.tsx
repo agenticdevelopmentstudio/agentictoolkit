@@ -1,30 +1,45 @@
 'use client'
 
+import { useId } from 'react'
 import {
   AdhFooter as ToolkitFooter,
   FooterMenu,
   type FooterLink,
   type FooterMenuItem,
 } from '@agentic-toolkit/adh/footer'
-import { AboutModal, ABOUT_DIALOG_ID, BRAND_LABEL } from './AboutModal'
+import { AboutModal, ABOUT_DIALOG_ID, BRAND_HREF, BRAND_LABEL } from './AboutModal'
 import { FooterChat } from './FooterChat'
 import { SitesPopover, SITES_OVERVIEW_POPOVER_ID } from './SitesOverview'
 import { openLegalModal, TermsModal, PrivacyModal, TERMS_DIALOG_ID, PRIVACY_DIALOG_ID } from './LegalModals'
+import { REST_SLOT_HOST_CLASS } from './useFooterRestOffset'
 
 export type SiteFooterProps = {
   links?: FooterLink[]
-  /** Mount bitbag. Default true — he belongs on every real footer. `false` is for
-   *  the ONE case that isn't one: a footer rendered as a specimen inside the theme
-   *  editor's preview pane. He portals himself to `document.body` (see
-   *  FooterChatInner), so a preview cannot contain him with a scoped `display:none`
-   *  the way it hides the in-flow theme switcher — he escapes the pane and lands
-   *  full-size over the console that is previewing him. Not mounting him is the
-   *  only thing that actually works, and it says what it means.
+  /** Mount bitbag. Default true — he belongs on every real footer; `false` leaves him out,
+   *  and the bar keeps no corner for him. A {@link SiteFooterProps.specimen | specimen}
+   *  never mounts him, whatever this says.
    *
    *  On THIS component, not the {@link ToolkitFooter} primitive it wraps: the
    *  primitive takes a generic `trailing` slot and has no idea bitbag exists, which
    *  is the whole point of the split. */
   chat?: boolean
+  /** A COPY of the footer, shown beside the page's own: the theme editor's preview pane
+   *  (theme-editor/areas.tsx). The footer carries things a page must have exactly one of,
+   *  and a specimen renders none of them:
+   *
+   *  - Its menus get ids of their own. `popovertarget` finds its panel by id across the
+   *    whole document, so on the page's ids the specimen's copyright opened the PAGE's
+   *    menu, and a second copy of each id is invalid HTML besides.
+   *  - No About, Sites, Terms or Privacy dialog. Those are found by id too, so the
+   *    specimen's entries open the page footer's own. On a page with no SiteFooter they
+   *    open nothing, which a specimen can afford: it is there to show what the footer
+   *    looks like, not to be one.
+   *  - No bitbag. He portals himself to `document.body` (see FooterChatInner), so a
+   *    preview cannot contain him with a scoped `display:none` the way it hides the
+   *    in-flow theme switcher: he escaped the pane and landed full-size over the console
+   *    previewing him. And a second dock would share the first's `view-transition-name`
+   *    (adh-site.css), which skips every slide while the specimen is on screen. */
+  specimen?: boolean
   /** The running server's own build identity, passed by {@link AppShell} in development
    *  only. Omitted everywhere else, where the baked `NEXT_PUBLIC_*` literals are the
    *  build and correct by construction — see {@link buildVersionLabel}.
@@ -79,10 +94,24 @@ const PRIVACY: FooterMenuItem = {
 // a browser without the Popover API — where the Legal menu is dead and a crowded bar
 // beats an unreachable Terms page. Which one shows is CSS (adh-site.css), so the server
 // HTML carries both hrefs either way.
-const LEGAL_LINKS: FooterLink[] = [
-  { ...TERMS, className: 'adh-footer__link--no-popover' },
+//
+// REST_SLOT_HOST_CLASS marks the FIRST item of whichever form shows — Legal, or Terms in
+// the fallback — as the one that keeps bitbag's resting slot as its left margin
+// (adh-site.css), and it is what `useFooterRestOffset` measures. On both, not on Legal
+// alone: the fallback hides Legal, and a slot kept on a hidden element is no slot at all —
+// measured there, it flung his resting face off the left edge of the screen.
+//
+// A function of the menu's id only because a specimen needs an id of its own (see
+// `SiteFooterProps.specimen`); the page's footer always passes LEGAL_MENU_ID.
+const legalLinks = (menuId: string): FooterLink[] => [
+  { ...TERMS, className: `adh-footer__link--no-popover ${REST_SLOT_HOST_CLASS}` },
   { ...PRIVACY, className: 'adh-footer__link--no-popover' },
-  { label: 'Legal', menuId: LEGAL_MENU_ID, items: [TERMS, PRIVACY], className: 'adh-footer__legal' },
+  {
+    label: 'Legal',
+    menuId,
+    items: [TERMS, PRIVACY],
+    className: `adh-footer__legal ${REST_SLOT_HOST_CLASS}`,
+  },
 ]
 
 /** The footer's build identity: `v1.0.155 · a73e79b7`, or null when neither field exists.
@@ -128,37 +157,66 @@ export function buildVersionLabel(live?: { version?: string; sha?: string }) {
  *  Named `SiteFooter` rather than `AdhFooter`: this barrel already publishes an `AdhFooter`
  *  — the registry-free primitive this component wraps. The two are unrelated components
  *  that happened to share a name; this one is adh's REGISTRY-AWARE composition. */
-export function SiteFooter({ links = [], chat = true, live }: SiteFooterProps) {
+export function SiteFooter({ links = [], chat = true, live, specimen = false }: SiteFooterProps) {
   // bitbag is rendered here but does NOT live here: FooterChatInner portals him to
   // `document.body` and he fixes himself to the viewport's bottom edge, so the
   // primitive's `trailing` slot is his mount point and nothing else. At rest he is his
   // face alone, parked in the bar's lower-right corner — and `adh-footer--with-chat` is
   // what makes the bar leave that corner empty for him (adh-site.css). Only when he is
   // mounted: a chat-less footer has no one to make room for.
+  const withChat = chat && !specimen
+  const version = buildVersionLabel(live)
+  // A specimen's menu ids, unique to this mount. useId is stable across renders and
+  // differs per instance; it is cut down to identifier characters because FooterMenu also
+  // spells the menu's CSS anchor name from the id, and React's `«r1»` is not one.
+  const instance = useId().replace(/[^\w-]/g, '')
+  const copyrightMenuId = specimen ? `${COPYRIGHT_MENU_ID}-${instance}` : COPYRIGHT_MENU_ID
+  const legalMenuId = specimen ? `${LEGAL_MENU_ID}-${instance}` : LEGAL_MENU_ID
   return (
     <>
       <ToolkitFooter
-        className={chat ? 'adh-footer--with-chat' : undefined}
-        links={[...links, ...LEGAL_LINKS]}
+        className={withChat ? 'adh-footer--with-chat' : undefined}
+        links={[...links, ...legalLinks(legalMenuId)]}
         copyright={
-          <FooterMenu
-            id={COPYRIGHT_MENU_ID}
-            triggerClassName="adh-footer__copyright-trigger"
-            label={
-              <>
-                {COPYRIGHT_PREFIX}
-                <span className="adh-footer__brand-link">{BRAND_LABEL}</span>
-              </>
-            }
-            items={COPYRIGHT_MENU}
-          />
+          <>
+            <FooterMenu
+              id={copyrightMenuId}
+              triggerClassName="adh-footer__copyright-trigger"
+              label={
+                <>
+                  {COPYRIGHT_PREFIX}
+                  <span className="adh-footer__brand-link">{BRAND_LABEL}</span>
+                </>
+              }
+              items={COPYRIGHT_MENU}
+            />
+            {/* The copyright menu's fallback, as the inline Terms / Privacy pair is Legal's:
+                without the Popover API the menu is a dead button and About never opens, so
+                the studio's link and this build's version — the two things the bar carried
+                before they moved into About — had no way onto the screen. Shown only there
+                (adh-site.css). AFTER the menu, because the theme editor reads the brand's
+                current values off the first `.adh-footer__brand-link` it finds
+                (theme-editor/areas.tsx), and that has to be the one people see. */}
+            <span className="adh-footer__copyright-fallback">
+              {COPYRIGHT_PREFIX}
+              <a className="adh-footer__brand-link" href={BRAND_HREF}>
+                {BRAND_LABEL}
+              </a>
+              {version && <span className="adh-footer__copyright-version"> · {version}</span>}
+            </span>
+          </>
         }
-        trailing={chat ? <FooterChat /> : null}
+        trailing={withChat ? <FooterChat /> : null}
       />
-      <AboutModal version={buildVersionLabel(live)} />
-      <SitesPopover />
-      <TermsModal />
-      <PrivacyModal />
+      {/* The page's, one each: a specimen's entries open these (see `specimen`). */}
+      {!specimen && (
+        <>
+          <AboutModal version={version} />
+          <SitesPopover />
+          <TermsModal />
+          <PrivacyModal />
+        </>
+      )}
     </>
   )
 }

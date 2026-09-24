@@ -7,6 +7,7 @@ import { Avatar, AvatarImage, AvatarFallback } from "@agenticdevelopertoolkit/ui
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
+import { PROFILE_FRAME_CLASS } from "./frame";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -95,7 +96,7 @@ export function ProfileNotFound(): ReactElement {
   };
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-16 sm:px-6">
+    <main className={PROFILE_FRAME_CLASS}>
       <div className="rounded-xl border border-apt-border bg-apt-bg p-8">
         {/* ── Message ─────────────────────────────────────────────────── */}
         <h1 className="font-serif text-2xl font-medium text-apt-text sm:text-3xl">

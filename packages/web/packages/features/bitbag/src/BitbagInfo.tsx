@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { CHAT_INSIDE_ATTR } from '@agenticdevelopertoolkit/chat'
 
 /**
  * Where else bitbag lives. He's a persona, not a feature of whatever site he's
@@ -31,6 +32,13 @@ const LINKS: readonly { label: string; href: string; shown: string }[] = [
  * outside it, or Escape — so the dock doesn't have to know it exists beyond
  * giving it a corner to sit on. Both listeners are on the document, because the
  * gesture that closes a popup is by definition one that lands somewhere else.
+ *
+ * It sits BESIDE the chat box, not in it, and the chat folds on a press anywhere
+ * outside its box — so the root is marked with the chat's `CHAT_INSIDE_ATTR`,
+ * which makes a press on the `i` or its panel no tap away. Unmarked, reaching for
+ * the `i` of an unfolded chat folded it: the box shrank out from under the
+ * pointer, and on the avatar-rest dock the fold shut the whole dock before the
+ * click could land.
  */
 export function BitbagInfo(): ReactNode {
   const [open, setOpen] = useState(false)
@@ -72,19 +80,34 @@ export function BitbagInfo(): ReactNode {
     const onPointerDown = (e: PointerEvent): void => {
       if (!root?.contains(e.target as Node)) setOpen(false)
     }
+    // Any Escape closes the panel, wherever focus is. One pressed INSIDE it is
+    // also consumed (`preventDefault`), because the chat behind the panel folds
+    // on every Escape it sees — and on the avatar-rest dock that fold shuts the
+    // whole dock, hiding the panel with focus still in it. The chat skips an
+    // Escape that is already `defaultPrevented`, so this key closes the panel and
+    // the NEXT one folds the chat: one key, one layer. Consumed rather than
+    // stopped: `stopPropagation` would hide the key from every listener above,
+    // not just the chat's. And only when pressed in here, because a document-wide
+    // `preventDefault` would also cancel the browser's own Escape for a native
+    // popover or dialog the visitor opened on top of this one.
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false)
+      if (e.key !== 'Escape') return
+      if (root?.contains(e.target as Node)) e.preventDefault()
+      setOpen(false)
     }
     document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
+    // Capture phase, so this runs before the chat's listener on the same node:
+    // that one was attached when the chat mounted, long before this panel first
+    // opened, and listeners in the same phase run in the order they were added.
+    document.addEventListener('keydown', onKeyDown, true)
     return () => {
       document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('keydown', onKeyDown, true)
     }
   }, [open])
 
   return (
-    <div className="bb-info" ref={rootRef}>
+    <div className="bb-info" ref={rootRef} {...{ [CHAT_INSIDE_ATTR]: '' }}>
       <button
         ref={btnRef}
         type="button"

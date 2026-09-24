@@ -29,8 +29,8 @@ export type SiteSwitcherProps = {
  * when there is.
  *
  * This is the REGISTRY-FREE primitive. A consumer that owns a site registry keeps
- * its richer switcher — curated menu taxonomy, recents, workspaces, dev-tools
- * flyouts — in its own package and injects it through `AdhHeader`'s `siteSwitcher`
+ * its richer switcher — curated menu taxonomy, recents, workspaces — in its own
+ * package and injects it through `AdhHeader`'s `siteSwitcher`
  * slot; that variant is deliberately NOT reachable from here, because every part
  * of it resolves a registry this package does not have.
  */

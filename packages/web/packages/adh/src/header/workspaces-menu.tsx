@@ -27,11 +27,18 @@ export type MenuWorkspace = {
 export type WorkspacesMenu = {
   workspaces: MenuWorkspace[]
   loading: boolean
+  /** True when the list could not be fetched. Optional so a host with nothing to fail (a
+   *  canned list) need not say so. It exists because "no rows, not loading" was all the menu
+   *  could see, and it told someone whose fetch had failed that they had "No workspaces yet" —
+   *  a false statement about their account, where the truth is that we could not ask. */
+  error?: boolean
   /** How a chosen row switches, when the host has something better than following `href`. The
-   *  hub fills it while a workspace route is mounted: its switch KEEPS the feature you are on and
-   *  REMEMBERS the pick as your preference — and a plain link can do neither, since the
-   *  route's resolver cannot tell a followed link from the back button, which must never
-   *  persist. Absent ⇒ the menu navigates to `href`. */
+   *  hub fills it while a workspace route is mounted, and what it adds is the FEATURE: its switch
+   *  keeps the page you are on under the new workspace (the route's `switchHrefFor`), where a
+   *  plain `href` lands on the bare workspace. Remembering the pick is NOT the difference: the
+   *  route records any fresh arrival on a `/<slug>` it did not seed itself — a followed link and
+   *  the back button alike — as the preference (teams excepted; see `useWorkspaceRoute`), so a
+   *  plain link is remembered too. Absent ⇒ the menu navigates to `href`. */
   select?: (workspace: MenuWorkspace) => void
 }
 

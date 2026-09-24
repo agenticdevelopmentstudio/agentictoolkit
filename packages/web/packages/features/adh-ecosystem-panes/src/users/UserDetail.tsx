@@ -5,7 +5,7 @@ import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Label } from "@agenticdevelopertoolkit/ui/components/label";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import type { EcosystemUser, EcosystemUserInput } from "../api/customers";
-import { DetailSection } from "@agentic-toolkit/resource";
+import { DetailSection, unchangedFromStored } from "@agentic-toolkit/resource";
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
@@ -25,17 +25,20 @@ export function userToInput(u: EcosystemUser): EcosystemUserInput {
 
 /** Returns an error message, or null when the draft is valid.
  *
- *  `storedEmail` is the address the record was loaded with. An unchanged email is never refused:
- *  `POST /customer/resolve` creates users from an SSO/BYO `externalId` alone, with a NULL email
- *  (read back as ""), and without this exemption every such user's Save stayed disabled for any
- *  edit at all — renaming them included. A user who TYPES a new address still gets it checked. */
+ *  `storedEmail` is the address the record was loaded with, and absent on a create. An unchanged
+ *  email skips EVERY email rule, "required" included: `POST /customer/resolve` creates users from
+ *  an SSO/BYO `externalId` alone, with a NULL email (read back as ""), and without this exemption
+ *  every such user's Save stayed disabled for any edit at all — renaming them included. A user who
+ *  TYPES a new address still gets it checked, and so does a create: it has nothing stored, and
+ *  `unchangedFromStored` never matches a missing stored value. (It once did — the master/detail
+ *  hook handed over `blank()` as the stored record on create, and a new user's "" matched it.) */
 export function userValidate(
   draft: EcosystemUserInput,
   takenEmails: string[] = [],
   storedEmail?: string,
 ): string | null {
   const email = draft.email.trim();
-  if (storedEmail !== undefined && email === storedEmail.trim()) return null;
+  if (unchangedFromStored(email, storedEmail)) return null;
   if (!email) return "Email is required.";
   if (!EMAIL_RE.test(email)) return "Enter a valid email address.";
   if (takenEmails.some((e) => e.toLowerCase() === email.toLowerCase()))

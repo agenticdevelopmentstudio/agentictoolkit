@@ -27,10 +27,6 @@ export type FooterLink =
       prefetch?: boolean
       className?: string
     }
-  /** A native popover trigger: `popovertarget` opens the panel with NO client JS. Carries
-   *  the `adh-footer__sites-trigger` class, which a host stylesheet may use to hide it in
-   *  browsers without the Popover API — where it cannot degrade to anything. */
-  | { label: string; popoverTarget: string; ariaLabel?: string; className?: string }
   /** A popup menu of further entries — see {@link FooterMenu}. */
   | { label: string; menuId: string; items: FooterMenuItem[]; ariaLabel?: string; className?: string }
 
@@ -62,10 +58,15 @@ function menuItemClass(extra?: string): string {
  * out, so every link in it is crawlable — the footer is on every page of every site, and a
  * menu that only existed after hydration would take those links out of the index.
  *
- * Positioned against its own trigger with CSS anchor positioning where the browser has it
- * (the anchor name is derived from `id`, so any number of menus can share a bar); where it
+ * Positioned against its own trigger's caret with CSS anchor positioning where the browser
+ * has it (the anchor name is derived from `id`, so any number of menus can share a bar, and
+ * the host element scopes it, so a second footer on the page cannot capture it); where it
  * does not, the host stylesheet's fallback parks it above the bar. Light-dismiss and Escape
  * are the platform's.
+ *
+ * `id` must be unique in the DOCUMENT, not just the bar: `popovertarget` is looked up by id
+ * across the whole page, and a repeated one opens the first panel that carries it — which
+ * is how the theme editor's specimen footer opened the real footer's menu.
  */
 export function FooterMenu({
   id,
@@ -85,11 +86,15 @@ export function FooterMenu({
   const anchor = { '--adh-footer-menu-anchor': `--${id}` } as CSSProperties
   return (
     <span className={['adh-footer__menu-host', className].filter(Boolean).join(' ')} style={anchor}>
+      {/* A DISCLOSURE of links, not an ARIA menu, so no `aria-haspopup="menu"`: that promises
+          assistive tech a role=menu popup with arrow-key focus, and this panel is a plain list
+          of links reached with Tab — the pattern APG recommends for navigation. It shipped with
+          the attribute, so screen readers announced a menu button whose arrow keys did nothing.
+          The open/closed state needs no ARIA: `popovertarget` exposes it natively. */}
       <button
         type="button"
         popoverTarget={id}
         aria-label={ariaLabel}
-        aria-haspopup="menu"
         className={`${triggerClassName} adh-footer__menu-trigger`}
       >
         {label}
@@ -153,18 +158,6 @@ export function AdhFooter({ links = [], copyright, trailing, className }: AdhFoo
                   ariaLabel={link.ariaLabel}
                   className={link.className}
                 />
-              ) : 'popoverTarget' in link ? (
-                <button
-                  key={`popover:${link.popoverTarget}`}
-                  type="button"
-                  popoverTarget={link.popoverTarget}
-                  aria-label={link.ariaLabel}
-                  className={['adh-footer__link adh-footer__sites-trigger', link.className]
-                    .filter(Boolean)
-                    .join(' ')}
-                >
-                  {link.label}
-                </button>
               ) : (
                 <Link
                   key={`href:${link.href}:${link.label}`}

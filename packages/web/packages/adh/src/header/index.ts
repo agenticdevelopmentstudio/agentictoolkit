@@ -19,6 +19,8 @@ export type {
   PopoverEntry,
   PopoverIcon,
   PopoverItem,
+  PopoverListEntry,
+  PopoverNotice,
   PopoverSearchCommand,
 } from './NavigationPopover'
 export { HubMark } from './HubMark'
@@ -40,14 +42,6 @@ export { SiteMenuSwitcher } from './SiteMenuSwitcher'
 export { WorkspaceMenu } from './WorkspaceMenu'
 export type { WorkspaceMenuProps } from './WorkspaceMenu'
 export type { SiteMenuSwitcherProps } from './SiteMenuSwitcher'
-// The bug-glyph dev-tools dropdown for AdhHeader's `debugMenu` slot. SiteHeader no
-// longer mounts it — the repo owner asked for the glyph gone and Debug Options moved
-// to the end of the avatar menu (`useDebugOptions`) — so it is exported for a host
-// that wants its site-family and Routes flyouts back. Everything build- or
-// admin-gated stays out of SiteMenu, which is what lets that be the same menu in a
-// dev build and a shipped one.
-export { DevToolsMenu } from './DevToolsMenu'
-export type { DevToolsMenuProps } from './DevToolsMenu'
 // The two config-only menus behind the SiteMenuSwitcher dispatcher + their shared base
 // — exported so demos/tests can render a specific auth state directly (the
 // dispatcher itself picks by route).
@@ -57,8 +51,13 @@ export { MarketingSiteMenu } from './MarketingSiteMenu'
 export { WorkspaceSiteMenu } from './WorkspaceSiteMenu'
 export { ADMIN_MENU_GROUPS, ADMIN_SECTION, FLEET_MENU_GROUPS, FLEET_SECTION } from './fleetMenuGroups'
 export { StudioWordmark } from './StudioWordmark'
-export { buildDebugSiteGroups, DEBUG_SECTION } from './debugSiteGroups'
-export { buildDevToolsEntries, DEV_TOOLS_BUILD_ENABLED } from './devToolsEntries'
+// The build half of the Debug Options gate (see devToolsEntries.ts). The bug-glyph
+// dev-tools dropdown that used to sit beside the site name went when the repo owner
+// asked for the glyph gone and Debug Options moved to the account end of the header
+// (`useDebugOptions`), and its site-family and Routes flyouts went with it: nothing
+// else mounted them. Everything build- or admin-gated stays out of SiteMenu, which is
+// what lets that be the same menu in a dev build and a shipped one.
+export { DEV_TOOLS_BUILD_ENABLED } from './devToolsEntries'
 export { isWorkspaceMenuRoute } from './activeMenuGroups'
 export { menuIcon } from './menu-icons'
 export { PrefetchSiblingSites } from './PrefetchSiblingSites'

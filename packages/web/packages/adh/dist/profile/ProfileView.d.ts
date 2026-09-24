@@ -41,4 +41,12 @@ export interface ProfileViewProps {
  * and tells this component not to duplicate the lookup.
  */
 export declare function ProfileView({ principal, siteId, children, upgrade, }: ProfileViewProps): ReactElement;
+/**
+ * A profile on its way: the card's own skeleton, in ProfileView's frame, so the profile
+ * replaces it in place when it arrives. A route's loading boundary (the hub's
+ * `/<slug>/profile/loading.tsx`) renders this rather than composing the two itself: the frame
+ * and the card are this directory's to change, and a site-side copy of either would stop
+ * matching the day one of them does.
+ */
+export declare function ProfileSkeleton(): ReactElement;
 //# sourceMappingURL=ProfileView.d.ts.map

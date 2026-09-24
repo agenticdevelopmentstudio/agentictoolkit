@@ -1536,7 +1536,7 @@ describe("SiteHomeShell picker mount", () => {
     expect(push).toHaveBeenCalledWith("/acme/services/svc_1", { scroll: false });
   });
 
-  it("renders ONE picker, in a labelled bar, from one list", async () => {
+  it("renders ONE picker, in a bar, from one list", async () => {
     const { container } = render(<Shell workspaceSlug="mine" />);
     await waitFor(() => expect(screen.getByTestId("feature")).toBeInTheDocument());
 

@@ -10,7 +10,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { type ReactElement } from 'react'
 import { useRegisteredShortcuts } from '@agenticdevelopertoolkit/ui/hooks/useShortcut'
 
-import { NavigationPopover, type PopoverEntry } from '../NavigationPopover'
+import { NavigationPopover, type PopoverEntry, type PopoverListEntry } from '../NavigationPopover'
 
 // This package's vitest config has no auto-cleanup setup file, so each render must be torn
 // down explicitly or the next test's queries see both mounted trees. It matters more than
@@ -221,5 +221,72 @@ describe('NavigationPopover — sectionLabels', () => {
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'temp' } })
     await waitFor(() => expect(screen.queryByText('Mine')).toBeNull())
     expect(screen.queryByText('Workspaces')).toBeNull()
+  })
+})
+
+describe('NavigationPopover — notices', () => {
+  // A notice is a line of text where rows would be ("Loading…", "No workspaces yet"). It replaced
+  // a placeholder ROW, which the arrow keys landed on and Enter "chose" — closing the menu and
+  // going nowhere. Each test is one of the ways a row is a row, which a notice must not be.
+  const LOADING: PopoverListEntry[] = [
+    { kind: 'notice', section: 0, key: 'ws:status', text: 'Loading…' },
+    { kind: 'leaf', section: 1, item: { key: 'help', label: 'Help' } },
+  ]
+  const ONLY_A_NOTICE: PopoverListEntry[] = [
+    { kind: 'notice', section: 0, key: 'ws:status', text: 'No workspaces yet' },
+  ]
+
+  async function openMenu(): Promise<HTMLElement> {
+    fireEvent.click(screen.getByRole('button', { name: TRIGGER }))
+    await expectOpen()
+    return screen.getByRole('combobox')
+  }
+
+  it('is announced text, not a menuitem', async () => {
+    render(<Menu entries={LOADING} sectionLabels={{ 0: 'Workspaces' }} />)
+    await openMenu()
+    const notice = screen.getByRole('status')
+    expect(notice).toHaveTextContent('Loading…')
+    expect(notice.closest('[role="menuitem"]')).toBeNull()
+    expect(screen.getAllByRole('menuitem').map((row) => row.textContent)).toEqual(['Help'])
+    // It sits where its rows would, heading and all.
+    const heading = screen.getByText('Workspaces')
+    expect(heading.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('is stepped over by the arrow keys, in both directions', async () => {
+    render(<Menu entries={LOADING} />)
+    const input = await openMenu()
+    const help = screen.getByRole('menuitem', { name: 'Help' })
+    // From nothing highlighted, ↓ starts at the first entry — the notice — and must pass it.
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await waitFor(() => expect(input).toHaveAttribute('aria-activedescendant', help.id))
+    // Wrapping round from Help lands on Help again, whichever way.
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    expect(input).toHaveAttribute('aria-activedescendant', help.id)
+    fireEvent.keyDown(input, { key: 'ArrowUp' })
+    expect(input).toHaveAttribute('aria-activedescendant', help.id)
+  })
+
+  it('leaves nothing to highlight and nothing for Enter to choose when it is all there is', async () => {
+    const onChoose = vi.fn()
+    render(<Menu entries={ONLY_A_NOTICE} onChoose={onChoose} />)
+    const input = await openMenu()
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    expect(input).not.toHaveAttribute('aria-activedescendant')
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(onChoose).not.toHaveBeenCalled()
+    // Enter on a placeholder row closed the menu; with no row there is nothing to close it for.
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('No workspaces yet')
+  })
+
+  it('is never offered as a search result', async () => {
+    // Typing "load" into a menu that is still loading must not list "Loading…" as a place to go.
+    render(<Menu entries={LOADING} emptyLabel="Nothing matches" />)
+    const input = await openMenu()
+    fireEvent.change(input, { target: { value: 'load' } })
+    await waitFor(() => expect(screen.getByText('Nothing matches')).toBeInTheDocument())
+    expect(screen.queryAllByRole('menuitem')).toEqual([])
   })
 })

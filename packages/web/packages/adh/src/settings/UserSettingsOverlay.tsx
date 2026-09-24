@@ -8,7 +8,6 @@ import {
   DialogTitle,
 } from "@agenticdevelopertoolkit/ui/components/dialog";
 import { UnsavedChangesAlert } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-alert";
-import { useMediaQuery } from "@agenticdevelopertoolkit/ui/hooks/useMediaQuery";
 import { SettingsLayout } from "@agentic-toolkit/account";
 import { SettingsDirtyProvider, useSettingsDirty } from "@agentic-toolkit/resource";
 // The react-query runtime every panel below fetches through, mounted HERE rather than in
@@ -91,41 +90,25 @@ function UserSettingsDialog({
     attemptExit(() => onOpenChange(false));
   }
 
-  // A phone gets the whole screen. The desktop footprint's 1rem margin and `vh` height left the
-  // bottom of the dialog — and the Save bar in it — under iOS Safari's toolbar, since `vh` there is
-  // measured with the toolbar hidden; `dvh` is the height actually visible.
-  const compact = useMediaQuery("(max-width: 639px)");
-
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      {/* Sizing via inline style (not Tailwind) so it's immune to utility
-          conflicts: centered by the shared dialog's fixed/translate classes.
-          Fixed to a large footprint (capped to the viewport on small screens) so
-          the dialog stays the same size across sections — switching panels never
-          resizes it; each panel scrolls internally instead. */}
+      {/* A phone gets the whole screen: the shared dialog's `sheetOnPhone`, below Tailwind's
+          `sm`. The desktop footprint's 1rem margin and `vh` height left the bottom of the
+          dialog — and the Save bar in it — under iOS Safari's toolbar, since `vh` there is
+          measured with the toolbar hidden; the sheet is `dvh`, the height actually visible,
+          and it insets itself (and its ×) clear of the notch and the home indicator.
+          From `sm` up, a large fixed footprint (capped to the viewport on small screens) so
+          the dialog stays the same size across sections — switching panels never resizes it;
+          each panel scrolls internally instead. Tall enough to show all subscription plans
+          without scrolling on a typical desktop; still caps to the viewport on shorter screens.
+          `sm:` classes, NOT an inline style (which this used to be, with its own copy of the
+          phone sheet behind a JS `(max-width: 639px)` query): a style beats every class at
+          every width, so it overrode the shared dialog wholesale. The `sm:` variants also beat
+          the dialog's own narrow `w-[calc(100%-2rem)] max-w-md` by variant order in the
+          stylesheet, not by how tailwind-merge happens to resolve the pair. */}
       <DialogContent
-        className="flex flex-col gap-0 overflow-hidden p-0"
-        style={
-          compact
-            ? {
-                width: "100vw",
-                maxWidth: "100vw",
-                height: "100dvh",
-                maxHeight: "100dvh",
-                borderRadius: 0,
-                borderWidth: 0,
-                paddingTop: "env(safe-area-inset-top)",
-                paddingBottom: "env(safe-area-inset-bottom)",
-              }
-            : {
-                width: "min(72rem, calc(100vw - 2rem))",
-                maxWidth: "min(72rem, calc(100vw - 2rem))",
-                // Tall enough to show all subscription plans without scrolling on a
-                // typical desktop; still caps to the viewport on shorter screens.
-                height: "min(56rem, calc(100dvh - 2rem))",
-                maxHeight: "calc(100dvh - 2rem)",
-              }
-        }
+        sheetOnPhone
+        className="flex flex-col gap-0 overflow-hidden p-0 sm:h-[min(56rem,calc(100dvh-2rem))] sm:max-h-[calc(100dvh-2rem)] sm:w-[min(72rem,calc(100vw-2rem))] sm:max-w-[min(72rem,calc(100vw-2rem))]"
       >
         <DialogTitle className="shrink-0 border-b border-apt-border px-6 py-3 font-mono text-sm tracking-wide text-apt-gold">
           User Settings

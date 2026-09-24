@@ -4,8 +4,9 @@ export type { AdhAppShellProps } from './AdhAppShell'
 // instead (adh's builds/status boards) and still want their stacks to answer to the flag.
 export { HierarchicalDetailViewFlag } from './HierarchicalDetailViewFlag'
 // Also mounted by AdhAppShell; `slideNavigate` is the call a link makes to slide instead of cut.
-export { SlideTransitions, slideNavigate, canSlide } from './SlideNavigation'
-export type { SlideDirection } from './SlideNavigation'
+// By package path, like AdhAppShell's import: one copy of the slide state for every entry.
+export { SlideTransitions, slideNavigate, canSlide } from '@agentic-toolkit/adh/layout/SlideNavigation'
+export type { SlideDirection } from '@agentic-toolkit/adh/layout/SlideNavigation'
 export { AppErrorBoundary } from './AppErrorBoundary'
 export { ErrorFallback } from './ErrorFallback'
 export { RouteError } from './RouteError'

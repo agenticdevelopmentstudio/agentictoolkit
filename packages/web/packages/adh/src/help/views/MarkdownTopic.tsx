@@ -1,6 +1,7 @@
 'use client'
 
 import type { MouseEvent } from 'react'
+import { isModifiedClick } from '@agenticdevelopertoolkit/ui/lib/navigation-guard'
 // Package path (not '../HelpProvider') so useHelp resolves to the SINGLE HelpContext the provider
 // created — a relative import would bundle a second HelpProvider/context into this window chunk and
 // useHelp() would read the wrong (empty) context, silently no-op'ing the navigation below. Same
@@ -32,7 +33,8 @@ export function MarkdownTopic({ contentKey }: { contentKey: string }) {
   const html = HELP_CONTENT_HTML[contentKey]
 
   function onDocLinkClick(e: MouseEvent<HTMLDivElement>) {
-    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    // Already handled by something else, or a new-tab / download click the browser keeps.
+    if (e.defaultPrevented || isModifiedClick(e)) return
     const anchor = (e.target as HTMLElement).closest('a')
     if (!anchor || anchor.target === '_blank') return
     const href = anchor.getAttribute('href') ?? ''

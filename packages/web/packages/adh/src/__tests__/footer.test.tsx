@@ -48,6 +48,10 @@ describe('adh SiteFooter', () => {
       expect(hrefs).toContain('https://agenticdevelopmentstudio.com/')
       expect(hrefs.some((h) => h?.includes('fishlamp.com'))).toBe(true)
       expect(about.textContent).toContain('FishLamp Design')
+      // ONE company behind the family, not two. FishLamp's line is its registry
+      // description, which used to read 'The studio behind the Hub' and so claimed the
+      // same thing as the Agentic Development Studio entry printed right above it.
+      expect(about.textContent!.match(/\bbehind\b/gi)).toHaveLength(1)
       expect(about.textContent).toContain('v1.0.155 · a73e79b7')
     } finally {
       vi.unstubAllEnvs()

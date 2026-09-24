@@ -39,10 +39,11 @@ function makeSmartHeaderAuth(cfg = {}) {
     const login = () => beginLogin({ clientId, returnTo: returnTo?.() ?? defaultReturnTo(opts.siteId) });
     return {
       user: user ? toAvatarUser(user, avatarFallback) : null,
-      // Unlocks the dev-tools menu (Routes, site families, Debug Options) in every
-      // env for a signed-in adh admin — see AdhHeaderAuthProps — and appends the
-      // admin consoles section to the site menu beside it. Those are the only two
-      // things it does; every other row of both menus is the same for everyone.
+      // Unlocks Debug Options (the avatar menu's last row) in every env for a
+      // signed-in adh admin — see AdhHeaderAuthProps — and appends the admin
+      // consoles to the site menu, or on the hub to the workspace menu. Those are
+      // the only two things it does; every other row of those menus is the same for
+      // everyone.
       userIsAdmin: isAdmin(user),
       // Spinner while the session resolves, not a flash of the signed-out buttons.
       authLoading: isLoading,

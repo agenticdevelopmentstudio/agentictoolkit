@@ -30,7 +30,7 @@ vi.mock('@agentic-toolkit/adh/header', async (importOriginal) => {
 })
 
 // adh's real switcher stands in as a probe, because its contents are already covered by
-// header/__tests__/{useSiteMenu,debugSiteGroups,fleetMenuGroups}.test — re-rendering the
+// header/__tests__/{useSiteMenu,fleetMenuGroups,workspaceMenu}.test — re-rendering the
 // whole menu here would test those twice and this file's subject not at all.
 //
 // That is now the WHOLE reason. While this file lived in the former `@adh/chrome` it carried a
@@ -239,8 +239,9 @@ describe('SiteHeader auth source injection', () => {
     expect(screen.getByTestId('adh-avatar-menu').textContent).toBe('Ada')
     expect(headerProps.current?.user).toEqual({ name: 'Ada' })
     expect(switcherProps.current?.authenticated).toBe(true)
-    // An admin is offered Debug Options in every env — as the avatar menu's last row, not
-    // a bug-glyph dropdown in the bar, which the header no longer mounts at all.
+    // An admin is offered Debug Options in every env — as the avatar menu's last row. The
+    // bug-glyph dropdown that used to hold it in the `debugMenu` slot is deleted, and
+    // SiteHeader leaves the slot empty for every visitor, signed in or out.
     expect(typeof headerProps.current?.onDebugOptions).toBe('function')
     expect(headerProps.current?.debugMenu).toBeUndefined()
     // The site menu gets it too — it is what adds the admin consoles section. What
@@ -272,6 +273,55 @@ describe('SiteHeader auth source injection', () => {
     // The status board renders the family bar with NO adh AuthProvider above it, so a
     // default source that called `useAuth()` would crash the whole site.
     expect(() => render(<SiteHeader siteId="status" />)).not.toThrow()
+  })
+})
+
+// The signed-out half of the Debug Options door, through the whole chain: SiteHeader's
+// gate, the prop it hands the bar, and the button the bar draws. Moving the door into the
+// avatar menu once left a signed-out developer with no way into the console at all — on
+// `status` (whose source never signs anyone in) permanently — and with no way to switch
+// OFF a console flag already saved in localStorage.
+describe('SiteHeader — Debug Options for a signed-out visitor', () => {
+  const anonymous = (): HeaderAuthState => ({ user: null })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  // The build flag folds at MODULE LOAD from NEXT_PUBLIC_DEPLOYMENT_ENV, so each build
+  // is a fresh module registry under a freshly-stubbed env (the mocks above survive a
+  // reset). jsdom's host is `localhost`, so the REAL env is `local` in both cases: what
+  // differs is only the build, which is the one thing that gates an ordinary visitor.
+  async function siteHeaderBuiltFor(env: string) {
+    vi.resetModules()
+    vi.stubEnv('NEXT_PUBLIC_DEPLOYMENT_ENV', env)
+    return (await import('../header/SiteHeader')).SiteHeader
+  }
+
+  // The real env comes from the host, which `useClientHost` resolves in a mount effect.
+  // `render` flushes that effect and its re-render inside act() before it returns, so a
+  // synchronous query already sees the settled bar — which is what the two positive
+  // cases prove by using `getBy`, and what keeps the negative case below from passing
+  // on a first render that had no host yet.
+  it('draws the Debug Options button in a dev build, on the site that never signs anyone in', async () => {
+    const Header = await siteHeaderBuiltFor('local')
+    render(<Header siteId="status" />)
+    expect(screen.getByRole('button', { name: 'Debug Options' })).toBeInTheDocument()
+    expect(headerProps.current?.user).toBeNull()
+  })
+
+  it('draws it for an anonymous visitor on any other site too', async () => {
+    const Header = await siteHeaderBuiltFor('staging')
+    render(<Header siteId="hub" useAuthSource={anonymous} />)
+    expect(screen.getByRole('button', { name: 'Debug Options' })).toBeInTheDocument()
+  })
+
+  it('draws nothing for an ordinary signed-out visitor in a production build', async () => {
+    const Header = await siteHeaderBuiltFor('production')
+    render(<Header siteId="hub" useAuthSource={anonymous} />)
+    expect(headerProps.current?.onDebugOptions).toBeUndefined()
+    expect(screen.queryByRole('button', { name: 'Debug Options' })).toBeNull()
   })
 })
 

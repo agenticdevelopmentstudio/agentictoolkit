@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import {
+  CHAT_INPUT_SELECTOR,
   InlineChatView,
   useBlockCursor,
   useChatSession,
@@ -97,6 +98,19 @@ export interface BitbagChatProps {
   anchorRef?: RefObject<HTMLElement | null>
   /** Extra classes on the theme-scope root — the host's positioning wrapper. */
   className?: string
+  /**
+   * Whether the chat is unfolded, when the host takes that over from the chat's own
+   * focus / tap-away / Escape tracking — the dock does, so that hiding his chat also
+   * folds it. Only the `dock` variant folds at all (`inactive: minimal`); the stage
+   * is always open, so there it means nothing.
+   */
+  engaged?: boolean
+  /**
+   * Reports each unfold and fold as it happens — the typed signal the dock closes
+   * on, rather than reading the chat's classes back off the DOM. Dock variant only,
+   * for the same reason.
+   */
+  onEngagedChange?: (engaged: boolean) => void
 }
 
 export function BitbagChat({
@@ -109,6 +123,8 @@ export function BitbagChat({
   onMute,
   anchorRef,
   className,
+  engaged,
+  onEngagedChange,
 }: BitbagChatProps) {
   const isDock = variant === 'dock'
   // Default to the built-in scripted mock so existing consumers are byte-for-byte
@@ -160,7 +176,7 @@ export function BitbagChat({
   // Detect the user composing.
   const [userTyping, setUserTyping] = useState(false)
   useEffect(() => {
-    const input = wrapperRef.current?.querySelector<HTMLInputElement>('.pc-input')
+    const input = wrapperRef.current?.querySelector<HTMLInputElement>(CHAT_INPUT_SELECTOR)
     if (!input) return
     const onInput = () => setUserTyping(input.value.trim().length > 0)
     const onBlur = () => setUserTyping(false)
@@ -269,6 +285,8 @@ export function BitbagChat({
         inputDisabled={inputDisabled}
         fadeOlder
         sizing={sizing}
+        engaged={engaged}
+        onEngagedChange={onEngagedChange}
       />
       {/* Block cursor. left/top/width/height are viewport coords from
           caretMetrics — position:fixed (set in the theme CSS) resolves them

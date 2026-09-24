@@ -391,11 +391,11 @@
 }
 
 /* The lead's first ROW: the site-name switcher and, beside it, whatever the header's
-   `debugMenu` slot holds (adh puts its dev-tools dropdown there). A row of its own
-   because .adh-header__lead is a COLUMN — the badges stack UNDER the brand, so a
-   sibling dropped straight into the lead would land under the brand too, not after it.
-   Renders identically to the bare switcher when the slot is empty, which on a shipped
-   site is always. */
+   `debugMenu` slot holds. A row of its own because .adh-header__lead is a COLUMN — the
+   badges stack UNDER the brand, so a sibling dropped straight into the lead would land
+   under the brand too, not after it. Renders identically to the bare switcher when the
+   slot is empty. SiteHeader always leaves it empty now; the slot stays for a host of
+   AdhHeader that has a menu of its own to put beside the switcher. */
 .adh-header__brand-row {
   display: flex;
   align-items: center;
@@ -477,7 +477,9 @@
 
   /* Putting the links down was not enough on its own. Signed in at 390px the bar
      still wanted 429.8px: 233.8 of brand (site name + dev-tools square), 124 of nav
-     (site actions + avatar trigger), and 72 of pure gutter. The two rules below take
+     (site actions + avatar trigger), and 72 of pure gutter. That is a historical
+     measurement, taken while the dev-tools square still rendered beside the site name;
+     the square is gone, so today's brand is narrower by it. The two rules below take
      that last 429.8 apart from the cheap end first.
 
      Gutters and the cluster gap are desktop-sized above this query, and 72px of a
@@ -515,62 +517,56 @@
     text-overflow: ellipsis;
   }
 
-  /* The caret and the dev-tools square are fixed glyphs — 12px and 28px. Left
-     shrinkable they take their proportional share of the squeeze and both come out
-     misshapen, which buys the text almost nothing. */
-  .adh-header__lead .adh-nav-popover__chevron,
-  .adh-header__brand-row > .adh-nav-popover__trigger--icon {
+  /* The caret is a fixed glyph — 12px. Left shrinkable it takes its proportional share
+     of the squeeze and comes out misshapen, which buys the text almost nothing. */
+  .adh-header__lead .adh-nav-popover__chevron {
     flex-shrink: 0;
   }
 }
 
 /* ── The workspace chooser ───────────────────────────────────────────────────────
-   ONE mount at every width: a full-width bar under the header, carrying a "Workspace"
-   label and the picker. No breakpoint, no portal and no `mounted` gate, so nothing here
-   depends on hydration order and there is no second copy to keep in step.
+   ONE mount at every width: a full-width bar under the header carrying the picker and
+   nothing else — no visible label, since the trigger reads as the workspace's name. No
+   breakpoint, no portal and no `mounted` gate, so nothing here depends on hydration order
+   and there is no second copy to keep in step. A feature site's bar only: the hub's
+   switcher is its header's WorkspaceMenu.
 
    Sticky BENEATH the sticky header (.adh-header is `position: sticky; top: 0; z-index: 50`),
    so the chooser stays reachable while the landing view scrolls, at a z-index below the
    header's and above the page.
 
-   Three tracks with the chooser in the middle one, so it is centred on the BAR rather than
-   on whatever space a trailing action leaves it: the outer `1fr`s take equal shares of what
-   the middle track doesn't, so the hub's bar (which carries "New Organization") and a feature
-   site's (which carries nothing) put the chooser in the same place. The action lands in
-   track 3 by flow and stays right-aligned there via its own `ml-auto` — an auto margin, which
-   overrides a grid item's default stretch, so it is sized to its content rather than filling
-   the track. No bar-level `gap`: the empty tracks would each add one and shift the middle
-   track off centre by half of it.
-
-   `1fr` and not `minmax(0, 1fr)` — deliberately the version that can be pushed off centre.
-   A `1fr` track floors at its content's min-width, so an action too wide for its third
-   steals from the other side and the chooser drifts left; `minmax(0, 1fr)` would hold the
-   centre exactly and let the action overflow into it instead. Drifting is the better failure:
-   the chooser stays legible and clickable, where an overlap loses both. */
+   A flex row centring its one child. This was a `1fr auto 1fr` grid, whose equal outer
+   tracks kept the chooser centred on the BAR while the hub's bar also carried a "New
+   Organization" action. The action went, then the hub stopped mounting this bar, and with
+   nothing beside the chooser there is nothing for tracks to balance. A second child would
+   share the row and pull the chooser off centre, which is why WorkspaceBar renders none. */
 .adh-home__toolbar {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   position: sticky;
   top: var(--adh-header-height, 3.5rem);
   z-index: 40;
-  align-items: center;
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--color-border);
   /* Solid, so content scrolling under it stays covered — same reason .adh-footer has one. */
   background: var(--color-surface);
 }
 
-/* The centred group: label + trigger, held together so the pair centres as one unit.
-   Explicit `grid-column: 2` rather than flow placement, because the label and the picker
-   would otherwise be two separate children racing the action for the three tracks.
-   `min-width: 0` lets a long workspace name shrink the trigger instead of widening the
-   middle track until the outer two can no longer stay equal. */
-.adh-home__toolbar-control {
-  grid-column: 2;
-  display: flex;
+/* The one child is PopupMenu's own root. It takes no class from us (WorkspacePicker's
+   `className` reaches the trigger inside it), hence the structural selector. A flex item
+   floors at `min-width: auto`, the full unwrapped width of the workspace's name, so without
+   this a name wider than the bar never reaches the trigger's ellipsis: it overflows, and a
+   centred row overflows BOTH edges, the left one where no scrolling reaches it. `0` lets
+   the root shrink to the bar, and the name truncates.
+
+   The grid this replaced overflowed as well, despite a `min-width: 0` that said otherwise:
+   that sat on a flex wrapper around the picker, and the root inside the wrapper kept its
+   floor. Measured in Chromium at 390px with a name whose trigger wants ~560px: under the
+   grid the trigger ran 200px past the right edge and the page scrolled sideways; in a
+   centred row without this rule it lost 100px off each side; with it, it truncates. */
+.adh-home__toolbar > * {
   min-width: 0;
-  align-items: center;
-  gap: 0.5rem;
 }
 
 .adh-footer {
@@ -634,9 +630,18 @@
 
 /* FOOTER MENUS (FooterMenu) — a popover-trigger button and the panel it opens.
    The trigger reads as one of the bar's links, so it takes their type and colour by
-   inheritance and only drops the button chrome. */
+   inheritance and only drops the button chrome.
+
+   The host keeps its menu's anchor name to itself (`anchor-scope`), so a panel can only
+   find the caret beside it. An anchor name is otherwise document-wide, and the LAST
+   element in the document to declare it is the one every panel naming it opens at: the
+   theme editor shows a specimen footer beside the page's own, and the page's copyright
+   menu opened at the specimen's caret, inside the console. The specimen's menus carry
+   ids of their own too (SiteFooter's `specimen`), which is all a browser without
+   `anchor-scope` gets. */
 .adh-footer__menu-host {
   display: inline-flex;
+  anchor-scope: all;
 }
 
 .adh-footer__menu-trigger,
@@ -659,7 +664,7 @@
    whole label's width from the caret that says it opens a menu, and read as some other
    control's. The name arrives as a custom property set per menu (FooterMenu derives it
    from the panel's id), because `anchor-name` must be unique per bar and a class
-   cannot be. */
+   cannot be; the host above keeps it from reaching any other bar. */
 .adh-footer__menu-caret {
   anchor-name: var(--adh-footer-menu-anchor);
   display: inline-block;
@@ -851,7 +856,15 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.55rem 0.75rem;
+  /* Block padding as ui's touch-row PARAMETERS, not `padding`. Every avatar row is a
+     DropdownMenuItem or DropdownMenuLinkItem, so it also carries ui's
+     `.adh-dropdown-menu__item`, whose base rule reads these for its block padding and
+     supplies the 0.75rem inline padding, and ui's one coarse-pointer rule adds the 30%
+     touch growth ("Touch rows" in @agenticdevelopertoolkit/ui's components.css). A
+     `padding` here overrode that rule (equal specificity, later in the cascade), which
+     is why this sheet once carried its own copy. */
+  --adh-touch-row-pt: 0.55rem;
+  --adh-touch-row-pb: 0.55rem;
   font-size: 0.93rem;
   line-height: 1.2;
   color: var(--color-text-primary);
@@ -859,16 +872,6 @@
   border-radius: 0.5rem;
   cursor: pointer;
   outline: none;
-}
-
-/* 30% taller on a touch screen — see "Touch rows" in @agenticdevelopertoolkit/ui's
-   components.css, which owns the factor. Natural height: 0.55rem × 2 + 0.93rem × 1.2 line
-   = 2.216rem. */
-@media (pointer: coarse) {
-  .adh-avatar-menu__item {
-    padding-top: calc(0.55rem + 2.216rem * var(--adh-touch-row-grow, 0.3) / 2);
-    padding-bottom: calc(0.55rem + 2.216rem * var(--adh-touch-row-grow, 0.3) / 2);
-  }
 }
 
 .adh-avatar-menu__item:hover,

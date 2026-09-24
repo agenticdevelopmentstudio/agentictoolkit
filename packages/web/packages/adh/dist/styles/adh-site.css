@@ -59,7 +59,9 @@
 /* The copyright line — the trigger of the footer's About / Sites menu (SiteFooter).
    The studio's name in it is tinted with the site's highlight (accent) colour so it
    reads as the brand; the class keeps its old `-link` name because the theme editor
-   targets it (theme-editor/areas.tsx), though the link itself now lives in About.
+   targets it (theme-editor/areas.tsx). The link itself lives in About now — and in the
+   plain copyright line a browser without popovers is shown in the menu's place (the
+   @supports block further down), where the name is a real link again.
 
    Never wrapped, at any width. A narrow bar once let it wrap to keep clear of bitbag,
    and the studio's name broken over two lines read as broken; before that it was cut
@@ -80,7 +82,9 @@
 }
 
 .adh-footer__copyright-trigger:hover .adh-footer__brand-link,
-.adh-footer__copyright-trigger:focus-visible .adh-footer__brand-link {
+.adh-footer__copyright-trigger:focus-visible .adh-footer__brand-link,
+a.adh-footer__brand-link:hover,
+a.adh-footer__brand-link:focus-visible {
   color: var(--adh-footer-brand-color-hover, var(--color-accent-bright));
 }
 
@@ -89,25 +93,36 @@
    left of it bitbag's resting slot. Folding the links and moving him out of the bar's
    middle is what lets the studio's full name fit on one line on a phone.
 
-   The inline Terms / Privacy pair is the no-popover fallback, shown only by the
-   @supports block further down. */
-.adh-footer__link--no-popover {
+   The inline Terms / Privacy pair and the plain copyright line are the no-popover
+   fallbacks for the bar's two menus, shown only by the @supports block further down. */
+.adh-footer__link--no-popover,
+.adh-footer__copyright-fallback {
   display: none;
 }
 
-/* HIS SLOT: room the bar keeps empty for bitbag's resting face, as Legal's left margin,
-   so Legal holds the corner and nothing the bar lays out can end up under him.
+/* HIS SLOT: room the bar keeps empty for bitbag's resting face, as the left margin of
+   the bar's right-hand item, so that item holds the corner and nothing the bar lays out
+   can end up under him. The item is Legal — or Terms, where a browser without popovers
+   shows the inline pair in Legal's place: SiteFooter marks both `rest-slot-host`, and
+   only one of them is ever laid out. Legal alone left the fallback with no slot at all.
    SiteFooter sets `--with-chat` only when it mounts him, so a footer without chat has
    no gap. The slot is his resting box's full width, not just the visible face: that box
    is hit-testable (see the z-index note below), so a narrower slot would let it sit
    over Legal's left edge and take its clicks. Where the slot lands is measured, not
-   computed here — see `useFooterRestOffset`, which reads this margin. */
+   computed here — see `useFooterRestOffset`, which reads this margin.
+
+   IN PX, the unit his box is laid out in. BitbagDock sizes the resting avatar inline,
+   half its 132px `size`: 66px whatever the root font, and the slot is that plus a pixel
+   either side. It was 4.25rem, which is 68px only at a 16px root: the Text size
+   setting's Small sets the root to 14px (the themes package's accessibility.css), which
+   made the slot 59.5px, and his box overlapped Legal by 3.25px and took its clicks
+   there. footerDock.test.tsx fails if the box ever outgrows this number. */
 .adh-footer {
   --adh-footer-pad-x: 1.5rem;
-  --adh-footer-rest-slot: 4.25rem;
+  --adh-footer-rest-slot: 68px;
 }
 
-.adh-footer--with-chat .adh-footer__legal {
+.adh-footer--with-chat .adh-footer__rest-slot-host {
   margin-left: var(--adh-footer-rest-slot);
 }
 
@@ -172,12 +187,12 @@
    `elementFromPoint` there answers with his hit box
    (`e2e/work-item-comments.spec.ts`, "reacting adds the viewer's emoji").
 
-   Conditioning on `:has(.persona-chat:not(.pc-collapsed))` — the same selector
-   bitbag-dock.css engages on — costs the lift nothing it was written for and takes
-   back everything it was not. Resting, the rig is his face alone sitting in the
-   footer bar and the header is at the top: they cannot overlap, so 45 is
-   indistinguishable from 51 except to the overlays. Engaged, his chat is the tall
-   thing that can reach the header, and the lift is exactly the reason it exists.
+   Conditioning on `:not(.bb-dock--resting):has(.persona-chat:not(.pc-collapsed))` —
+   the same condition bitbag-dock.css lights its scrim on — costs the lift nothing it
+   was written for and takes back everything it was not. Resting, the rig is his face
+   alone sitting in the footer bar and the header is at the top: they cannot overlap,
+   so 45 is indistinguishable from 51 except to the overlays. Engaged, his chat is the
+   tall thing that can reach the header, and the lift is exactly the reason it exists.
 
    This only works because FooterChatInner portals the dock to `document.body`:
    inside `.adh-footer` — sticky WITH a z-index, hence a stacking context — no
@@ -193,7 +208,7 @@
    classes anyway: they are what says WHOSE dock this is, and the day the condition
    is dropped the tie is back. When the selector does not match, `.bb-dock`'s own 45
    is the fallback — which is the point, not an accident. */
-.bb-dock.adh-footer__chat:has(.persona-chat:not(.pc-collapsed)) {
+.bb-dock.adh-footer__chat:not(.bb-dock--resting):has(.persona-chat:not(.pc-collapsed)) {
   z-index: 51;
 }
 
@@ -213,8 +228,8 @@
    What used to be reserved was his resting ENTRY LINE: a 560px composer fixed across the
    bottom edge, which covered the bar's links below 64rem (so the bar padded itself 4.5rem
    tall to lift them clear) and overhung every page's last row (so `.adh-app-shell__main`
-   padded itself 6rem, and viewport-filling consoles had to opt back out with
-   `data-fills-viewport`). FooterChatInner now docks him with `rest="avatar"`: resting he
+   padded itself 6rem, and viewport-filling consoles had to opt back out of that
+   padding). FooterChatInner now docks him with `rest="avatar"`: resting he
    is his face alone, laid out at half size, inside the bar's own height. His chat only
    exists while he is being talked to. Nothing overhangs, so nothing under the page is
    paid for.
@@ -222,27 +237,31 @@
    WHERE HE RESTS: the slot's centre. The dock is a full-width column that centres him,
    and waking must bring him back to that centre — his chat opens under him there — so
    the slot is a TRANSLATE off the centre, not a different layout. That is what makes the
-   wake a single motion: bitbag-dock.css drops the resting transform to `none` and grows
-   his width, both on its 0.34s curve, so he slides from the slot to the middle as he
-   grows. A layout move (margin-left:auto, a justify change) would jump instead, because
-   neither animates. The distance is `--adh-footer-rest-x`, measured by
-   `useFooterRestOffset` because Legal's width — which the slot sits beside — belongs to
-   the theme's font. Unmeasured (no JS yet, or no slot), he rests at the centre, which is
-   bitbag's own default rather than a guess.
+   wake a single motion: bitbag-dock.css drops the resting translate and grows his width,
+   both on its 0.34s curve, so he slides from the slot to the middle as he grows. A
+   layout move (margin-left:auto, a justify change) would jump instead, because neither
+   animates. The distance is `--adh-footer-rest-x`, measured by `useFooterRestOffset`
+   because Legal's width — which the slot sits beside — belongs to the theme's font, and
+   written on the dock itself. Unmeasured (no JS yet, or no slot), he rests at the
+   centre, which is bitbag's own default rather than a guess.
 
    His resting face also sat on the bar's bottom edge, reading as cut off rather than
-   centred in it: lifted 6px over bitbag's own 0.1rem rest margin. Both of
-   bitbag-dock.css's resting selectors are matched and each is outranked by the host
-   class, because that sheet lands later (see the z-index note above). adh's rule, not
+   centred in it, so he is lifted 6px over bitbag's own 0.1rem rest margin.
+
+   Both reach him through bitbag's resting HOOKS — `--bb-dock-rest-x` and
+   `--bb-dock-rest-lift`, which its resting rule reads (bitbag-dock.css) — set here on
+   the dock's own root. This used to restate both of that rule's selectors instead, one
+   class stronger so it would win when bitbag's sheet landed later, and it held only
+   while the two copies stayed in step, which nothing checked. A hook needs no
+   specificity contest: nothing but this rule sets them. The values are adh's, not
    bitbag's: the bar and its slot are this footer's, and the dock knows nothing of
    either. */
-.adh-footer__chat.bb-dock--resting .bb-dock__avatar,
-.adh-footer__chat.bb-dock--resting:has(.persona-chat.pc-collapsed) .bb-dock__avatar {
-  transform: translateX(var(--adh-footer-rest-x, 0px));
-  margin-bottom: calc(0.1rem + 6px);
+.bb-dock.adh-footer__chat {
+  --bb-dock-rest-x: var(--adh-footer-rest-x, 0px);
+  --bb-dock-rest-lift: 6px;
 }
 
-/* The shared footer modal dialog (native HTML Popover API) — used by the Sites,
+/* The shared footer modal dialog (native HTML Popover API) — used by the About, Sites,
    Terms and Privacy triggers. Open state is centered in the top layer with a
    dimmed backdrop; a flex column pins the header while the body scrolls.
 
@@ -477,21 +496,36 @@
   color: var(--color-text-dim);
 }
 
-/* Hide everything popover-related in browsers without the Popover API so the
-   panel never dumps inline and the dead trigger isn't shown. The <a href>s are
-   still in the server HTML, so crawlers follow them regardless of this. */
+/* Hide everything popover-related in browsers without the Popover API (iOS before 17,
+   Firefox before 125) so no panel dumps inline and no dead trigger is shown, and put
+   the plain form of what each footer menu holds in its place. The <a href>s are still
+   in the server HTML, so crawlers follow them regardless of this.
+
+   `.adh-footer__menu-host` rather than the triggers and panels by name: a host is one
+   FooterMenu's trigger AND its panel, so this covers every menu the bar has. The list
+   used to name the Legal menu alone (and a Sites trigger that no longer exists), so
+   when the copyright became a menu it stayed on screen as a live-looking button that
+   opened nothing — and the studio's link and the build's version, which that menu's
+   About had replaced, had no way onto the screen at all. */
 @supports not selector(:popover-open) {
   .adh-modal,
-  .adh-footer__sites-trigger,
-  .adh-footer__menu,
-  .adh-footer__legal {
+  .adh-footer__menu-host {
     display: none;
   }
-  /* Without popovers the Legal menu is dead, so the plain links come back — a crowded
-     bar beats an unreachable Terms page. Later than the rule that hides them and
-     equally specific, so it wins. */
-  .adh-footer__link--no-popover {
+  /* The plain forms (SiteFooter): Legal's inline Terms / Privacy pair, and the copyright
+     line with the studio's link and this build's version. A crowded bar beats an
+     unreachable Terms page. Later than the rule that hides them and equally specific,
+     so it wins. What was never in the bar stays popover-only here, as the Sites overview
+     always was: About's FishLamp Design entry, and the overview itself. */
+  .adh-footer__link--no-popover,
+  .adh-footer__copyright-fallback {
     display: revert;
+  }
+  /* The version may wrap under the name on a phone, where the whole line cannot fit and
+     would push the page sideways instead; the name itself still never wraps (the
+     copyright's `nowrap`, above). */
+  .adh-footer__copyright-version {
+    white-space: normal;
   }
 }
 
@@ -506,31 +540,6 @@
   padding: 0;
   cursor: pointer;
   font: inherit;
-}
-
-/* The icon-only variant: a trigger whose whole content is one glyph (the header's
-   dev-tools bug). No text and no caret, so it needs its own hit target — 1.75rem
-   square is the 24px-ish minimum a pointer can hit reliably beside a text trigger,
-   without becoming a second brand-weight element in the bar. Held back to 0.65
-   opacity so the site name stays the loudest thing in the lead, and brought to full
-   on hover/open, which is also the only feedback a caret would otherwise give. */
-.adh-nav-popover__trigger--icon {
-  justify-content: center;
-  height: 1.75rem;
-  width: 1.75rem;
-  border-radius: 0.375rem;
-  opacity: 0.65;
-  transition: opacity 120ms ease;
-}
-
-/* `[data-popup-open]` — Base UI's open-state attribute on the trigger. NOT
-   `[data-state='open']`: that is Radix's, and this package still carried a
-   Radix-era selector that matched nothing for long enough to be worth naming here
-   (see the note above .adh-dropdown-menu__sub-trigger in adh-components.css). */
-.adh-nav-popover__trigger--icon:hover,
-.adh-nav-popover__trigger--icon:focus-visible,
-.adh-nav-popover__trigger--icon[data-popup-open] {
-  opacity: 1;
 }
 
 .adh-nav-popover__chevron {
@@ -605,9 +614,13 @@
    `sectionLabels`. Smaller and dimmer than a row, and set in the mono caps the command
    prompt uses, so it reads as a caption over the rows rather than as one more row to
    click. Tighter than .adh-dropdown-menu__label's default padding, which is sized for
-   a standalone menu title, not a caption between a divider and its rows. Compound, because
-   the ui package's components.css loads after this sheet: a lone class of equal weight lost
-   to its label rule and the heading shipped at row size. */
+   a standalone menu title, not a caption between a divider and its rows. Compound, so
+   the win does not rest on load order. The ui package's components.css is read first
+   today — adh-components.css imports it ahead of its own rules, and this sheet imports
+   adh-components.css ahead of its own — so a lone class of equal weight would tie ui's
+   label rule and win only by coming later. Any path that brought ui's sheet in again
+   after this one would ship the heading at row size; the compound outweighs the label
+   rule outright (src/__tests__/hostCascade.test.ts holds it to that). */
 .adh-dropdown-menu__label.adh-nav-popover__section-label {
   padding: 0.45rem 0.75rem 0.2rem;
   font-family: var(--font-mono, ui-monospace, monospace);
@@ -866,23 +879,15 @@
 }
 
 /* Tighter rows — less vertical padding than the base dropdown item so the menu
-   reads compact (covers topic triggers, leaves, search results, and flyouts). */
+   reads compact (covers topic triggers, leaves, search results, and flyouts).
+   Set as ui's touch-row PARAMETERS, not as `padding`: ui's base item reads its block
+   padding from them, and ui's one coarse-pointer rule adds the 30% touch growth to
+   them ("Touch rows" in @agenticdevelopertoolkit/ui's components.css). A `padding`
+   here out-specified that rule, which is why this sheet once carried its own copy. */
 .adh-nav-popover__list .adh-dropdown-menu__item,
 .adh-nav-popover__submenu .adh-dropdown-menu__item {
-  padding-top: 0.35rem;
-  padding-bottom: 0.35rem;
-}
-
-/* …and 30% taller on a touch screen, like every other row (see "Touch rows" in
-   @agenticdevelopertoolkit/ui's components.css, which owns the factor). This rule has to
-   restate it because the compact padding above out-specifies ui's base-item touch rule.
-   Natural height: 0.35rem × 2 + 0.75rem × 1.2 line = 1.6rem. */
-@media (pointer: coarse) {
-  .adh-nav-popover__list .adh-dropdown-menu__item,
-  .adh-nav-popover__submenu .adh-dropdown-menu__item {
-    padding-top: calc(0.35rem + 1.6rem * var(--adh-touch-row-grow, 0.3) / 2);
-    padding-bottom: calc(0.35rem + 1.6rem * var(--adh-touch-row-grow, 0.3) / 2);
-  }
+  --adh-touch-row-pt: 0.35rem;
+  --adh-touch-row-pb: 0.35rem;
 }
 
 /* The leading icon slot on a row — muted so the label + tagline stay primary.
@@ -953,16 +958,63 @@ a.adh-dropdown-menu__item:hover .adh-nav-popover__link-name {
    is gone after it, so an ordinary navigation keeps the browser default: no
    animation at all. Everything below is keyed on it for that reason.
 
-   Only the page body moves. The header and footer are the same on both pages, so
-   they stay in the root snapshot with its crossfade switched off — the chrome holds
-   still while the content slides under it, the way a native navigation stack does.
-   Reduced motion never gets here: `canSlide()` declines before the attribute is set. */
+   Only the page body moves: the chrome holds still while the content slides under it,
+   the way a native navigation stack does. Reduced motion never gets here: `canSlide()`
+   declines before the attribute is set.
+   It reads the Appearance setting (`html[data-reduce-motion]`) before the OS: "on"
+   declines, "off" slides even when prefers-reduced-motion asks for less, and only its
+   absence ("auto") defers to the media query. It has to be decided there, not here:
+   the themes' `[data-reduce-motion="on"]` rules select `*`, `*::before` and
+   `*::after`, none of which matches a `::view-transition-*` pseudo-element, so no
+   rule in this file could stop the slide.
+
+   The chrome is NAMED so the page can slide under it, not left in the root snapshot.
+   The groups paint in the order their elements painted, the root's first, so anything
+   left in the root is UNDER the sliding page — and `.adh-app-shell__main` runs on under
+   both sticky bars as the window scrolls, so on any page taller than the screen the
+   slide swept across the header, the footer and bitbag's face. Named, each is a group
+   of its own, and each lands above the page's: the header (z-index 50), the footer and
+   the dock (45) are positioned with positive z-indexes and the main column is not, so
+   they paint after it.
+
+   Only the SHELL's own header and footer (`>`): the theme editor shows a specimen of each
+   on the same page — in the Debug console, which is portaled to <body> — and two elements
+   sharing a view-transition-name skip the whole transition. The child combinator names
+   the one bar the shell lays out, never a copy rendered anywhere inside it. The dock is
+   one per page — the specimen footer mounts no chat.
+
+   Held still by having no animation — the new image as it is, with no fade or blend —
+   and no old image: a bar is opaque and would hide its old self anyway, but the dock is
+   transparent around his face, and his old face under the live one drew him twice
+   wherever the two differed. */
 :root[data-adh-slide] .adh-app-shell__main {
   view-transition-name: adh-page;
+}
+:root[data-adh-slide] .adh-app-shell > .adh-header {
+  view-transition-name: adh-header;
+}
+:root[data-adh-slide] .adh-app-shell > .adh-footer {
+  view-transition-name: adh-footer;
+}
+:root[data-adh-slide] .bb-dock.adh-footer__chat {
+  view-transition-name: adh-dock;
 }
 :root[data-adh-slide]::view-transition-old(root),
 :root[data-adh-slide]::view-transition-new(root) {
   animation: none;
+}
+:root[data-adh-slide]::view-transition-group(adh-header),
+:root[data-adh-slide]::view-transition-group(adh-footer),
+:root[data-adh-slide]::view-transition-group(adh-dock),
+:root[data-adh-slide]::view-transition-new(adh-header),
+:root[data-adh-slide]::view-transition-new(adh-footer),
+:root[data-adh-slide]::view-transition-new(adh-dock) {
+  animation: none;
+}
+:root[data-adh-slide]::view-transition-old(adh-header),
+:root[data-adh-slide]::view-transition-old(adh-footer),
+:root[data-adh-slide]::view-transition-old(adh-dock) {
+  display: none;
 }
 :root[data-adh-slide]::view-transition-image-pair(adh-page) {
   overflow: hidden;

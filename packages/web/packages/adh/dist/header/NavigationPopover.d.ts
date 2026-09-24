@@ -11,15 +11,16 @@ import { type NavLinkIcon } from './NavLink';
  *  and same remedy as {@link NavLinkIcon}, which this is an alias of: accept any
  *  className-bearing component. */
 export type PopoverIcon = NavLinkIcon;
-/** One destination row. `href` makes the row a real link (middle-click /
- *  open-in-new-tab work); omit it for an informational, non-navigable row (e.g.
- *  a dynamic-segment pattern that has no single destination). `key` is a stable
- *  per-instance id; `current` flags the user's current location (aria-current);
- *  `description` is an optional tagline; `icon` is an optional leading glyph.
- *  `onSelect` makes the row an action rather than a destination — it runs INSTEAD
- *  of navigation (no `href` needed) and takes priority over the popover's
- *  `onChoose`, so a single popover can mix links with commands (e.g. "Debug
- *  Options" opening a floating window). */
+/** One row. `href` makes the row a real link (middle-click / open-in-new-tab work).
+ *  `onSelect` makes it an action rather than a destination — it runs INSTEAD of
+ *  navigation (no `href` needed) and takes priority over the popover's `onChoose`, so a
+ *  single popover can mix links with commands (Help, opening the help panel). A row with
+ *  NEITHER has nothing to do when chosen: it is still a menuitem the arrow keys land on,
+ *  and Enter or a click on it closed the menu and went nowhere — which is what the
+ *  "Loading…" and "No workspaces yet" rows did. A line of text in the list is a
+ *  {@link PopoverNotice}, never an item. `key` is a stable per-instance id; `current`
+ *  flags the user's current location (aria-current); `description` is an optional
+ *  tagline; `icon` is an optional leading glyph. */
 export type PopoverItem = {
     key: string;
     label: string;
@@ -59,6 +60,26 @@ export type PopoverEntry = {
     /** Flags the trigger as the user's current location (aria-current). */
     current?: boolean;
 };
+/** A line of text standing where rows would be — "Loading…", "No workspaces yet", "Couldn't
+ *  load your workspaces". NOT a row: never highlighted, never reached by the arrow keys, never
+ *  searched, never chosen, and not a menuitem to assistive tech. It is a polite status instead,
+ *  so a notice whose text changes while the menu is open (loading → failed) is announced.
+ *  `section` places it among the rows exactly like an entry (dividers and headings included);
+ *  `key` is its identity, and keeping it across a text change is what keeps it ONE live region.
+ *
+ *  Its own type rather than a flag on {@link PopoverItem}, because an item is a thing you can
+ *  choose — the empty and loading states were items once, and each was a menuitem that closed
+ *  the menu and went nowhere. */
+export type PopoverNotice = {
+    kind: 'notice';
+    section: number;
+    key: string;
+    text: string;
+};
+/** Everything the list can hold: the rows, and the notices that stand in for rows that are
+ *  not there. {@link PopoverEntry} stays rows-only, so code that walks a menu's ROWS
+ *  (useSiteMenu, anything narrowing on `kind`) never has to account for a line of text. */
+export type PopoverListEntry = PopoverEntry | PopoverNotice;
 /** Imperative handle handed to slot render-props so they can close the menu —
  *  optionally WITHOUT restoring focus to the trigger, when they're handing focus
  *  off to another surface (a dialog/popover) that owns Escape-to-dismiss. */
@@ -75,8 +96,9 @@ export type PopoverSearchCommand = {
     onSelect: () => void;
 };
 export type NavigationPopoverProps = {
-    /** The ordered top-level entries (resolved: hrefs + current flags applied). */
-    entries: PopoverEntry[];
+    /** The ordered top-level entries (resolved: hrefs + current flags applied), with any
+     *  {@link PopoverNotice} placed among them where the rows it stands in for would be. */
+    entries: PopoverListEntry[];
     /** Accessible label for the trigger button (e.g. "Storage — switch site"). */
     triggerLabel: string;
     /** Replaces the trigger's default "{label} ⌄" content. */
@@ -139,11 +161,11 @@ export type NavigationPopoverProps = {
  * (case-insensitive substring, matched chars underlined), each result shown as
  * "{area} → {item}".
  *
- * This is the reusable base behind {@link SiteSwitcher} (family sites) and the
- * SiteMenu's Routes flyout (a site's own routes, see routeEntries.ts). Subclasses
- * supply the resolved {@link PopoverEntry} structure, the trigger content, how to
- * navigate a chosen item, and any command-row trailing control / special search
- * command.
+ * This is the reusable base behind the header's switchers: {@link SiteMenu} (the
+ * family launcher), {@link WorkspaceMenu} (the signed-in hub's workspaces) and
+ * {@link SiteSwitcher} (a plain caller-supplied site list). Subclasses supply the
+ * resolved {@link PopoverEntry} structure, the trigger content, how to navigate a
+ * chosen item, and any command-row trailing control / special search command.
  */
 export declare function NavigationPopover({ entries, triggerLabel, triggerContent, triggerText, triggerIcon, triggerClassName, placeholder, emptyLabel, onChoose, commandTrailing, searchCommand, footer, sectionLabels, openShortcut, }: NavigationPopoverProps): ReactElement;
 //# sourceMappingURL=NavigationPopover.d.ts.map

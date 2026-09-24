@@ -130,6 +130,18 @@ describe("AvatarMenu", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Open Mike Fullerton menu" }));
     expect(await screen.findByText("Sim: prod")).toBeInTheDocument();
-    expect(screen.getByText("Debug Options")).toBeInTheDocument();
+    // The NAME, not just the text on screen: a menuitem named from all of its content
+    // read "Debug OptionsSim: prod" here, and a role query (or a voice command) for
+    // "Debug Options" found nothing — while production was being simulated, which is
+    // exactly when a developer comes back for this row. The hint is the description.
+    const row = screen.getByRole("menuitem", { name: "Debug Options" });
+    expect(row).toHaveAccessibleDescription("Sim: prod");
+  });
+
+  it("describes the Debug row with nothing when there is no hint", async () => {
+    render(<AvatarMenu user={user} onLogout={vi.fn()} onDebugOptions={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open Mike Fullerton menu" }));
+    const row = await screen.findByRole("menuitem", { name: "Debug Options" });
+    expect(row).toHaveAccessibleDescription("");
   });
 });

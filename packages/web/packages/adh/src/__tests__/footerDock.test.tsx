@@ -4,7 +4,7 @@
  * footerBitbag.test.tsx stubs `../footer/FooterChat` down to a marker, which is right for what
  * it asserts (bitbag is not gated — the assertion is about him being MOUNTED, not about his
  * internals). The cost is that nothing anywhere mounted him: he now ships in the footer of
- * every site, and the three things the footer itself owns were untested. All are pinned here,
+ * every site, and the things the footer itself owns were untested. All are pinned here,
  * against the real `BitbagDock`:
  *
  *   1. the PORTAL — the dock is `position: fixed` and rendered into `document.body`, because
@@ -16,18 +16,24 @@
  *      shared store, and it has to reach the component that owns the theme scope. A host
  *      <ThemeStyle> around the dock sets the same custom properties on a FARTHER ancestor and
  *      silently loses, which is exactly how the picker spent a while looking wired and
- *      theming nothing (see footer/chat-theme-store.ts).
+ *      theming nothing (see footer/chat-theme-store.ts);
+ *   4. his resting box FITTING the slot the bar keeps for it. The box's width is bitbag's
+ *      (an inline style, from his `size`) and the slot's is adh-site.css's, so neither file
+ *      can see the other; only the real dock beside the real stylesheet can.
  *
  * `FooterChatInner` is rendered directly rather than through `FooterChat`: the loader is a
  * three-line `next/dynamic` wrapper whose import resolves to the package's built dist, so
  * going through it would test the last build instead of the source.
  */
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 // Type-side too, not just the runtime setup — see footerBitbag.test.tsx.
 import '@testing-library/jest-dom/vitest'
 import { render, cleanup } from '@testing-library/react'
 import { ThemeStyle, type ThemeKey } from '@agenticdevelopertoolkit/themes'
 import { DEFAULT_THEME } from '@agentic-toolkit/bitbag'
+import { REST_DOCK_SELECTOR } from '../footer/useFooterRestOffset'
 
 /** Mirrors footer/chat-theme-store.ts — the localStorage key the Debug console writes. */
 const STORAGE_KEY = 'adh-chat-theme'
@@ -114,6 +120,35 @@ describe('footer dock', () => {
     // everywhere is the lamp — fishlamp's, which is the source of truth for how he looks.
     expect(DEFAULT_THEME).toBe('fishlamp')
     expect(themeCss(baseElement)).toBe(cssFor(DEFAULT_THEME))
+  })
+})
+
+describe('his resting box and the slot the bar keeps for it', () => {
+  it('is the element `useFooterRestOffset` writes his offset on', async () => {
+    // The hook finds the dock by selector. Were that to stop matching the real root, the
+    // offset would land nowhere and he would rest at the centre, over the bar's links.
+    const { baseElement } = await dockIn(undefined)
+    expect(baseElement.querySelector(REST_DOCK_SELECTOR)).toBe(baseElement.querySelector('.bb-dock'))
+  })
+
+  it('is never wider than the slot, in the same unit', async () => {
+    const { baseElement } = await dockIn(undefined)
+    expect(baseElement.querySelector('.bb-dock')).toHaveClass('bb-dock--resting')
+    const box = baseElement.querySelector<HTMLElement>('.bb-dock__avatar')!.style.width
+    expect(box).toMatch(/^\d+(\.\d+)?px$/)
+
+    // Source text, comments stripped: vitest hands a CSS import back as an empty string.
+    const css = readFileSync(resolve(import.meta.dirname, '../styles/adh-site.css'), 'utf8').replace(
+      /\/\*[\s\S]*?\*\//g,
+      '',
+    )
+    const slot = css.match(/--adh-footer-rest-slot:\s*([^;]+);/)
+    expect(slot, 'no --adh-footer-rest-slot in adh-site.css — did it move?').not.toBeNull()
+    // In px, the unit his box is laid out in. The slot was 4.25rem, and the Text size
+    // setting's Small root (14px) made it 59.5px against his 66px box, which then covered
+    // the left edge of Legal and took its clicks.
+    expect(slot![1]!.trim()).toMatch(/^\d+(\.\d+)?px$/)
+    expect(parseFloat(slot![1]!)).toBeGreaterThanOrEqual(parseFloat(box))
   })
 })
 

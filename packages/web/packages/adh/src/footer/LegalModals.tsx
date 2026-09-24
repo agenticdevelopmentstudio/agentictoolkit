@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
+import { isModifiedClick } from '@agenticdevelopertoolkit/ui/lib/navigation-guard'
 // PRESERVED IMPORT — the package path, never '../legal', even though it is a sibling
 // directory here. `legal/index` is its own tsup entry with a matching `external`; a
 // relative specifier would inline the whole legal tier (both prose bodies plus
@@ -80,8 +81,10 @@ export function PrivacyModal() {
  */
 export function openLegalModal(dialogId: string) {
   return (e: MouseEvent<HTMLAnchorElement>) => {
-    // Let modified clicks (new tab, etc.) fall through to normal navigation.
-    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    // Let modified or non-primary clicks (new tab, etc.) fall through to normal
+    // navigation — the shared rule, which also carries the button check this copy
+    // had lost — and leave a click something else already handled alone.
+    if (e.defaultPrevented || isModifiedClick(e)) return
     const el = document.getElementById(dialogId)
     if (el && 'showPopover' in el) {
       e.preventDefault()

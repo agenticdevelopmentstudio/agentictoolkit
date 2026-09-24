@@ -25,7 +25,7 @@ vi.mock('next/navigation', () => ({
 
 import { useSiteMenu } from '../useSiteMenu'
 import { FLEET_MENU_GROUPS } from '../fleetMenuGroups'
-import { type PopoverEntry, type PopoverItem } from '@agentic-toolkit/adh/header'
+import { type MenuGroup, type PopoverEntry, type PopoverItem } from '@agentic-toolkit/adh/header'
 
 /** A row anywhere in the resolved tree — top level or inside a flyout. */
 const row = (entries: PopoverEntry[], key: string): PopoverItem | undefined =>
@@ -378,6 +378,41 @@ describe('useSiteMenu', () => {
       // point the same way here, and if either changed alone this row would start pointing
       // at a segment for itself.
       expect(topic(inHub(), 'Hub')?.href).toBe('/acme')
+    })
+  })
+
+  // A link marked `external` means "open this site": its own deployment, at its landing —
+  // never the hub's in-house route onto it, and never the carried workspace. The dev
+  // site-family flyouts were its only in-tree user, and they went with the dev-tools
+  // dropdown; the flag is still MenuLink's public contract, so what it promises is pinned
+  // here rather than lost with that menu's test file.
+  describe('`external` links', () => {
+    const groupsWith = (external?: boolean): MenuGroup[] => [
+      { kind: 'topic', section: 2, label: 'Sites', links: [{ site: 'ecosystems', external }] },
+    ]
+    const ecosystemsHref = (external?: boolean) =>
+      row(
+        at('agenticdeveloperhub.com', '/acme/products', () =>
+          renderHook(() =>
+            useSiteMenu(groupsWith(external), {
+              currentSiteId: 'hub',
+              authenticated: true,
+              hubOffersFeature: () => true,
+            }),
+          ).result.current.entries,
+        ),
+        'ecosystems',
+      )?.href
+
+    it('open the site deployment from an in-hub workspace route, not the /<slug>/<feature> view', () => {
+      // The same row WITHOUT the flag takes the in-hub reroute, so the branch the flag
+      // opts out of is proven live on this exact render...
+      expect(ecosystemsHref()).toBe('/acme/products')
+      // ...and with it, the site's own origin at its landing: no route, no workspace.
+      const href = ecosystemsHref(true)
+      expect(href).toMatch(/^https?:\/\//)
+      expect(href?.startsWith('/acme/')).toBe(false)
+      expect(new URL(href!).pathname).toBe('/')
     })
   })
 

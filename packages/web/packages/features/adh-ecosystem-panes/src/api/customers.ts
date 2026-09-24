@@ -98,9 +98,17 @@ export const ecosystemUsersApi = {
 
   async update(id: string, input: Partial<EcosystemUserInput>): Promise<EcosystemUser> {
     const fields: Partial<RequestBody<"/customer/customers/{id}", "put">> = {
-      email: input.email,
+      // "" goes out as NULL for the two columns under a unique index. `toUser` reads NULL back as
+      // "", so an SSO user created from an externalId alone (NULL email) comes back with email "",
+      // and a save that echoed it wrote '' — a VALUE to Postgres, where NULL is not one: the
+      // non-partial (ecosystem_id, email) and (ecosystem_id, external_id) indexes admit any
+      // number of NULLs but a single '', so the SECOND such user saved in an ecosystem got a 409.
+      // `compact` keeps an explicit null (a clear) and drops only undefined (a field not sent).
+      // Only these two: `slug` and `avatarUrl` are NOT NULL (the wire type refuses null for
+      // both), and `displayName` is under no unique index.
+      email: input.email === "" ? null : input.email,
       displayName: input.displayName,
-      externalId: input.externalId,
+      externalId: input.externalId === "" ? null : input.externalId,
       slug: input.slug,
       avatarUrl: input.avatarUrl,
     };

@@ -38,6 +38,15 @@ export default defineConfig({
     // HomePlaceholder/SiteNotFound take as props here) merged into this same entry when
     // the app tier came across — see the vocabulary-tier block below.
     'layout/index': 'src/layout/index.ts',
+    // The slide navigation's module state — the registered router `push`, the committed
+    // `renderedPath`, the `slides` pair list and the render `waiters`. TWO entries reach it:
+    // AdhAppShell (in `layout/index`) mounts the `SlideTransitions` that registers `push`,
+    // while AvatarMenu (in `header/index`) calls `slideNavigate`, which reads it. With
+    // splitting:false a relative specifier from either one inlines a private copy, so the
+    // header's copy would never see a registered `push` and every Profile click would fall
+    // back to a plain navigation in production — while dev/vitest (the `development`
+    // condition, one src module) slid fine. Its own entry + the preserved import below.
+    'layout/SlideNavigation': 'src/layout/SlideNavigation.tsx',
     // The dev-only build identity, and its `browser`-condition twin. Two entries rather
     // than a re-export from `./server`, because `./server` is where the `node:fs` /
     // `node:child_process` imports live and AppShell — which the `layout` barrel above
@@ -539,14 +548,21 @@ export default defineConfig({
     '@agentic-toolkit/adh/debug-env/SiteThemeConsole',
     '@agentic-toolkit/adh/themes/theme-preview',
     // BARRELS reached across entries. `header` is also reached from WITHIN its own entry
-    // (SiteHeader/SiteMenu/useSiteMenu/devToolsEntries import their own barrel); that
-    // emits a self-import in dist/header/index.js, which resolves back to the module
+    // (SiteHeader/SiteMenu/SiteMenuSwitcher/WorkspaceMenu/useSiteMenu/useDebugOptions import
+    // their own barrel); that emits a self-import in dist/header/index.js, which resolves back to the module
     // already being evaluated — ESM live bindings handle it, and it is what the app tier
     // shipped before the merge. `theme-editor` and `header` both carry module state the console must share.
     '@agentic-toolkit/adh/header',
     '@agentic-toolkit/adh/header-auth',
     '@agentic-toolkit/adh/footer',
     '@agentic-toolkit/adh/layout',
+    // The slide navigation's module state (entry above), shared by the `layout` entry's
+    // SlideTransitions and the `header` entry's AvatarMenu. Preserved import ⇒ one copy,
+    // resolved by the consumer. BOTH halves required: this line, and every reaching module
+    // writing '@agentic-toolkit/adh/layout/SlideNavigation' — one surviving
+    // './SlideNavigation' or '../layout/SlideNavigation' forks it, exactly as one surviving
+    // './recents' would.
+    '@agentic-toolkit/adh/layout/SlideNavigation',
     '@agentic-toolkit/adh/legal',
     '@agentic-toolkit/adh/graph',
     '@agentic-toolkit/adh/theme-editor',

@@ -8,11 +8,11 @@
 //     '/personas', …) for the Recents rows, which key each recorded place by the
 //     feature route it sits under.
 //   - a chrome key (for the non-site rows): 'home', 'workspaces', 'recents',
-//     'login', 'signup', 'routes', 'debug'.
+//     'login', 'signup'.
 //   - a fleet-menu key (`iconKey`), for the rows the registry cannot name: the
 //     grouping topics that are no single site ('plan', 'build'), the topic that
 //     deliberately does not wear its own site's glyph ('learn'), and the one
-//     destination with no registry entry at all ('registry'). See fleetMenuGroups.
+//     destination with no registry entry at all ('monitor'). See fleetMenuGroups.
 //
 // Icons reuse the glyph the platform already associates with the thing wherever
 // one exists (feature icons from hub `FEATURE_META`, the workspace type icons,
@@ -20,10 +20,14 @@
 // are chosen to read clearly and are safe to adjust here in the one place.
 //
 // The whole SiteId space is mapped — not just the sites promoted into the Hub
-// core — because the dev-only "Marketing sites" / "Main sites" submenus list every
-// site under `websites/{marketing,main}/` (MARKETING_SITE_IDS / MAIN_SITE_IDS), and
-// each of those rows resolves its icon here too. A missing key just leaves the slot
-// empty, so every family id carries one below.
+// core — because a `{ site }` link resolves its icon by site id wherever it sits:
+// the fleet tree names nearly every family site (fleetMenuGroups), the admin
+// section derives its rows from ADMIN_SITE_IDS, and the fold at the bottom of this
+// file hands a site's glyph to the hub workspace route that mounts it, for Recents.
+// A missing key just leaves the slot empty, so every family id carries one below.
+// (The keys were first written for the dev-only "Marketing sites" / "Main sites"
+// submenus, which listed every site; those left with the dev menu, and the three
+// uses above are why the keys outlived them.)
 
 import {
   Activity,
@@ -38,7 +42,6 @@ import {
   Bot,
   Boxes,
   Briefcase,
-  Bug,
   Building,
   ChefHat,
   CircleHelp,
@@ -83,7 +86,6 @@ import {
   Package,
   Plug,
   Rocket,
-  Route,
   School,
   ScrollText,
   Send,
@@ -185,20 +187,17 @@ const ICONS: Record<string, LucideIcon> = {
   // reads as that child promoted, rather than as the group it is.
   learn: Lightbulb,
 
-  // --- Chrome rows (the auth-conditional top section, + the dev-only tools
-  //     appended after the Marketing/Main sites submenus) ---
+  // --- Chrome rows (the auth-conditional top section) ---
   home: House,
   workspaces: Boxes,
   recents: History,
   login: LogIn,
   signup: UserPlus,
-  routes: Route,
-  debug: Bug,
 
-  // --- Remaining MAIN family sites (websites/main/), for the dev "Main sites"
-  //     submenu. The rest of the family (hub, bitbag, community, cookbook,
-  //     devteam, help, myagenticteams, news, personaregistry, toolkit) is mapped
-  //     among the Hub-core rows above. ---
+  // --- Remaining MAIN family sites (websites/main/), for the admin section's
+  //     consoles and the fleet tree's operations rows. The rest of the family
+  //     (hub, bitbag, community, cookbook, devteam, help, myagenticteams, news,
+  //     personaregistry, toolkit) is mapped among the Hub-core rows above. ---
   admin: ShieldCheck, // operations console
   api: Code,
   builds: HardHat, // the build console
@@ -206,10 +205,10 @@ const ICONS: Record<string, LucideIcon> = {
   status: Activity, // system status / pulse
   support: LifeBuoy,
 
-  // --- MARKETING family sites (websites/marketing/), for the dev "Marketing
-  //     sites" submenu. Where a site mirrors a hub feature, it reuses the
-  //     FEATURE_META glyph so the menu matches the workspace rail. ('narratives'
-  //     is mapped among the Hub-core rows above.) ---
+  // --- MARKETING family sites (websites/marketing/), for the fleet tree's
+  //     `{ site }` rows and the Recents fold below. Where a site mirrors a hub
+  //     feature, it reuses the FEATURE_META glyph so the menu matches the workspace
+  //     rail. ('narratives' is mapped among the Hub-core rows above.) ---
   academy: GraduationCap,
   authentication: Fingerprint, // customer auth / identity
   billing: CreditCard, // matches FEATURE_META `billing`

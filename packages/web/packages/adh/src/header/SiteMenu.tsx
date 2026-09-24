@@ -2,7 +2,7 @@
 
 import { useMemo, type ReactElement, type ReactNode } from 'react'
 import { usePathname } from 'next/navigation'
-import { CircleHelp, Settings } from 'lucide-react'
+import { CircleHelp } from 'lucide-react'
 // Sibling module, not the '@agentic-toolkit/adh/footer' subpath: a self-referencing package
 // specifier would make tsup inline the whole footer entry into this header entry.
 import { SITES_OVERVIEW_POPOVER_ID } from '../footer/SitesOverview'
@@ -26,6 +26,7 @@ import { useHeaderLinksCollapsed } from './useHeaderLinksCollapsed'
 import { buildSiteNavEntries } from './siteNavEntries'
 import { type NavLink } from './NavLink'
 import { menuIcon } from './menu-icons'
+import { helpEntry, settingsTrailing } from './menuChrome'
 // The section number only — this base renders the Recents flyout that HEADS the fleet
 // block, so it has to agree with the rows underneath it or a divider appears between
 // them. The tree itself is the subclasses' to supply (see SiteMenuProps.groups).
@@ -56,11 +57,13 @@ import { useHelp } from '@agentic-toolkit/adh/help'
 // `label`/`description` override the registry defaults. `section` groups rows for
 // dividers (a divider falls between sections, never within one).
 //
-// `external` forces a SITE link to its cross-site deployment URL even from an
-// in-hub workspace route (where a plain `site` link would resolve to the target's
-// `/<slug>/<feature>` workspace view instead). Used by the dev site-family
-// submenus, whose whole purpose is to open the actual site build — never an
-// in-hub route. See useSiteMenu's hrefFor.
+// `external` forces a SITE link to its cross-site deployment URL, at the target's
+// landing, even from an in-hub workspace route (where a plain `site` link would
+// resolve to the target's `/<slug>/<feature>` workspace view instead). It is for a
+// row whose whole purpose is to open the actual site build — never an in-hub route.
+// No shipped menu sets it since the dev site-family flyouts that did went with the
+// dev-tools dropdown; what it promises is pinned in useSiteMenu.test. See
+// useSiteMenu's hrefFor.
 export type MenuLink =
   | { site: SiteId; label?: string; description?: string; external?: boolean }
   | { route: string; label: string; description?: string }
@@ -116,7 +119,10 @@ export type SiteMenuChromeProps = {
   authenticated?: boolean
   /** Whether the signed-in user is an adh admin. The ONLY flag that changes which
    *  destinations this menu offers: true appends {@link ADMIN_MENU_GROUPS} (the
-   *  operations consoles) below the family tree. Resolves asynchronously with the
+   *  operations consoles) below the family tree. The {@link WorkspaceMenu} that takes
+   *  this menu's place for a signed-in hub user appends the same rows below its Help
+   *  row — it is the only switcher an admin on the hub sees, so a flag it dropped left
+   *  them no link to a console anywhere. Resolves asynchronously with the
    *  session, so `undefined` and `false` must behave identically — the section
    *  appears when the answer arrives, and a build that never resolves one shows the
    *  same menu as it does to a visitor.
@@ -149,7 +155,10 @@ export type SiteMenuChromeProps = {
    *  gear. `onSettings` (preferred) opens an in-app overlay over the current
    *  route; otherwise `settingsHref` makes the gear a link (satellites redirect
    *  to the hub's settings page). Both absent, or signed out ⇒ the "?" help
-   *  button. Gated on `authenticated`: settings never show signed out. */
+   *  button. Gated on `authenticated`: settings never show signed out. The
+   *  {@link WorkspaceMenu} draws the same gear (see `settingsTrailing`), and with
+   *  both absent shows nothing there — it is not the family launcher, so it has no
+   *  family overview to offer. */
   settingsHref?: string
   onSettings?: () => void
   /** The signed-OUT top-section links (Login / Sign up). Supplied by AdhHeader (its
@@ -265,8 +274,14 @@ export function SiteMenu({
       },
     ]
     // Workspaces — an indented flyout under Home (hub-only; off-hub there's no
-    // provider so it's absent). A loading placeholder keeps the flyout non-blank.
-    if (workspacesMenu && (workspacesMenu.workspaces.length || workspacesMenu.loading)) {
+    // provider so it's absent), and only once there is a workspace to list in it.
+    // Loading, failed or empty, there is NO flyout rather than one holding a
+    // placeholder: a flyout's rows are menuitems, and the "Loading…" row it used to
+    // hold was one the arrow keys landed on and Enter "chose" — closing the menu and
+    // going nowhere. A line of text in a list is a PopoverNotice, and notices live at
+    // the top level; the signed-in hub says loading / failed / empty that way, in the
+    // WorkspaceMenu that SiteMenuSwitcher mounts in place of this menu.
+    if (workspacesMenu?.workspaces.length) {
       const items: PopoverItem[] = workspacesMenu.workspaces.map((w) => ({
         key: `ws:${w.id}`,
         label: w.label,
@@ -279,7 +294,7 @@ export function SiteMenu({
         label: 'Workspaces',
         icon: menuIcon('workspaces'),
         indent: true,
-        items: items.length ? items : [{ key: 'ws:loading', label: 'Loading…' }],
+        items,
       })
     }
     return out
@@ -320,7 +335,7 @@ export function SiteMenu({
 
   // The host site's own primary nav, surfaced HERE exactly while the bar has dropped
   // it (below 768px). The rows are {@link buildSiteNavEntries}' — a pure builder with
-  // its own test, like the dev-tools and site-family sections — and the gate is
+  // its own test — and the gate is
   // {@link useHeaderLinksCollapsed}, which reads the very media query the bar hides on.
   const linksCollapsed = useHeaderLinksCollapsed()
   const navSection = useMemo<PopoverEntry[]>(
@@ -340,6 +355,7 @@ export function SiteMenu({
 
   // The Help modal opener — an action row (no navigation), always present regardless of
   // auth. Sits at the foot of the top section (section 0), just above the first divider.
+  // The row itself is {@link helpEntry}'s, shared with WorkspaceMenu.
   const openHelp = useHelp().open
 
   // The full ordered list: the site's own nav (phone only — see navSection), the auth
@@ -348,27 +364,18 @@ export function SiteMenu({
   //
   // Nothing in this list is gated on the BUILD ENV, so the menu a developer opens is
   // the menu that ships. The dev-only rows this list used to end with (the
-  // Marketing/Main site flyouts, Routes, Debug Options) are their own dropdown now —
-  // see {@link DevToolsMenu}. The single conditional row-set is the admin consoles,
-  // gated on the signed-in user's capability rather than on the build (see `tree`
-  // above and `userIsAdmin`) — a fact about who is looking, not about which bundle
-  // this is.
+  // Marketing/Main site flyouts, Routes, Debug Options) moved to a dev-tools dropdown
+  // of their own, and that dropdown is gone too: Debug Options is the account end of
+  // the header now (see `useDebugOptions`), and the flyouts had no other host. The
+  // single conditional row-set is the admin consoles, gated on the signed-in user's
+  // capability rather than on the build (see `tree` above and `userIsAdmin`) — a fact
+  // about who is looking, not about which bundle this is.
   //
   // The site's nav goes FIRST because on a phone this menu IS the site's navigation —
   // that is the whole of what the bar handed over. Reaching a page on the site you are
   // already on should not mean scrolling past the family launcher to get to it.
   const allEntries = useMemo<PopoverEntry[]>(
-    () => [
-      ...navSection,
-      ...topSection,
-      {
-        kind: 'leaf',
-        section: 0,
-        item: { key: 'help', label: 'Help', icon: menuIcon('help'), onSelect: () => openHelp() },
-      },
-      ...recentsSection,
-      ...entries,
-    ],
+    () => [...navSection, ...topSection, helpEntry(openHelp, 0), ...recentsSection, ...entries],
     [navSection, topSection, recentsSection, entries, openHelp],
   )
 
@@ -433,41 +440,27 @@ export function SiteMenu({
         shortcut: 'overview',
         onSelect: showOverview,
       }}
-      // The command-row trailing control: signed-in settings gear (in-app overlay
-      // or hub link), else the signed-out family-overview "?" help button.
-      commandTrailing={({ close }) =>
-        authenticated && onSettings ? (
-          <button
-            type="button"
-            className="adh-site-switcher__help"
-            aria-label="User settings"
-            onClick={() => {
-              close({ restoreFocus: false })
-              requestAnimationFrame(() => onSettings())
-            }}
-          >
-            <Settings className="adh-site-switcher__help-icon" aria-hidden />
-          </button>
-        ) : authenticated && settingsHref ? (
-          // A real link so middle-click / new-tab work; native nav tears down the
-          // page, so no explicit close needed.
-          <a className="adh-site-switcher__help" aria-label="User settings" href={settingsHref}>
-            <Settings className="adh-site-switcher__help-icon" aria-hidden />
-          </a>
-        ) : (
-          <button
-            type="button"
-            className="adh-site-switcher__help"
-            aria-label="About the Agentic Developer family"
-            onClick={() => {
-              close({ restoreFocus: false })
-              showOverview()
-            }}
-          >
-            <CircleHelp className="adh-site-switcher__help-icon" aria-hidden />
-          </button>
+      // The command-row trailing control: signed in, the settings gear (in-app overlay
+      // or hub link — {@link settingsTrailing}'s, shared with WorkspaceMenu); signed out,
+      // or signed in on a host with no settings surface, the family-overview "?" button.
+      commandTrailing={({ close }) => {
+        const gear = authenticated ? settingsTrailing({ close, onSettings, settingsHref }) : null
+        return (
+          gear ?? (
+            <button
+              type="button"
+              className="adh-site-switcher__help"
+              aria-label="About the Agentic Developer family"
+              onClick={() => {
+                close({ restoreFocus: false })
+                showOverview()
+              }}
+            >
+              <CircleHelp className="adh-site-switcher__help-icon" aria-hidden />
+            </button>
+          )
         )
-      }
+      }}
     />
   )
 }

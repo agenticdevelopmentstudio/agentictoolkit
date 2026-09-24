@@ -134,21 +134,28 @@
 
 /* Engaged, the wash also becomes the dismiss target. It catches the tap, which
  * collapses the chat — the sizing hook disengages on any pointerdown outside
- * `.persona-chat`, and a hit on this pseudo targets the rig, which is not inside
- * it — and the tap STOPS there, so the gesture that closes the chat never also
- * trips a link, a nav, or a scroll on the page underneath.
+ * `.persona-chat` that is not on a control marked CHAT_INSIDE_ATTR (the `i`, and
+ * his face when he is the dock's button), and a hit on this pseudo targets the
+ * rig, which is inside neither — and the tap STOPS there, so the gesture that
+ * closes the chat never also trips a link, a nav, or a scroll on the page
+ * underneath.
  *
  * The tap is not the only way out, and saying so here matters: while this is lit
  * it is `pointer-events: auto` over the whole viewport, so on a page where bitbag
  * is a footer widget rather than the main event, a reader who arrived by TAB has
  * sealed the page. They didn't — `useChatSizing` also disengages on Escape, from
  * a document-level listener, so the keyboard has the same exit the pointer does.
+ * It leaves alone an Escape that a layer above it already spent
+ * (`defaultPrevented` — the `i` panel marks one pressed inside it, the press that
+ * closes the panel), so each press peels one layer. And a RESTING dock never
+ * lights the wash, whatever the chat says: its panel is hidden, and a wash with
+ * nothing lit above it would seal the page with no visible way out.
  * Anyone weighing a change to this rule should check that hook first.
  *
  * It seals only the page: bitbag and his chat are block-level children of the
  * rig and so paint above a `z-index: -1` pseudo, which means hit-testing still
  * finds them first and they keep taking their own clicks. */
-.bb-dock:has(.persona-chat:not(.pc-collapsed))::before {
+.bb-dock:not(.bb-dock--resting):has(.persona-chat:not(.pc-collapsed))::before {
   opacity: 1;
   pointer-events: auto;
 }
@@ -181,9 +188,20 @@
  * width here instead of leaning on the doze transform above — a scaled box keeps
  * its full-size footprint, and on a host whose bottom edge is a bar of its own
  * that invisible 132px box sits over the bar's controls and takes their clicks.
- * So the transform is switched off while resting, or he would be quartered. The
+ * So the doze scale is switched off while resting, or he would be quartered. The
  * width change is animated with the transform's own curve, so waking still reads
- * as him growing up out of the bar. */
+ * as him growing up out of the bar.
+ *
+ * Where in the bar he rests is the HOST's to say, and it says it through two hooks
+ * this rule reads with neutral fallbacks — the way `--kb-inset` reaches the rig:
+ *   --bb-dock-rest-x     how far off the column's centre his face sits. A translate,
+ *                        so waking slides him back to the centre on the same curve; a
+ *                        layout move would jump, because a margin or a justify doesn't
+ *                        animate.
+ *   --bb-dock-rest-lift  room under him beyond this rule's own 0.1rem.
+ * The adh footer sets both on its dock, to park him in the slot its bar keeps for
+ * him. Before these existed it restated both selectors below, one class stronger,
+ * which held only while the two copies stayed in step — and nothing checked that. */
 .bb-dock--rest-avatar .bb-dock__avatar {
   transition:
     transform 0.34s cubic-bezier(0.16, 1, 0.3, 1),
@@ -191,8 +209,8 @@
 }
 .bb-dock--resting .bb-dock__avatar,
 .bb-dock--resting:has(.persona-chat.pc-collapsed) .bb-dock__avatar {
-  transform: none;
-  margin-bottom: 0.1rem;
+  transform: translateX(var(--bb-dock-rest-x, 0px));
+  margin-bottom: calc(0.1rem + var(--bb-dock-rest-lift, 0px));
 }
 /* He is the button here, so he gets a button's focus ring. */
 .bb-dock--rest-avatar .bb-dock__avatar:focus-visible {
@@ -231,7 +249,11 @@
  * against `--color-*` in the themes package's `styles/fishlamp.css`; that file is
  * the palette's source of truth. Being outside the chat is deliberate and worth
  * the copy: a tap in here must not reach the chat's focus-reclaim, which would
- * refocus the composer and unfold the box under the panel that just opened. */
+ * refocus the composer and unfold the box under the panel that just opened.
+ * Being outside is half of it; the root also carries the chat's CHAT_INSIDE_ATTR
+ * (`data-pc-inside`, set in BitbagInfo.tsx), so a press here is neither a tap in
+ * nor a tap away — an engaged chat stays engaged, and the avatar-rest dock stays
+ * open under the panel. */
 .bb-info {
   --color-ink-soft: #17130f;
   --color-ember: #e8a33d;

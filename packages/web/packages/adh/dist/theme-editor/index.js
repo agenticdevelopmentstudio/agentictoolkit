@@ -1,7 +1,12 @@
 'use client'
 
 // src/theme-editor/areas.tsx
-import { SiteHeader, SiteMenuSwitcher } from "@agentic-toolkit/adh/header";
+import {
+  SiteHeader,
+  SiteMenuSwitcher,
+  WorkspacesMenuProvider,
+  useWorkspacesMenu
+} from "@agentic-toolkit/adh/header";
 import { SiteFooter } from "@agentic-toolkit/adh/footer";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import {
@@ -19,8 +24,17 @@ var usePreviewHeaderAuth = () => ({
   onLogout: () => {
   }
 });
+var PREVIEW_WORKSPACES = {
+  workspaces: [
+    { id: "preview:ada", label: "Ada Lovelace", href: "#", current: true },
+    { id: "preview:engine", label: "Analytical Engine", href: "#" }
+  ],
+  loading: false,
+  select: () => {
+  }
+};
 function HeaderPreview() {
-  return /* @__PURE__ */ jsx(
+  const header = /* @__PURE__ */ jsx(
     SiteHeader,
     {
       siteId: "hub",
@@ -34,6 +48,8 @@ function HeaderPreview() {
       }
     }
   );
+  const pageHasWorkspaces = useWorkspacesMenu() != null;
+  return pageHasWorkspaces ? /* @__PURE__ */ jsx(WorkspacesMenuProvider, { value: PREVIEW_WORKSPACES, children: header }) : header;
 }
 function FooterPreview() {
   return /* @__PURE__ */ jsxs("div", { className: "tep-preview", children: [
@@ -41,7 +57,7 @@ function FooterPreview() {
     /* @__PURE__ */ jsx(
       SiteFooter,
       {
-        chat: false,
+        specimen: true,
         links: [
           { label: "GitHub", href: "#" },
           { label: "Status", href: "#" }

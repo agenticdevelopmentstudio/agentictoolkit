@@ -109,7 +109,7 @@ describe('AdhHeader (registry-free)', () => {
   //    the brief was pinning — admin-only navigation never appears in a header that was
   //    not given one — is pinned at its real seam: this header renders no admin surface
   //    of its own, and `userIsAdmin` reaches only what a caller puts in a slot — adh
-  //    hands it to the `debugMenu` one. (`userIsAdmin`
+  //    hands it to its site-menu switcher, which appends the admin consoles. (`userIsAdmin`
   //    stays on AdhHeaderAuthProps because shared/auth's HeaderAuthState is derived from
   //    that type and must keep its shape.) ──
   it('exposes no admin surface of its own — userIsAdmin only reaches a caller-supplied switcher', () => {
@@ -152,12 +152,14 @@ describe('AdhHeader (registry-free)', () => {
     expect(row.firstElementChild?.textContent).toBe('Custom switcher')
   })
 
+  // SiteHeader fills nothing here any more (its dev-tools dropdown was deleted), but the
+  // slot is public API and its one promise — beside, not under — is still the contract.
   it('renders debugMenu AFTER the switcher, on the same row', () => {
     render(
       <AdhHeader
         siteName="Hub"
         siteSwitcher={<button type="button">Custom switcher</button>}
-        debugMenu={<button type="button">Dev tools</button>}
+        debugMenu={<button type="button">Second menu</button>}
         badges={[{ label: 'preview' }]}
       />,
     )
@@ -167,7 +169,7 @@ describe('AdhHeader (registry-free)', () => {
     // a layout bug no assertion on mere presence can see, and the reason the row exists.
     expect(Array.from(row.children).map((c) => c.textContent)).toEqual([
       'Custom switcher',
-      'Dev tools',
+      'Second menu',
     ])
     expect(row.contains(screen.getByText('preview'))).toBe(false)
   })
@@ -361,5 +363,65 @@ describe('AdhHeader (registry-free)', () => {
     render(<AdhHeader siteName="Hub" user={{ name: 'Mike Fullerton' }} />)
     const trigger = screen.getByRole('button', { name: 'Open Mike Fullerton menu' })
     expect(trigger.textContent).toBe('MF')
+  })
+})
+
+// The Debug Options door, in each auth state. The bug-glyph dropdown it came from sat
+// in the bar for signed-in and signed-out visitors alike; moving its row into the avatar
+// menu alone left a signed-out developer no way into the console — including the way to
+// switch OFF a console flag saved in localStorage (10x slow animations, say). So the
+// header draws one door per state from the one `onDebugOptions`, and never two.
+describe('AdhHeader — the Debug Options door', () => {
+  const signedOut = { onLogin: () => {}, onSignup: () => {} }
+
+  it('is a Debug Options button after login / join when signed out, and opens the console', () => {
+    const onDebugOptions = vi.fn()
+    render(<AdhHeader siteName="Hub" {...signedOut} onDebugOptions={onDebugOptions} />)
+    const nav = screen.getByRole('navigation', { name: 'Primary' })
+    const door = screen.getByRole('button', { name: 'Debug Options' })
+    // At the account end of the bar, where the avatar and its row stand signed in:
+    // after the auth buttons, not beside the site name where the old glyph was.
+    expect(nav.contains(door)).toBe(true)
+    const order = (el: Element): number => Array.prototype.indexOf.call(nav.children, el)
+    expect(order(screen.getByText('join'))).toBeLessThan(order(door))
+    expect(screen.getByRole('banner').querySelector('.adh-header__brand-row')!.contains(door)).toBe(false)
+
+    fireEvent.click(door)
+    expect(onDebugOptions).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the hint out of the name: "Debug Options", described by the hint', () => {
+    render(
+      <AdhHeader siteName="Hub" {...signedOut} onDebugOptions={() => {}} debugOptionsHint="Sim: prod" />,
+    )
+    // The name is what a test, a screen reader and a voice command all ask for, and
+    // it must not change with the env the developer is simulating.
+    const door = screen.getByRole('button', { name: 'Debug Options' })
+    expect(door).toHaveAccessibleDescription('Sim: prod')
+  })
+
+  it('carries no description without a hint — not even its own name read back', () => {
+    render(<AdhHeader siteName="Hub" {...signedOut} onDebugOptions={() => {}} />)
+    expect(screen.getByRole('button', { name: 'Debug Options' })).toHaveAccessibleDescription('')
+  })
+
+  it('is the avatar-menu row instead when signed in — never a second door in the bar', async () => {
+    render(<AdhHeader siteName="Hub" user={{ name: 'Mike Fullerton' }} onDebugOptions={() => {}} />)
+    expect(screen.queryByRole('button', { name: 'Debug Options' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Open Mike Fullerton menu' }))
+    await waitFor(() => expect(screen.getByRole('menu')).toBeInTheDocument())
+    expect(screen.getByRole('menuitem', { name: 'Debug Options' })).toBeInTheDocument()
+  })
+
+  it('draws no door while the session is still resolving', () => {
+    // Which door applies is not known yet, and a button that vanished as a cached
+    // session landed would shift the bar under the visitor's pointer.
+    render(<AdhHeader siteName="Hub" authLoading {...signedOut} onDebugOptions={() => {}} />)
+    expect(screen.queryByRole('button', { name: 'Debug Options' })).toBeNull()
+  })
+
+  it('draws no door for a visitor the caller did not offer it to', () => {
+    render(<AdhHeader siteName="Hub" {...signedOut} />)
+    expect(screen.queryByRole('button', { name: 'Debug Options' })).toBeNull()
   })
 })

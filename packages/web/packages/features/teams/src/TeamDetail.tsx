@@ -6,7 +6,7 @@ import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Label } from "@agenticdevelopertoolkit/ui/components/label";
 import type { Team, TeamInput } from "@agentic-toolkit/data/teams";
 import { validateTeamIdentifier } from "@agentic-toolkit/data/teams";
-import { DetailSection } from "@agentic-toolkit/resource";
+import { DetailSection, unchangedFromStored } from "@agentic-toolkit/resource";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 
 export function teamBlank(): TeamInput {
@@ -19,11 +19,12 @@ export function teamToInput(t: Team): TeamInput {
 
 /** Returns an error message, or null when the draft is valid.
  *
- *  `storedIdentifier` is the identifier already on the record being edited. It is exempt from the
- *  reverse-domain FORMAT rule: the backend provisions teams with plain slugs (`participants`,
- *  `admins`), and requiring the user to rename one before any other field could be saved left
- *  Save permanently disabled on exactly the teams every workspace has. A changed identifier is
- *  still held to the format. */
+ *  `storedIdentifier` is the identifier already on the record being edited (absent on a create).
+ *  It is exempt from the reverse-domain FORMAT rule: the backend provisions teams with plain slugs
+ *  (`participants`, `admins`), and requiring the user to rename one before any other field could
+ *  be saved left Save permanently disabled on exactly the teams every workspace has. A changed
+ *  identifier is still held to the format. ONLY the format is exempt: an empty identifier is
+ *  still required, and an untouched one is still checked for uniqueness. */
 export function teamValidate(
   draft: TeamInput,
   takenIdentifiers: string[],
@@ -31,7 +32,11 @@ export function teamValidate(
 ): string | null {
   if (!draft.displayName.trim()) return "Display name is required.";
   const id = draft.identifier.trim();
-  const idErr = id && id === storedIdentifier ? null : validateTeamIdentifier(id);
+  // `id &&` because `validateTeamIdentifier` holds the REQUIRED rule as well as the format one,
+  // and only the format is grandfathered. Whether the identifier is untouched is
+  // `unchangedFromStored`'s call, shared with every other stored-value exemption — it trims the
+  // stored side too, where this compared it raw and refused a stored slug carrying whitespace.
+  const idErr = id && unchangedFromStored(id, storedIdentifier) ? null : validateTeamIdentifier(id);
   if (idErr) return idErr;
   if (takenIdentifiers.includes(id)) return `Identifier "${id}" is already in use.`;
   return null;

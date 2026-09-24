@@ -17,7 +17,7 @@ import type { SiteHomeShellProps } from './SiteHomeModel'
 const loadWorkspaces = (): Promise<Workspace[]> => workspacesApi.list()
 
 /**
- * The shared shell for a feature site's workspace route: one labelled workspace chooser in a bar
+ * The shared shell for a feature site's workspace route: one workspace chooser in a bar
  * directly under the header, and below it that site's own HTDV scoped to the chosen workspace.
  *
  * The DEFAULT, not the only one: a site may declare `shell` on its model and get its own. One
@@ -31,7 +31,7 @@ const loadWorkspaces = (): Promise<Workspace[]> => workspacesApi.list()
  *   - The ONE workspacesApi.list() fetch. The bar and the resolution read it.
  *   - Resolution, the URL-as-truth replace, and persistence of an explicit choice — all of it
  *     useWorkspaceRoute's, which the hub mounts too (it needs a different LIST — the fetch on the
- *     line above drops teams — but the behaviour behind the bar is the same one).
+ *     line above drops teams — but the behaviour behind its switcher is the same one).
  *   - A workspace this caller cannot reach: a settled list without the URL's slug renders that
  *     slug's PROFILE (`ProfileFallback`) rather than the workspace. See the check below the hook
  *     for the three states that are NOT that.
@@ -41,7 +41,7 @@ const loadWorkspaces = (): Promise<Workspace[]> => workspacesApi.list()
  *     exists, so its props could only be built from the raw URL segment — which is `undefined`
  *     at `/home` and stale mid-redirect. Called instead, it runs once the answer is known and is
  *     handed that answer.
- *   - Rendering the chooser ONCE, in a labelled bar directly under the header, at every width.
+ *   - Rendering the chooser ONCE, in a bar directly under the header, at every width.
  *
  * Signed-out visitors DO reach here: the workspace route's gate is `WorkspaceOrProfileGate`,
  * which renders `children` (this shell) for a caller with a session and the principal's profile

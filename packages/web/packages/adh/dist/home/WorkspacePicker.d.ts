@@ -5,9 +5,9 @@ import type { WorkspaceOption } from './WorkspaceOption';
  * Presentational and data-free — it takes a list and a callback, so the mounted one and the
  * tested one cannot drift apart.
  *
- * A switcher, and nothing else: no "All" row (one workspace is always chosen). The hub's "New
- * Organization" button is not here either — it rides in WorkspaceBar's `action` slot, because org
- * creation is the hub's alone (NewOrganizationModal lives there) and no feature site has it.
+ * A switcher, and nothing else: no "All" row (one workspace is always chosen). Nor is there a "New
+ * Organization" entry: an org is created inside the hub's Organizations feature, where the new org
+ * then appears, not from a switcher that sits above every route.
  *
  * `allLabel` doubles as PopupMenu's EMPTY-SELECTION trigger text, which is why the three
  * pre-selection states ride on it rather than on a fourth prop. Each renders one inert row in the

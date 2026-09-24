@@ -3,7 +3,10 @@ import { AppErrorBoundary } from './AppErrorBoundary'
 import { DevAnimScale } from './DevAnimScale'
 import { HierarchicalDetailViewFlag } from './HierarchicalDetailViewFlag'
 import { HtdvLayoutLogSwitch } from './HtdvLayoutLogSwitch'
-import { SlideTransitions } from './SlideNavigation'
+// By PACKAGE PATH, never './SlideNavigation': the header entry's AvatarMenu reads the router
+// `push` this registers, and a relative specifier would inline a private copy of that state
+// here — see the `layout/SlideNavigation` entry in tsup.config.ts.
+import { SlideTransitions } from '@agentic-toolkit/adh/layout/SlideNavigation'
 import { SwipeHistory } from './SwipeHistory'
 
 export type AdhAppShellProps = {

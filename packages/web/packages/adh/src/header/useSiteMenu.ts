@@ -181,8 +181,8 @@ export function useSiteMenu(
       // This menu is a cross-site navigator: the destination is the target site's
       // workspace, never the hub's in-house view of it. undefined when there is no
       // workspace to carry, or when the target has none of its own (Docs, Community, …),
-      // and then the plain path below applies. `external` links (the dev site-family
-      // submenus) opt out — they always want the target's landing.
+      // and then the plain path below applies. An `external` link opts out: it means
+      // "open this site", and always wants the target's landing (see MenuLink).
       const workspacePath =
         workspaceSlug && !external ? siteWorkspaceHref(site, workspaceSlug) : undefined
       // The site we're already on: a bare same-origin path either way.
@@ -201,9 +201,9 @@ export function useSiteMenu(
       // than a segment for itself, and BEFORE the `hostname` guard because a same-origin path
       // needs no host at all.
       //
-      // `external` rows (the dev site-family submenus) opt out with the same reasoning as the
-      // workspace carry above: that menu means "open this site", and answering it with a hub
-      // route would leave no way to reach the site at all.
+      // `external` rows opt out with the same reasoning as the workspace carry above: the
+      // flag means "open this site", and answering it with a hub route would leave no way
+      // to reach the site at all from a menu built to do exactly that.
       if (currentSiteId === 'hub' && authenticated && workspaceSlug && !external) {
         const segment = hubFeatureSegment(site.id)
         // `hubOffersFeature` is the workspace's own answer, not a formality — see the opt. A
@@ -218,9 +218,9 @@ export function useSiteMenu(
       // A carried workspace is an EXACT destination and goes through siteUrl, not
       // buildSiteHref: that one route-MATCHES, mapping everything but `/home*` onto the
       // target's landing, so `/acme` would arrive as `/`. Without one, route matching is
-      // exactly right — and `external` links (the dev site-family submenus) open the
-      // target's LANDING rather than carrying the current route, because the debug menu
-      // is "jump to this site", not "switch to the same area on this site".
+      // exactly right — and `external` links open the target's LANDING rather than
+      // carrying the current route, because the flag asks "jump to this site", not
+      // "switch to the same area on this site".
       const href = carryTheme(
         workspacePath
           ? siteUrl(site.id, workspacePath, hostname)

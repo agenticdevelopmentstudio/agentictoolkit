@@ -407,12 +407,16 @@ describe('LISTED_SITES (the family roster)', () => {
     expect(status).toBeLessThan(admin)
     const fishlampDef = getSite('fishlamp')!
     expect(fishlampDef.dividerBefore).toBe(true)
-    // `featured` marks it as the brand the family sits under. Nothing renders it
-    // yet (see SiteDef.featured), so this pins the marker's location, not any
-    // visual behavior.
+    // `featured` marks it as the studio brand, set apart from the product sites.
+    // Nothing renders it yet (see SiteDef.featured), so this pins the marker's
+    // location, not any visual behavior.
     expect(fishlampDef.featured).toBe(true)
     // FishLamp carries a description — the overview popover shows one per row.
     expect(fishlampDef.description).toBeTruthy()
+    // ...and it must not claim the Hub. adh's About dialog prints it directly under
+    // Agentic Development Studio, the company that IS behind the family, and when
+    // this said 'The studio behind the Hub' the dialog named two companies for one Hub.
+    expect(fishlampDef.description).not.toMatch(/behind/i)
     expect(getSite('status')?.dividerBefore).toBe(true)
   })
   it('resolves the external FishLamp domains directly in every env (no env prefix)', () => {
@@ -443,10 +447,12 @@ describe('LISTED_SITES (the family roster)', () => {
   })
 })
 
-describe('MAIN_SITE_IDS / MARKETING_SITE_IDS (dev site-menu families)', () => {
+describe('MAIN_SITE_IDS / MARKETING_SITE_IDS (the site-app roster)', () => {
   // The Next app folders under frontend/src/sites/ are the source of truth for the two
   // families TAKEN TOGETHER; the arrays must cover them exactly so a newly-scaffolded
-  // site can't silently drop out of the dev site menu.
+  // site can't silently drop off the roster adh-tools provisions and probes from (see
+  // the arrays' doc comment). They were the dev site menu's families until that menu
+  // was removed; the roster is why they outlived it.
   //
   // Until 2026-08-04 the families were two DIRECTORIES (frontend/src/main/ and
   // frontend/src/marketing/), so each array could be held against its own folder. The

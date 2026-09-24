@@ -39,8 +39,9 @@ export type AvatarMenuProps = {
      *  Options" row; absent ⇒ no row. The caller owns the gate (dev build, or an adh
      *  admin) and the console — this component only offers the door. */
     onDebugOptions?: () => void;
-    /** Secondary text on the Debug row ("Sim: prod"), kept out of its label so the
-     *  row's accessible name is stably "Debug Options". */
+    /** Secondary text on the Debug row ("Sim: prod"). Shown, but kept out of the row's
+     *  NAME — it is the row's accessible description instead — so the name is stably
+     *  "Debug Options" whether or not production is being simulated. */
     debugOptionsHint?: string;
 };
 /**

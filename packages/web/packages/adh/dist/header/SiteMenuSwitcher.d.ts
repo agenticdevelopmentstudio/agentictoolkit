@@ -20,6 +20,11 @@ export type SiteMenuSwitcherProps = SiteMenuChromeProps;
  * the fleet menu is set aside altogether and the slot holds the {@link WorkspaceMenu} instead —
  * inside the product, switching workspace is the everyday move. A host with no provider (every
  * satellite) keeps the site menu at every auth state: it has no workspaces to offer.
+ *
+ * The swap drops what is about SITES (the family tree, Home, Recents), the signed-out rows (which
+ * cannot apply) and `triggerContent` (the WorkspaceMenu's trigger is its own). Everything else
+ * passes through — `userIsAdmin` above all: the WorkspaceMenu is the only switcher a signed-in
+ * admin on the hub sees, and the admin consoles have no other door.
  */
 export declare function SiteMenuSwitcher(props: SiteMenuSwitcherProps): ReactElement;
 //# sourceMappingURL=SiteMenuSwitcher.d.ts.map

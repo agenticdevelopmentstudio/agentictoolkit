@@ -23,15 +23,6 @@ export type FooterLink =
     prefetch?: boolean;
     className?: string;
 }
-/** A native popover trigger: `popovertarget` opens the panel with NO client JS. Carries
- *  the `adh-footer__sites-trigger` class, which a host stylesheet may use to hide it in
- *  browsers without the Popover API — where it cannot degrade to anything. */
- | {
-    label: string;
-    popoverTarget: string;
-    ariaLabel?: string;
-    className?: string;
-}
 /** A popup menu of further entries — see {@link FooterMenu}. */
  | {
     label: string;
@@ -54,10 +45,15 @@ export type AdhFooterProps = {
  * out, so every link in it is crawlable — the footer is on every page of every site, and a
  * menu that only existed after hydration would take those links out of the index.
  *
- * Positioned against its own trigger with CSS anchor positioning where the browser has it
- * (the anchor name is derived from `id`, so any number of menus can share a bar); where it
+ * Positioned against its own trigger's caret with CSS anchor positioning where the browser
+ * has it (the anchor name is derived from `id`, so any number of menus can share a bar, and
+ * the host element scopes it, so a second footer on the page cannot capture it); where it
  * does not, the host stylesheet's fallback parks it above the bar. Light-dismiss and Escape
  * are the platform's.
+ *
+ * `id` must be unique in the DOCUMENT, not just the bar: `popovertarget` is looked up by id
+ * across the whole page, and a repeated one opens the first panel that carries it — which
+ * is how the theme editor's specimen footer opened the real footer's menu.
  */
 export declare function FooterMenu({ id, label, items, ariaLabel, className, triggerClassName, }: {
     id: string;

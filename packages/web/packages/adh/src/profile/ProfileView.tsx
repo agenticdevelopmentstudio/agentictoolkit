@@ -3,8 +3,9 @@
 import type { ReactElement, ReactNode } from 'react'
 import type { SiteId } from '@agentic-toolkit/adh-registry'
 import { siteUrl, siteProdUrl } from '@agentic-toolkit/adh-registry'
-import { UserCard } from '@agenticdevelopertoolkit/ui/blocks/user-card'
+import { UserCard, UserCardSkeleton } from '@agenticdevelopertoolkit/ui/blocks/user-card'
 import { useClientHost } from '../header/useClientHost'
+import { PROFILE_FRAME_CLASS } from './frame'
 import type { ProfilePrincipal } from './types'
 import { useViewerPrincipal } from './useViewerPrincipal'
 
@@ -86,7 +87,7 @@ export function ProfileView({
         : siteProdUrl('hub', `/${encodeURIComponent(shown.slug)}/profile`)
 
   return (
-    <main className="mx-auto max-w-2xl px-4 py-16 sm:px-6">
+    <main className={PROFILE_FRAME_CLASS}>
       <UserCard user={shown} />
       {/* The org's own blurb. Users have no equivalent, so this renders for organizations only —
           it is the "any public facing general info" half of the standardized header, and dropping
@@ -107,6 +108,21 @@ export function ProfileView({
           </a>
         </div>
       )}
+    </main>
+  )
+}
+
+/**
+ * A profile on its way: the card's own skeleton, in ProfileView's frame, so the profile
+ * replaces it in place when it arrives. A route's loading boundary (the hub's
+ * `/<slug>/profile/loading.tsx`) renders this rather than composing the two itself: the frame
+ * and the card are this directory's to change, and a site-side copy of either would stop
+ * matching the day one of them does.
+ */
+export function ProfileSkeleton(): ReactElement {
+  return (
+    <main className={PROFILE_FRAME_CLASS}>
+      <UserCardSkeleton />
     </main>
   )
 }

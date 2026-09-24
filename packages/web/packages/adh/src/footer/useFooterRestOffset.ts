@@ -2,17 +2,38 @@
 
 import { useLayoutEffect } from 'react'
 
-/** The custom property adh-site.css translates bitbag's resting face by. */
+/** How far off the dock's centre bitbag's resting face sits. adh-site.css hands it to the
+ *  dock's own resting hook, `--bb-dock-rest-x` (bitbag-dock.css). */
 export const REST_OFFSET_VAR = '--adh-footer-rest-x'
 
-/** Where the bar's reserved slot is: the room `adh-footer--with-chat` opens up as the
- *  Legal menu's left margin (adh-site.css). Exported for the test. */
-export const REST_SLOT_SELECTOR = '.adh-footer--with-chat .adh-footer__legal'
+/** Marks a bar item that keeps bitbag's resting slot as its left margin (adh-site.css):
+ *  the Legal menu, and Terms, which leads the inline pair the no-popover fallback shows in
+ *  Legal's place (SiteFooter). CSS shows one of the two. */
+export const REST_SLOT_HOST_CLASS = 'adh-footer__rest-slot-host'
+
+/** Where the bar's reserved slot can be: the room `adh-footer--with-chat` opens up as a
+ *  slot host's left margin. Exported for the test. */
+export const REST_SLOT_SELECTOR = `.adh-footer--with-chat .${REST_SLOT_HOST_CLASS}`
+
+/** bitbag's dock as FooterChatInner mounts it — the element the offset is written on. */
+export const REST_DOCK_SELECTOR = '.bb-dock.adh-footer__chat'
+
+/** What can move the slot when it changes size: the bar, and the links nav that holds
+ *  the slot host and everything right of it. */
+const RESIZE_SOURCES = '.adh-footer--with-chat, .adh-footer--with-chat .adh-footer__links'
 
 /** The horizontal distance from the dock's centre — where bitbag's face sits with no
  *  transform — to the centre of the slot, or null when there is no slot to rest in. */
 export function restOffset(doc: Document): number | null {
-  const host = doc.querySelector<HTMLElement>(REST_SLOT_SELECTOR)
+  // The host that is actually LAID OUT, not merely the first in the DOM. A host with no
+  // layout box (display:none on it or an ancestor) reads `left: 0` while its computed
+  // margin still says 68px, so measuring it centred his face half a slot beyond the
+  // screen's LEFT edge, out of sight and out of reach — which is what every browser
+  // without the Popover API got, because there the fallback hides Legal and shows the
+  // inline Terms / Privacy pair instead.
+  const host = Array.from(doc.querySelectorAll<HTMLElement>(REST_SLOT_SELECTOR)).find(
+    (el) => el.getClientRects().length > 0,
+  )
   if (!host) return null
   const slot = parseFloat(getComputedStyle(host).marginLeft) || 0
   // The dock is `position: fixed; left: 0; right: 0`, so its centre is the middle of
@@ -22,7 +43,7 @@ export function restOffset(doc: Document): number | null {
 }
 
 /**
- * Keeps {@link REST_OFFSET_VAR} on the root element pointing at the bar's reserved slot.
+ * Keeps {@link REST_OFFSET_VAR} on bitbag's dock pointing at the bar's reserved slot.
  *
  * MEASURED, because CSS alone cannot say where the slot is. It sits just left of the
  * Legal menu, which holds the far-right position, so its centre is the viewport's edge
@@ -31,32 +52,45 @@ export function restOffset(doc: Document): number | null {
  * under the footer, so it cannot use the bar's layout either; and a CSS anchor could
  * place the dock but not drive the transform that animates his wake.
  *
- * A LAYOUT effect: the dock mounts in the same commit, so the offset is set before his
- * first paint and he appears in the slot instead of sliding into it from the centre.
- * Re-measured whenever the footer, Legal or the viewport changes size, and once the web
- * fonts settle, since those are what move Legal.
+ * ON THE DOCK'S ROOT, not on <html>: the only reader is his resting avatar, inside the
+ * dock, and the value changes on every change of viewport width (the slot is pinned to
+ * the right edge while the dock's centre moves half as far). Written on <html>, each new
+ * value re-resolved inherited style for the whole document to move one face — in a
+ * Chromium trace of a 12k-element page, 4,004 elements restyled per write against 3 with
+ * the value on the dock. React never touches the root's inline style (BitbagDock gives it
+ * no `style` prop), so the property stays put across his renders.
+ *
+ * A LAYOUT effect: the dock mounts in the same commit (FooterChatInner portals it and
+ * imports it statically), so it exists here, and the offset is set before his first
+ * paint — he appears in the slot instead of sliding into it from the centre.
+ * Re-measured whenever the footer or its links change size, and once the web fonts
+ * settle, since those are what move Legal. The footer spans the viewport, so observing
+ * it covers every width change a window `resize` listener would have — which is why
+ * there is none — and a height-only resize cannot move the slot. The links nav, not
+ * the slot host alone: in the fallback, Privacy sits right of the host and its width
+ * moves the host too.
  */
 export function useFooterRestOffset(): void {
   useLayoutEffect(() => {
-    const root = document.documentElement
+    const dock = document.querySelector<HTMLElement>(REST_DOCK_SELECTOR)
+    // No dock, no face to place.
+    if (!dock) return
     const update = () => {
       const x = restOffset(document)
-      if (x === null) root.style.removeProperty(REST_OFFSET_VAR)
-      else root.style.setProperty(REST_OFFSET_VAR, `${x}px`)
+      if (x === null) dock.style.removeProperty(REST_OFFSET_VAR)
+      else dock.style.setProperty(REST_OFFSET_VAR, `${x}px`)
     }
     update()
-    window.addEventListener('resize', update)
     const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
-    for (const el of document.querySelectorAll('.adh-footer, ' + REST_SLOT_SELECTOR)) ro?.observe(el)
+    for (const el of document.querySelectorAll(RESIZE_SOURCES)) ro?.observe(el)
     let live = true
     document.fonts?.ready.then(() => {
       if (live) update()
     })
     return () => {
       live = false
-      window.removeEventListener('resize', update)
       ro?.disconnect()
-      root.style.removeProperty(REST_OFFSET_VAR)
+      dock.style.removeProperty(REST_OFFSET_VAR)
     }
   }, [])
 }

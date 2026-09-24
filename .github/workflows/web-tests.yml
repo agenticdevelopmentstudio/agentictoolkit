@@ -52,6 +52,20 @@ jobs:
           cache: pnpm
           cache-dependency-path: packages/web/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      # The submodule's packages are reached through their BUILT output: a `link:` dep
+      # resolves by its package.json `exports`, and some of them point only at `./dist`
+      # with no source condition (`chat`'s `.` entry is `types` + `import`, both dist).
+      # The submodule gitignores dist, so a fresh checkout has none, and bitbag's suite
+      # died at import with 'Failed to resolve entry for package
+      # "@agenticdevelopertoolkit/chat"' on every run from 2026-09-07 until this step.
+      # It is a separate pnpm workspace with its own lockfile, so it installs on its own;
+      # these are the two commands its own CI runs, and its `build` includes `themes`'
+      # build:data codegen, the other file a fresh checkout lacks.
+      - name: build agenticdevelopertoolkit web packages
+        working-directory: external/agenticdevelopertoolkit/packages/web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
       # Per-package vitest suites (the root `test` script is the same recursive run).
       # Deliberately NOT `lint`: per-package tsc resolves sibling DIST types that a fresh
       # checkout hasn't built — gate types in consumers (which build first) until that's

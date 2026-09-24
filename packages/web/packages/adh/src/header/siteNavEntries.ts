@@ -4,7 +4,7 @@ import type { PopoverEntry } from './NavigationPopover'
 // The section the host site's own nav rows carry. The popover rules a divider
 // wherever two adjacent entries disagree on this number (`NavigationPopover`), so all
 // it has to be is DISTINCT from the others in play — 0 (SiteMenu's auth top section),
-// 1 (`fleetMenuGroups`' FLEET_SECTION) and 2 (`debugSiteGroups`' DEBUG_SECTION).
+// 1 (`fleetMenuGroups`' FLEET_SECTION) and 2 (its ADMIN_SECTION, the admin consoles).
 // Ordering is the array's job, not this number's; 3 is simply the next free value.
 export const SITE_NAV_SECTION = 3
 

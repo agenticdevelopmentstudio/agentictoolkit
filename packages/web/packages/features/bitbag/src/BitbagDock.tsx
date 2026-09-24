@@ -1,7 +1,12 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import type { ChatBackend, GazeVector } from '@agenticdevelopertoolkit/chat'
+import {
+  CHAT_INPUT_SELECTOR,
+  CHAT_INSIDE_ATTR,
+  type ChatBackend,
+  type GazeVector,
+} from '@agenticdevelopertoolkit/chat'
 import type { ThemeKey } from '@agenticdevelopertoolkit/themes'
 import { useKeyboardInset } from '@agenticdevelopertoolkit/viewport'
 import { BitbagChat } from './BitbagChat'
@@ -32,7 +37,8 @@ export interface BitbagDockProps {
    *   a 560px composer across the middle of it covered the bar's links and made
    *   every page reserve room for it. Tapping him opens his chat under him, with
    *   the caret in it; when the chat folds (a tap away, Escape) he goes back to
-   *   being just a face.
+   *   being just a face, and tapping him again puts him back as well — folding
+   *   the chat with him.
    */
   rest?: 'entry' | 'avatar'
 }
@@ -96,49 +102,69 @@ export function BitbagDock({
     setUtterance({ text, id: utterId.current })
   }, [])
 
-  // The avatar-only rest. `open` is whether his chat is shown at all; whether it is
-  // ENGAGED stays the chat's own fact (`.pc-collapsed`, owned by its sizing hook), and
-  // this only follows it: the fold that ends a conversation is what puts him back to
-  // rest, so there is one "done talking" signal rather than a second one to drift.
+  // The avatar-only rest. `open` is whether his chat is shown at all. Whether it is
+  // ENGAGED (unfolded) is the chat's own fact, which it reports through
+  // `onEngagedChange` — the typed signal, where this used to watch `.pc-collapsed`
+  // with a MutationObserver: a class rename in the chat package would have blinded
+  // it silently, since this package's tests stand a mock in for the chat and the
+  // mock kept the old name. The dock takes the fact over (`engaged`)
+  // only so that it can END it: hiding a chat does not fold it, and an engaged chat
+  // behind a closed dock kept its engaged-only CSS — the page scrim, the raised
+  // z-index — over the host page until the next tap or Escape happened to land.
   const avatarRest = rest === 'avatar'
   const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
-  // Read at pointerdown, before the chat's own document listener folds it: a tap on
-  // him while he is talking is that fold, and the click that follows must close, not
-  // reopen. Closing explicitly as well covers the one case the fold does not — a chat
-  // opened while its composer was still disabled, which never engaged to fold back.
-  const openAtPress = useRef(false)
+  const [chatEngaged, setChatEngaged] = useState(false)
+  // The frame his chat and his `i` share, which `hidden` takes away when he rests.
+  const panelRef = useRef<HTMLDivElement>(null)
 
+  // Every way back to rest comes through here. Focus first: `hidden` stops the
+  // panel rendering, and a focused composer or `i` inside it dropped focus to
+  // <body> — a keyboard user lost their place on every Escape. It goes back to
+  // him, the control that opened the panel.
+  const close = useCallback((): void => {
+    if (panelRef.current?.contains(document.activeElement)) bitbagRef.current?.focus()
+    setOpen(false)
+    setChatEngaged(false)
+  }, [])
+
+  // The fold that ends a conversation (a tap away, Escape) is what puts him back to
+  // rest — one "done talking" signal, the chat's own, rather than a second one to
+  // drift. It cannot fire on opening, which would shut him the instant he opened:
+  // the chat opens folded, only the caret going in engages it, and the chat reports
+  // real flips only — so a fold heard here always follows an engagement. (A chat
+  // opened while its composer was still disabled never engages, so it never folds
+  // back either; tapping him again is the way out of that one.)
+  const onEngagedChange = useCallback(
+    (engaged: boolean): void => {
+      setChatEngaged(engaged)
+      if (!engaged && avatarRest) close()
+    },
+    [avatarRest, close],
+  )
+
+  // Opening puts the caret in his composer, which is what engages the chat. An
+  // effect, not the click handler: at click time the panel is still `hidden`, and
+  // a browser will not focus an element that is not being rendered.
   useEffect(() => {
     if (!avatarRest || !open) return
-    const root = rootRef.current
-    if (!root) return
-    // Opening shows a chat that is still folded; the caret going in is what engages
-    // it. So "folded" alone cannot mean "done" — only folded AFTER having been
-    // engaged does, or he would shut the instant he opened.
-    let engaged = false
-    const sync = (): void => {
-      const chat = root.querySelector('.persona-chat')
-      if (!chat) return
-      if (!chat.classList.contains('pc-collapsed')) engaged = true
-      else if (engaged) setOpen(false)
-    }
-    const observer = new MutationObserver(sync)
-    observer.observe(root, { subtree: true, attributes: true, attributeFilter: ['class'] })
-    root.querySelector<HTMLInputElement>('.pc-input')?.focus()
-    sync()
-    return () => observer.disconnect()
+    panelRef.current?.querySelector<HTMLInputElement>(CHAT_INPUT_SELECTOR)?.focus()
   }, [avatarRest, open])
 
-  const onAvatarClick = (): void => {
-    const wasOpen = openAtPress.current
-    openAtPress.current = false
-    setOpen(!wasOpen)
+  // A tap, Enter/Space, or a bare `el.click()` from assistive tech all toggle on
+  // the LIVE `open`. That is only sound because his own press is marked part of the
+  // conversation (`CHAT_INSIDE_ATTR`, below): unmarked, a press on him folded the
+  // chat at pointerdown — closing the dock — before the click that followed could
+  // read the state it was meant to toggle, and the click reopened him. The
+  // pointerdown snapshot that papered over it read stale for any click that no
+  // pointerdown preceded, so those could open him but never close him.
+  const toggle = (): void => {
+    if (open) close()
+    else setOpen(true)
   }
   const onAvatarKey = (e: KeyboardEvent<HTMLDivElement>): void => {
     if (e.key !== 'Enter' && e.key !== ' ') return
     e.preventDefault()
-    setOpen((o) => !o)
+    toggle()
   }
 
   // Resting, he is laid out at half width rather than scaled to it: a transform leaves
@@ -155,7 +181,7 @@ export function BitbagDock({
     .join(' ')
 
   return (
-    <div ref={rootRef} className={rootClass}>
+    <div className={rootClass}>
       <div
         ref={bitbagRef}
         className="bb-dock__avatar"
@@ -166,10 +192,8 @@ export function BitbagDock({
               tabIndex: 0,
               'aria-label': open ? 'bitbag' : 'Chat with bitbag',
               'aria-expanded': open,
-              onPointerDown: () => {
-                openAtPress.current = open
-              },
-              onClick: onAvatarClick,
+              [CHAT_INSIDE_ATTR]: '',
+              onClick: toggle,
               onKeyDown: onAvatarKey,
             }
           : {})}
@@ -179,7 +203,7 @@ export function BitbagDock({
       {/* The panel is the frame his chat and his `i` share: it fixes the box's
           width (the column itself is viewport-wide, so the chat can't set it)
           and gives the `i` a corner to hang off. */}
-      <div className="bb-dock__panel" hidden={resting}>
+      <div ref={panelRef} className="bb-dock__panel" hidden={resting}>
         <BitbagChat
           className="bb-dock__chat"
           variant="dock"
@@ -190,6 +214,8 @@ export function BitbagDock({
           onGazeHint={onGaze}
           utterance={utterance}
           onMute={onMute}
+          engaged={chatEngaged}
+          onEngagedChange={onEngagedChange}
         />
         <BitbagInfo />
       </div>

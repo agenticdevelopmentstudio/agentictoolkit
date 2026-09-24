@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { principalFromOrgCard, principalFromUserCard, type OrgCardBody, type UserCardBody } from '../normalize'
-import { ProfileView } from '../ProfileView'
+import { ProfileSkeleton, ProfileView } from '../ProfileView'
 import type { ProfilePrincipal } from '../types'
 
 /**
@@ -69,6 +69,30 @@ describe('ProfileView', () => {
   it('renders NO Full Profile link on the hub, because that link would point at this page', () => {
     render(<ProfileView principal={principal()} siteId="hub" />)
     expect(screen.queryByRole('link', { name: 'Full Profile' })).toBeNull()
+  })
+})
+
+/**
+ * The hub's `/<slug>/profile` loading boundary renders ProfileSkeleton, and the page streams
+ * ProfileView into the same spot when the fetch lands. The boundary used to draw its own copy
+ * of the frame; these pin the one thing that copy existed to get right.
+ */
+describe('ProfileSkeleton', () => {
+  it("announces the card as loading, inside the page's main landmark", () => {
+    render(<ProfileSkeleton />)
+    expect(screen.getByRole('main')).toContainElement(
+      screen.getByRole('status', { name: 'Loading profile…' }),
+    )
+  })
+
+  it("draws in ProfileView's own frame, so the profile replaces it in place instead of jumping", () => {
+    const skeleton = render(<ProfileSkeleton />)
+    const frame = skeleton.container.querySelector('main')!.className
+    skeleton.unmount()
+    // Non-empty first: two frames that both lost their class would also be "equal".
+    expect(frame).not.toBe('')
+    render(<ProfileView principal={principal()} siteId="hub" />)
+    expect(screen.getByRole('main').className).toBe(frame)
   })
 })
 

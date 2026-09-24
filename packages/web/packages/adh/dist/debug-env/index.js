@@ -20,7 +20,8 @@ import {
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
-import { useMediaQuery } from "@agenticdevelopertoolkit/ui/hooks/useMediaQuery";
+import { PHONE_SHEET_CLASSES } from "@agenticdevelopertoolkit/ui/components/dialog";
+import { PHONE_MAX_WIDTH, useMediaQuery } from "@agenticdevelopertoolkit/ui/hooks/useMediaQuery";
 
 // src/hooks/useIsMounted.ts
 import { useEffect, useState } from "react";
@@ -32,7 +33,14 @@ function useIsMounted() {
 
 // src/debug-env/FloatingWindow.tsx
 import { jsx, jsxs } from "react/jsx-runtime";
-var COMPACT_QUERY = "(max-width: 639px)";
+function roomFor(el) {
+  return { x: window.innerWidth - el.offsetWidth, y: window.innerHeight - el.offsetHeight };
+}
+function fitInto(p, room) {
+  const x = Math.max(0, Math.min(p.x, room.x));
+  const y = Math.max(0, Math.min(p.y, room.y));
+  return x === p.x && y === p.y ? p : { x, y };
+}
 function FloatingWindow({
   open,
   onClose,
@@ -45,11 +53,11 @@ function FloatingWindow({
   const [pos, setPos] = useState2(null);
   const initialSize = useRef(null);
   const dragTeardown = useRef(null);
-  const compact = useMediaQuery(COMPACT_QUERY);
+  const compact = useMediaQuery(PHONE_MAX_WIDTH);
   useEffect2(() => {
     if (!open) return;
     if (compact) {
-      initialSize.current = { w: window.innerWidth, h: window.innerHeight };
+      initialSize.current = null;
       setPos({ x: 0, y: 0 });
       return;
     }
@@ -67,7 +75,20 @@ function FloatingWindow({
     el.style.width = `${initialSize.current.w}px`;
     el.style.height = `${initialSize.current.h}px`;
     initialSize.current = null;
+    const room = roomFor(el);
+    setPos((p) => p ? fitInto(p, room) : p);
   });
+  useEffect2(() => {
+    if (!open || compact) return;
+    const onResize = () => {
+      const el = ref.current;
+      if (!el) return;
+      const room = roomFor(el);
+      setPos((p) => p ? fitInto(p, room) : p);
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [open, compact]);
   useEffect2(() => {
     if (!open) return;
     const nestedOverlayOpen = () => !!document.querySelector('[data-open][role="dialog"]');
@@ -118,31 +139,32 @@ function FloatingWindow({
         ref,
         role: "dialog",
         "aria-labelledby": titleId,
-        className: compact ? "fixed z-50 flex flex-col overflow-hidden bg-apt-surface text-apt-text" : "fixed z-50 flex flex-col overflow-hidden rounded-xl border border-apt-border bg-apt-surface text-apt-text shadow-2xl",
+        className: compact ? `fixed z-50 flex flex-col overflow-hidden bg-apt-surface text-apt-text ${PHONE_SHEET_CLASSES}` : "fixed z-50 flex flex-col overflow-hidden rounded-xl border border-apt-border bg-apt-surface text-apt-text shadow-2xl",
         style: compact ? (
-          // `dvh`, not `vh`: iOS Safari's `vh` is the height with the toolbar HIDDEN, so a
-          // 100vh sheet runs under the toolbar and hides its own bottom edge. The safe-area
-          // padding keeps the title bar clear of the notch.
-          {
-            left: 0,
-            top: 0,
-            maxWidth: "100vw",
-            maxHeight: "100dvh",
-            paddingTop: "env(safe-area-inset-top)",
-            paddingBottom: "env(safe-area-inset-bottom)"
-          }
+          // The sheet's geometry and its notch inset are the shared classes above. This style
+          // only takes width and height back from the floating window, which wrote them in px
+          // on this same element (a rotation across the line keeps the node): a style beats a
+          // class, so left alone they would pin the sheet at the floating size. React clears a
+          // property it is handed as '' — and, owning them, writes nothing more, so nothing
+          // goes stale when the viewport changes without crossing the line.
+          { width: "", height: "" }
         ) : {
           left: pos.x,
           top: pos.y,
           resize: "both",
-          minWidth: 520,
-          minHeight: 360,
-          // Capped at the room RIGHT OF and BELOW its own corner, not the whole viewport: the
-          // size is fixed on open, so a window opened at 1600px and a browser then narrowed to
-          // 700 kept its 1400px box running off the right edge — and the HTDV inside fitted
-          // its lists to that off-screen width, so nothing ever covered (item 23's sweep).
-          maxWidth: `calc(100vw - ${Math.max(0, pos.x)}px)`,
-          maxHeight: `calc(100vh - ${Math.max(0, pos.y)}px)`
+          // The floor never exceeds the viewport: CSS lets min-width beat max-width, so a
+          // bare 520 x 360 floor overran the caps below on a narrow or short screen.
+          minWidth: "min(520px, 100vw)",
+          minHeight: "min(360px, 100dvh)",
+          // Capped at the VIEWPORT: the size is fixed on open, so without a cap a window
+          // opened at 1600px and a browser then narrowed to 700 kept its 1400px box running
+          // off the right edge — and the HTDV inside fitted its lists to that off-screen
+          // width, so nothing ever covered (item 23's sweep). The resize re-fit above moves
+          // the corner so the capped box is on screen. NOT the room right of and below the
+          // corner, as this once was: that cap moved with `pos`, so every drag RESIZED the
+          // window, and the HTDV refitted its rails on each pointermove.
+          maxWidth: "100vw",
+          maxHeight: "100dvh"
         },
         children: [
           /* @__PURE__ */ jsxs(

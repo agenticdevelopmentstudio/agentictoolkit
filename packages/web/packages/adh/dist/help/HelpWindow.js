@@ -178,6 +178,7 @@ function topicIcon(id) {
 }
 
 // src/help/views/MarkdownTopic.tsx
+import { isModifiedClick } from "@agenticdevelopertoolkit/ui/lib/navigation-guard";
 import { useHelp } from "@agentic-toolkit/adh/help";
 
 // src/docs/MarkdownHtml.tsx
@@ -1853,7 +1854,7 @@ function MarkdownTopic({ contentKey }) {
   const { open } = useHelp();
   const html = HELP_CONTENT_HTML[contentKey];
   function onDocLinkClick(e) {
-    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (e.defaultPrevented || isModifiedClick(e)) return;
     const anchor = e.target.closest("a");
     if (!anchor || anchor.target === "_blank") return;
     const href = anchor.getAttribute("href") ?? "";

@@ -31,13 +31,6 @@ describe('AdhFooter (identity-free)', () => {
     expect(footer.lastElementChild).toBe(trailing)
   })
 
-  it('renders a native popover trigger for popoverTarget entries', () => {
-    render(<AdhFooter links={[{ label: 'Sites', popoverTarget: 'panel-1', ariaLabel: 'Sites — overview' }]} />)
-    const btn = screen.getByRole('button', { name: 'Sites — overview' })
-    expect(btn.getAttribute('popovertarget')).toBe('panel-1')
-    expect(btn.className).toContain('adh-footer__sites-trigger')
-  })
-
   it('keeps the href on onSelect entries so they still work without JS', () => {
     let opened = false
     render(
@@ -110,11 +103,20 @@ describe('FooterMenu', () => {
     const { container } = render(<FooterMenu id="m1" label="© 2026" items={items} />)
     const trigger = screen.getByRole('button', { name: '© 2026' })
     expect(trigger.getAttribute('popovertarget')).toBe('m1')
-    expect(trigger.getAttribute('aria-haspopup')).toBe('menu')
     const panel = container.querySelector('#m1')!
     expect(panel.getAttribute('popover')).toBe('auto')
     expect(panel.querySelector('a[href="/terms"]')).not.toBeNull()
     expect(panel.querySelector('button[popovertarget="about-dialog"]')).not.toBeNull()
+  })
+
+  it('announces a disclosure of links, not an ARIA menu', () => {
+    // `aria-haspopup="menu"` promises a role=menu popup with arrow-key focus; this panel is
+    // a list of links reached with Tab, so the attribute sent screen-reader users looking
+    // for arrow keys that did nothing. Nothing in the panel may claim menu roles either.
+    const { container } = render(<FooterMenu id="m1" label="Legal" items={items} />)
+    const trigger = screen.getByRole('button', { name: 'Legal' })
+    expect(trigger.hasAttribute('aria-haspopup')).toBe(false)
+    expect(container.querySelector('[role="menu"], [role="menuitem"]')).toBeNull()
   })
 
   it('shows a popup indicator on its trigger, hidden from the accessible name', () => {

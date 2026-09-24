@@ -174,8 +174,10 @@ export interface SiteDef {
    *  FIRST entry of each group; following entries (without their own label) join
    *  it. Entries before the first labelled group render as an unlabelled lead. */
   sectionLabel?: string
-  /** Marks the one entry that is the BRAND the family sits under (FishLamp
-   *  Design), rather than a member of it. ⚠️ Declared intent only: nothing reads
+  /** Marks the one entry that is a studio brand (FishLamp Design) rather than a
+   *  product site of the family. NOT the company the family sits under: that is
+   *  Agentic Development Studio, which deliberately has no registry entry (adh's
+   *  fleetMenuGroups says why). ⚠️ Declared intent only: nothing reads
    *  this today (the switcher menus are curated per-site props, not derived from
    *  the registry), so it renders as an ordinary row. Kept as the marker for
    *  whoever styles it. */
@@ -206,7 +208,7 @@ export interface SiteDef {
 //   1. bitbag — the Agentic Developer persona, set apart at the very top.
 //   2. the core site family (hub … research).
 //   3. consultants — the services CTA, its own section above the studio brand.
-//   4. fishlamp — FishLamp Design, the studio the family sits under (marked
+//   4. fishlamp — FishLamp Design, the design & consulting studio (marked
 //      `featured`, currently unrendered), followed by its second domain.
 //   5. admin + status + builds — the operational consoles, set apart at the end.
 // `dividerBefore` on the first entry of a section draws the separator above it.
@@ -298,13 +300,19 @@ export const SITES: SiteDef[] = [
   // pruning) — stays registered (its own header resolves, /details keep serving)
   // but it leaves the switcher + footer. ---
   { id: 'consulting', label: 'Consulting', description: 'Let us help you', prodHost: 'agenticdeveloperconsulting.com', hasStaging: true, hasTesting: true, hasHome: true, workspaceRoute: 'root', listed: false },
-  // --- FishLamp Design: the studio the whole family sits under, and the name in
-  // every footer's copyright. Featured (centered, gold, italic, name-only) in the
-  // switcher; carries a description for the overview popover. Opens the
-  // "Studio & consulting" group. Both domains serve the SAME site — fishlamp.com
-  // is the canonical one, fishlampdesign.com the longer second door. `external`:
-  // neither is an app in this repo, so neither joins the SSO return allowlist. ---
-  { id: 'fishlamp', label: 'FishLamp Design', shortLabel: 'FishLamp', description: 'The studio behind the Hub', prodHost: 'fishlamp.com', hasStaging: false, hasTesting: false, hasHome: false, external: true, dividerBefore: true, sectionLabel: 'Studio & consulting', featured: true },
+  // --- FishLamp Design: the design & consulting studio (consulting, above, is
+  // folded into it). NOT the company behind the Hub, and no longer the name in
+  // the copyright: both are Agentic Development Studio's, which has no registry
+  // entry. So its description says only what FishLamp itself is. The footer's
+  // About dialog prints it directly under the studio's own "the company behind
+  // the family" line, and 'The studio behind the Hub' there named two companies
+  // behind one Hub. Featured (centered, gold, italic, name-only) in the switcher;
+  // carries a description for the overview popover and the About dialog. Opens
+  // the "Studio & consulting" group. Both domains serve the SAME site —
+  // fishlamp.com is the canonical one, fishlampdesign.com the longer second door.
+  // `external`: neither is an app in this repo, so neither joins the SSO return
+  // allowlist. ---
+  { id: 'fishlamp', label: 'FishLamp Design', shortLabel: 'FishLamp', description: 'Design & consulting studio', prodHost: 'fishlamp.com', hasStaging: false, hasTesting: false, hasHome: false, external: true, dividerBefore: true, sectionLabel: 'Studio & consulting', featured: true },
   { id: 'fishlampdesign', label: 'fishlampdesign.com', description: 'FishLamp Design — second domain', prodHost: 'fishlampdesign.com', hasStaging: false, hasTesting: false, hasHome: false, external: true },
   // --- operational consoles, their own section at the very end ---
   // `status` heads the section because it is the only PUBLIC one: it carries the
@@ -476,12 +484,16 @@ export function siteIdForDir(name: string): SiteId | undefined {
 }
 
 /** The two physical site families — the ids whose Next app folders live under
- *  `websites/main/` and `websites/marketing/`. The dev-only site-menu submenus
- *  ("Main sites" / "Marketing sites", shown only in staging/testing/local — see
- *  {@link ../header/debugSiteGroups}) link every one to its deployment in the
- *  CURRENT env, so a developer can jump straight to any site's build. A registry
- *  test asserts these arrays against adh's directory listing, so a newly-scaffolded
- *  site can't silently drop out of the menu. Alphabetical, mirroring that listing.
+ *  `websites/main/` and `websites/marketing/`. Together they are the roster of ids
+ *  that HAVE a Next app, and adh-tools reads that roster BY THESE NAMES to decide
+ *  which sites get provisioned and probed (`fleet/scripts/vercel/provision.py` and
+ *  `probe-auth-fleet.py` parse the two declarations out of this file; the fleet
+ *  sign-in smoke's `scope.ts` imports them), so a rename here must land there too.
+ *  They also fed the header's dev-only "Main sites" / "Marketing sites" submenus
+ *  until that dev menu was removed; nothing in the toolkit's UI reads them now. A
+ *  registry test asserts these arrays against adh's directory listing, so a
+ *  newly-scaffolded site can't silently drop off the roster. Alphabetical, mirroring
+ *  that listing.
  *
  *  Membership here means "this id HAS a Next app", not "its app is checked out
  *  beside this file": `bitbag` and `myagenticteams` are built from their own repos

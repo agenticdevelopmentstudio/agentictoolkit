@@ -80,6 +80,11 @@
       "development": "./src/layout/index.ts",
       "import": "./dist/layout/index.js"
     },
+    "./layout/SlideNavigation": {
+      "types": "./dist/layout/SlideNavigation.d.ts",
+      "development": "./src/layout/SlideNavigation.tsx",
+      "import": "./dist/layout/SlideNavigation.js"
+    },
     "./profile": {
       "types": "./dist/profile/index.d.ts",
       "development": "./src/profile/index.ts",

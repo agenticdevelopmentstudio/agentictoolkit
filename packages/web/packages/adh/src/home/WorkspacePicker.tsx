@@ -10,9 +10,9 @@ import type { WorkspaceOption } from './WorkspaceOption'
  * Presentational and data-free — it takes a list and a callback, so the mounted one and the
  * tested one cannot drift apart.
  *
- * A switcher, and nothing else: no "All" row (one workspace is always chosen). The hub's "New
- * Organization" button is not here either — it rides in WorkspaceBar's `action` slot, because org
- * creation is the hub's alone (NewOrganizationModal lives there) and no feature site has it.
+ * A switcher, and nothing else: no "All" row (one workspace is always chosen). Nor is there a "New
+ * Organization" entry: an org is created inside the hub's Organizations feature, where the new org
+ * then appears, not from a switcher that sits above every route.
  *
  * `allLabel` doubles as PopupMenu's EMPTY-SELECTION trigger text, which is why the three
  * pre-selection states ride on it rather than on a fourth prop. Each renders one inert row in the
@@ -58,8 +58,10 @@ export function WorkspacePicker({
       allLabel={allLabel}
       ariaLabel="Workspace"
       icon={<ChevronDown size={14} aria-hidden className="shrink-0 text-apt-text-muted" />}
-      // Sized to its content rather than filling the bar: the bar also carries the "Workspace"
-      // label, and a full-width trigger would push it to the far edge on a wide viewport.
+      // Sized to its content, not PopupMenu's default full width, so the chooser reads as one
+      // control centred in WorkspaceBar rather than a field spanning it. `max-w-full` caps it at
+      // its root; what lets that root shrink to the bar, so a long name truncates instead of
+      // overflowing, is the bar's `.adh-home__toolbar > * { min-width: 0 }` rule.
       className="w-auto max-w-full"
     />
   )

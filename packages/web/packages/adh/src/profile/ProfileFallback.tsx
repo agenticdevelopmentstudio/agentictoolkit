@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 
 import type { SiteId } from '@agentic-toolkit/adh-registry'
 import { principalFromOrgCard, principalFromUserCard, type OrgCardBody, type UserCardBody } from './normalize'
 import { ProfileNotFound } from './ProfileNotFound'
+import { PROFILE_FRAME_CLASS } from './frame'
 import { ProfileView } from './ProfileView'
 import type { ProfilePrincipal } from './types'
 import { useViewerPrincipal } from './useViewerPrincipal'
@@ -141,7 +142,7 @@ export function ProfileFallback({ slug, siteId, section }: ProfileFallbackProps)
   if (viewerPending) return null
   if (state.status === 'missing') return <ProfileNotFound />
   return (
-    <main className="mx-auto max-w-2xl px-4 py-16 sm:px-6">
+    <main className={PROFILE_FRAME_CLASS}>
       <p className="text-apt-text-muted">
         Couldn&apos;t load this profile. Reload the page to try again.
       </p>

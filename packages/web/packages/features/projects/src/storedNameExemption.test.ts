@@ -33,3 +33,24 @@ describe("name uniqueness exempts the stored name", () => {
     expect(templateValidate(template, taken, "Sprint 11")).toMatch(/already exists/);
   });
 });
+
+// All four decide "kept the name" through the shared `unchangedFromStored`, so they cannot drift
+// apart on it again: the stored name is compared trimmed and case-sensitively, and a create —
+// where useMasterDetailForm hands over no stored record — is always checked.
+describe("the four agree on what counts as keeping the stored name", () => {
+  const cases: [string, (storedName?: string) => string | null][] = [
+    ["iteration", (s) => iterationValidate(iteration, ["sprint 12"], s)],
+    ["milestone", (s) => milestoneValidate(milestone, ["sprint 12"], s)],
+    ["program", (s) => programValidate(program, ["sprint 12"], s)],
+    ["template", (s) => templateValidate(template, [{ name: "sprint 12", kind: "project" }], s)],
+  ];
+  it.each(cases)("%s: a create (no stored name) is still checked", (_, validate) => {
+    expect(validate(undefined)).toMatch(/already exists/);
+  });
+  it.each(cases)("%s: the stored name is compared trimmed", (_, validate) => {
+    expect(validate("  Sprint 12 ")).toBeNull();
+  });
+  it.each(cases)("%s: re-casing the stored name is an edit, and is checked", (_, validate) => {
+    expect(validate("SPRINT 12")).toMatch(/already exists/);
+  });
+});

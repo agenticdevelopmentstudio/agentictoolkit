@@ -164,8 +164,8 @@ export function adhNextConfig(options: AdhNextConfigOptions = {}): NextConfig {
     distDir: process.env.ADH_DIST_DIR || ".next",
     env: {
       // Promote the (server-only) DEPLOYMENT_ENV to a client-inlined build constant on
-      // EVERY site, so the shared site menu's dev-only Routes / Debug Options rows gate
-      // uniformly — SiteMenu's DEV_TOOLS_BUILD_ENABLED reads NEXT_PUBLIC_DEPLOYMENT_ENV,
+      // EVERY site, so the header's Debug Options door gates uniformly —
+      // header/devToolsEntries.ts's DEV_TOOLS_BUILD_ENABLED reads NEXT_PUBLIC_DEPLOYMENT_ENV,
       // which Next inlines from here. Falls back to an already-public
       // NEXT_PUBLIC_DEPLOYMENT_ENV (the local dev suite sets that ambiently). Ported from
       // next-config-base.mjs:428.
