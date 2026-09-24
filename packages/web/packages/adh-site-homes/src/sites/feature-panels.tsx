@@ -80,8 +80,9 @@ export function productFeaturePanelRenderer({
       case "all-data":
         // The Storage group's third member. The package's own browser, with the crud package's
         // DefaultCrudShell: the hub passes a variant only because it has rail chrome of its own
-        // to publish the schema ▸ table rails into, and this site has none.
-        return <AllDataPane />;
+        // to publish the schema ▸ table rails into, and this site has none. The workspace slug
+        // confines it to the rows that workspace owns, exactly as the hub's mount does.
+        return <AllDataPane workspace={workspaceSlug} />;
       case "email-signup":
         // The Authentication group's fourth member, and the one pane this site genuinely cannot
         // draw: the panel is the hub's, built on hub-local workspace context and API clients, and

@@ -6,6 +6,10 @@ import { CrudDataBrowser, type CrudShell } from "@agentic-toolkit/crud";
 /**
  * All Data as a member of an ecosystem's Storage rail: the cross-schema CRUD browser.
  *
+ * WORKSPACE — `workspace` is the slug whose data this shows. "All data literally shows all data,
+ * it should only show data owned by the workspace" (Mike, 2026-09-24): pass it, and the browser
+ * lists only that workspace's rows and hides the global catalogs no workspace owns.
+ *
  * SCOPE — read this before mounting it on a new host. It passes no `tables` prop, so the browser
  * falls back to its own default: the WHOLE of CRUD_TABLES. That is every schema in
  * allowed-schemas.json — access, billing, monitoring, system, team, usage and the rest — not just
@@ -25,12 +29,13 @@ import { CrudDataBrowser, type CrudShell } from "@agentic-toolkit/crud";
  * `shell` is the host's stack adapter. Omit it and the browser uses the crud package's own
  * DefaultCrudShell — correct for a host with no rail chrome of its own to publish into.
  */
-export function AllDataPane({ shell }: { shell?: CrudShell }) {
+export function AllDataPane({ shell, workspace }: { shell?: CrudShell; workspace?: string }) {
   const [schema, setSchema] = useState<string | null>(null);
   const [table, setTable] = useState<string | null>(null);
   return (
     <CrudDataBrowser
       shell={shell}
+      workspace={workspace}
       selection={{
         schema,
         table,

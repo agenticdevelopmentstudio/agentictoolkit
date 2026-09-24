@@ -70,6 +70,19 @@ interface CrudDataBrowserCommon {
   /** How to render the schema/table rail. Defaults to a standalone HierarchicalTopicDetail;
    *  inject one (e.g. via StackLevels) to publish into an enclosing workspace shell's stack. */
   shell?: CrudShell
+  /** The workspace slug whose data this browser shows. Every list is sent `?workspace=<slug>`,
+   *  which the backend reads as "only rows this workspace owns", and the rail drops every table
+   *  that cannot be scoped that way — a global catalog no workspace owns would otherwise list
+   *  every tenant's rows under a workspace's name. Omit it for the unscoped, cross-tenant
+   *  browser. */
+  workspace?: string
+}
+
+/** Whether the backend can narrow `meta`'s list to one workspace: it scopes an ecosystem-columned
+ *  table to the workspace's ecosystems, and an owner-pair table to the workspace's owner. */
+function isWorkspaceScopable(meta: CrudTableMeta): boolean {
+  const names = new Set(meta.columns.map((c) => c.name))
+  return names.has('ecosystemId') || (names.has('ownerKind') && names.has('ownerId'))
 }
 
 /**
@@ -107,7 +120,7 @@ export type CrudDataBrowserProps = CrudDataBrowserCommon &
  * segment falls back to "nothing open" rather than a phantom selection.
  */
 export function CrudDataBrowser(props: CrudDataBrowserProps) {
-  const { tables, shell, selection, basePath, activeSchema, activeTable } = props
+  const { tables, shell, workspace, selection, basePath, activeSchema, activeTable } = props
   const router = useRouter()
   // Admin-tier tables are hidden from a non-admin viewer: the backend refuses them outright, so
   // listing them offers a row whose only outcome is a 403. Catalog-tier tables stay listed —
@@ -121,8 +134,12 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
   const { isAdmin: viewerIsAdmin, ready: viewerReady } = useViewer()
   const allTables = useMemo(
     () =>
-      viewerReady ? readableTables(tables ?? Object.values(CRUD_TABLES), viewerIsAdmin) : [],
-    [tables, viewerIsAdmin, viewerReady],
+      viewerReady
+        ? readableTables(tables ?? Object.values(CRUD_TABLES), viewerIsAdmin).filter(
+            (t) => !workspace || isWorkspaceScopable(t),
+          )
+        : [],
+    [tables, viewerIsAdmin, viewerReady, workspace],
   )
 
   // level 0 = distinct schemas (sorted); level 1 = the open schema's tables (sorted). Schemas
@@ -241,7 +258,12 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
       Loading…
     </p>
   ) : tableSelected ? (
-    <CrudDataView key={tableSelected.key} meta={tableSelected} onGuardChange={registerGuard} />
+    <CrudDataView
+      key={tableSelected.key}
+      meta={tableSelected}
+      filter={workspace ? { workspace } : undefined}
+      onGuardChange={registerGuard}
+    />
   ) : (
     <p className="p-6 font-mono text-sm text-apt-text-dim" role="status">
       {schemaSelected ? 'Pick a table to view its data.' : 'Pick a schema, then a table.'}

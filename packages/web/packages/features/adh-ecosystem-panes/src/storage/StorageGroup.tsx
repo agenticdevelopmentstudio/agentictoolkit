@@ -131,7 +131,7 @@ export function StorageGroup({
     "all-data": {
       label: "All Data",
       icon: <Database size={16} aria-hidden />,
-      render: () => renderAllData?.() ?? <AllDataPane />,
+      render: () => renderAllData?.() ?? <AllDataPane workspace={workspaceSlug} />,
     },
     // The `adh_…` storage-access principals, each of which owns its own isolated bucket — which
     // is what earns this row a place in THIS rail rather than only under Orgs ▸ Configuration,
