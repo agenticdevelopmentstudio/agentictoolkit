@@ -3,7 +3,7 @@ id: 2f1d9160-a055-4aca-8dff-86d39cc0b76a
 title: Chat Transcript Row View
 domain: agentictoolkit://recipes/chat-transcript-row-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
@@ -186,13 +186,15 @@ Not applicable: `ChatTranscriptRowView.swift` contains no URL scheme, route, or 
 
 ## Localization
 
-The three user-facing strings in this file are hardcoded English literals with no override option today; the table below documents them for a future localization layer, and does not reflect a runtime lookup by key in the current source.
+The three user-facing strings in this file are hardcoded English literals with no override option today; the table lists them as built.
 
 | String Key | Default (en) | Context |
 |-----------|-------------|---------|
-| chat_row_jump_tooltip_generic | "Go to this conversation" | Tooltip on the app icon when `attribution.appIdentity` is empty |
-| chat_row_jump_tooltip_named | "Go to this conversation in {appIdentity}" | Tooltip on the app icon when `attribution.appIdentity` is non-empty |
-| chat_row_jump_accessibility_label | "Go to {attribution.headerLine}" | Accessibility label on the app icon, set only when `actions.onJump` is wired |
+| n/a (literal) | "Go to this conversation" | Tooltip on the app icon when `attribution.appIdentity` is empty |
+| n/a (literal) | "Go to this conversation in {appIdentity}" | Tooltip on the app icon when `attribution.appIdentity` is non-empty |
+| n/a (literal) | "Go to {attribution.headerLine}" | Accessibility label on the app icon, set only when `actions.onJump` is wired |
+
+NEEDS REVIEW: Not implemented in source. The app-icon tooltips and `setAccessibilityLabel("Go to \(attribution.headerLine)")` (ChatTranscriptRowView.swift:343) are — plain `String` literals, none routed through `String(localized:)` or `NSLocalizedString`, so none reaches a string catalog. What is missing: localization keys and catalog entries for the two tooltips and the jump accessibility label. What would settle it: routing the literals through `String(localized:)` in source.
 
 ## Accessibility Options
 
@@ -279,3 +281,4 @@ Not applicable: `ChatTranscriptRowView.swift` contains no logging calls (no `os_
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Claude Sonnet 5 | Initial creation from the macOS/AppKit source (ChatTranscriptRowView.swift) |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: corrected the WinUI 3 double-click note and added a select-then-open vector; gave the showsInlineTimestamp decision a real rationale; retargeted the bubble/typing-indicator links to this repo's own recipes and populated depends-on; fixed the bubble-width floor boundary from 88pt to 168pt with new vectors; corrected the user-facing-string count and vector 037's wording; reworded hover-fill-when-pressable to name the actual hit-test check; settled the keyboard-path-for-open accessibility question from ChatView.swift's Return handler and corrected the touch-target open question's false SessionHeaderView-padding claim; reclassified keyboard-navigable and reduced-motion as partial and dropped touch-target-size from Compliance |
+| 1.1.1 | 2026-09-23 | Mike Fullerton | Recorded the unlocalized jump-control literals as an open question; replaced proposed localization keys with n/a (literal) |

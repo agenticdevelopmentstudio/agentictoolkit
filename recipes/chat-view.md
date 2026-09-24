@@ -3,7 +3,7 @@ id: 4d0c6859-ed34-46ca-bfe4-ca87234ad684
 title: ChatView
 domain: agentictoolkit://recipes/chat-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
@@ -227,8 +227,10 @@ Not applicable: `ChatView` contains no URL scheme or deep-link handling in sourc
 
 | String Key | Default (en) | Context |
 |-----------|-------------|---------|
-| `chat.composer.placeholder` (proposed; source hardcodes the literal with no key) | `Type a message...` | Composer placeholder text shown while the field is empty |
-| `chat.send.accessibility` (proposed; source hardcodes the literal with no key) | `Send` | Accessibility description on the send button's SF Symbol image |
+| n/a (literal) | `Type a message...` | Composer placeholder text shown while the field is empty |
+| n/a (literal) | `Send` | Accessibility description on the send button's SF Symbol image |
+
+NEEDS REVIEW: Not implemented in source. The composer placeholder `"Type a message..."` (ChatView.swift:253) and the send image's accessibility description `"Send"` (:292) are — plain `String` literals, none routed through `String(localized:)` or `NSLocalizedString`, so none reaches a string catalog. What is missing: localization keys and catalog entries for the placeholder and the send button's description. What would settle it: routing the literals through `String(localized:)` in source.
 
 ## Accessibility Options
 
@@ -322,3 +324,4 @@ Statuses rest on: the accessibility identifiers present throughout but the two s
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: recast the plain-bubble floor and failed-session-state behavior as pending Design Decisions instead of MUSTs; rephrased transcript-explicit-width as observable resize behavior; stated the 200pt floor in plain-bubble-width-cap; filled depends-on with the composed child recipes; trimmed the summary; clarified Return's composer-vs-selection ambiguity; added modifier-guard test vectors for `g` and modified `m`; corrected WinUI 3 (`Divider`, `SystemAnimationsAreEnabled`) and Compose (`LocalAccessibilityManager`) platform-note inaccuracies; removed internal-symbol leakage from the SwiftUI, Compose, and WinUI 3 notes; reconciled the Reduce Motion cross-references with the delegated status in Accessibility Options; and proposed localization keys |
+| 1.1.1 | 2026-09-23 | Mike Fullerton | Recorded the unlocalized composer placeholder and Send button literals as an open question; replaced proposed localization keys with n/a (literal) |

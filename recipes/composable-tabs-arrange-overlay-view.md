@@ -3,7 +3,7 @@ id: bfc2dcde-d905-4923-bff2-577c85f17d5f
 title: ComposableTabsArrangeOverlayView
 domain: agentictoolkit://recipes/composable-tabs-arrange-overlay-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
@@ -324,6 +324,8 @@ Not applicable beyond the table above: the pane-name text shown by
 `paneName` is supplied by the caller (an already-resolved display name from
 elsewhere in the app), not a literal string this file owns.
 
+NEEDS REVIEW: Not implemented in source. The `"Add"`, `"Remove"`, and `"Done"` button titles (ComposableTabsArrangeOverlayView.swift:53–55) and the `"Move"` pull-down title are — plain `String` literals, none routed through `String(localized:)` or `NSLocalizedString`, so none reaches a string catalog. What is missing: localization keys and catalog entries for the four titles. What would settle it: routing the literals through `String(localized:)` in source.
+
 ## Accessibility Options
 
 - **Reduce Motion**: Not applicable — no animation, transition, or
@@ -538,3 +540,4 @@ directly under **Accessibility Options** below.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: fixed scrim-opacity wording, removed unverified keystroke-blocking claim, restated source-comment citations as direct claims, qualified the Direction type, corrected the accessibility-prefix and test-vector-029 API mismatch, fixed compose/swiftui/winui/web platform-note errors, replaced "Tapping" with "clicking or activating", reformatted Design Decisions, corrected the Compliance table to only cite checks defined in the catalog, and fixed frontmatter tags/related/change-history |
+| 1.1.1 | 2026-09-23 | Mike Fullerton | Recorded the unlocalized Add/Remove/Done/Move button literals as an open question |

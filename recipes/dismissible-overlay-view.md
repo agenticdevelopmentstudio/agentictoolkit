@@ -3,7 +3,7 @@ id: 0bc93127-4078-4bc6-a250-04dde181788b
 title: DismissibleOverlayView
 domain: agentictoolkit://recipes/dismissible-overlay-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -11,8 +11,8 @@ modified: '2026-09-23'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
-summary: An open NSView base class that covers its host with a blurred, fading backdrop
-  and dismisses itself on an unclaimed click, Escape, or Return.
+summary: Covers its host with a blurred, fading backdrop and dismisses itself on
+  an unclaimed click, Escape, or Return.
 platforms:
 - swift
 - macos
@@ -23,9 +23,10 @@ tags:
 - macos
 - appkit
 depends-on: []
-related: []
-references:
+related:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references:
+- https://developer.apple.com/design/human-interface-guidelines/motion
 approved-by: ''
 approved-date: ''
 ---
@@ -49,83 +50,83 @@ whatever it has running that needs to stop.
 
 ## Behavioral Requirements
 
-- **confines-mutation-to-main-actor**: Component MUST only be constructed or
+- **main-actor-isolation**: Component MUST only be constructed or
   mutated from the main actor; the class is declared `@MainActor`.
-- **rejects-storyboard-instantiation**: Component MUST fail with a fatal
+- **coder-init**: Component MUST fail with a fatal
   error if constructed via `init?(coder:)`, since it provides no Interface
   Builder/`NSCoding` support.
-- **participates-in-auto-layout**: Component MUST set
+- **auto-layout-participation**: Component MUST set
   `translatesAutoresizingMaskIntoConstraints = false` on both itself and its
   backdrop, and MUST set `wantsLayer = true` on itself, at construction.
-- **renders-blurred-backdrop**: Component MUST add an `NSVisualEffectView`
+- **blurred-backdrop**: Component MUST add an `NSVisualEffectView`
   backdrop, pinned to its own top, leading, trailing, and bottom anchors,
   with `blendingMode == .withinWindow` and `state == .active`.
-- **backdrop-is-added-first**: The backdrop MUST be added as this view's
+- **backdrop-subview-order**: The backdrop MUST be added as this view's
   subview during `DismissibleOverlayView`'s own `init`, before any
   subclass's designated initializer can add subviews of its own, so the
   backdrop is always the first (bottommost) subview.
-- **defaults-backdrop-material-to-hud-window**: Component MUST use
+- **backdrop-material-default**: Component MUST use
   `.hudWindow` as the backdrop's `material` when no `material` argument is
   supplied to `init`.
-- **accepts-caller-supplied-material**: Component MUST use the
+- **backdrop-material-override**: Component MUST use the
   caller-supplied `material` value for the backdrop's `material` when one is
   passed to `init`.
-- **covers-host-entirely-on-present**: `present(in:)` MUST add itself as a
+- **host-coverage**: `present(in:)` MUST add itself as a
   subview of `host` and constrain its top, leading, trailing, and bottom
   anchors equal to `host`'s corresponding anchors.
-- **completes-layout-before-fade-in**: `present(in:)` MUST set `alphaValue`
+- **present-layout-order**: `present(in:)` MUST set `alphaValue`
   to 0, then call `host.layoutSubtreeIfNeeded()` and its own
   `displayIfNeeded()`, before starting the fade-in animation.
-- **fades-in-on-present**: `present(in:)` MUST animate `alphaValue` from 0 to
+- **present-fade**: `present(in:)` MUST animate `alphaValue` from 0 to
   1 over `fadeDuration` (0.2 seconds).
-- **fades-out-on-dismiss**: `dismiss()` MUST animate `alphaValue` to 0 over
+- **dismiss-fade**: `dismiss()` MUST animate `alphaValue` to 0 over
   `fadeDuration` (0.2 seconds).
-- **removes-from-superview-after-fade-out**: `dismiss()` MUST remove the
+- **post-fade-removal**: `dismiss()` MUST remove the
   view from its superview once the fade-out animation's completion handler
   runs.
-- **dismiss-is-idempotent**: `dismiss()` MUST have no further effect (no
-  repeated `willDismiss()` call, no repeated `onDismissed` invocation, no
-  additional animation) on any call after the first, because it returns
-  immediately when `isDismissing` is already `true`.
-- **sets-dismissing-flag-synchronously**: `dismiss()` MUST set `isDismissing`
+- **dismiss-idempotency**: `dismiss()` MUST have no further effect on any
+  call after the first — an observable consequence of `dismissing-flag-timing`,
+  since `dismiss()` returns immediately whenever `isDismissing` is already
+  `true`.
+- **dismissing-flag-timing**: `dismiss()` MUST set `isDismissing`
   to `true` synchronously, before calling `willDismiss()`, invoking
   `onDismissed`, or starting the fade-out animation.
-- **calls-will-dismiss-before-fade-out**: `dismiss()` MUST call
+- **will-dismiss-timing**: `dismiss()` MUST call
   `willDismiss()` before starting the fade-out animation.
-- **invokes-dismissed-callback-before-fade-completes**: `dismiss()` MUST
+- **dismissed-callback-timing**: `dismiss()` MUST
   invoke `onDismissed`, when set, synchronously, immediately after
   `willDismiss()` and before the fade-out animation's completion handler
   runs.
-- **no-op-will-dismiss-by-default**: `willDismiss()` MUST do nothing in the
+- **default-will-dismiss**: `willDismiss()` MUST do nothing in the
   base class implementation.
-- **dismisses-on-unhandled-mouse-down**: `mouseDown(with:)` MUST call
+- **mouse-down-dismissal**: `mouseDown(with:)` MUST call
   `dismiss()` whenever the event reaches this view (i.e. no subview claimed
   it first).
-- **defers-key-equivalent-to-subviews-first**: `performKeyEquivalent(with:)`
+- **key-equivalent-subview-priority**: `performKeyEquivalent(with:)`
   MUST return `true` without calling `dismiss()` when
   `super.performKeyEquivalent(with:)` (a subview) already handled the event.
-- **dismisses-on-escape-or-return**: `performKeyEquivalent(with:)` MUST call
+- **escape-return-dismissal**: `performKeyEquivalent(with:)` MUST call
   `dismiss()` and return `true` when the event's `keyCode` is 53 (Escape), 36
   (Return), or 76 (keypad Enter), `isDismissing` is `false`, and no subview
   handled the event first.
-- **ignores-non-dismiss-key-equivalents**: `performKeyEquivalent(with:)`
+- **non-dismiss-key-equivalents**: `performKeyEquivalent(with:)`
   MUST return `false` for a key event whose `keyCode` is not 53, 36, or 76,
   when no subview handled the event first.
-- **ignores-key-equivalents-while-dismissing**: `performKeyEquivalent(with:)`
+- **key-equivalents-during-dismissal**: `performKeyEquivalent(with:)`
   MUST return `false` for a dismiss-key event when `isDismissing` is already
   `true`.
-- **supports-open-subclassing**: The class, `present(in:)`, `willDismiss()`,
+- **open-subclassing**: The class, `present(in:)`, `willDismiss()`,
   `mouseDown(with:)`, and `performKeyEquivalent(with:)` MUST be declared
   `open`, so a subclass can override presentation, add its own content above
   the backdrop, and extend dismissal handling.
-- **overrides-will-dismiss-for-cleanup**: Subclasses SHOULD override
+- **will-dismiss-cleanup**: Subclasses SHOULD override
   `willDismiss()` to stop any timers, polling, or other ongoing work they
   own, since it is called once, before the fade-out begins, and the base
   class stops nothing on a subclass's behalf. A subclass with nothing
   running MAY leave the default no-op override in place; this is a
   recommendation for subclass authors, not a behavior this component can
   itself verify (see Design Decisions).
-- **may-omit-dismissed-callback**: Callers MAY leave `onDismissed` as `nil`,
+- **optional-dismissed-callback**: Callers MAY leave `onDismissed` as `nil`,
   in which case `dismiss()` performs no additional callback work beyond the
   fade-out animation and removal from superview.
 
@@ -159,7 +160,7 @@ whatever it has running that needs to stop.
 | Removed (after fade-out completes) | The view has been removed from its superview and no longer draws or receives events |
 | Pressed | Not applicable: the source defines no separate pressed-state styling; a press either reaches `mouseDown` (triggering dismissal, not a visual change) or is claimed by a subview's own control. |
 | Disabled | Not applicable: the source exposes no `isEnabled` property or disabled-state styling. |
-| Focused | Not applicable: per `defers-key-equivalent-to-subviews-first`'s doc comment, the overlay deliberately never becomes first responder — `performKeyEquivalent` catches Escape/Return without requiring key/focus status, so it defines no focused appearance. |
+| Focused | Not applicable: per the source doc comment on `performKeyEquivalent(with:)` (see `key-equivalent-subview-priority`), the overlay deliberately never becomes first responder — `performKeyEquivalent` catches Escape/Return without requiring key/focus status, so it defines no focused appearance. |
 | Loading | Not applicable: the source performs no asynchronous operation and defines no loading flag, spinner, or placeholder state. |
 
 ## Accessibility
@@ -198,7 +199,7 @@ whatever it has running that needs to stop.
   to confirm whether the host's underlying controls remain reachable, and
   whether that is acceptable given they are also visually hidden.
 - **Minimum tap target**: Not applicable in the small-target sense — per
-  `dismisses-on-unhandled-mouse-down` and `covers-host-entirely-on-present`,
+  `mouse-down-dismissal` and `host-coverage`,
   the dismiss gesture's target is the overlay's entire frame, which itself
   covers the host entirely; there is no small tap target to size.
 - **Minimum contrast ratio**: Not applicable to this base view — it renders
@@ -210,34 +211,35 @@ whatever it has running that needs to stop.
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| dismissible-overlay-001 | confines-mutation-to-main-actor | Attempt to call `init` or any public method from a non-main-actor context | Code does not compile (Swift concurrency checker rejects the call) |
-| dismissible-overlay-002 | rejects-storyboard-instantiation | `DismissibleOverlayView(coder:)` invoked (e.g. via nib/storyboard unarchiving) | Process traps with a fatal error |
-| dismissible-overlay-003 | participates-in-auto-layout | Inspect a freshly constructed instance and its backdrop | `translatesAutoresizingMaskIntoConstraints == false` on both self and the backdrop; `wantsLayer == true` on self |
-| dismissible-overlay-004 | renders-blurred-backdrop | Inspect the backdrop after construction | An `NSVisualEffectView` subview exists with `blendingMode == .withinWindow` and `state == .active` |
-| dismissible-overlay-005 | backdrop-is-added-first | Construct a subclass that adds one content subview after calling `super.init` | `subviews.first` is the backdrop; the content subview appears after it |
-| dismissible-overlay-006 | defaults-backdrop-material-to-hud-window | `DismissibleOverlayView()` (no `material` argument) | Backdrop's `material == .hudWindow` |
-| dismissible-overlay-007 | accepts-caller-supplied-material | `DismissibleOverlayView(material: .sidebar)` | Backdrop's `material == .sidebar` |
-| dismissible-overlay-008 | covers-host-entirely-on-present | `present(in: host)` | Overlay is a subview of `host`, with top/leading/trailing/bottom anchors each constrained equal to the matching host anchor |
-| dismissible-overlay-009 | completes-layout-before-fade-in | Call `present(in: host)`; inspect state synchronously before the animation's first frame | `host.layoutSubtreeIfNeeded()` and the overlay's `displayIfNeeded()` have run, and `alphaValue == 0`, before `NSAnimationContext.runAnimationGroup` begins |
-| dismissible-overlay-010 | fades-in-on-present | Call `present(in: host)` | `alphaValue` animates from 0 to 1 over exactly 0.2s |
-| dismissible-overlay-011 | fades-out-on-dismiss | Call `dismiss()` on a fully presented overlay | `alphaValue` animates from 1 to 0 over exactly 0.2s |
-| dismissible-overlay-012 | removes-from-superview-after-fade-out | Call `dismiss()` and wait for the fade-out animation to complete | The overlay's `superview` becomes `nil` once the completion handler runs |
-| dismissible-overlay-013 | dismiss-is-idempotent | Call `dismiss()` twice in immediate succession | `willDismiss()` and `onDismissed` are each invoked exactly once; exactly one fade-out animation runs |
-| dismissible-overlay-014 | sets-dismissing-flag-synchronously | Call `dismiss()`; read `isDismissing` synchronously, before the animation completes | `isDismissing == true` immediately |
-| dismissible-overlay-015 | calls-will-dismiss-before-fade-out | Override `willDismiss()` to record a timestamp, then call `dismiss()` | The recorded timestamp precedes any change to `alphaValue` |
-| dismissible-overlay-016 | invokes-dismissed-callback-before-fade-completes | Set `onDismissed` to record a timestamp, then call `dismiss()` | The recorded timestamp precedes the fade-out animation's completion handler |
-| dismissible-overlay-017 | no-op-will-dismiss-by-default | Call `dismiss()` on a plain (non-subclassed) instance | No observable side effect beyond the fade-out and removal; no crash |
-| dismissible-overlay-018 | dismisses-on-unhandled-mouse-down | Deliver a `mouseDown` event to the overlay itself, unclaimed by any subview | `dismiss()` is invoked |
-| dismissible-overlay-019 | defers-key-equivalent-to-subviews-first | Add a subview whose own `performKeyEquivalent` returns `true` for Return, then send a Return key event | `performKeyEquivalent` returns `true`; `dismiss()` is NOT invoked |
-| dismissible-overlay-020 | dismisses-on-escape-or-return | Send a key event with `keyCode == 53` (Escape), unclaimed by any subview | `performKeyEquivalent` returns `true`; `dismiss()` is invoked |
-| dismissible-overlay-020b | dismisses-on-escape-or-return | Same as above with `keyCode == 36` (Return) | Same as above |
-| dismissible-overlay-020c | dismisses-on-escape-or-return | Same as above with `keyCode == 76` (keypad Enter) | Same as above |
-| dismissible-overlay-021 | ignores-non-dismiss-key-equivalents | Send a key event with `keyCode == 49` (Space), unclaimed by any subview | `performKeyEquivalent` returns `false`; `dismiss()` is NOT invoked |
-| dismissible-overlay-022 | ignores-key-equivalents-while-dismissing | Call `dismiss()`, then immediately send `keyCode == 53` before the fade-out completes | `performKeyEquivalent` returns `false`; `dismiss()` is not invoked a second time |
-| dismissible-overlay-023 | supports-open-subclassing | Define a subclass overriding `present(in:)`, `willDismiss()`, `mouseDown(with:)`, and `performKeyEquivalent(with:)` | Code compiles; the subclass's overrides run in place of the base implementation |
-| dismissible-overlay-024 | may-omit-dismissed-callback | Leave `onDismissed` as `nil`, then call `dismiss()` | No crash; the fade-out animation and removal from superview still proceed |
+| dismissible-overlay-001 | main-actor-isolation | Attempt to call `init` or any public method from a non-main-actor context | Code does not compile (Swift concurrency checker rejects the call) |
+| dismissible-overlay-002 | coder-init | `DismissibleOverlayView(coder:)` invoked (e.g. via nib/storyboard unarchiving) | Process traps with a fatal error |
+| dismissible-overlay-003 | auto-layout-participation | Inspect a freshly constructed instance and its backdrop | `translatesAutoresizingMaskIntoConstraints == false` on both self and the backdrop; `wantsLayer == true` on self |
+| dismissible-overlay-004 | blurred-backdrop | Inspect the backdrop after construction | An `NSVisualEffectView` subview exists with `blendingMode == .withinWindow` and `state == .active` |
+| dismissible-overlay-005 | backdrop-subview-order | Construct a subclass that adds one content subview after calling `super.init` | `subviews.first` is the backdrop; the content subview appears after it |
+| dismissible-overlay-006 | backdrop-material-default | `DismissibleOverlayView()` (no `material` argument) | Backdrop's `material == .hudWindow` |
+| dismissible-overlay-007 | backdrop-material-override | `DismissibleOverlayView(material: .sidebar)` | Backdrop's `material == .sidebar` |
+| dismissible-overlay-008 | host-coverage | `present(in: host)` | Overlay is a subview of `host`, with top/leading/trailing/bottom anchors each constrained equal to the matching host anchor |
+| dismissible-overlay-009 | present-layout-order | Call `present(in: host)`, then synchronously (before the next run-loop turn) inspect `host`'s subview layout and the overlay's `frame` | `host`'s subtree is already laid out and the overlay's `frame` already reflects its final host-pinned size at the moment `present(in:)` returns, before any animation frame renders |
+| dismissible-overlay-010 | present-fade | Call `present(in: host)`, inspecting `NSAnimationContext.current.duration` from inside an injected/overridden animation hook (e.g. a test subclass that captures the context passed to `runAnimationGroup`) | `NSAnimationContext.current.duration == fadeDuration` (0.2s) while the group runs; `alphaValue` reaches `1` once the animation completes |
+| dismissible-overlay-011 | dismiss-fade | Call `dismiss()` on a fully presented overlay, inspecting `NSAnimationContext.current.duration` from the same injected/overridden animation hook | `NSAnimationContext.current.duration == fadeDuration` (0.2s) while the group runs; `alphaValue` reaches `0` once the completion handler runs |
+| dismissible-overlay-012 | post-fade-removal | Call `dismiss()` and wait for the fade-out animation to complete | The overlay's `superview` becomes `nil` once the completion handler runs |
+| dismissible-overlay-013 | dismiss-idempotency | Call `dismiss()` twice in immediate succession | `willDismiss()` and `onDismissed` are each invoked exactly once; exactly one fade-out animation runs |
+| dismissible-overlay-014 | dismissing-flag-timing | Call `dismiss()`; read `isDismissing` synchronously, before the animation completes | `isDismissing == true` immediately |
+| dismissible-overlay-015 | will-dismiss-timing | Override `willDismiss()` to record a timestamp, then call `dismiss()` | The recorded timestamp precedes any change to `alphaValue` |
+| dismissible-overlay-016 | dismissed-callback-timing | Set `onDismissed` to record a timestamp, then call `dismiss()` | The recorded timestamp precedes the fade-out animation's completion handler |
+| dismissible-overlay-017 | default-will-dismiss | Call `dismiss()` on a plain (non-subclassed) instance | No observable side effect beyond the fade-out and removal; no crash |
+| dismissible-overlay-018 | mouse-down-dismissal | Deliver a `mouseDown` event to the overlay itself, unclaimed by any subview | `dismiss()` is invoked |
+| dismissible-overlay-019 | key-equivalent-subview-priority | Add a subview whose own `performKeyEquivalent` returns `true` for Return, then send a Return key event | `performKeyEquivalent` returns `true`; `dismiss()` is NOT invoked |
+| dismissible-overlay-020 | escape-return-dismissal | Send a key event with `keyCode == 53` (Escape), unclaimed by any subview | `performKeyEquivalent` returns `true`; `dismiss()` is invoked |
+| dismissible-overlay-020b | escape-return-dismissal | Same as above with `keyCode == 36` (Return) | Same as above |
+| dismissible-overlay-020c | escape-return-dismissal | Same as above with `keyCode == 76` (keypad Enter) | Same as above |
+| dismissible-overlay-021 | non-dismiss-key-equivalents | Send a key event with `keyCode == 49` (Space), unclaimed by any subview | `performKeyEquivalent` returns `false`; `dismiss()` is NOT invoked |
+| dismissible-overlay-022 | key-equivalents-during-dismissal | Call `dismiss()`, then immediately send `keyCode == 53` before the fade-out completes | `performKeyEquivalent` returns `false`; `dismiss()` is not invoked a second time |
+| dismissible-overlay-023 | open-subclassing | Define a subclass overriding `present(in:)`, `willDismiss()`, `mouseDown(with:)`, and `performKeyEquivalent(with:)` | Code compiles; the subclass's overrides run in place of the base implementation |
+| dismissible-overlay-024 | optional-dismissed-callback | Leave `onDismissed` as `nil`, then call `dismiss()` | No crash; the fade-out animation and removal from superview still proceed |
+| dismissible-overlay-025 | key-equivalent-subview-priority | Present one `DismissibleOverlayView` in `host`, then present a second instance as a subview added above the first (mirroring "a message expanded over a conversation"); send a key event with `keyCode == 53` (Escape) | `performKeyEquivalent` on the outer (first-presented) overlay returns `true` via its `super.performKeyEquivalent(with:)` call reaching the inner overlay first; only the inner (topmost) overlay's `dismiss()` is invoked, not the outer one's |
 
-`overrides-will-dismiss-for-cleanup` has no test vector: it is guidance for
+`will-dismiss-cleanup` has no test vector: it is guidance for
 what a subclass author puts inside their own override, not a behavior
 `DismissibleOverlayView` itself performs or can verify at the component
 level (see Design Decisions).
@@ -246,25 +248,27 @@ level (see Design Decisions).
 
 - **Null/empty input** (SHOULD/MUST): `onDismissed` defaults to `nil`, and
   `dismiss()` on an instance with `onDismissed == nil` proceeds identically
-  minus the callback (MUST, per `may-omit-dismissed-callback`). `material`
+  minus the callback (MUST, per `optional-dismissed-callback`). `material`
   is a required, typed parameter with a default value (`.hudWindow`), so
   there is no null/empty case for it to guard.
 - **Boundary values** (MUST): `dismissKeyCodes` is a fixed three-value set
   (`{53, 36, 76}`); a `keyCode` either is or is not a member — there is no
   partial match, range, or near-miss behavior (per
-  `dismisses-on-escape-or-return` / `ignores-non-dismiss-key-equivalents`).
+  `escape-return-dismissal` / `non-dismiss-key-equivalents`).
   `fadeDuration` is a single fixed 0.2s value with no configurable minimum
   or maximum.
-- **`present(in:)` called on a momentarily zero-sized host** (MUST): because
-  layout and drawing are forced before the fade starts (per
-  `completes-layout-before-fade-in`), a host that is still zero-sized at the
-  moment of the call produces a zero-sized, effectively invisible overlay;
-  nothing in source detects or defers this case.
-- **`dismiss()` called on an instance never passed to `present(in:)`**
-  (MUST): `removeFromSuperview()` on a view with no superview is a harmless
-  AppKit no-op; `willDismiss()` and `onDismissed` still fire (per
-  `calls-will-dismiss-before-fade-out` and
-  `invokes-dismissed-callback-before-fade-completes`) — `dismiss()` has no
+- **`present(in:)` called on a momentarily zero-sized host**: because layout
+  and drawing are forced before the fade starts (per
+  `present-layout-order`), a host that is still zero-sized at the moment of
+  the call produces a zero-sized first frame; once `host` is later given a
+  real size, the overlay's own edge-pinned constraints (per `host-coverage`)
+  resize it to match — nothing in source detects or defers the zero-sized
+  first frame itself.
+- **`dismiss()` called on an instance never passed to `present(in:)`**:
+  `removeFromSuperview()` on a view with no superview is a harmless AppKit
+  no-op; `willDismiss()` and `onDismissed` still fire (per
+  `will-dismiss-timing` and
+  `dismissed-callback-timing`) — `dismiss()` has no
   guard requiring the view to have been presented first.
 - **Concurrent access**: Not applicable — the class is `@MainActor`; the
   Swift compiler confines every stored-property read/write and UI mutation
@@ -281,15 +285,16 @@ level (see Design Decisions).
   anywhere in this file.
 - **Escape and an unclaimed click arriving in the same runloop turn**
   (MUST): because `isDismissing` flips to `true` synchronously on the first
-  call to `dismiss()` (per `sets-dismissing-flag-synchronously`), whichever
+  call to `dismiss()` (per `dismissing-flag-timing`), whichever
   gesture is processed second sees `isDismissing == true` and is a
   guaranteed no-op — this is not a race that depends on animation timing.
 - **A second overlay presented on top of the first** (MUST, per the class
   doc comment's "a message expanded over a conversation"): because
   `performKeyEquivalent` offers the event to subviews first (per
-  `defers-key-equivalent-to-subviews-first`), the topmost overlay — being
-  the nearer subview in the responder chain — is the one Escape dismisses,
-  not the one underneath it.
+  `key-equivalent-subview-priority`), the topmost overlay — being the nearer
+  subview in the responder chain — is the one Escape dismisses, not the one
+  underneath it; see `dismissible-overlay-025` for the two-overlay vector
+  this rests on.
 
 ## Configuration
 
@@ -300,6 +305,7 @@ level (see Design Decisions).
 |--------|------|---------|-------------|
 | `material` | `NSVisualEffectView.Material` | `.hudWindow` | Backdrop blur material, set once at `init` and never reassigned afterward |
 | `onDismissed` | `(() -> Void)?` | `nil` | Invoked synchronously once `dismiss()` begins, before the fade-out animation completes |
+| `isDismissing` | `Bool` | `false` | `public private(set)` — readable by any caller, but only `dismiss()` itself can set it; `true` from the first `dismiss()` call onward |
 
 ```swift
 public static let fadeDuration: TimeInterval = 0.2
@@ -334,8 +340,10 @@ adds above the backdrop, which is out of scope for this recipe.
 - **Reduce Motion**: Supported: `present(in:)` and `dismiss()` animate only
   `alphaValue` (a 0.2s opacity fade via `NSAnimationContext`, duration
   `fadeDuration`); nothing moves, scales, or slides. A cross-fade is the
-  substitute Apple's guidance recommends when Reduce Motion is on, so no
-  separate Reduce Motion path is needed. A port keeps the fade opacity-only.
+  substitute the [Apple Human Interface Guidelines' Motion
+  page](https://developer.apple.com/design/human-interface-guidelines/motion)
+  recommends when Reduce Motion is on, so no separate Reduce Motion path is
+  needed. A port keeps the fade opacity-only.
 - **Increase Contrast**: Not applicable — this file chooses no color values
   of its own; the backdrop's appearance is entirely AppKit's system
   `NSVisualEffectView.Material` rendering, not anything this view controls.
@@ -385,7 +393,7 @@ or `print`).
   beneath, not around, the content, so a content control's own gesture
   claims the touch first). SwiftUI has no direct equivalent of
   `performKeyEquivalent`'s free "offer to subviews first" behavior;
-  reproduce `defers-key-equivalent-to-subviews-first` with `.onExitCommand`
+  reproduce `key-equivalent-subview-priority` with `.onExitCommand`
   (Escape) plus a hidden default-action `Button` (Return) attached at the
   overlay's own level, and make sure any focused child control that wants
   Return/Escape for itself (e.g. a multiline text editor) is given priority
@@ -400,7 +408,7 @@ or `print`).
   to match `fadeDuration`. Dismiss on an unclaimed tap via a
   `pointerInput { detectTapGestures { dismiss() } }` modifier on the
   backdrop `Box` placed beneath any content `Box`es, so content added on top
-  intercepts first (mirroring `dismisses-on-unhandled-mouse-down`). There is
+  intercepts first (mirroring `mouse-down-dismissal`). There is
   no Escape/Return key-equivalent on a touch-first platform; map the
   system Back gesture/button via `BackHandler { dismiss() }` instead.
 - **React/Web**: Use an absolutely positioned, full-container `<div>` with
@@ -410,12 +418,12 @@ or `print`).
   Attach the dismiss `onClick` handler to that backdrop `<div>` itself, not
   to an ancestor wrapping the content, so a content control's own `onClick`
   with `stopPropagation()` claims the click first (mirroring
-  `dismisses-on-unhandled-mouse-down`). Attach a `keydown` listener for
+  `mouse-down-dismissal`). Attach a `keydown` listener for
   `Escape`/`Enter` at the overlay's own container and have any content
   control that wants those keys for itself call `stopPropagation()`, so the
   overlay's own listener — running last via normal DOM bubbling — only fires
   when nothing else claimed the key (mirroring
-  `defers-key-equivalent-to-subviews-first`).
+  `key-equivalent-subview-priority`).
 - **AppKit/UIKit** (source platform): Implemented in
   `packages/apple/AgenticToolkit/CoreUI/DismissibleOverlayView.swift` as an
   `open`, `@MainActor`, `NSView` subclass; the only import is `AppKit`, and
@@ -431,7 +439,7 @@ or `print`).
   equivalent affordance for a touch-only device, a UIKit port would need an
   explicit on-screen dismiss control (e.g. a close button) that this macOS
   source has no need for.
-- **WinUI 3** (the reason this recipe exists): Build the backdrop as a
+- **WinUI 3**: Build the backdrop as a
   full-bleed `Border` behind the content, with `Background="{ThemeResource
   AcrylicInAppFillColorDefaultBrush}"` (an `AcrylicBrush`) as the platform's
   real backdrop-blur primitive — the nearest analog to `.hudWindow`, unlike
@@ -440,95 +448,115 @@ or `print`).
   (present) and 1→0 (dismiss) over `Duration="0:0:0.2"`, matching
   `fadeDuration`; on the dismiss storyboard's `Completed` event, remove the
   element from its parent panel's `Children`, mirroring
-  `removes-from-superview-after-fade-out`. Attach a `Tapped` handler to the
+  `post-fade-removal`. Attach a `Tapped` handler to the
   backdrop `Border` itself, not to a `Grid` that also hosts the content, so
   a content `Button`'s own `Click`/`Tapped` event (which WinUI marks handled
   by default) never reaches it, mirroring
-  `dismisses-on-unhandled-mouse-down`. Register `KeyboardAccelerator`s for
+  `mouse-down-dismissal`. Register `KeyboardAccelerator`s for
   `VirtualKey.Escape` and `VirtualKey.Enter` on the overlay's root element,
-  which — like `performKeyEquivalent` — routes the key first to whichever
-  focused descendant control would normally consume it (e.g. a `TextBox`
-  accepting a literal Enter) before the overlay's own accelerator fires,
-  mirroring `defers-key-equivalent-to-subviews-first`; guard the
+  which is meant to mirror `performKeyEquivalent`'s "offer to subviews
+  first" behavior, but `KeyboardAccelerator` precedence relative to a
+  focused control varies by control and is not guaranteed the way
+  `performKeyEquivalent`'s subview-first traversal is — a `TextBox` a reader
+  is typing into does not automatically consume the accelerator, so a porter
+  MUST explicitly mark the key handled (e.g. set `Handled = true` on the
+  `TextBox`'s own `KeyDown`) for any content control that wants Return or
+  Escape for itself, mirroring `key-equivalent-subview-priority`. Guard the
   accelerator's `Invoked` handler with an `isDismissing`-style boolean field,
   since `KeyboardAccelerator.Invoked` has no built-in idempotency the way
   `dismiss()`'s own guard provides.
 
 ## Design Decisions
 
-Decision: `onDismissed` is invoked synchronously inside `dismiss()`,
+**Decision**: `onDismissed` is invoked synchronously inside `dismiss()`,
 immediately after `willDismiss()` and before the fade-out animation
 finishes, rather than from the animation's completion handler.
-Rationale: Per the property's own doc comment, this lets "the owner drop
+**Rationale**: Per the property's own doc comment, this lets "the owner drop
 its reference without waiting out the fade" — an owner that releases its
 only strong reference to the overlay the moment `onDismissed` fires does
 not have to keep it alive for the 0.2s fade, since the fade-out's
 completion closure only touches `self` via a weak reference.
-Approved: pending
+**Approved**: pending
 
-Decision: `dismiss()` sets `isDismissing = true` synchronously, before
+**Decision**: `dismiss()` sets `isDismissing = true` synchronously, before
 calling `willDismiss()`, invoking `onDismissed`, or starting the fade-out
 animation.
-Rationale: Per the property's doc comment, "a reader can press Escape and
+**Rationale**: Per the property's doc comment, "a reader can press Escape and
 click in the same breath" — both `mouseDown` and `performKeyEquivalent`
 route through the same `dismiss()`, and flipping the flag before anything
 else runs is what makes the second of two near-simultaneous dismissal
 gestures a guaranteed no-op rather than a race dependent on animation
 timing.
-Approved: pending
+**Approved**: pending
 
-Decision: Dismissal on Escape/Return is implemented via
+**Decision**: Dismissal on Escape/Return is implemented via
 `performKeyEquivalent`, not `keyDown`, and the overlay never makes itself
 first responder.
-Rationale: Per the method's doc comment, AppKit offers every key-down to
+**Rationale**: Per the method's doc comment, AppKit offers every key-down to
 this subtree via `performKeyEquivalent` before the responder chain sees it,
 so Escape/Return dismiss without the overlay taking first-responder
 status — which would otherwise cost the overlay's own content (e.g. a
 scrollable transcript) the arrow keys and page keys it needs to stay
 readable while presented.
-Approved: pending
+**Approved**: pending
 
-Decision: `mouseDown(with:)` unconditionally calls `dismiss()`, with no
+**Decision**: `mouseDown(with:)` unconditionally calls `dismiss()`, with no
 check of what was clicked, relying entirely on the AppKit responder chain
 to keep the call from firing when a control did claim the click.
-Rationale: Per the method's doc comment, this "works by not being
+**Rationale**: Per the method's doc comment, this "works by not being
 reached": a scroller, button, or selectable text a reader is interacting
 with handles its own `mouseDown` and stops the event there, so this
 override only ever runs for a press nothing else wanted — hit-testing
 subviews manually would duplicate logic the responder chain already
 provides.
-Approved: pending
+**Approved**: pending
 
-Decision: The backdrop's `blendingMode` is fixed to `.withinWindow` and is
+**Decision**: The backdrop's `blendingMode` is fixed to `.withinWindow` and is
 not exposed as an `init` parameter the way `material` is.
-Rationale: Per the inline comment in `init`, what is being blurred is "the
+**Rationale**: Per the inline comment in `init`, what is being blurred is "the
 view directly behind this one, not the desktop — this is a layer over a
 window, not a window over a screen"; every overlay built on this class
 shares that same relationship to its host, so there is no legitimate
 caller-supplied alternative to expose.
-Approved: pending
+**Approved**: pending
+
+**Decision**: `main-actor-isolation` is verified at compile time by the
+Swift concurrency checker, not by an XCTest runtime assertion — a
+non-main-actor call site fails to compile rather than throwing or asserting
+at runtime.
+**Rationale**: `@MainActor` isolation is a type-system property; there is no
+way to construct or call a member of `DismissibleOverlayView` from
+off-actor code that still compiles, so `dismissible-overlay-001` is
+executed as a compile-fail check (e.g. a test target file that must not
+build) rather than a normal test-runner assertion.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | ui-tokens |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | failed | accessibility |
-| [live-region-announcements](agenticdevelopercookbook://compliance/accessibility#live-region-announcements) | failed | accessibility |
-| [reduce-motion-support](agenticdevelopercookbook://compliance/accessibility#reduce-motion-support) | passed | accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [focus-management](agenticdevelopercookbook://compliance/accessibility#focus-management) | partial | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | failed | Accessibility |
+| [reduced-motion](agenticdevelopercookbook://compliance/accessibility#reduced-motion) | passed | Accessibility |
+| [platform-theming](agenticdevelopercookbook://compliance/platform-compliance#platform-theming) | passed | Platform Compliance |
 
 `keyboard-navigable` passes because Escape, Return, and keypad Enter all
 dismiss the overlay without requiring it to become first responder (see
-`dismisses-on-escape-or-return`). `screen-reader-support` and `live-region-announcements` fail for the two
-open questions under Accessibility: no accessibility label and no
-presence/dismissal announcement. `reduce-motion-support` passes because the
-only animation is an opacity fade.
+`escape-return-dismissal`). `focus-management` is `partial`: the overlay
+manages dismissal focus-independently, but the "Keyboard focus containment"
+open question under Accessibility is unresolved in source — nothing traps
+Tab focus to the overlay's own content. `screen-reader-support` fails for
+the "Label requirements" open question: no accessibility label describes
+the overlay's presence or dismissal affordance. `reduced-motion` passes
+because the only animation is an opacity fade (see Accessibility Options).
+`platform-theming` passes because the backdrop's appearance comes entirely
+from a system `NSVisualEffectView.Material` value, not a raw color this
+view chooses itself.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only kebab-case; reformatted Design Decisions to bold three-line form; moved the internal cross-reference from `references` to `related` and added the HIG Motion URL; corrected Compliance to real catalog checks and categories; added a two-overlay conformance vector and an `isDismissing` Configuration row; qualified the WinUI 3 accelerator-precedence claim; tightened animation-timing conformance vectors for XCTest executability; trimmed edge-case RFC tags and fixed the zero-sized-host accuracy issue. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `DismissibleOverlayView` (AppKit, macOS) source. |

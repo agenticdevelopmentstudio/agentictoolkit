@@ -3,7 +3,7 @@ id: 52e34f70-c3d8-4ec6-a753-d9d3cea11789
 title: ComposableTabsViewRegistry
 domain: agentictoolkit://recipes/composable-tabs-view-registry
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -25,7 +25,8 @@ tags:
 depends-on: []
 related: []
 references:
-- https://developer.apple.com/design/human-interface-guidelines/
+- https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html
+- https://developer.apple.com/documentation/appkit/nsviewcontroller
 approved-by: ''
 approved-date: ''
 ---
@@ -64,80 +65,86 @@ consume this registry but are out of scope for this recipe.
 
 ## Behavioral Requirements
 
-- **registers-placeholder-on-init**: `init()` MUST register `.placeholder`,
+- **placeholder-registration**: `init()` MUST register `.placeholder`,
   mapped to a factory that builds `PlaceholderPaneViewController`, before any
   caller can register or query anything else.
-- **register-overwrites-existing-entry**: `register(_:descriptor:factory:)`
+- **register-overwrite**: `register(_:descriptor:factory:)`
   MUST replace any descriptor and factory already registered for that view id.
-- **unregister-refuses-placeholder**: `unregister(_:)` MUST NOT remove the
+- **placeholder-protection**: `unregister(_:)` MUST NOT remove the
   entry for `.placeholder`, MUST return `false` when called with it, and MUST
   log an error.
-- **unregister-removes-a-registered-entry**: `unregister(_:)` MUST remove the
+- **unregister-removal**: `unregister(_:)` MUST remove the
   entry and return `true` for any registered view id other than `.placeholder`.
-- **unregister-reports-absence**: `unregister(_:)` MUST return `false` for a
+- **unregister-absence**: `unregister(_:)` MUST return `false` for a
   view id that has no registered entry.
-- **registered-view-ids-sorted-ascending**: `registeredViewIDs` MUST return
+- **view-id-ordering**: `registeredViewIDs` MUST return
   every registered view id, sorted ascending by `rawValue`.
-- **is-registered-reports-presence**: `isRegistered(_:)` MUST return `true`
+- **registration-presence**: `isRegistered(_:)` MUST return `true`
   only for a view id that has a registered entry.
-- **descriptor-defaults-to-unknown**: `descriptor(for:)` MUST return
+- **descriptor-default**: `descriptor(for:)` MUST return
   `ComposableTabsViewDescriptor.unknown` for a view id with no registered
   entry, and MUST return the registered descriptor otherwise.
-- **make-content-view-controller-invokes-the-registered-factory**:
+- **factory-dispatch**:
   `makeContentViewController(for:nodeID:project:workingDirectory:paneNumber:ownerNodeID:treeID:)`
   MUST invoke the factory registered for that view id, passing it a
   `ComposableTabsViewContext` built from the call's parameters and that
   entry's descriptor.
-- **make-content-view-controller-falls-back-to-a-placeholder**:
+- **unregistered-fallback**:
   `makeContentViewController(...)` MUST return a `PlaceholderPaneViewController`
   carrying the call's `paneNumber`, and MUST log an error, for a view id with
   no registered entry, rather than throwing or trapping.
-- **tree-id-defaults-to-node-id**: `makeContentViewController(...)` MUST set
+- **tree-id-default**: `makeContentViewController(...)` MUST set
   the context's `treeID` to the call's `nodeID` when the `treeID` parameter is
   `nil`.
-- **context-carries-the-call-parameters-unchanged**: `makeContentViewController(...)`
+- **context-passthrough**: `makeContentViewController(...)`
   MUST pass `nodeID`, `project`, `workingDirectory`, `paneNumber`, and
   `ownerNodeID` through to the `ComposableTabsViewContext` exactly as given.
-- **state-store-inherits-owner-node-id**: `ComposableTabsViewContext.makeStateStore(prefix:)`
+- **state-store-owner**: `ComposableTabsViewContext.makeStateStore(prefix:)`
   MUST construct the returned `ProjectPaneStateStore` with the context's
   `project`, `nodeID`, and the given `prefix`, and MUST set the store's
   `ownerNodeID` to the context's `ownerNodeID`.
-- **resolved-holding-priority-honors-an-explicit-value**:
+- **explicit-holding-priority**:
   `ComposableTabsViewDescriptor.resolvedHoldingPriority` MUST return
   `holdingPriority` when it is non-`nil`, regardless of `preferredThicknessFraction`.
-- **resolved-holding-priority-boosts-a-fractioned-pane**: When `holdingPriority`
+- **fractioned-priority-boost**: When `holdingPriority`
   is `nil` and `preferredThicknessFraction` is non-`nil`,
   `resolvedHoldingPriority` MUST return
-  `NSLayoutConstraint.Priority.defaultLow.rawValue + 10`.
-- **resolved-holding-priority-defaults-to-low**: When both `holdingPriority`
+  `NSLayoutConstraint.Priority(rawValue: NSLayoutConstraint.Priority.defaultLow.rawValue + 10)`.
+- **default-low-priority**: When both `holdingPriority`
   and `preferredThicknessFraction` are `nil`, `resolvedHoldingPriority` MUST
   return `NSLayoutConstraint.Priority.defaultLow`.
-- **teardown-conformance-is-optional**: Pane content MAY adopt
+- **optional-teardown**: Pane content MAY adopt
   `PaneContentTeardown` to be told, via `paneContentWillBeDiscarded()`, the
   moment its pane is discarded; content that does not adopt it MUST NOT be
   assumed to need teardown.
-- **removal-confirmation-conformance-is-optional**: Pane content MAY adopt
+- **optional-removal-confirmation**: Pane content MAY adopt
   `PaneContentRemovalConfirmation` to supply a `removalConfirmationMessage`
   describing what would be lost if its pane were closed; content that returns
   `nil`, or does not adopt the protocol, MUST be treated as having nothing to
   lose.
-- **placeholder-shows-the-pane-number**: `PlaceholderPaneViewController` MUST
+- **placeholder-pane-number**: `PlaceholderPaneViewController` MUST
   display the literal text "Pane N", where N is the 1-based `paneNumber` it
   was constructed with.
-- **placeholder-tints-by-series-color**: `PlaceholderPaneViewController` MUST
+- **placeholder-series-tint**: `PlaceholderPaneViewController` MUST
   set its container's layer background to
   `palette.chartSeriesNSColors[(paneNumber - 1) % series.count]` at 0.15 alpha
   whenever the active theme's chart-series color list is non-empty.
-- **placeholder-skips-the-tint-when-the-series-is-empty**:
+- **empty-series-no-tint**:
   `PlaceholderPaneViewController` MUST NOT set a background tint when the
   active theme's chart-series color list is empty.
-- **placeholder-retints-on-theme-change**: `PlaceholderPaneViewController`
+- **placeholder-retint**: `PlaceholderPaneViewController`
   MUST re-evaluate its tint, via `observeTheme`, every time the active theme
   changes.
-- **placeholder-title-is-centered**: `PlaceholderPaneViewController` MUST
+- **stale-tint-persistence**: When **placeholder-retint**'s handler
+  re-evaluates and the newly active theme's chart-series color list is empty,
+  `PlaceholderPaneViewController` MUST leave the container's existing
+  background tint unchanged rather than clearing it — the early-return guard
+  makes no assignment on that path, so a tint set under a prior, non-empty
+  theme persists after the switch.
+- **placeholder-title-centering**: `PlaceholderPaneViewController` MUST
   center its title label both horizontally and vertically within its
   container view.
-- **placeholder-coder-init-is-unavailable**: `PlaceholderPaneViewController.init(coder:)`
+- **coder-init-unavailable**: `PlaceholderPaneViewController.init(coder:)`
   MUST be unavailable and MUST trap with a fatal error if ever called.
 
 ## Appearance
@@ -156,7 +163,7 @@ consume this registry but are out of scope for this recipe.
 - **Background**: The container's `CALayer.backgroundColor` is set to
   `palette.chartSeriesNSColors[(paneNumber - 1) % series.count].withAlphaComponent(0.15)`
   when the theme's chart-series list is non-empty (per
-  **placeholder-tints-by-series-color**); otherwise the layer's background is
+  **placeholder-series-tint**); otherwise the layer's background is
   left at its default (unset/transparent).
 - **Foreground/Text**: The title's text color is `palette.nsColor(.primaryText)`,
   set by `ThemedLabel`'s own `role: .primaryText` (the default the source
@@ -218,30 +225,31 @@ consume this registry but are out of scope for this recipe.
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| CTVR-01 | registers-placeholder-on-init | A freshly constructed `ComposableTabsViewRegistry` | `isRegistered(.placeholder)` is `true` |
-| CTVR-02 | register-overwrites-existing-entry | Register a view id, then register it again with a different descriptor/factory | `descriptor(for:)` reflects the second registration; the first factory is never invoked |
-| CTVR-03 | unregister-refuses-placeholder | `unregister(.placeholder)` | Returns `false`; `isRegistered(.placeholder)` remains `true`; an error is logged |
-| CTVR-04 | unregister-removes-a-registered-entry | Register a non-placeholder view id, then `unregister` it | Returns `true`; `isRegistered(_:)` is `false` afterward |
-| CTVR-05 | unregister-reports-absence | `unregister` a view id that was never registered | Returns `false` |
-| CTVR-06 | registered-view-ids-sorted-ascending | Register `"z.view"`, `"a.view"`, `"m.view"` | `registeredViewIDs` returns `[.placeholder, a.view, m.view, z.view]` in ascending `rawValue` order |
-| CTVR-07 | is-registered-reports-presence | Query `isRegistered(_:)` for a registered and an unregistered id | Returns `true` and `false` respectively |
-| CTVR-08 | descriptor-defaults-to-unknown | `descriptor(for:)` for an unregistered view id | Returns `ComposableTabsViewDescriptor.unknown` (`displayName == "Unknown"`) |
-| CTVR-09 | make-content-view-controller-invokes-the-registered-factory | Register a view id with a factory returning a distinguishable view controller, then call `makeContentViewController` for it | The returned view controller is the one the factory produced |
-| CTVR-10 | make-content-view-controller-falls-back-to-a-placeholder | Call `makeContentViewController` for an unregistered view id with `paneNumber: 3` | Returns a `PlaceholderPaneViewController` showing "Pane 3"; an error is logged |
-| CTVR-11 | tree-id-defaults-to-node-id | Call `makeContentViewController` with `treeID: nil` and a given `nodeID` | The factory's `ComposableTabsViewContext.treeID` equals that `nodeID` |
-| CTVR-12 | context-carries-the-call-parameters-unchanged | Call `makeContentViewController` with distinct `project`, `workingDirectory`, `paneNumber`, `ownerNodeID` values | The factory's `ComposableTabsViewContext` carries each value unchanged |
-| CTVR-13 | state-store-inherits-owner-node-id | Call `makeStateStore(prefix:)` on a context built with a non-nil `ownerNodeID` | The returned `ProjectPaneStateStore.ownerNodeID` equals the context's `ownerNodeID` |
-| CTVR-14 | resolved-holding-priority-honors-an-explicit-value | A descriptor with `holdingPriority: .defaultHigh` and `preferredThicknessFraction: 0.5` | `resolvedHoldingPriority` equals `.defaultHigh` |
-| CTVR-15 | resolved-holding-priority-boosts-a-fractioned-pane | A descriptor with `holdingPriority: nil`, `preferredThicknessFraction: 0.3` | `resolvedHoldingPriority.rawValue` equals `NSLayoutConstraint.Priority.defaultLow.rawValue + 10` |
-| CTVR-16 | resolved-holding-priority-defaults-to-low | A descriptor with `holdingPriority: nil`, `preferredThicknessFraction: nil` | `resolvedHoldingPriority` equals `.defaultLow` |
-| CTVR-17 | teardown-conformance-is-optional | A pane's content does not adopt `PaneContentTeardown`; the pane is discarded | No teardown call occurs and no error results |
-| CTVR-18 | removal-confirmation-conformance-is-optional | A pane's content does not adopt `PaneContentRemovalConfirmation`; the pane is closed | The pane closes with no confirmation prompt |
-| CTVR-19 | placeholder-shows-the-pane-number | Construct `PlaceholderPaneViewController(paneNumber: 5)` and load its view | The title label's `stringValue` is "Pane 5" |
-| CTVR-20 | placeholder-tints-by-series-color | Load a placeholder for `paneNumber: 2` under a theme whose `chartSeriesNSColors` has at least 2 entries | The container layer's `backgroundColor` equals `series[1]` at 0.15 alpha |
-| CTVR-21 | placeholder-skips-the-tint-when-the-series-is-empty | Load a placeholder under a theme whose `chartSeriesNSColors` is empty | The container layer's `backgroundColor` is unchanged from its default |
-| CTVR-22 | placeholder-retints-on-theme-change | Load a placeholder, then switch the active theme | The container's tint is recomputed against the new theme's `chartSeriesNSColors` |
-| CTVR-23 | placeholder-title-is-centered | Load a placeholder's view and lay it out | The title's center X and center Y equal the container's center X and center Y |
-| CTVR-24 | placeholder-coder-init-is-unavailable | Attempt to instantiate `PlaceholderPaneViewController` via `init(coder:)` (e.g. from a storyboard/XIB unarchive) | The process traps with a fatal error |
+| CTVR-01 | placeholder-registration | A freshly constructed `ComposableTabsViewRegistry` | `isRegistered(.placeholder)` is `true` |
+| CTVR-02 | register-overwrite | Register a view id, then register it again with a different descriptor/factory | `descriptor(for:)` reflects the second registration; the first factory is never invoked |
+| CTVR-03 | placeholder-protection | `unregister(.placeholder)` | Returns `false`; `isRegistered(.placeholder)` remains `true`; an error is logged |
+| CTVR-04 | unregister-removal | Register a non-placeholder view id, then `unregister` it | Returns `true`; `isRegistered(_:)` is `false` afterward |
+| CTVR-05 | unregister-absence | `unregister` a view id that was never registered | Returns `false` |
+| CTVR-06 | view-id-ordering | Register `"z.view"`, `"a.view"`, `"m.view"` | `registeredViewIDs` returns `[a.view, m.view, .placeholder, z.view]` in ascending `rawValue` order — `.placeholder`'s `rawValue` is `"whippet.placeholder"`, which sorts between `"m.view"` and `"z.view"` |
+| CTVR-07 | registration-presence | Query `isRegistered(_:)` for a registered and an unregistered id | Returns `true` and `false` respectively |
+| CTVR-08 | descriptor-default | `descriptor(for:)` for an unregistered view id | Returns `ComposableTabsViewDescriptor.unknown` (`displayName == "Unknown"`) |
+| CTVR-09 | factory-dispatch | Register a view id with a factory returning a distinguishable view controller, then call `makeContentViewController` for it | The returned view controller is the one the factory produced |
+| CTVR-10 | unregistered-fallback | Call `makeContentViewController` for an unregistered view id with `paneNumber: 3` | Returns a `PlaceholderPaneViewController` showing "Pane 3"; an error is logged |
+| CTVR-11 | tree-id-default | Call `makeContentViewController` with `treeID: nil` and a given `nodeID` | The factory's `ComposableTabsViewContext.treeID` equals that `nodeID` |
+| CTVR-12 | context-passthrough | Call `makeContentViewController` with distinct `project`, `workingDirectory`, `paneNumber`, `ownerNodeID` values | The factory's `ComposableTabsViewContext` carries each value unchanged |
+| CTVR-13 | state-store-owner | Call `makeStateStore(prefix:)` on a context built with a non-nil `ownerNodeID` | The returned `ProjectPaneStateStore.ownerNodeID` equals the context's `ownerNodeID` |
+| CTVR-14 | explicit-holding-priority | A descriptor with `holdingPriority: .defaultHigh` and `preferredThicknessFraction: 0.5` | `resolvedHoldingPriority` equals `.defaultHigh` |
+| CTVR-15 | fractioned-priority-boost | A descriptor with `holdingPriority: nil`, `preferredThicknessFraction: 0.3` | `resolvedHoldingPriority.rawValue` equals `NSLayoutConstraint.Priority.defaultLow.rawValue + 10` |
+| CTVR-16 | default-low-priority | A descriptor with `holdingPriority: nil`, `preferredThicknessFraction: nil` | `resolvedHoldingPriority` equals `.defaultLow` |
+| CTVR-17 | optional-teardown | A content type does not adopt `PaneContentTeardown` | Casting an instance to `PaneContentTeardown?` yields `nil`; nothing in this file requires or assumes the cast succeeds |
+| CTVR-18 | optional-removal-confirmation | A content type adopts `PaneContentRemovalConfirmation` and returns `nil` from `removalConfirmationMessage`, and separately a content type that does not adopt the protocol at all | `removalConfirmationMessage` is `nil` in the adopting case; casting to `PaneContentRemovalConfirmation?` is `nil` in the non-adopting case — both mean "nothing would be lost" per this file's protocol contract |
+| CTVR-19 | placeholder-pane-number | Construct `PlaceholderPaneViewController(paneNumber: 5)` and load its view | The title label's `stringValue` is "Pane 5" |
+| CTVR-20 | placeholder-series-tint | Load a placeholder for `paneNumber: 2` under a theme whose `chartSeriesNSColors` has at least 2 entries | The container layer's `backgroundColor` equals `series[1]` at 0.15 alpha |
+| CTVR-21 | empty-series-no-tint | Load a placeholder under a theme whose `chartSeriesNSColors` is empty | The container layer's `backgroundColor` is unchanged from its default |
+| CTVR-22 | placeholder-retint | Load a placeholder, then switch the active theme | The container's tint is recomputed against the new theme's `chartSeriesNSColors` |
+| CTVR-23 | placeholder-title-centering | Load a placeholder's view and lay it out | The title's center X and center Y equal the container's center X and center Y |
+| CTVR-24 | coder-init-unavailable | Attempt to instantiate `PlaceholderPaneViewController` via `init(coder:)` (e.g. from a storyboard/XIB unarchive) | The process traps with a fatal error |
+| CTVR-25 | stale-tint-persistence | Load a placeholder under a theme with a non-empty `chartSeriesNSColors`, note the container's tint, then switch to a theme whose `chartSeriesNSColors` is empty | The container layer's `backgroundColor` remains the tint set under the prior theme, unchanged |
 
 ## Edge Cases
 
@@ -252,13 +260,19 @@ consume this registry but are out of scope for this recipe.
   entry MUST return a placeholder rather than throwing — traced to the
   `guard let entry = entries[viewID] else { ... return PlaceholderPaneViewController(...) }`.
 - Null/empty input: `makeContentViewController(...)` called with `treeID: nil`
-  MUST fall back to `nodeID` per **tree-id-defaults-to-node-id**, rather than
+  MUST fall back to `nodeID` per **tree-id-default**, rather than
   leaving `treeID` `nil` or generating a new identifier — traced to
   `treeID: treeID ?? nodeID`.
 - Null/empty input: `PlaceholderPaneViewController` loaded while the theme's
   `chartSeriesNSColors` is empty MUST leave the container untinted per
-  **placeholder-skips-the-tint-when-the-series-is-empty** — traced to
+  **empty-series-no-tint** — traced to
   `guard !series.isEmpty else { return }`.
+- Boundary values: A theme switch from a chart-series list that is non-empty
+  to one that is empty MUST leave the container's previously set tint in
+  place, per **stale-tint-persistence** — traced to the same
+  `guard !series.isEmpty else { return }` in the `observeTheme` closure, which
+  makes no assignment on that path rather than clearing the layer's
+  `backgroundColor`.
 - Boundary values: `unregister(.placeholder)` MUST always be refused,
   regardless of how many other view ids are registered — the only view id the
   registry hard-codes as non-removable.
@@ -274,8 +288,8 @@ consume this registry but are out of scope for this recipe.
 - Error states: The only error path in this file is an unregistered view id,
   and it is not surfaced as a thrown error or shown to the user — it is
   handled by falling back to `PlaceholderPaneViewController` and logging at
-  `.error` (**make-content-view-controller-falls-back-to-a-placeholder**,
-  **unregister-refuses-placeholder**). Nothing in this file communicates that
+  `.error` (**unregistered-fallback**,
+  **placeholder-protection**). Nothing in this file communicates that
   fallback to the caller beyond the placeholder itself and the log line.
 - Offline/disconnected: Not applicable. The registry makes no network call
   and holds no server-backed state; it is a pure in-memory, single-process
@@ -304,21 +318,27 @@ from a URL.
 | String Key | Default (en) | Context |
 |-----------|-------------|---------|
 | (none — inline string literal) | `Pane \(paneNumber)` | `PlaceholderPaneViewController`'s title, shown for `.placeholder` and for any unregistered view id. |
+| (none — inline string literal) | "Placeholder" | `ComposableTabsViewDescriptor.placeholder.displayName`, the name the Split menu shows. |
+| (none — inline string literal) | "Unknown" | `ComposableTabsViewDescriptor.unknown.displayName`, shown for an unregistered view id. |
 
 The source contains no localization mechanism for this string — no
 `NSLocalizedString`, string catalog lookup, or similar — so it renders as the
 literal English text "Pane N" regardless of the device's locale.
 
-## Accessibility Options
+NEEDS REVIEW: Not implemented in source. `"Pane \(paneNumber)"`
+(ComposableTabsViewRegistry.swift:279) and the `"Placeholder"`/`"Unknown"`
+display names (:114, :118) are plain `String` literals, none routed through
+`String(localized:)` or `NSLocalizedString`, so none reaches a string catalog.
+What is missing: localization keys and catalog entries for the three strings.
+What would settle it: routing them through `String(localized:)` in source.
 
-Document which accessibility display options (Rule 15) this component
-responds to:
+## Accessibility Options
 
 | Option | Behavior |
 |--------|----------|
 | Reduce Motion | Not applicable: the placeholder's tint and layout are set once, synchronously, with no animation or transition; there is no motion for this setting to reduce. |
 | Increase Contrast | Not applicable as a distinct code path: the source performs no Increase-Contrast-specific branching of its own; all color comes from theme tokens whose actual values live outside this file (see Accessibility > Contrast). |
-| Differentiate Without Color | Satisfied without a marker: each placeholder's identity is not conveyed by tint color alone — its title label always shows the pane's number, which is the primary identifying cue; the color tint is a secondary reinforcement, per **placeholder-shows-the-pane-number** and **placeholder-tints-by-series-color**. |
+| Differentiate Without Color | Satisfied without a marker: each placeholder's identity is not conveyed by tint color alone — its title label always shows the pane's number, which is the primary identifying cue; the color tint is a secondary reinforcement, per **placeholder-pane-number** and **placeholder-series-tint**. |
 
 ## Feature Flags
 
@@ -367,9 +387,12 @@ from the conforming type's name, `ComposableTabsViewRegistry`.
   host resolves content with `registry.makeContent(for:context:)` returning
   `AnyView` instead of a view controller. The placeholder becomes a plain
   `View`: a `ZStack` with a `.background(color.opacity(0.15))` modifier and a
-  centered `Text("Pane \(paneNumber)").font(.title)` (the `.heading`-role
-  analogue), retinting automatically when the environment's theme value
-  changes rather than through an explicit `observeTheme` call.
+  centered `Text("Pane \(paneNumber)")` with its font resolved from the
+  environment's theme — `.font(theme.font(for: .heading))`, read via an
+  `@Environment` theme key — never a hardcoded `.font(.title)`, so it stays
+  the SwiftUI analogue of the source's theme-token-only `.heading` role;
+  retinting happens automatically when the environment's theme value changes
+  rather than through an explicit `observeTheme` call.
 - **Compose**: Hold the registry as a plain Kotlin class mapping a view id to
   a descriptor plus a `@Composable (ComposableTabsViewContext) -> Unit`
   factory (Compose has no view-controller-owning-child concept, so a
@@ -399,15 +422,15 @@ from the conforming type's name, `ComposableTabsViewRegistry`.
   container-view-controller embedding (`addChild`/`didMove(toParent:)`) in
   place of whatever AppKit-specific embedding `ComposableTabsPaneViewController`
   performs outside this file.
-- **WinUI 3**: This is the reason this recipe exists. Model
+- **WinUI 3**: Model
   `ComposableTabsViewRegistry` as a C# class holding a
   `Dictionary<string, (ComposableTabsViewDescriptor Descriptor, Func<ComposableTabsViewContext, UserControl> Factory)>`
   (the `Factory` typealias becomes a `Func<...>` returning a `UserControl` or
   `Page`, since WinUI panes host XAML content rather than a
   `NSViewController`); `Register`, `Unregister` (refusing the placeholder key
-  exactly as `unregister-refuses-placeholder` requires), `RegisteredViewIds`
+  exactly as `placeholder-protection` requires), `RegisteredViewIds`
   (sorted with `OrderBy(id => id, StringComparer.Ordinal)`), `IsRegistered`,
-  `Descriptor`, and `MakeContentView` mirror the five public members 1:1.
+  `Descriptor`, and `MakeContentView` mirror the six public members 1:1.
   `ComposableTabsViewDescriptor` becomes a C# record with `DisplayName`,
   `IconSource` (a `SymbolIconSource`/`FontIconSource` in place of an SF Symbol
   name), `PreferredAxis`, `MinimumThickness` (bound to a `GridSplitter`
@@ -428,8 +451,11 @@ from the conforming type's name, `ComposableTabsViewRegistry`.
   no interactive states, no `VisualStateGroup` beyond the default
   `CommonStates.Normal` is needed. Retinting on theme change replaces the
   source's `observeTheme` associated-object mechanism with `{ThemeResource}`
-  brush bindings plus a handler on `FrameworkElement.ActualThemeChanged` that
-  recomputes the series brush. Logging replaces `Loggable`/`OSLog` with
+  brush bindings plus a handler on the app's own theme-store change event —
+  the `observeTheme` analogue — rather than
+  `FrameworkElement.ActualThemeChanged`, which only fires when the system
+  switches between light and dark and would miss an in-app `SemanticPalette`
+  theme change. Logging replaces `Loggable`/`OSLog` with
   `Microsoft.Extensions.Logging.ILogger<ComposableTabsViewRegistry>`, using
   the same category-equals-type-name convention.
 
@@ -485,20 +511,25 @@ from the conforming type's name, `ComposableTabsViewRegistry`.
 | [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | passed | recipe-quality |
 | [template-conformance](agenticdevelopercookbook://compliance/recipe-quality#template-conformance) | passed | recipe-quality |
 | [meaningful-labels](agenticdevelopercookbook://compliance/accessibility#meaningful-labels) | passed | accessibility |
-| [text-contrast](agenticdevelopercookbook://compliance/accessibility#text-contrast) | needs-review | accessibility |
+| [text-contrast](agenticdevelopercookbook://compliance/accessibility#text-contrast) | partial | accessibility |
 | [theme-token-only-colors](agenticdevelopercookbook://compliance/ui#theme-token-only-colors) | passed | ui |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | internationalization |
 
 `meaningful-labels` passes because the placeholder's only text, "Pane N", is
 also its default AppKit accessibility label, with nothing shown that the
-label omits. `text-contrast` is `needs-review` for the reason given in
+label omits. `text-contrast` is `partial` for the reason given in
 Accessibility > Contrast: the actual color values behind
 `chartSeriesNSColors` and `.primaryText` are chosen per theme, outside this
-file. `theme-token-only-colors` passes because every color this file reads
-(`chartSeriesNSColors`, `ThemedLabel`'s `.primaryText` role) is a
-`SemanticPalette`-derived token, never a raw literal.
+file, so the pairing cannot be confirmed to pass or shown to fail from this
+source alone. `theme-token-only-colors` passes because every color this file
+reads (`chartSeriesNSColors`, `ThemedLabel`'s `.primaryText` role) is a
+`SemanticPalette`-derived token, never a raw literal. `no-hardcoded-strings`
+fails because `PlaceholderPaneViewController`'s title is the literal
+`"Pane \(paneNumber)"`, with no localization mechanism, per Localization.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from source. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: replace the uncited HIG root reference with the two pages the contrast and containment claims actually rely on; drop the unsupported WinUI "reason this recipe exists" line; rename every requirement to a subject-only name and update every citation; fix the `text-contrast` status to `partial` and add a `no-hardcoded-strings` internationalization row marked `failed`; remove the leftover template instruction line from Accessibility Options; add a `stale-tint-persistence` requirement, edge case, and CTVR-25 for the non-empty-to-empty series transition; correct CTVR-06's expected sort order against `.placeholder`'s actual `"whippet.placeholder"` `rawValue`; rewrite CTVR-17/18 to test only this file's protocol shape instead of pane discard/close behavior owned elsewhere; fix the fractioned-holding-priority requirement's type to `NSLayoutConstraint.Priority(rawValue:)`; correct the WinUI member count to six and its retint bullet to the app's own theme-store event; and resolve the SwiftUI port's placeholder font from the environment's `.heading` token instead of a hardcoded `.font(.title)`. |
