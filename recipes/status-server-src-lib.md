@@ -3,7 +3,7 @@ id: 1c017caa-0dcc-4278-9b82-af4fa935a3d9
 title: status-server-src-lib
 domain: agentictoolkit://recipes/status-server-src-lib
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: 2026-09-24
@@ -131,7 +131,7 @@ Not applicable: the module contains no logging calls. All errors (e.g., missing 
 ## Platform Notes
 
 - **Web / TypeScript**: The module is implemented in TypeScript (`links.ts`) with ES6 module syntax. Functions are pure and side-effect-free. URL scheme detection uses a regex (`/^[a-z][a-z0-9+.-]*:\/\//i`) compliant with RFC 3986. Platform canonicalization is delegated to `platformCanon()` from the monitor submodule (re-exported by `../monitor/overview` from `@agentic-toolkit/deploy-platform/canon`, where it maps platform aliases such as `cloudflare-pages` to one canonical name). URL encoding is handled by the native `encodeURIComponent()` function.
-- **Windows (.NET / C#)**: Derive URLs using `System.Uri` for scheme detection and `Uri.EscapeDataString()` for URL encoding. Canonicalize platform names using a switch statement or a dictionary mapping aliases like `cloudflare-pages` to `cloudflare`. Implement `PlatformMeta` as a nullable record type or class with optional properties. The `null`-checking patterns in the source translate directly to C# null-coalescing operators (`??`) and ternary expressions.
+- **WinUI 3**: Port `links.ts` to a static C# class (e.g. `SiteLinkBuilder`) in a plain .NET class library the WinUI 3 app and any ASP.NET Core backend both reference; it is pure, synchronous, and touches no UI, so it needs no `DispatcherQueue` marshalling or `async` and can be called from any thread. `PlatformMeta` becomes `public sealed record PlatformMeta(string? RailwayProjectId = null, string? VercelTeamId = null, string? CloudflareAccountId = null)` and `SiteLinks` becomes `public sealed record SiteLinks(string? Live, string? Platform)`, with nullable reference types enabled. `liveUrl()` keeps the exact regex as `new Regex(@"^[a-z][a-z0-9+.-]*://", RegexOptions.IgnoreCase)` (or a `[GeneratedRegex]`) rather than `Uri.TryCreate`, which would accept scheme-less or `file:` forms differently and break idempotence. `platformDashboardUrl()` takes `string? platform, string? projectName, PlatformMeta? meta = null`, treats a null `meta` as `new PlatformMeta()`, returns null first when `string.IsNullOrEmpty(projectName)`, and switches on the result of a ported `PlatformCanon(platform)` (a dictionary or switch mapping aliases such as `cloudflare-pages` to `cloudflare`, shared with the monitor port rather than duplicated); each falsy-id check becomes `string.IsNullOrEmpty`, and `encodeURIComponent()` becomes `Uri.EscapeDataString()` applied to `projectName` in the Vercel and Cloudflare URLs only, with the Railway id inserted unencoded exactly as the source does. `siteLinks()` takes the site's `Platform`/`ProjectName` and an `IReadOnlyList` of endpoints with `Url` and `string? Environment`, selects `endpoints.FirstOrDefault(e => e.Environment == "production") ?? endpoints.FirstOrDefault()`, and keeps every URL template, the null-never-guess rule, and the empty-`url`-yields-`https://` behavior identical. In the WinUI 3 client, bind `SiteLinks.Live`/`Platform` to `HyperlinkButton.NavigateUri` (hidden when null) or open them with `Windows.System.Launcher.LaunchUriAsync(new Uri(...))`.
 - **iOS / Swift**: Implement as a Swift module with structs for `PlatformMeta` and `SiteLinks`. Use `URL(string:)` for scheme detection or `URL.scheme` property check. Encode URL components with `URLComponents` and `URLQueryItem` where applicable, or `addingPercentEncoding(withAllowedCharacters:)` for manual encoding. Delegate platform canonicalization to a separate `platformCanon()` function; isolate it to support mocking in unit tests.
 - **macOS / Swift AppKit**: Same as iOS; no platform-specific differences in link generation.
 - **Android / Kotlin**: Implement as a Kotlin object or top-level functions in a module. Use `Uri.Builder` for URL construction or `URLEncoder.encode()` for encoding (specify UTF-8). Platform canonicalization can be a sealed class or when expression. Implement nullability using Kotlin's nullable types (`String?`).
@@ -172,3 +172,4 @@ Not applicable: the module contains no logging calls. All errors (e.g., missing 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-24 | | Initial creation |
+| 1.0.1 | 2026-09-24 | Claude | Add WinUI 3 translation guidance |

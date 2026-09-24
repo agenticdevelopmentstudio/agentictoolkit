@@ -49,7 +49,7 @@ copyright: 2026 Mike Fullerton
 license: MIT
 approved-by: ''
 approved-date: ''
-type: reference
+type: ingredient
 language: en
 depends-on: []
 ---
