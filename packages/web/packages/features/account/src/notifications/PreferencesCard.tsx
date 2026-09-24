@@ -1,20 +1,21 @@
 "use client";
 
-import { useState, type ReactElement } from "react";
+import { useMemo, useState, type ReactElement, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@agenticdevelopertoolkit/ui/components/card";
-import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { Switch } from "@agenticdevelopertoolkit/ui/components/switch";
-import { Spinner } from "@agenticdevelopertoolkit/ui/components/spinner";
-import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
-import { RecordApiButton } from "@agentic-toolkit/api-explorer";
-import { useReportSettingsDirty } from "@agentic-toolkit/resource";
+import {
+  EditableList,
+  useEditableList,
+  type EditableListColumn,
+} from "@agenticdevelopertoolkit/ui/blocks";
+// No RecordApiButton here: the settings registry's FeatureTitle carries the topic's API link
+// (`/notifications/preferences`) above every panel, and a second one inside it was a duplicate.
+import {
+  DetailSection,
+  EditActionBar,
+  SettingsBody,
+  useReportSettingsDirty,
+} from "@agentic-toolkit/resource";
 import {
   listPreferences,
   savePreferences,
@@ -72,9 +73,20 @@ const CATEGORY_LABELS: Record<string, { title: string; blurb: string }> = {
 type Channel = "email" | "sms";
 type Override = Partial<Record<Channel, boolean>>;
 
-export function PreferencesCard(): ReactElement {
+/** One row of the preferences table: the served preference plus its human label, looked up once. */
+type PrefRow = NotificationPref & { title: string; blurb: string };
+
+export interface PreferencesCardProps {
+  /** Rendered in the panel body BELOW the preferences table (Notifications puts its contact
+   *  methods here). A slot rather than a sibling because this card owns the top-of-panel
+   *  Cancel/Save bar: the bar has to sit above the scrolling body, so the body is this card's
+   *  too, and anything else the panel shows has to be inside it. */
+  children?: ReactNode;
+}
+
+export function PreferencesCard({ children }: PreferencesCardProps = {}): ReactElement {
   const qc = useQueryClient();
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["account", "preferences"],
     queryFn: listPreferences,
   });
@@ -94,9 +106,9 @@ export function PreferencesCard(): ReactElement {
     return overrides[p.category]?.[ch] ?? p[ch];
   }
   function toggle(category: string, ch: Channel, next: boolean) {
-    // Clear the prior save's success state on any edit, so the "Saved" note
-    // can't reappear when a toggle is flipped back to its saved value.
-    if (save.isSuccess) save.reset();
+    // Clear the prior save's outcome on any edit, so the "Saved" note can't reappear when a
+    // toggle is flipped back to its saved value, and a stale failure doesn't sit beside new edits.
+    if (save.isSuccess || save.isError) save.reset();
     setOverrides((prev) => ({ ...prev, [category]: { ...prev[category], [ch]: next } }));
   }
 
@@ -122,84 +134,100 @@ export function PreferencesCard(): ReactElement {
     );
   }
 
+  /** Cancel drops every unsaved toggle — the grid goes back to what the server served. */
+  function onCancel() {
+    if (save.isSuccess || save.isError) save.reset();
+    setOverrides({});
+  }
+
+  const rows: PrefRow[] | undefined = useMemo(
+    () =>
+      data?.map((p) => ({
+        ...p,
+        ...(CATEGORY_LABELS[p.category] ?? { title: p.category, blurb: "" }),
+      })),
+    [data],
+  );
+
+  // One row per notification kind, one Switch column per channel — the same table admin draws,
+  // not a bespoke grid. A channel toggle means nothing across a selection, so the table is not
+  // selectable and carries no bar verbs: Cancel/Save on the EditActionBar commit the whole grid.
+  const channelColumn = (ch: Channel, header: string, spoken: string): EditableListColumn<PrefRow> => ({
+    key: ch,
+    header,
+    width: "5rem",
+    resizable: false,
+    sortable: false,
+    searchable: false,
+    render: (p) => (
+      <Switch
+        aria-label={`${p.title} ${spoken}`}
+        checked={valueOf(p, ch)}
+        onCheckedChange={(v) => toggle(p.category, ch, v)}
+      />
+    ),
+  });
+  const columns: EditableListColumn<PrefRow>[] = [
+    {
+      key: "category",
+      header: "Notification",
+      value: (p) => p.title,
+      render: (p) => (
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate text-sm font-medium text-apt-text">{p.title}</span>
+          {p.blurb && <span className="truncate text-xs text-apt-text-muted">{p.blurb}</span>}
+        </span>
+      ),
+    },
+    channelColumn("email", "Email", "email"),
+    channelColumn("sms", "SMS", "SMS"),
+  ];
+
+  const list = useEditableList<PrefRow>({
+    rows: isLoading ? undefined : rows,
+    getRowId: (p) => p.category,
+    columns,
+  });
+
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle>Notification preferences</CardTitle>
-          <RecordApiButton
-            path="/notifications/preferences"
-            pathValues={{}}
-            title="Notification preferences API"
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* At the top of the panel, like every other single-record settings form: the grid is ONE
+          record (a whole-row PUT), so it gets the one Cancel/Save strip, not an inline button
+          at the bottom of a list that can scroll it out of sight. */}
+      <EditActionBar
+        dirty={dirty === true}
+        canSave={dirty === true}
+        saving={save.isPending}
+        onCancel={onCancel}
+        onSave={onSave}
+        status={
+          save.isError ? (
+            <span className="text-apt-error">Couldn’t save — try again.</span>
+          ) : save.isSuccess && !dirty ? (
+            <span className="text-apt-text-muted">Saved.</span>
+          ) : null
+        }
+      />
+      <SettingsBody width="full">
+        <DetailSection title="Preferences">
+          <p className="text-sm text-apt-text-muted">
+            Choose how you hear from us. SMS needs a verified phone number.
+          </p>
+          <EditableList
+            list={list}
+            ariaLabel="Notification preferences"
+            selectable={false}
+            loading={isLoading}
+            error={error}
+            errorTitle="Couldn’t load your preferences"
+            columnWidthsKey="settings-notification-preferences"
+            searchPlaceholder="Notification"
+            emptyLabel="No notification categories."
+            emptyFilteredLabel="No notifications match this search."
           />
-        </div>
-        <CardDescription>
-          Choose how you hear from us. SMS needs a verified phone number below.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {isLoading && (
-          <div className="flex items-center gap-2 text-sm text-apt-text-muted">
-            <Spinner /> Loading preferences…
-          </div>
-        )}
-        {isError && (
-          <ErrorText error="Couldn’t load your preferences. Reload to try again." />
-        )}
-        {data && (
-          <div className="space-y-1">
-            <div className="hidden grid-cols-[1fr_auto_auto] items-center gap-x-6 px-1 pb-2 text-[0.7rem] font-mono uppercase tracking-wider text-apt-text-dim sm:grid">
-              <span />
-              <span className="w-12 text-center">Email</span>
-              <span className="w-12 text-center">SMS</span>
-            </div>
-            {data.map((p) => {
-              const label = CATEGORY_LABELS[p.category] ?? {
-                title: p.category,
-                blurb: "",
-              };
-              return (
-                <div
-                  key={p.category}
-                  className="grid grid-cols-[1fr_auto_auto] items-center gap-x-6 gap-y-2 rounded-lg px-1 py-2.5"
-                >
-                  <div>
-                    <div className="text-sm font-medium text-apt-text">{label.title}</div>
-                    {label.blurb && (
-                      <div className="text-xs text-apt-text-muted">{label.blurb}</div>
-                    )}
-                  </div>
-                  <div className="flex w-12 justify-center">
-                    <Switch
-                      aria-label={`${label.title} email`}
-                      checked={valueOf(p, "email")}
-                      onCheckedChange={(v) => toggle(p.category, "email", v)}
-                    />
-                  </div>
-                  <div className="flex w-12 justify-center">
-                    <Switch
-                      aria-label={`${label.title} SMS`}
-                      checked={valueOf(p, "sms")}
-                      onCheckedChange={(v) => toggle(p.category, "sms", v)}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-            <div className="flex items-center gap-3 pt-4">
-              <Button onClick={onSave} disabled={!dirty || save.isPending}>
-                {save.isPending ? "Saving…" : "Save preferences"}
-              </Button>
-              {save.isSuccess && !dirty && (
-                <span className="text-sm text-apt-text-muted" role="status">
-                  Saved
-                </span>
-              )}
-              {save.isError && <ErrorText error="Couldn’t save — try again." />}
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        </DetailSection>
+        {children}
+      </SettingsBody>
+    </div>
   );
 }

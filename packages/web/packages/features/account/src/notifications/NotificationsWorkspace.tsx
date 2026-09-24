@@ -1,7 +1,6 @@
 "use client";
 
 import type { ReactElement } from "react";
-import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 import { PreferencesCard } from "./PreferencesCard";
 import { ContactsCard } from "./ContactsCard";
 
@@ -9,21 +8,17 @@ import { ContactsCard } from "./ContactsCard";
  * The bespoke /notifications account workspace: notification preferences +
  * contact-method management (verify email/phone). Replaces the generic
  * settings.notifications CRUD table (feature-routes.ts marks it `custom`).
+ *
+ * No title, help or API button of its own: the settings registry's FeatureTitle draws all three
+ * above every topic, and this panel used to repeat them — centred, at a narrower width than its
+ * siblings — so it read as a page from another site. PreferencesCard owns the panel's frame (its
+ * Cancel/Save bar sits above the scrolling body), and the contacts list rides inside that body,
+ * under its own "Contact methods" section heading.
  */
 export function NotificationsWorkspace(): ReactElement {
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-4 sm:p-6">
-      <SectionHeader
-        title="Notifications"
-        help={
-          <p className="text-sm text-apt-text-muted">
-            Manage how we contact you. Notification channels respect your verified contacts —
-            SMS only sends to a verified phone number.
-          </p>
-        }
-      />
-      <PreferencesCard />
+    <PreferencesCard>
       <ContactsCard />
-    </div>
+    </PreferencesCard>
   );
 }

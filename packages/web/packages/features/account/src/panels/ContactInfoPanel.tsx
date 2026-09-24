@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { PrivacyLevelSelect } from "@agenticdevelopertoolkit/ui/components/privacy-level-select";
@@ -11,6 +12,7 @@ import {
   PRIVACY_KEY,
   type PrivacyLevel,
 } from "@agentic-toolkit/data/profile";
+import { SettingsBody } from "@agentic-toolkit/resource";
 import type { ContactMethod } from "../api/account";
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -24,7 +26,8 @@ export function ContactInfoPanel() {
     retry: false,
   });
 
-  const grants = privacyQuery.data ?? [];
+  // Not `?? []` here: a fresh empty array per render would defeat the useCallback below.
+  const grants = privacyQuery.data;
 
   const privacyMutation = useMutation({
     mutationFn: ({ id, level }: { id: string; level: PrivacyLevel }) =>
@@ -34,28 +37,29 @@ export function ContactInfoPanel() {
     },
   });
 
-  function rowExtra(contact: ContactMethod) {
-    const level = resolvePrivacyLevel(grants, "contact_methods", contact.id);
+  // Stable across renders that change nothing it reads: ContactsCard builds its table columns from
+  // it, and a fresh function every render would rebuild them every render.
+  const { mutate: setLevel, isPending: levelPending } = privacyMutation;
+  const rowExtra = useCallback((contact: ContactMethod) => {
+    const level = resolvePrivacyLevel(grants ?? [], "contact_methods", contact.id);
     const typeLabel = contact.type === "email" ? "Email" : "Phone";
     return (
       <div className="w-36 shrink-0">
         <PrivacyLevelSelect
           value={level}
-          onChange={(next) =>
-            privacyMutation.mutate({ id: contact.id, level: next })
-          }
+          onChange={(next) => setLevel({ id: contact.id, level: next })}
           ariaLabel={`${typeLabel} ${contact.value} visibility`}
-          disabled={privacyMutation.isPending}
+          disabled={levelPending}
         />
       </div>
     );
-  }
+  }, [grants, setLevel, levelPending]);
 
+  // Full width: this topic IS a table, and a form-width cap truncates the columns it was resized
+  // to show. `hideSectionTitle` because the registry's FeatureTitle already says "Contacts".
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-      <div className="max-w-3xl">
-        <ContactsCard rowExtra={rowExtra} />
-      </div>
-    </div>
+    <SettingsBody width="full">
+      <ContactsCard rowExtra={rowExtra} hideSectionTitle />
+    </SettingsBody>
   );
 }
