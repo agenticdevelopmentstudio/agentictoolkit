@@ -112,7 +112,7 @@ describe("UsagePanel — the self view", () => {
   it("shows an empty state when nothing has been metered", async () => {
     getUsageSummary.mockResolvedValue([]);
     renderPanel();
-    await waitFor(() => expect(screen.getByText("Nothing metered yet")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/^Nothing metered yet\./)).toBeTruthy());
   });
 });
 

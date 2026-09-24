@@ -1,12 +1,17 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { RotateCcw } from "lucide-react";
 import { Badge } from "@agenticdevelopertoolkit/ui/components/badge";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
-import { DataTable, type DataTableColumn } from "@agenticdevelopertoolkit/ui/components/data-table";
-import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
+import {
+  EditableList,
+  useEditableList,
+  type EditableListColumn,
+} from "@agenticdevelopertoolkit/ui/blocks";
 import { ErrorText } from "@agentic-toolkit/crud";
+import { ListBarActions, SettingsBody } from "@agentic-toolkit/resource";
 
 import {
   useArchivedWorkspaces,
@@ -18,6 +23,11 @@ import { organizationsApi } from "../api/organizations";
 import { ORGANIZATIONS_QUERY_KEY } from "@agentic-toolkit/data/organizations";
 import { errMsg } from "@agentic-toolkit/data";
 
+/** A row the caller can actually bring back: its handle is still free AND they may restore it. */
+function isRestorable(row: ArchivedWorkspace): boolean {
+  return row.handleAvailable && row.canRestore;
+}
+
 /**
  * Archived — the things the caller has archived, and the one place they can be brought back.
  *
@@ -27,22 +37,47 @@ import { errMsg } from "@agentic-toolkit/data";
  * It lives in PERSONAL settings rather than the org's own settings for a structural reason: an
  * archived org is invisible from inside itself (its workspace no longer resolves), so the
  * archiving user's personal settings is the only surface that can still list it.
+ *
+ * The same table every other User Settings list draws: Restore is a verb on the BAR acting on the
+ * ticked rows, not a button repeated on every row — a per-row button next to a selection is two
+ * competing models of "what am I acting on".
  */
 export function ArchivedPanel() {
   const qc = useQueryClient();
   const query = useArchivedWorkspaces();
-  // A Set, not a single id: restoring row B while row A is still in flight must not un-disable
-  // A or drop its "Restoring…" label.
-  const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  // One flag, not a per-row set: the bar's Restore acts on the whole selection at once and is
+  // disabled until that batch settles, so there is no second restore to overlap the first.
+  const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function restore(row: ArchivedWorkspace): Promise<void> {
-    setBusyIds((prev) => new Set(prev).add(row.id));
+  async function restore(rows: ArchivedWorkspace[]): Promise<void> {
+    // Only the rows that CAN come back. A ticked row with a taken handle or no admin right is
+    // skipped rather than sent to fail — its badge already says why.
+    const targets = rows.filter(isRestorable);
+    if (targets.length === 0) return;
+    setRestoring(true);
     setError(null);
     try {
       // Restore is keyed by id, which the list carries. There is deliberately no slug lookup
       // here: GET /organization/organizations/{key} cannot see an archived org.
-      await organizationsApi.restore(row.id);
+      //
+      // `allSettled`, not `all`: one org whose handle was taken a second ago must not hide that
+      // the others DID come back — the invalidations below have to run either way.
+      const results = await Promise.allSettled(
+        targets.map((row) => organizationsApi.restore(row.id)),
+      );
+      const failures = results.flatMap((r) =>
+        r.status === "rejected" ? [errMsg(r.reason, "Couldn't restore that organization.")] : [],
+      );
+      // Everything that did come back leaves the selection; a failed row stays ticked so a
+      // second press retries exactly it.
+      const failedIds = new Set(
+        targets.filter((_, i) => results[i]?.status === "rejected").map((r) => r.id),
+      );
+      list.setSelectedIds(
+        new Set([...list.selectedIds].filter((id) => failedIds.has(id))),
+      );
+      if (failures.length > 0) setError(failures.join(" "));
       // All three invalidations together, not awaited one after another: sequential, each
       // refetch only STARTS once the previous has come back, so between them the row is gone
       // from Archived while the workspace picker still doesn't have it — and if the archived
@@ -55,131 +90,101 @@ export function ArchivedPanel() {
       // entry is in this very cache and a restored org is a row that belongs back in it. The
       // prefix invalidates every workspace's copy, which is right: the restored org may be
       // owned by any of them. On the other sites there is no such entry and this costs nothing.
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ARCHIVED_WORKSPACES_QUERY_KEY }),
-        qc.invalidateQueries({ queryKey: WORKSPACES_QUERY_KEY }),
-        qc.invalidateQueries({ queryKey: ORGANIZATIONS_QUERY_KEY }),
-      ]);
+      if (failures.length < targets.length) {
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: ARCHIVED_WORKSPACES_QUERY_KEY }),
+          qc.invalidateQueries({ queryKey: WORKSPACES_QUERY_KEY }),
+          qc.invalidateQueries({ queryKey: ORGANIZATIONS_QUERY_KEY }),
+        ]);
+      }
     } catch (e) {
       setError(errMsg(e, "Couldn't restore that organization."));
     } finally {
-      setBusyIds((prev) => {
-        const next = new Set(prev);
-        next.delete(row.id);
-        return next;
-      });
+      setRestoring(false);
     }
   }
 
-  const columns: DataTableColumn<ArchivedWorkspace>[] = [
-    {
-      key: "name",
-      header: "Name",
-      render: (r) => (
-        <span className="inline-flex items-center gap-2">
-          {r.name}
-          {/* Visible, in the a11y tree, and next to the fact it's about (the caller's own
-              permission on this org) — a `title` on the disabled Restore button reaches neither
-              screen readers nor touch. */}
-          {!r.canRestore && <Badge variant="orange">Admins only</Badge>}
-        </span>
-      ),
-    },
-    {
-      key: "handle",
-      header: "Handle",
-      render: (r) => (
-        <span className="inline-flex items-center gap-2">
-          <span className="font-mono">org.{r.slug}</span>
-          {/* Visible, in the a11y tree, and next to the handle it is about — a `title` on the
-              disabled Restore button reaches neither screen readers nor touch. */}
-          {!r.handleAvailable && <Badge variant="orange">Handle taken</Badge>}
-        </span>
-      ),
-    },
-    // `archivedAt` is a DB timestamp read back as Postgres text (`YYYY-MM-DD HH:MM:SS.ssssss`),
-    // not RFC3339 — hence the slice rather than `new Date(...)`, which parses it inconsistently
-    // across browsers.
-    {
-      key: "archivedAt",
-      header: "Archived",
-      render: (r) => r.archivedAt.slice(0, 10),
-    },
-    {
-      key: "actions",
-      header: <span className="sr-only">Actions</span>,
-      align: "end",
-      resizable: false,
-      render: (r) => (
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={!r.handleAvailable || !r.canRestore || busyIds.has(r.id)}
-          aria-label={`Restore ${r.name}`}
-          onClick={() => void restore(r)}
-        >
-          {busyIds.has(r.id) ? "Restoring…" : "Restore"}
-        </Button>
-      ),
-    },
-  ];
-
-  if (query.isError) {
-    return (
-      <Shell>
-        <EmptyState
-          title="Couldn't load your archived items"
-          description="Reload the page to retry."
-        />
-      </Shell>
-    );
-  }
-
-  if (query.isPending) {
-    return (
-      <Shell>
-        <DataTable<ArchivedWorkspace>
-          columns={columns}
-          rows={[]}
-          getRowId={(r) => r.id}
-          loading
-          ariaLabel="Archived"
-          autoSizeColumns
-        />
-      </Shell>
-    );
-  }
-
-  if (query.data.length === 0) {
-    return (
-      <Shell>
-        <EmptyState
-          title="Nothing archived"
-          description="Organizations you archive appear here, and can be restored while their handle is still free."
-        />
-      </Shell>
-    );
-  }
-
-  return (
-    <Shell>
-      <ErrorText error={error} />
-      <DataTable<ArchivedWorkspace>
-        columns={columns}
-        rows={query.data}
-        getRowId={(r) => r.id}
-        ariaLabel="Archived"
-        autoSizeColumns
-      />
-    </Shell>
+  const columns: EditableListColumn<ArchivedWorkspace>[] = useMemo(
+    () => [
+      {
+        key: "name",
+        header: "Name",
+        value: (r) => r.name,
+        render: (r) => (
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <span className="truncate font-medium text-apt-text">{r.name}</span>
+            {/* Visible, in the a11y tree, and next to the fact it's about (the caller's own
+                permission on this org) — a `title` on a disabled Restore button reaches neither
+                screen readers nor touch. */}
+            {!r.canRestore && <Badge variant="orange">Admins only</Badge>}
+          </span>
+        ),
+      },
+      {
+        key: "handle",
+        header: "Handle",
+        value: (r) => `org.${r.slug}`,
+        render: (r) => (
+          <span className="inline-flex min-w-0 items-center gap-2">
+            <span className="truncate font-mono text-xs text-apt-text-muted">org.{r.slug}</span>
+            {/* Visible, in the a11y tree, and next to the handle it is about — a `title` on a
+                disabled Restore button reaches neither screen readers nor touch. */}
+            {!r.handleAvailable && <Badge variant="orange">Handle taken</Badge>}
+          </span>
+        ),
+      },
+      // `archivedAt` is a DB timestamp read back as Postgres text (`YYYY-MM-DD HH:MM:SS.ssssss`),
+      // not RFC3339 — hence the slice rather than `new Date(...)`, which parses it inconsistently
+      // across browsers. The slice also sorts correctly as a string.
+      {
+        key: "archivedAt",
+        header: "Archived",
+        width: "8rem",
+        value: (r) => r.archivedAt.slice(0, 10),
+      },
+    ],
+    [],
   );
-}
 
-/** The panel's scroll container — the same wrapper `UsagePanel` uses. */
-function Shell({ children }: { children: ReactNode }) {
+  const list = useEditableList<ArchivedWorkspace>({
+    rows: query.data,
+    getRowId: (r) => r.id,
+    columns,
+  });
+  const selected = list.selectedRows;
+  const anyRestorable = selected.some(isRestorable);
+
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-      <div className="max-w-5xl">{children}</div>
-    </div>
+    <SettingsBody width="full">
+      <ErrorText error={error} />
+      <EditableList
+        list={list}
+        ariaLabel="Archived"
+        loading={query.isPending}
+        error={query.isError ? query.error : undefined}
+        errorTitle="Couldn't load your archived items"
+        columnWidthsKey="settings-archived"
+        describeRow={(r) => r.name}
+        searchPlaceholder="Name or handle"
+        emptyLabel="Nothing archived. Organizations you archive appear here, and can be restored while their handle is still free."
+        emptyFilteredLabel="Nothing archived matches this search."
+        actions={
+          <ListBarActions noun="archived item" selectedCount={selected.length}>
+            {/* Disabled unless the selection holds at least one row that CAN come back: a press
+                that would skip every ticked row does nothing, and a live button that does
+                nothing reads as broken. */}
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!anyRestorable || restoring}
+              onClick={() => void restore(selected)}
+            >
+              <RotateCcw data-icon="inline-start" />
+              {restoring ? "Restoring…" : "Restore"}
+            </Button>
+          </ListBarActions>
+        }
+      />
+    </SettingsBody>
   );
 }
