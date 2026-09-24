@@ -91,8 +91,9 @@ export function StorageGroup({
    *  transfer section, which is the honest result for a host that cannot name the destinations. */
   renderTransfer?: RenderTransferSection;
   /** The All Data member. Defaults to the package's own local-selection browser; a host with rail
-   *  chrome of its own passes a variant that publishes into its stack. */
-  renderAllData?: () => ReactNode;
+   *  chrome of its own passes a variant that publishes into its stack. Handed the resolved
+   *  ecosystem, which it MUST scope to — see AllDataPane's ECOSYSTEM note. */
+  renderAllData?: (ecosystemId: string | undefined) => ReactNode;
 }): ReactElement {
   const { ecosystemId, canManage, isError } = scope;
   if (isError) return <WorkspaceResolutionError />;
@@ -109,6 +110,7 @@ export function StorageGroup({
       render: (subLeaf) => (
         <SchemasPane
           ecosystemId={ecosystemId}
+          workspaceSlug={workspaceSlug}
           help={helpFor("ecosystems/schemas")}
           leaf={subLeaf}
           renderTransfer={renderTransfer}
@@ -131,7 +133,10 @@ export function StorageGroup({
     "all-data": {
       label: "All Data",
       icon: <Database size={16} aria-hidden />,
-      render: () => renderAllData?.() ?? <AllDataPane workspace={workspaceSlug} />,
+      render: () =>
+        renderAllData?.(ecosystemId) ?? (
+          <AllDataPane workspace={workspaceSlug} ecosystemId={ecosystemId} />
+        ),
     },
     // The `adh_…` storage-access principals, each of which owns its own isolated bucket — which
     // is what earns this row a place in THIS rail rather than only under Orgs ▸ Configuration,

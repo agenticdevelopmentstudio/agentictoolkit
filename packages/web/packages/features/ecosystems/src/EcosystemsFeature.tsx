@@ -131,7 +131,7 @@ export interface EcosystemsFeatureProps {
   /** Render a non-ecosystems workspace feature's own content for a topic/group-member this
    *  feature reuses verbatim (Communities / Messaging / Research / Dashboards / All Data) —
    *  the host's `renderFeaturePanel` from feature-panels.tsx. */
-  renderFeaturePanel?: (feature: string, opts?: { subLeaf?: TopicLeaf }) => ReactNode;
+  renderFeaturePanel?: (feature: string, opts?: { subLeaf?: TopicLeaf; ecosystemId?: string }) => ReactNode;
   /** Render a host-owned settings pane this feature composes but doesn't own: the topic ids
    *  "applications" | "integrations", and the group-member ids "buckets" | "access" | "users". */
   renderTopicPane?: (topicId: string, ctx: RenderTopicPaneCtx) => ReactNode;
@@ -227,7 +227,7 @@ function groupMembers(
   ecoId: string | undefined,
   titleFor: (label: string) => string,
   renderTopicPane: (topicId: string, ctx: RenderTopicPaneCtx) => ReactNode,
-  renderFeaturePanel: (feature: string, opts?: { subLeaf?: TopicLeaf }) => ReactNode,
+  renderFeaturePanel: (feature: string, opts?: { subLeaf?: TopicLeaf; ecosystemId?: string }) => ReactNode,
 ): Record<GroupId, GroupTopicItem[]> {
   // Each member render receives a `subLeaf` — the deep-linkable inner-entity selection ceded by the
   // group (the URL segment AFTER this member). Host-owned config panes take it as their `leaf`;
@@ -243,7 +243,8 @@ function groupMembers(
         render: (subLeaf) => renderTopicPane("access", { ecosystemId: ecoId, title: titleFor("Access"), leaf: subLeaf }) },
       { id: "all-data", label: "All Data", icon: <Database size={16} aria-hidden />,
         description: "Browse and edit the raw rows behind every bucket.",
-        render: () => renderFeaturePanel("all-data") },
+        // Scoped to THIS ecosystem, not the workspace — "ONLY THE ECOSYSTEMS TABLES SHOULD SHOW - this is a huge huge huge data leak" (Mike, 2026-09-24).
+        render: () => renderFeaturePanel("all-data", { ecosystemId: ecoId }) },
     ],
     // Users (topic id "invitations", kept for deep-link stability): the ecosystem's people —
     // the Users master/detail (host-owned) followed by Requests / Pending users / Invites, each a

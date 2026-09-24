@@ -87,7 +87,7 @@ export interface StorageHostSeams {
   renderTransfer?: RenderTransferSection;
   /** A host's own All Data member, for a host with rail chrome to publish into. Omitted ⇒ the
    *  package's own local-selection browser. */
-  renderAllData?: () => ReactNode;
+  renderAllData?: (ecosystemId: string | undefined) => ReactNode;
 }
 
 // The default export is what `app/home/page.tsx` and the workspace route import, so

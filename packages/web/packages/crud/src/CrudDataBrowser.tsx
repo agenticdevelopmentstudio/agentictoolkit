@@ -14,6 +14,7 @@ import { CrudDataView } from './CrudDataView'
 import { readableTables } from './exposure'
 import { useViewer } from './viewer'
 import { useExitGuardChannel } from './useExitGuardChannel'
+import { useTablesWithRows } from './useTablesWithRows'
 import type { CrudTableMeta } from './types'
 
 export interface CrudShellProps {
@@ -76,6 +77,19 @@ interface CrudDataBrowserCommon {
    *  every tenant's rows under a workspace's name. Omit it for the unscoped, cross-tenant
    *  browser. */
   workspace?: string
+  /** The ecosystem (rdid or uuid) whose data this browser shows — narrower than `workspace`,
+   *  which spans every ecosystem the workspace owns. Every list is sent `?ecosystemId=<id>` and
+   *  the rail keeps only ecosystem-columned tables: an owner-pair table has no ecosystem to
+   *  narrow by, so under an ecosystem it would show the workspace's rows, not this ecosystem's.
+   *  "ONLY THE ECOSYSTEMS TABLES SHOULD SHOW - this is a huge huge huge data leak" (Mike,
+   *  2026-09-24), from an ecosystem's Storage ▸ All Data listing its sibling ecosystem's
+   *  buckets. */
+  ecosystemId?: string
+}
+
+/** Whether `meta`'s rows belong to an ecosystem — the only tables an ecosystem scope can narrow. */
+function hasEcosystemColumn(meta: CrudTableMeta): boolean {
+  return meta.columns.some((c) => c.name === 'ecosystemId')
 }
 
 /** Whether the backend can narrow `meta`'s list to one workspace: it scopes an ecosystem-columned
@@ -120,7 +134,8 @@ export type CrudDataBrowserProps = CrudDataBrowserCommon &
  * segment falls back to "nothing open" rather than a phantom selection.
  */
 export function CrudDataBrowser(props: CrudDataBrowserProps) {
-  const { tables, shell, workspace, selection, basePath, activeSchema, activeTable } = props
+  const { tables, shell, workspace, ecosystemId, selection, basePath, activeSchema, activeTable } =
+    props
   const router = useRouter()
   // Admin-tier tables are hidden from a non-admin viewer: the backend refuses them outright, so
   // listing them offers a row whose only outcome is a 403. Catalog-tier tables stay listed —
@@ -132,14 +147,33 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
   // deep-linked schema vanish and pop back a paint later. Empty-then-populated is the one
   // sequence that never shows a wrong answer.
   const { isAdmin: viewerIsAdmin, ready: viewerReady } = useViewer()
-  const allTables = useMemo(
+  const candidates = useMemo(
     () =>
       viewerReady
-        ? readableTables(tables ?? Object.values(CRUD_TABLES), viewerIsAdmin).filter(
-            (t) => !workspace || isWorkspaceScopable(t),
+        ? readableTables(tables ?? Object.values(CRUD_TABLES), viewerIsAdmin).filter((t) =>
+            ecosystemId ? hasEcosystemColumn(t) : !workspace || isWorkspaceScopable(t),
           )
         : [],
-    [tables, viewerIsAdmin, viewerReady, workspace],
+    [tables, viewerIsAdmin, viewerReady, workspace, ecosystemId],
+  )
+  // The list filter every table is read with — the open view's AND the has-rows probe's, so the
+  // rail never offers a table the view would then show empty.
+  const listFilter = useMemo(() => {
+    if (!workspace && !ecosystemId) return undefined
+    const f: Record<string, string> = {}
+    if (workspace) f.workspace = workspace
+    if (ecosystemId) f.ecosystemId = ecosystemId
+    return f
+  }, [workspace, ecosystemId])
+  // A SCOPED browser lists only the tables holding rows in its scope ("in All Data only show
+  // tables and schemas in the list with data in them", Mike, 2026-09-24). The unscoped
+  // cross-tenant browser stays a catalogue of every table.
+  const populated = useTablesWithRows(candidates, viewerReady && listFilter ? listFilter : null)
+  const ready = viewerReady && (!listFilter || populated !== null)
+  const allTables = useMemo(
+    () =>
+      !listFilter ? candidates : populated ? candidates.filter((t) => populated.has(t.key)) : [],
+    [candidates, listFilter, populated],
   )
 
   // level 0 = distinct schemas (sorted); level 1 = the open schema's tables (sorted). Schemas
@@ -208,7 +242,7 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
           else if (basePath) router.push(basePath, { scroll: false })
         },
         // "None" and "not known yet" are different answers; say which one this is.
-        emptyLabel: viewerReady ? 'No schemas.' : 'Loading…',
+        emptyLabel: !ready ? 'Loading…' : listFilter ? 'No data yet.' : 'No schemas.',
       },
       {
         id: 'table',
@@ -238,7 +272,8 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
       router,
       basePath,
       selection,
-      viewerReady,
+      ready,
+      listFilter,
     ],
   )
 
@@ -253,7 +288,7 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
   // else a hint to drill in. Keyed per table so a switch is a fresh mount.
   // Before auth settles, a deep link has no answer yet — say "loading", not "pick a schema"
   // (which would read as the deep link having failed).
-  const content = !viewerReady ? (
+  const content = !ready ? (
     <p className="p-6 font-mono text-sm text-apt-text-dim" role="status">
       Loading…
     </p>
@@ -261,7 +296,7 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
     <CrudDataView
       key={tableSelected.key}
       meta={tableSelected}
-      filter={workspace ? { workspace } : undefined}
+      filter={listFilter}
       onGuardChange={registerGuard}
     />
   ) : (

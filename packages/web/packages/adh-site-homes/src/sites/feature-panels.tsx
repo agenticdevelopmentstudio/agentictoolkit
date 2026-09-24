@@ -54,8 +54,8 @@ export function productFeaturePanelRenderer({
   workspaceSlug,
 }: {
   workspaceSlug: string;
-}): (feature: string) => ReactNode {
-  return function renderProductFeaturePanel(feature) {
+}): (feature: string, opts?: { ecosystemId?: string }) => ReactNode {
+  return function renderProductFeaturePanel(feature, opts) {
     // Anything outside the seam's declared set is the feature asking for a pane it never told
     // this host about. Render the raw id rather than nothing — ugly, but it names itself.
     if (!isHostRendered(feature)) return feature;
@@ -82,7 +82,8 @@ export function productFeaturePanelRenderer({
         // DefaultCrudShell: the hub passes a variant only because it has rail chrome of its own
         // to publish the schema ▸ table rails into, and this site has none. The workspace slug
         // confines it to the rows that workspace owns, exactly as the hub's mount does.
-        return <AllDataPane workspace={workspaceSlug} />;
+        // And the ecosystem whose Storage rail it sits in — the workspace alone spans them all.
+        return <AllDataPane workspace={workspaceSlug} ecosystemId={opts?.ecosystemId} />;
       case "email-signup":
         // The Authentication group's fourth member, and the one pane this site genuinely cannot
         // draw: the panel is the hub's, built on hub-local workspace context and API clients, and

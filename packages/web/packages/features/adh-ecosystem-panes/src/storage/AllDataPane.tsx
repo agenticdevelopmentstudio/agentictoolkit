@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CrudDataBrowser, type CrudShell } from "@agentic-toolkit/crud";
+import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
 
 /**
  * All Data as a member of an ecosystem's Storage rail: the cross-schema CRUD browser.
@@ -9,6 +10,12 @@ import { CrudDataBrowser, type CrudShell } from "@agentic-toolkit/crud";
  * WORKSPACE — `workspace` is the slug whose data this shows. "All data literally shows all data,
  * it should only show data owned by the workspace" (Mike, 2026-09-24): pass it, and the browser
  * lists only that workspace's rows and hides the global catalogs no workspace owns.
+ *
+ * ECOSYSTEM — `ecosystemId` narrows it further, to the one ecosystem whose Storage rail this sits
+ * in: the workspace alone spans every ecosystem it owns, so an ecosystem's All Data listed its
+ * siblings' buckets too — "ONLY THE ECOSYSTEMS TABLES SHOULD SHOW - this is a huge huge huge data leak" (Mike, 2026-09-24). It is REQUIRED, and until it resolves this renders
+ * "Loading…" rather than the wider workspace view: a scope that is still arriving must never be
+ * read as "no scope".
  *
  * SCOPE — read this before mounting it on a new host. It passes no `tables` prop, so the browser
  * falls back to its own default: the WHOLE of CRUD_TABLES. That is every schema in
@@ -29,13 +36,23 @@ import { CrudDataBrowser, type CrudShell } from "@agentic-toolkit/crud";
  * `shell` is the host's stack adapter. Omit it and the browser uses the crud package's own
  * DefaultCrudShell — correct for a host with no rail chrome of its own to publish into.
  */
-export function AllDataPane({ shell, workspace }: { shell?: CrudShell; workspace?: string }) {
+export function AllDataPane({
+  shell,
+  workspace,
+  ecosystemId,
+}: {
+  shell?: CrudShell;
+  workspace?: string;
+  ecosystemId: string | undefined;
+}) {
   const [schema, setSchema] = useState<string | null>(null);
   const [table, setTable] = useState<string | null>(null);
+  if (!ecosystemId) return <EmptyState title="Loading…" />;
   return (
     <CrudDataBrowser
       shell={shell}
       workspace={workspace}
+      ecosystemId={ecosystemId}
       selection={{
         schema,
         table,

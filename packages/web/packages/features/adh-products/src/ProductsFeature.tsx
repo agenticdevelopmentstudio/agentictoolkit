@@ -256,6 +256,7 @@ export function productTopicPaneRenderer({
         return (
           <SchemasPane
             ecosystemId={ctx.ecosystemId}
+            workspaceSlug={workspaceSlug}
             title={ctx.title}
             help={helpFor("ecosystems/schemas")}
             leaf={ctx.leaf}
@@ -317,7 +318,7 @@ export interface ProductsFeatureProps {
    * HOST_RENDERED_TOPIC_IDS, not off this sentence — that list is the contract.
    * The hub passes its workspace feature-panel registry; a feature site passes its own smaller one.
    */
-  renderFeaturePanel: (feature: string, opts?: { subLeaf?: TopicLeaf }) => ReactNode;
+  renderFeaturePanel: (feature: string, opts?: { subLeaf?: TopicLeaf; ecosystemId?: string }) => ReactNode;
   /** Transfer Ownership for an open bucket or application — see {@link RenderTransferSection}.
    *  Omitted ⇒ no transfer section, the honest result for a host that cannot name the
    *  destinations. */
