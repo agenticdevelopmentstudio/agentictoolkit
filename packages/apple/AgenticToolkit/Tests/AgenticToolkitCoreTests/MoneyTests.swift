@@ -53,6 +53,24 @@ final class MoneyTests: XCTestCase {
         XCTAssertLessThan(Money(cents: 99), Money(cents: 100))
     }
 
+    func testSubtractionKeepsTheCurrency() {
+        let difference = Money(cents: 1_000, currency: "EUR") - Money(cents: 250, currency: "EUR")
+        XCTAssertEqual(difference, Money(cents: 750, currency: "EUR"))
+        XCTAssertEqual(Money(cents: 100) - Money(cents: 300), Money(cents: -200))
+    }
+
+    /// `+`, `-`, `<` and `sum` trap on mixed currencies; this is the check
+    /// they share, so it is what a test can reach without crashing the run.
+    func testMixedCurrenciesAreNotTheSameCurrency() {
+        XCTAssertTrue(Money(cents: 1, currency: "USD").isSameCurrency(as: Money(cents: 2, currency: "USD")))
+        XCTAssertFalse(Money(cents: 1, currency: "USD").isSameCurrency(as: Money(cents: 1, currency: "EUR")))
+    }
+
+    func testSumKeepsTheAmountsCurrency() {
+        let total = Money.sum([Money(cents: 100, currency: "GBP"), Money(cents: 5, currency: "GBP")])
+        XCTAssertEqual(total, Money(cents: 105, currency: "GBP"))
+    }
+
     func testFormatterRendersIntegerCents() {
         let formatter = MoneyFormatter(currency: "USD", locale: Locale(identifier: "en_US"))
         XCTAssertEqual(formatter.string(cents: 0), "$0.00")
