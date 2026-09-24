@@ -3,11 +3,11 @@ id: 071e67a8-54a7-4f8b-b747-e6384713efde
 title: RdidEditor
 domain: agentictoolkit://recipes/rdid-editor
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: 2026-09-23
-modified: 2026-09-23
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -148,29 +148,15 @@ own classes) and the shared `FieldFootnote` component — see the Overview.
   set and is otherwise absent (`marks-input-invalid-on-error`,
   `omits-invalid-attribute-without-error`); `disabled` maps to the native
   `disabled` attribute, which assistive technology announces natively.
-- Minimum tap target: NEEDS REVIEW: Not implemented in source. The input's fixed
-  height is `h-9` (36px), and no minimum width is enforced beyond `w-full`.
-  Whether 36px meets or is exempt from a 44×44 CSS-pixel touch-target guideline
-  is a design decision the source cannot make on its own; it would be settled by
-  measuring the rendered control against the platform's touch-target guideline
-  (see the `platform-design-languages` reference) with the ecosystem's actual
-  viewport/pointer usage in mind.
-- Error announcement to assistive technology: NEEDS REVIEW: Not implemented in
-  source. `FieldFootnote` accepts an `errorId` prop specifically so a caller can
-  point the field's `aria-describedby` at the rendered error text, but
-  `RdidEditor` never supplies `errorId` to `FieldFootnote` nor forwards an
-  `aria-describedby` to `Input`. A screen-reader user therefore hears
-  `aria-invalid` but has no guaranteed programmatic link to the error message
-  itself. This would be resolved by adding an `errorId`/`aria-describedby` pair
-  to the component (or by a reviewer confirming the omission is intentional;
-  tracked as a pending Design Decision below).
-- Minimum contrast ratio: NEEDS REVIEW: Not implemented in source. The prefix
-  text (`text-apt-text-muted` on `bg-apt-bg`) is authored directly in this
-  component, but the actual color values behind the `apt-*` tokens are resolved
-  at runtime from a theme (per `Input`'s own comment, "mapped to the M3 role
-  vars injected by `AdhThemeStyle`") that is not part of this source file.
-  Whether that pairing meets a minimum contrast ratio cannot be determined from
-  `rdid-editor.tsx` alone; it requires inspecting the resolved token values.
+- **minimum-tap-target**: NEEDS REVIEW: Not implemented in source. The input's fixed height is `h-9` (36px), with no minimum width enforced beyond `w-full`; whether that meets or is exempt from a 44×44 CSS-pixel touch-target guideline requires measuring the rendered control against the platform's guideline (see the `platform-design-languages` reference) with the ecosystem's actual viewport/pointer usage in mind.
+- Error announcement to assistive technology: not linked. `FieldFootnote`
+  accepts an `errorId` prop specifically so a caller can point the field's
+  `aria-describedby` at the rendered error text, but `RdidEditor` never
+  supplies `errorId` to `FieldFootnote` nor forwards `aria-describedby` to
+  `Input`. A screen-reader user hears `aria-invalid` but has no programmatic
+  link to the error message itself (tracked as a pending Design Decision
+  below).
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. The prefix's `text-apt-text-muted` on `bg-apt-bg` resolves at runtime from the M3 role vars injected by `AdhThemeStyle` (per `Input`'s own comment); whether that pairing meets a minimum contrast ratio for small text cannot be determined from `rdid-editor.tsx` alone — it requires inspecting the resolved token values.
 - Differentiate without color: satisfied — the invalid state is conveyed by the
   error text itself (`shows-error-in-place-of-hint` swaps in the `error`
   message, not just a color change) and by the `aria-invalid` attribute, not by
@@ -426,3 +412,4 @@ touch target.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: correct FieldFootnote's package attribution, deduplicate Appearance/States against the shared Input shell, correct the Input source path, align onChange/onInput naming, move the cookbook reference to related, use bare frontmatter dates, fix Design Decision approval formatting, rebuild Compliance against real catalog checks, add a stable-id re-render vector and a no-footnote vector, and document the mid-value lowercase caret jump |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

@@ -3,11 +3,11 @@ id: 2e0bf51e-905d-476d-9c0c-48465174ba59
 title: SecureTextEditView
 domain: agentictoolkit://recipes/secure-text-edit-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -101,18 +101,14 @@ and the Default row under States below.
 - **Role/trait**: Inherited unmodified from `TextEditView` — no
   `setAccessibilityRole` call appears in either file; `NSSecureTextField`
   carries AppKit's own built-in secure-text-field accessibility role.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source. Behavior
-  undefined. Neither `TextEditView.swift` (whose `init` `SecureTextEditView`
-  inherits unmodified) nor `SecureTextEditView.swift` calls
-  `setAccessibilityTitleUIElement` or sets an `accessibilityLabel` linking
-  `textField` to `label` — unlike the sibling `CheckboxView`
+- **Label requirements**: Neither `TextEditView.swift` (whose `init`
+  `SecureTextEditView` inherits unmodified) nor `SecureTextEditView.swift`
+  calls `setAccessibilityTitleUIElement` or sets an `accessibilityLabel`
+  linking `textField` to `label` — unlike the sibling `CheckboxView`
   (`agentictoolkit://recipes/checkbox-view`), which links its switch to its
   label for exactly this reason ("AppKit gives a bare switch no name").
   Without that link, VoiceOver announces `textField` as an unnamed secure
-  text field rather than by the row's title. What would settle it: a
-  decision on whether `TextEditView`/`SecureTextEditView` should adopt the
-  same `setAccessibilityTitleUIElement(label)` call `CheckboxView` uses, or
-  accessibility-audit evidence that this omission is acceptable as-is.
+  text field rather than by the row's title.
 - **Announce state changes**: Inherited unmodified from `TextEditView` — the
   component has no loading state and never disables itself in source; masked
   characters being typed or deleted are announced through
@@ -370,8 +366,9 @@ bezel styling (**masks-entry-with-secure-field**); `keyboard-navigable`,
 is `TextEditView`'s concern and out of this recipe's scope (the field's
 inherited, unmodified `NSControl` tab order, **skips-redundant-commits**,
 and the view holding no persistence or business logic of its own); `screen-
-reader-support` is `partial` because the accessibility title link is
-missing — see the open question in Accessibility above; `contrast-ratio` is
+reader-support` is `partial` because `textField` has no accessibility label
+linking it to `label`'s title text — see Label requirements in
+Accessibility above; `contrast-ratio` is
 `partial` because the inherited placeholder-text color clears only a 1.6:1
 floor against WCAG's 4.5:1 threshold (see
 `agentictoolkit://recipes/text-edit-view#design-decisions`).
@@ -382,3 +379,4 @@ floor against WCAG's 4.5:1 threshold (see
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: restructure to a delta-only recipe depending on text-edit-view, pruning duplicated requirements/appearance/states/test-vectors/edge-cases/configuration/privacy/logging content to the masking-specific delta (masks-entry-with-secure-field, forecloses-subclassing); reword forecloses-subclassing platform-neutrally and move the `final`/SwiftLint detail to Platform Notes; drop the macos tag; add text-edit-view to depends-on and checkbox-view to related; reformat Design Decisions to the bold convention and move the inherited placeholder-timing/contrast-floor decisions to text-edit-view; fix the WinUI Grid column order (Auto,\*) and correct WinUI/Compose/React commit timing to end-editing/submit instead of per-keystroke; add a partial contrast-ratio compliance row with a supporting sentence; remap compliance citations to the catalog |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

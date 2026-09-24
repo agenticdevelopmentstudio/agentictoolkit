@@ -3,11 +3,11 @@ id: 1cecd319-1cc2-40a5-8ef0-56267eb78b89
 title: SessionWatcherActivityIconView
 domain: agentictoolkit://recipes/session-watcher-activity-icon-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: 2026-09-23
-modified: 2026-09-23
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -196,29 +196,17 @@ stuttering.
   `toolTip`.
 - **Announce state changes**: `describeState()` reassigns the accessibility
   label, `toolTip`, and accessibility identifier whenever `activity` or
-  `isSummarizing` actually changes, but no `NSAccessibility.post(element:notification:)`
-  call accompanies that reassignment anywhere in the source.
-  **NEEDS REVIEW: Not implemented in source. Behavior undefined.** Whether
-  VoiceOver reliably announces the new label to a user already focused on
-  this glyph when its underlying value reassigns — without an explicit posted
-  notification — cannot be determined from this file alone. Settling this
-  needs either an `NSAccessibility.post(element:notification: .titleChanged)`
-  (or `.valueChanged`) call in `describeState()`, or a VoiceOver-pass
-  confirmation that AppKit's default handling already surfaces the change.
+  `isSummarizing` actually changes, but no
+  `NSAccessibility.post(element:notification:)` call (e.g. `.titleChanged` or
+  `.valueChanged`) accompanies that reassignment anywhere in the source — the
+  change reaches VoiceOver only through AppKit's own default handling of a
+  reassigned accessibility label, never through an explicit posted
+  notification.
 - **Minimum tap target**: Not applicable in the iOS/touch sense — this is a
   macOS, pointer-driven `NSView` with no target/action, gesture recognizer,
   or click handling of any kind in the source; Apple's 44×44pt minimum
   applies to touch targets, not to a static AppKit image view.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
-  glyph's tint (theme accent/tertiary-text/warning color, or the
-  `tertiaryLabelColor` system fallback) is rasterized as an opaque fill over
-  whatever background sits behind this 13×13pt view — a session row in a
-  list — with no contrast check against that background anywhere in this
-  file. Whether any tint/background pairing meets a specific contrast ratio
-  cannot be determined from `SessionWatcherActivityIconView.swift` alone; it
-  depends on the actual `SemanticPalette` colors and the row background it
-  is placed against. Settling this needs a contrast audit of each tint
-  against the session row background across the app's shipped themes.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. The glyph's tint (theme accent/tertiary-text/warning color, or the `tertiaryLabelColor` system fallback) is rasterized as an opaque fill over whatever background sits behind this 13×13pt view — a session row in a list — with no contrast check against that background anywhere in this file; settling it needs a contrast audit of each tint against the session row background across the app's shipped themes.
 
 ## Conformance Test Vectors
 
@@ -345,15 +333,15 @@ SwiftUI `Text`/`Label`/`Button`, none of these four are localized by the
 platform automatically; each needs an explicit lookup (e.g.
 `NSLocalizedString` or a String Catalog entry) to translate.
 
-NEEDS REVIEW: Not implemented in source. The source performs no such lookup,
-so all four reach VoiceOver and the tooltip in English only.
+The source performs no such lookup, so all four reach VoiceOver and the
+tooltip in English only.
 
 ## Accessibility Options
 
 | Option | Behavior |
 |--------|----------|
-| Reduce Motion | NEEDS REVIEW: Not implemented in source. The rotation (`working`'s spin) and the opacity pulse (`waiting`/summarizing) both repeat indefinitely (`repeatCount = .greatestFiniteMagnitude`), and no code in this file checks `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` (or any other Reduce Motion signal) before starting either, nor is a static substitute offered for either animated state. Settling this needs either a Reduce-Motion-gated static-icon substitution inside `startAnimation()`, or confirmation from the design/accessibility team that always-on animation here is an accepted exception. |
-| Increase Contrast | Not applicable to this component directly: the source reads no system contrast setting (e.g. `NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast`); the tint always comes from the active `SemanticPalette` (or the `NSColor.tertiaryLabelColor` system fallback before the first theme apply), so whether the resulting contrast is adequate is tracked once under Accessibility → Minimum contrast ratio above, not duplicated here. |
+| Reduce Motion | Not handled: the rotation (`working`'s spin) and the opacity pulse (`waiting`/summarizing) both repeat indefinitely (`repeatCount = .greatestFiniteMagnitude`), and no code in this file checks `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` (or any other Reduce Motion signal) before starting either, nor is a static substitute offered for either animated state. |
+| Increase Contrast | Not applicable to this component directly: the source reads no system contrast setting (e.g. `NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast`); the tint always comes from the active `SemanticPalette` (or the `NSColor.tertiaryLabelColor` system fallback before the first theme apply), so whether the resulting contrast is adequate is tracked once under the open question on minimum-contrast-ratio above, not duplicated here. |
 | Differentiate Without Color | Supported: each state's SF Symbol shape (`arrow.triangle.2.circlepath`, `circle.fill`, `exclamationmark.circle.fill`, `sparkles`) differs from every other state's shape independently of the tint color `applyTheme` assigns (see **state-based-symbol-selection** and **state-based-tint**), so state is never conveyed by color alone. |
 
 ## Feature Flags
@@ -534,7 +522,7 @@ Not applicable: the source contains no logging calls (no `os_log`,
 sets a meaningful accessibility label for every state (see
 **state-based-label-and-tooltip**). `contrast-ratio` is `partial` because
 the tint's contrast against a session row's background cannot be computed
-from this file alone (see Accessibility → Minimum contrast ratio).
+from this file alone (see the open question on minimum-contrast-ratio).
 `reduced-motion` is `failed` because no code path here checks a Reduce
 Motion signal before starting the spin or pulse animation (see
 Accessibility Options → Reduce Motion). `no-hardcoded-strings` is `failed`
@@ -546,3 +534,4 @@ literals with no localization key (see Localization).
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: restated four AppKit-mechanism MUSTs as observable outcomes and moved their mechanisms into the AppKit/UIKit Platform Notes bullet and Design Decisions; simplified the working-state-spin guard condition; noted that the idle symbol/tint/label are never seen or announced while the view is hidden; documented the missing symbol-provider seam for the unresolvable-symbol test vector instead of inventing one; renamed every requirement to a subject-noun name and updated all cross-references; moved the internal cookbook reference from `references` to `related`; corrected the pulse's per-direction/full-cycle timing; added test vectors for the working/summarizing tint, idle symbol, and summarizing-while-idle pulse; made the two flagged vectors mechanically checkable; grounded the `.sourceAtop` rationale in the source's own doc comment; unquoted the frontmatter dates; and rebuilt the Compliance table to cite only checks that exist in the catalog with rulings-consistent statuses. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

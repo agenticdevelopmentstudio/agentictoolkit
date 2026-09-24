@@ -3,11 +3,11 @@ id: 7774cbd3-4883-43f0-aef0-f49a29389b98
 title: RadioButtonChoiceView
 domain: agentictoolkit://recipes/radio-button-choice-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -168,21 +168,17 @@ writes the user's radio-button selection back into the view model's
   radio-button accessibility role and reports its own visible title text
   (the choice's `label`) as its accessible name automatically — unlike a
   bare, title-less control, each button here is already individually named.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source. Behavior
-  undefined. Source sets no accessibility API at all on `label`,
-  `controlsStack`, or any `radioButtons` element — no
-  `setAccessibilityTitleUIElement`, no accessibility group role, no
-  `accessibilityChildren` linkage tying the heading `label` (e.g. "Theme")
-  to the set of radio buttons beneath it as one named group. This is
-  confirmed by comparison with `CheckboxView`, a sibling row, which does
-  call `toggle.setAccessibilityTitleUIElement(self.label)` for its single
-  control. What is missing: whether VoiceOver announces the heading's text
-  as part of each radio button's context (e.g. "Theme, Light, radio button,
-  1 of 3") or only the individual button title with no group name. What
-  would settle it: a VoiceOver pass over an instantiated row, or an explicit
-  decision to expose `controlsStack` (or `self`) as an
-  `NSAccessibilityGroupRole`/radio-group element whose name derives from
-  `label`.
+- **Label requirements**: Not implemented in source. Source sets no
+  accessibility API at all on `label`, `controlsStack`, or any
+  `radioButtons` element — no `setAccessibilityTitleUIElement`, no
+  accessibility group role, no `accessibilityChildren` linkage tying the
+  heading `label` (e.g. "Theme") to the set of radio buttons beneath it as
+  one named group. This is confirmed by comparison with `CheckboxView`, a
+  sibling row, which does call
+  `toggle.setAccessibilityTitleUIElement(self.label)` for its single
+  control; VoiceOver has no source-declared link between the heading's
+  text and the radio-button group, so each button's own visible title is
+  the only accessible name it reports.
 - **Announce state changes (e.g., loading, disabled)**: Not applicable — the
   component has no loading state and never disables itself in source (see
   States); a selection change is announced by `NSButton`'s own native
@@ -194,12 +190,7 @@ writes the user's radio-button selection back into the view model's
   pointer-interface requirement. `RadioButtonChoiceView` sets no
   `controlSize` on any `radioButtons` element, so each keeps `NSButton`'s
   regular system click-target metrics.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
-  heading `label` text color resolves from the active theme's `.primaryText` role against
-  the hosting background at runtime; the component performs no contrast
-  check, so whether a given theme's resolved pair meets 4.5:1 cannot be
-  determined from this file. This would be settled by a theme-level
-  contrast audit of `.primaryText` against the backgrounds it sits on.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. The heading `label` text color resolves from the active theme's `.primaryText` role against the hosting background at runtime; the component performs no contrast check, so whether a given theme's resolved pair meets 4.5:1 cannot be determined from this file, which would be settled by a theme-level contrast audit of `.primaryText` against the backgrounds it sits on.
 
 ## Conformance Test Vectors
 
@@ -360,8 +351,8 @@ Not applicable: `RadioButtonChoiceView.swift` contains no logging call (no
   equality check before calling the parent's setter, mirroring
   skips-redundant-commits.
 - **React/Web**: A `<fieldset>` with a `<legend>{title}</legend>` — the
-  direct web analog of the heading-to-group linkage that is the open question
-  in Accessibility — wrapping a flex container (`flex-direction: column` or
+  direct web analog of the heading-to-group linkage this component's source
+  does not implement (see Accessibility) — wrapping a flex container (`flex-direction: column` or
   `row` per axis) of `<input type="radio" name={groupName} value=...
   checked={...}>` elements, each paired with its own `<label>` set from
   `choice.label`. Giving every input the same `name` attribute is the web's
@@ -398,8 +389,8 @@ Not applicable: `RadioButtonChoiceView.swift` contains no logging call (no
   `Header` property is the direct analog of this component's heading
   `label` — critically, `RadioButtons.Header` is exposed to `UIA` as the
   group's accessible name automatically, which is the exact linkage this
-  component's own source leaves unimplemented (see the open question in
-  Accessibility). Bind `ItemsSource="{x:Bind Choices}"` with
+  component's own source leaves unimplemented (see Accessibility). Bind
+  `ItemsSource="{x:Bind Choices}"` with
   `DisplayMemberPath="Label"`, and `SelectedItem="{x:Bind SelectedChoice,
   Mode=TwoWay}"` through a property setter that skips the assignment (and so
   skips raising `INotifyPropertyChanged`) when the incoming value already
@@ -467,8 +458,8 @@ Not applicable: `RadioButtonChoiceView.swift` contains no logging call (no
   title-UI-element linkage to the radio buttons beneath it (no
   `NSAccessibilityGroupRole`, no `setAccessibilityTitleUIElement`), unlike
   sibling `CheckboxView`, which does link its single control to its label.
-  **Rationale**: Not yet decided; see the open question in Accessibility
-  (Label requirements) for what would settle it. WinUI's
+  **Rationale**: Not yet decided; see Accessibility (Label requirements) for
+  what the source does and does not implement. WinUI's
   `RadioButtons.Header`, Compose's `selectableGroup()`, and the Web
   `<fieldset>`/`<legend>` notes already assume a named accessibility group as
   the eventual target for this component.
@@ -488,9 +479,10 @@ Not applicable: `RadioButtonChoiceView.swift` contains no logging call (no
 `native-controls-preference` and `platform-design-language` pass because every
 control is a stock AppKit `NSButton`/`NSTextField`; `keyboard-navigable` is
 `partial` because source sets no explicit key-view-loop or Full Keyboard
-Access handling of its own (only AppKit's default `NSControl` tab behavior),
-and Accessibility carries an open question on the group-to-heading link;
-`semantic-markup` stays `partial` for that same unresolved linkage;
+Access handling of its own (only AppKit's default `NSControl` tab behavior);
+`semantic-markup` stays `partial` because Accessibility documents that
+source implements no accessibility group linkage between the heading label
+and the radio buttons beneath it (see Label requirements);
 `idempotent-operations` passes on `skips-redundant-commits`; and
 `separation-of-concerns` passes because Behavioral Requirements now state
 platform-neutral behavior, with the AppKit-specific mechanics confined to
@@ -502,3 +494,4 @@ Platform Notes.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded Behavioral Requirements as platform-neutral behavior and moved the AppKit mechanics (NSButton/NSStackView factories, `.on`/`.off` state, `private(set)`, `@MainActor`) into the AppKit/UIKit platform note; replaced the unsupported "copied forward" guess in the fatal-error Design Decision with a factual known-defect note; reformatted all Design Decisions into the three-line bold form and added decisions for the onChange-overwrite limitation and the open accessibility group-heading question; removed false MUST framing from descriptive Edge Cases and pointed the onChange-overwrite edge case at its Design Decision; downgraded the `keyboard-navigable` compliance row to partial and added the compliance status sentence; renumbered the conformance test vectors sequentially, reworded vector 009 (formerly 008) to assert "no write is recorded", marked vector 017 (formerly 014) as a static/compile-time check, and added vectors for the click-to-async-`syncSelection()` round trip including a rejected-write case; records the unverified theme-token contrast as an open question. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
