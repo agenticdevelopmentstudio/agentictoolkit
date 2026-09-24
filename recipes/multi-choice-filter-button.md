@@ -3,11 +3,11 @@ id: bc43002d-faf6-4ffa-bc12-95f1a07f27e8
 title: MultiChoiceFilterButton
 domain: agentictoolkit://recipes/multi-choice-filter-button
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: 2026-09-23
-modified: 2026-09-23
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -193,15 +193,7 @@ trades a familiar system control for a hand-built one.
   trackpad-driven `NSControl` with no touch input path in source; the
   44×44pt minimum is iOS/touch guidance. Source sets no `controlSize` on
   the button, so it keeps `NSPopUpButton`'s regular system control metrics.
-- NEEDS REVIEW: Minimum contrast ratio is not verified in source. Text
-  color (`contentTintColor` = `primaryTextColor`) and the button's bezel
-  are both resolved from the active `ColorTheme` at runtime, and
-  `MultiChoiceFilterButton.swift` performs no contrast check against that
-  background. This is a decision the source cannot make on its own:
-  resolving it requires auditing each shipped `ColorTheme`'s
-  `.primaryText`-vs-bezel contrast against a chosen accessibility bar
-  (e.g., WCAG 2.1 AA's 4.5:1 for body-sized text), which is a call for the
-  design/accessibility owner of the theme catalog, not this file.
+- **contrast**: NEEDS REVIEW: Not implemented in source. Text color (`contentTintColor` = `primaryTextColor`) and the button's bezel are both resolved from the active `ColorTheme` at runtime, and `MultiChoiceFilterButton.swift` performs no contrast check against that background; resolving it requires auditing each shipped `ColorTheme`'s `.primaryText`-vs-bezel contrast against a chosen accessibility bar (e.g., WCAG 2.1 AA's 4.5:1 for body-sized text), a call for the design/accessibility owner of the theme catalog, not this file.
 
 ## Conformance Test Vectors
 
@@ -308,10 +300,8 @@ Not applicable beyond the table above: `label` and each `Choice.title`/
 `Choice.detail` are caller-supplied strings, not literals owned by this
 file, so there is nothing else here for the component itself to localize.
 
-NEEDS REVIEW: `"Any"` and `"{n} selected"` are English literals assigned to
-AppKit titles with no localization key; the count string also needs plural
-handling. Whether they move to a String Catalog (with a plural variant for
-the count) is an open question.
+`"Any"` and `"{n} selected"` are English literals assigned to AppKit titles
+with no localization key, and the count string has no plural variant.
 
 ## Accessibility Options
 
@@ -491,7 +481,7 @@ accessible name is the same title-based string always shown on screen, and
 that string always states both the filtered axis and the current selection
 (see **Label requirements** under Accessibility). Contrast-ratio is
 `partial` because the resolved theme colors are never checked for contrast
-in source (see the open question under Accessibility).
+in source (see the open question on **contrast**).
 String-externalization is failed because the "Any" and "{n} selected"
 strings are hardcoded English literals with no localization key (see
 Localization).
@@ -502,3 +492,4 @@ Localization).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reformatted frontmatter dates and Design Decisions to the template's bold three-line form; fixed the split `fires-on-change-on-actual-change` citation; downgraded descriptive Edge Cases MUSTs to prose while adding an explicit caller contract for unique `Choice.id`s; restated `refreshes-title-synchronously` and `resizes-for-longer-titles` as observable outcomes and moved their AppKit method calls into the Platform Note; added `label-and-any-never-checked` and `initializes-selection-empty` requirements with test vectors; reworded the `syncStates()` asymmetry Design Decision to align with `reflects-checkmarks` instead of contradicting it; fixed test vectors 008 (unfalsifiable no-op), 014 and 015 (spy-only assertions); cleaned up the garbled UIKit note and the incomplete WinUI 3 note; changed the Compliance table's `needs-review` status to `partial` and its categories to title case, remapped `meaningful-labels` into `screen-reader-support` and dropped the uncataloged `differentiate-without-color` and `main-actor-confined` checks, and updated the surrounding prose to match |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

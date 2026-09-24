@@ -3,11 +3,11 @@ id: bea6525c-171f-4547-bbb3-7c709543552e
 title: MCPChipsBarView
 domain: agentictoolkit://recipes/mcp-chips-bar-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -216,16 +216,7 @@ currently reads that state (see Design Decisions).
   height on the button or on a picker row; the 44×44pt (iOS) / 48×48dp
   (Android) minimum described in Platform Notes applies to the touch-
   platform translations, not to this AppKit-hosted SwiftUI control.
-
-NEEDS REVIEW: Not implemented in source. Neither the `"server.rack"` icon
-(`MCPChipsBarView.swift:99`) nor the `"chevron.down"` icon inside the
-button's label (`MCPChipsBarView.swift:107`) is marked
-`.accessibilityHidden(true)` or explicitly folded into the button's label
-via `.accessibilityElement(children: .combine)`; each remains its own,
-separately-spoken image element (see **Label requirements** above). Whether
-the rack icon should be hidden as purely decorative, or the chevron combined
-into the button's single spoken label, is a design decision the source does
-not make; settled once someone audits VoiceOver output for this bar.
+- **icon-grouping**: Neither the `"server.rack"` icon (`MCPChipsBarView.swift:99`) nor the `"chevron.down"` icon in the button's label (`MCPChipsBarView.swift:107`) is marked `.accessibilityHidden(true)` or folded into the button's label via `.accessibilityElement(children: .combine)`, so each remains its own, separately-spoken image element to VoiceOver.
 
 ## Conformance Test Vectors
 
@@ -336,19 +327,15 @@ not presented or navigated to via a link.
 | — (unlocalized `String` value, no key) | MCP: {active} of {total} | Button label computed by `buttonLabel`, passed to `Text` as a `String` variable |
 | — (unlocalized `String` value, no key) | Unknown | Fallback row label when a server id is missing from `serverNames`, passed to `Text` as a `String` expression |
 
-NEEDS REVIEW: Not implemented in source. `buttonLabel` is declared `private
-var buttonLabel: String`, so `Text(buttonLabel)` always receives a `String`
-value rather than a `LocalizedStringKey`, and SwiftUI renders it verbatim
-with no string-table lookup, even though its three possible values ("No MCP
-servers", "MCP: none", "MCP: {n} of {m}") are authored as English literals
-inside that computed property. The same is true of
+`buttonLabel` is declared `private var buttonLabel: String`, so
+`Text(buttonLabel)` always receives a `String` value rather than a
+`LocalizedStringKey`, and SwiftUI renders it verbatim with no string-table
+lookup, even though its three possible values ("No MCP servers", "MCP:
+none", "MCP: {n} of {m}") are authored as English literals inside that
+computed property. The same is true of
 `Text(viewModel.serverNames[id] ?? "Unknown")`, whose `??` expression is
-typed `String`. Whether these four strings are expected to go through
-localization (making the current code a bug) or are considered internal/
-debug-only labels not yet worth localizing because the bar is unwired (per
-the Overview) is a product decision the source does not make; settled by
-the app's localization owner once this bar is scheduled to ship to a
-consumer.
+typed `String`. None of these four strings goes through localization in
+source.
 
 ## Accessibility Options
 
@@ -525,11 +512,11 @@ Keyboard Access is enabled; no keyboard-navigation test of this bar exists in
 source. Screen-reader-support is partial: button and row labels come from visible
 `Text` content with no explicit override, but the "server.rack" icon is a
 separate, ungrouped accessibility element next to the button (see **Label
-requirements** under Accessibility, and the open question noted there) and
-no explicit announcement accompanies a label or toggle-state change.
+requirements** under Accessibility, and **icon-grouping**)
+and no explicit announcement accompanies a label or toggle-state change.
 String-externalization is failed because the button's three label strings
-and the "Unknown" row fallback are unlocalized `String` values (see the
-open question under Localization). Separation-of-concerns passes because
+and the "Unknown" row fallback are unlocalized `String` values with no
+string-table lookup (see Localization). Separation-of-concerns passes because
 `MCPChipsBarViewModel` owns all registry/binding logic, leaving
 `MCPChipsBar` and `MCPServerPicker` as plain rendering of that model's
 published state.
@@ -540,3 +527,4 @@ published state.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Claude Sonnet 5 | Initial ingredient recipe for MCPChipsBarView, covering the bar/picker view pair, the view model's sort/label/toggle logic, the one-time active-ids snapshot and stale-id quirks, and one open localization question (unlocalized computed label strings) for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded two requirements and the `cancellables`-touching one to state observable behavior instead of private identifiers, moving those identifiers into Platform Notes; added an open-question note for the ungrouped rack/chevron icons; added an edge case for the non-idempotent row-toggle setter; corrected the keyboard-navigable compliance status and the ThemeTypography citation; reformatted Design Decisions to the bold three-line form and noted two MUSTs as accepted-pending-approval behavior; tightened three underspecified test vectors; dropped a redundant tag; converted Compliance categories to display names and removed the invented `main-actor-confined` and `differentiate-without-color` checks via the compliance-catalog fixer. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

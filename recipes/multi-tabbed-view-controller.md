@@ -3,11 +3,11 @@ id: d1257c76-fb28-47a5-bc2b-d4fb1ef87b53
 title: MultiTabbedViewController
 domain: agentictoolkit://recipes/multi-tabbed-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -258,29 +258,23 @@ component, since neither has a recipe of its own.
   element. A `.viewController` tab's own accessible content is entirely the
   hosted controller's concern — this component only forwards `isHighlighted`
   and `onClose` through `TabBarHostedItem` when the controller opts in.
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. `TabButton.isHighlighted`'s `didSet` updates that
-  button's own `accessibilityValue`, so a click-driven selection is reflected
-  on the pressed element itself, but nothing in `MultiTabbedViewController.swift`
-  or `TabBarView.swift` posts an `NSAccessibility.post(element:notification:)`
-  (or any other accessibility notification) when the active tab changes
-  programmatically — a fallback activation after `removeTab`, `setEdgeEnabled`,
-  or the sibling-selection update in `setSelected(_:)` across an edge's other
-  tabs. What is missing: whether a VoiceOver user tracking a different element
-  is told the active tab changed when no click of their own caused it. What
-  would settle it: a VoiceOver pass exercising `setEdgeEnabled`/`removeTab`-driven
-  fallback activation, or an explicit decision to post a notification from
-  `setActiveTab(_:)`.
-- **Keyboard / assistive-technology navigation**: NEEDS REVIEW: Not
-  implemented in source. Behavior undefined. `TabButton` and
+- **Announce state changes**: `TabButton.isHighlighted`'s `didSet` updates
+  that button's own `accessibilityValue`, so a click-driven selection is
+  reflected on the pressed element itself, but nothing in
+  `MultiTabbedViewController.swift` or `TabBarView.swift` posts an
+  `NSAccessibility.post(element:notification:)` (or any other accessibility
+  notification) when the active tab changes programmatically — a fallback
+  activation after `removeTab`, `setEdgeEnabled`, or the sibling-selection
+  update in `setSelected(_:)` across an edge's other tabs. A VoiceOver user
+  tracking a different element is not told the active tab changed when no
+  click of their own caused it.
+- **Keyboard / assistive-technology navigation**: `TabButton` and
   `TabItemHostView` (`TabBarView.swift`) are plain `NSView` subclasses with no
   `acceptsFirstResponder`, `keyDown`, or key-view-loop wiring; a tab is
   reachable only by a pointer click (`mouseDown`) or an existing VoiceOver
-  cursor's `accessibilityPerformPress()`. What is missing: a way for a
-  keyboard-only or Full Keyboard Access user to move focus onto a tab and
-  activate it without a pointer or VoiceOver already positioned there. What
-  would settle it: a keyboard-only pass over a real window, or an explicit
-  decision that tab selection is pointer/VoiceOver-only and out of scope.
+  cursor's `accessibilityPerformPress()`. There is no way for a keyboard-only
+  or Full Keyboard Access user to move focus onto a tab and activate it
+  without a pointer or VoiceOver already positioned there.
 - **Minimum tap target**: The close button's hit area is a fixed `14×14pt`
   (`TabButton.init`); the tab body (background, label, close button) is
   larger than that and is clickable everywhere outside the close button's own
@@ -398,15 +392,12 @@ added and removed only by direct, in-process API calls from the host.
 |-----------|-------------|---------|
 | — | "Close Tab" | `NSImage(systemSymbolName:accessibilityDescription:)`'s description for a `TabButton`'s close icon (`TabBarView.swift`) |
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined. "Close Tab" is a
-hardcoded English `String` literal passed directly to
+"Close Tab" is a hardcoded English `String` literal passed directly to
 `accessibilityDescription`, not routed through `NSLocalizedString` or any
 other localization mechanism used in this file — it is the one non-data-driven,
 user/AT-facing string this component itself owns (a tab's own title text is
 always supplied by the caller, so it carries no localization concern of this
-component's making). What is missing: a translated string table entry for
-this description. What would settle it: adding it to the app's string
-catalog/`.strings` file and replacing the literal with a lookup.
+component's making).
 
 ## Accessibility Options
 
@@ -420,17 +411,13 @@ catalog/`.strings` file and replacing the literal with a lookup.
   `.windowBackground`, `.outline`) is a semantic palette role; Increase
   Contrast handling, if any, belongs entirely to the theme/palette system this
   component defers to, not to this file.
-- **Differentiate Without Color**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. `TabButton.updateAppearance()` distinguishes selected
-  from unselected purely by fill color (`.selection` vs. transparent) and a
-  text-role swap (`.selectionText` vs. `.secondaryText`); no border, icon,
-  weight, or other non-color cue accompanies the change. A `.viewController`
-  item on a vertical edge gets a color-independent stacking/overlap cue from
-  its `stackDepth`, but a `.title` tab never gets one, on any edge. What is
-  missing: whether Differentiate Without Color should add e.g. a border or
-  bold weight to a selected `TabButton`. What would settle it: a decision from
-  the theme/accessibility owner on the substitute cue, or confirmation that
-  the `.selection`/background color contrast alone is judged sufficient.
+- **Differentiate Without Color**: `TabButton.updateAppearance()`
+  distinguishes selected from unselected purely by fill color (`.selection`
+  vs. transparent) and a text-role swap (`.selectionText` vs.
+  `.secondaryText`); no border, icon, weight, or other non-color cue
+  accompanies the change. A `.viewController` item on a vertical edge gets a
+  color-independent stacking/overlap cue from its `stackDepth`, but a
+  `.title` tab never gets one, on any edge.
 
 ## Feature Flags
 
@@ -615,7 +602,7 @@ here, per source fidelity, rather than smoothed over.
 | [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
 
 Keyboard-navigable is failed because `TabButton`/`TabItemHostView` have no
-key-view-loop or `keyDown` wiring (see the open question in Accessibility).
+key-view-loop or `keyDown` wiring (see Accessibility).
 Screen-reader-support is partial: it holds for `.title` tabs, where
 `TabButton` sets a real accessibility role, title, value, and a republished
 close-button child, but no accessibility notification is posted for a
@@ -633,3 +620,4 @@ compliance-catalog checks, so they are not listed here.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: at-most-one-active-tab summary/overview wording, observable (not private-internal) conformance test vector assertions, corrected edge-toggle-updates-bar-visibility and preferred-content-size-change-refreshes-every-bar wording, added Change History initial row, cleaned up and re-scoped Compliance to catalog checks, subject-only requirement renames, bold-form Design Decisions, AppKit / UIKit and WinUI 3 Platform Notes fixes, insertTab API-name correction, expanded and corrected conformance test vector coverage; states controller reuse across tabs as an unguarded caller precondition. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

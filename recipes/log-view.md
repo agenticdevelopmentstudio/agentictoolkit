@@ -3,11 +3,11 @@ id: c5a74f9a-d38f-4724-ad1d-f6460ebc2bb0
 title: Log View
 domain: agentictoolkit://recipes/log-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -231,15 +231,13 @@ contract:
   contrast ratios, are resolved by the active theme palette at runtime.
   Meeting a contrast standard is that palette's responsibility, not
   something decidable from this file.
-- NEEDS REVIEW: Not implemented. Behavior undefined. The per-column
-  `onClick`/`onDoubleClick` hooks are wired only to mouse actions (the
-  table's click and double-click actions); nothing invokes the
-  click-dispatch method from a keyboard event (for example, Return or Space
-  on the currently selected row), so a keyboard-only or switch-control user
-  has no way to trigger a column's click hook. This would be settled by
-  adding a key-event handler that calls the dispatch method for the
-  selected row, or by confirming with the design owner that click hooks are
-  pointer-only by design.
+- Keyboard operability: The per-column `onClick`/`onDoubleClick` hooks are
+  wired only to the table's mouse click and double-click actions
+  (`tableClicked`/`tableDoubleClicked`, both driven by `NSTableView`'s
+  `target`/`action`/`doubleAction`); no key-event handler calls
+  `dispatchClick(columnIndex:row:kind:)`, so a keyboard-only or
+  switch-control user who selects a row with the keyboard has no way to
+  trigger that row's column click hook.
 
 ## Conformance Test Vectors
 
@@ -343,13 +341,7 @@ caller's responsibility, not this component's.
   the themed view types it uses branch on an increase-contrast accessibility
   setting, so any such adaptation would live in the theme/palette system,
   not here.
-- NEEDS REVIEW: Not implemented. Behavior undefined. The selected row is
-  conveyed by a background color fill alone (see
-  `selected-row-uses-theme-selection-color`) — no additional shape, border,
-  or icon marks a selected row when color is hard to distinguish. This
-  would be settled by adding a non-color cue (for example, a border or
-  leading indicator) to the selected-row rendering, or by confirming with
-  the design owner that a color-only cue is acceptable here.
+- **color-only-selection-cue**: The selected row is conveyed by a background color fill alone (`selected-row-uses-theme-selection-color`) with no additional shape, border, or icon; the component does not respond to Differentiate Without Color.
 
 ## Feature Flags
 
@@ -505,8 +497,8 @@ as an API-visibility note.
 adds no custom accessibility overrides that would break AppKit's default
 table/row/cell hierarchy and defines no string literal of its own;
 `keyboard-navigable` is partial because row selection is keyboard-operable
-but the click-dispatch hooks are pointer-only (see the Accessibility NEEDS
-REVIEW); `dynamic-type-support` and `contrast-ratio` are partial because
+but the click-dispatch hooks are pointer-only (see Accessibility: Keyboard
+operability); `dynamic-type-support` and `contrast-ratio` are partial because
 both depend on `ThemedLabel` and the active theme palette, which this file
 does not control or expose.
 
@@ -516,3 +508,4 @@ does not control or expose.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: inlined a minimal LogProvider/LogColumn/LogLine/ThemedLabel contract in Overview; restated two implementation-detail requirements (`selection-fill-reflects-current-theme`, `cell-request-uses-column-reuse-identifier`) as observable behavior and moved their mechanism into Design Decisions; restated `dispatch-click-public-test-entry` as the MUST `public-dispatch-applies-same-guards`; removed source-narrative phrasing outside Design Decisions; moved the guidelines reference from `references` to `related`; reformatted Design Decisions to the bold three-line form; shortened the frontmatter summary; filled in the Compliance table; renumbered the `log-view-024b` test vector and added vectors for the reuse-identifier and empty-table-at-bottom requirements; defined the "within 2 points of the bottom" geometry precisely; and added the `empty-table-counts-as-at-bottom` requirement promoted from the States table. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
