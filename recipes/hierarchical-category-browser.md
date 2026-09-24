@@ -3,15 +3,15 @@ id: e36ff99d-0ebd-42ca-87f0-2881a8bfedea
 title: Hierarchical Category Browser
 domain: agentictoolkit://recipes/hierarchical-category-browser
 type: recipe
-version: 1.2.0
-status: draft
+version: 1.3.0
+status: review
 language: en
 created: '2026-08-23'
-modified: '2026-08-24'
+modified: '2026-09-23'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
-summary: "The category rail every markdown surface shares — one HTDV level per depth walked, All/Uncategorized leading the root level, and a per-level gear (add/rename/move/file/delete) — built from useCategoryLevels over the category DAG fold."
+summary: 'Shared category rail: one HTDV level per walked depth, All/Uncategorized at root, per-level gear.'
 platforms:
 - typescript
 - web
@@ -21,7 +21,6 @@ tags:
 - rail
 - navigation
 - master-detail
-- taxonomy
 ingredients:
 - agenticdevelopertoolkit://recipes/category-picker-dialog
 depends-on:
@@ -32,6 +31,9 @@ related:
 - agenticdevelopertoolkit://recipes/category-picker-dialog
 - agenticdevelopertoolkit://recipes/list-chooser
 - agenticdevelopertoolkit://recipes/entity-chooser
+- agenticdevelopertoolkit://recipes/dialog
+- agenticdevelopertoolkit://recipes/dialog-actions
+- agenticdevelopertoolkit://recipes/alert-and-dialog
 references: []
 ---
 
@@ -41,11 +43,13 @@ references: []
 
 The **Hierarchical Category Browser** is the shared rail every markdown surface
 that classifies its documents into a category hierarchy — the notebook today, and
-research — mounts as the leading levels of a [[hierarchical-topic-detail]] stack.
-It is a thin, category-specific layer over that substrate: HTDV owns the stack's
+research — mounts as the leading levels of a
+[Hierarchical Topic Detail](agenticdevelopertoolkit://recipes/hierarchical-topic-detail)
+stack. It is a thin, category-specific layer over that substrate: HTDV owns the stack's
 chrome, deep linking, breadcrumb, disclosure and narrow-mode behavior (see
-[[hierarchical-topic-detail]] and [[topic-detail]] for that contract, which this
-recipe does not restate). What this recipe adds is everything that is TRUE OF
+[Hierarchical Topic Detail](agenticdevelopertoolkit://recipes/hierarchical-topic-detail)
+and [Topic Detail](agenticdevelopertoolkit://recipes/topic-detail) for that contract,
+which this recipe does not restate). What this recipe adds is everything that is TRUE OF
 **CATEGORIES** on top of it:
 
 - **The rail is a level-per-depth walk of a DAG**, not a fixed hierarchy — the
@@ -77,13 +81,15 @@ about the rail itself differs between them (see Design Decisions).
 
 | Name | Domain | Role | Required | Configuration |
 |---|---|---|---|---|
-| Category Picker | agenticdevelopertoolkit://recipes/category-picker-dialog | The dialog behind BOTH place-picking gear actions — browses the folded forest and returns a place to file the selected category under. | yes | Move: `confirmLabel="Move"`, `allowRoot`, `rootLabel` = "Top level" or "Remove from “<parent>”" (see `not-call-an-unfiling-a-rooting`), `disabledIds` = the moved category + its own descendants. Also file: `confirmLabel="File"`, `initialSelectedId={null}`, NO `allowRoot` (a root is a category with no parents, so there is nothing to add), `disabledIds` = the category + its descendants + every parent it is ALREADY filed under. |
+| Category Picker | agenticdevelopertoolkit://recipes/category-picker-dialog | The dialog behind BOTH place-picking gear actions — browses the folded forest and returns a place to file the selected category under. | yes | Move: `confirmLabel="Move"`, `allowRoot`, `rootLabel` = "Top level" or "Remove from “<parent>”" (see #integration-requirements/not-call-an-unfiling-a-rooting), `disabledIds` = the moved category + its own descendants. Also file: `confirmLabel="File"`, `initialSelectedId={null}`, NO `allowRoot` (a root is a category with no parents, so there is nothing to add), `disabledIds` = the category + its descendants + every parent it is ALREADY filed under. |
 
 The other three gear dialogs (Rename, Delete, and the one-field Add) are plain
 compositions of the shared `Dialog`/`Input`/`DialogActions`/`AlertModal`
-primitives with no dedicated recipe of their own — see [[dialog]],
-[[dialog-actions]] and [[alert-and-dialog]] for those. `useCategoryLevels` wires
-all four; this recipe documents the whole.
+primitives with no dedicated recipe of their own — see
+[Dialog](agenticdevelopertoolkit://recipes/dialog),
+[Dialog Actions](agenticdevelopertoolkit://recipes/dialog-actions) and
+[Alert and Dialog](agenticdevelopertoolkit://recipes/alert-and-dialog) for those.
+`useCategoryLevels` wires all four; this recipe documents the whole.
 
 ## Integration Requirements
 
@@ -108,7 +114,8 @@ all four; this recipe documents the whole.
   own `sortOrder`, then name — and MUST NOT re-sort. The root is the one exception
   (above) because it is the one level with no context to read an order from; deeper,
   the arriving order is the owner's, `buildCategoryTree` documents that it preserves
-  it, and the [[category-picker]] browsing the same forest does not sort — so a rail
+  it, and the [Category Picker](agenticdevelopertoolkit://recipes/category-picker-dialog)
+  browsing the same forest does not sort — so a rail
   that re-sorted would discard a deliberate ordering and disagree with the picker
   about the same subtree in the same session.
 - **show-only-the-category-name**: A category row MUST render its name and
@@ -135,15 +142,18 @@ all four; this recipe documents the whole.
   currently standing in MUST keep those other filings untouched.
 - **file-a-category-in-a-second-place**: The gear MUST offer a verb that ADDS
   one filing and changes nothing else — one `addCategoryParent` call, no
-  `removeCategoryParent`, and no navigation. The hierarchy is a DAG (a category may
-  carry any number of parents), and Move is the wrong shape for saying "this belongs
-  here too": it necessarily removes the filing the user walked in through. The
-  picker MUST refuse the category itself and its own descendants (either would close
-  a cycle the backend rejects) and every parent it is already filed under (the edge
-  exists), showing those rows disabled rather than hiding them — a place that is
-  missing reads as a place that does not exist, while a greyed one says the filing
-  is already there. Filing MUST NOT navigate: the place the user walked in through
-  still holds the category, so the route they are standing on is still true.
+  `removeCategoryParent`. The hierarchy is a DAG (a category may carry any number
+  of parents), and Move is the wrong shape for saying "this belongs here too": it
+  necessarily removes the filing the user walked in through.
+- **disable-not-hide-an-invalid-file-target**: The Also file picker MUST refuse
+  the category itself and its own descendants (either would close a cycle the
+  backend rejects) and every parent it is already filed under (the edge exists),
+  showing those rows disabled rather than hiding them — a place that is missing
+  reads as a place that does not exist, while a greyed one says the filing is
+  already there.
+- **not-navigate-on-file**: Filing MUST NOT navigate: the place the user walked
+  in through still holds the category, so the route they are standing on is
+  still true.
 - **not-call-an-unfiling-a-rooting**: The Move picker's no-parent row MUST say
   what it will actually do. A category with other filings does NOT become a root by
   losing this one — it stops being HERE — so for such a category the row MUST read
@@ -157,35 +167,52 @@ all four; this recipe documents the whole.
   then the moved category, then whatever of the old chain hung BELOW it (those
   descendants moved with it). Moving to the top level drops everything above it —
   but only when that removal really roots the category; see
-  `not-call-an-unfiling-a-rooting`.
-  This is `follow-a-rename-to-the-new-slug`'s sibling and for the same reason —
-  a move keeps every slug but re-parents the category, so `resolveCategoryChain`
-  stops resolving from that segment down and the user who re-filed a category is
-  dropped to "All" on a URL that names nothing. Which segment moved is decided by
-  the gear's own level, NOT by the frontier: the level at depth *d* targets
-  `chain[d]`, which may be far above the deepest selection. A move driven from off
-  the chain, and one that FAILS, MUST leave the route alone. The moved category's
-  OWN segment MUST be re-derived against its new siblings, never carried over from
-  the old chain: slugs are unique per level (`select-by-slug-not-id`), so a
-  suffix it only carried because of a twin under the parent it is leaving is not its
-  slug under the parent it is joining.  Only the segments BELOW it carry over
-  unchanged — their scope is the moved category's own children, which a move does
-  not reshape.
+  #integration-requirements/not-call-an-unfiling-a-rooting. This is
+  #integration-requirements/follow-a-rename-to-the-new-slug's sibling and for the
+  same reason — a move keeps every slug but re-parents the category, so
+  `resolveCategoryChain` stops resolving from that segment down and the user who
+  re-filed a category is dropped to "All" on a URL that names nothing. Which
+  segment moved is decided by the gear's own level, NOT by the frontier: the level
+  at depth *d* targets `chain[d]`, which may be far above the deepest selection.
+- **not-navigate-on-a-move-off-chain-or-failed**: A move driven from off the
+  chain, and one that FAILS, MUST leave the route alone.
+- **rederive-the-moved-segment-not-carry-it-over**: The moved category's OWN
+  segment MUST be re-derived against its new siblings, never carried over from
+  the old chain: slugs are unique per level
+  (#integration-requirements/select-by-slug-not-id), so a suffix it only carried
+  because of a twin under the parent it is leaving is not its slug under the
+  parent it is joining. Only the segments BELOW it carry over unchanged — their
+  scope is the moved category's own children, which a move does not reshape.
+- **add-before-remove-on-move**: A move MUST write the new parent edge before
+  removing the old one, so a refused add — a cycle the client-side snapshot
+  could not see, caught by the backend's guard — leaves the category filed
+  where it started rather than orphaned at the top level mid-write.
+- **refresh-before-surfacing-a-half-move**: The two edge writes behind a move
+  share no transaction, so the add can succeed and the remove fail, leaving the
+  category filed in BOTH places. When that happens, the rail MUST be refreshed
+  before the failure surfaces to the user — a rejection that skipped the refresh
+  would show "the move failed" over a tree still drawn from the pre-move forest,
+  which displays neither filing.
+- **skip-an-existing-edge-on-retry**: A move's add step MUST be skipped when the
+  category is already filed under the destination (`node.parentIds` carries every
+  filing, in-forest or not) — otherwise a retry after a half-applied move
+  reissues an edge that already exists and the move can never be finished.
 - **follow-a-rename-to-the-new-slug**: A successful rename of the
   CURRENTLY SELECTED category MUST re-select it under its new slug and update the
   route to match — a rename changes the category's name, and by
-  `select-by-slug-not-id` that IS its URL identity, so the route the user is
-  standing on expires the instant the write lands. Leaving it there drops them to
-  "All" on a URL that no longer resolves, with nothing said. Renaming a category
-  that is NOT the current selection MUST leave the route alone, and a rename that
-  FAILS MUST leave it alone too. Only the renamed segment changes: every
-  descendant's slug comes from its own name, so a deeper chain keeps its tail. The
-  new segment is the slug the NEXT fold will assign, not `slugFor(newName, id)` on
-  its own — see `not-guess-a-contested-slug`.
+  #integration-requirements/select-by-slug-not-id that IS its URL identity, so
+  the route the user is standing on expires the instant the write lands. Leaving
+  it there drops them to "All" on a URL that no longer resolves, with nothing
+  said. Renaming a category that is NOT the current selection MUST leave the
+  route alone, and a rename that FAILS MUST leave it alone too. Only the renamed
+  segment changes: every descendant's slug comes from its own name, so a deeper
+  chain keeps its tail. The new segment is the slug the NEXT fold will assign,
+  not `slugFor(newName, id)` on its own — see
+  #integration-requirements/not-guess-a-contested-slug.
 - **not-guess-a-contested-slug**: A rename or move that lands the category on
   a slug ALREADY claimed by one of its (new) siblings MUST leave the route alone
   rather than navigate. Slugs are de-collided per level and the first claimant keeps
-  the bare slug (`select-by-slug-not-id`), so which of two twins keeps it
+  the bare slug (#integration-requirements/select-by-slug-not-id), so which of two twins keeps it
   depends on the level's ORDER — and the write itself can change that order, since
   siblings sort by `sortOrder` then NAME. Navigating on a guess would open the OTHER
   category, which is strictly worse than not moving: the stale chain degrades to the
@@ -215,15 +242,18 @@ all four; this recipe documents the whole.
   slug, later ones take `-2`, `-3`… — so a chain segment names exactly one row. The
   scope is one parent's children, so cousins on separate branches keep the same bare
   slug; the top level is one scope across the whole root list.
-- **clear-to-the-parent-level**: A level's `onClear` (re-click of the
-  selected row, or a breadcrumb-up through HTDV) MUST re-select the chain one
-  segment shorter than this level's own ancestors, not the whole chain — it walks
-  up one level at a time, the same as the level walk went down.
+- **clear-to-the-parent-level**: A level at depth *d*'s `onClear` (re-click of
+  the selected row, or a breadcrumb-up through HTDV) MUST re-select
+  `chain.slice(0, d)` — this level's own ancestors, dropping its own selection —
+  not the whole chain: it walks up one level at a time, the same as the level
+  walk went down.
 
 ## Layout
 
 The browser contributes N rail levels (N = the walked depth + 1) into an
-existing [[hierarchical-topic-detail]] stack; it draws no chrome of its own:
+existing
+[Hierarchical Topic Detail](agenticdevelopertoolkit://recipes/hierarchical-topic-detail)
+stack; it draws no chrome of its own:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
@@ -243,7 +273,8 @@ existing [[hierarchical-topic-detail]] stack; it draws no chrome of its own:
 ```
 
 Narrow-mode drill-down, disclosure, and the breadcrumb are entirely HTDV's — see
-[[hierarchical-topic-detail]]'s own Layout section.
+[Hierarchical Topic Detail](agenticdevelopertoolkit://recipes/hierarchical-topic-detail)'s
+own Layout section.
 
 ## Shared State
 
@@ -264,20 +295,21 @@ Narrow-mode drill-down, disclosure, and the breadcrumb are entirely HTDV's — s
 | T2 | not-publish-an-empty-leaf-level | select a leaf category (no children) | no level appears below the leaf's own level; the host's pane renders directly |
 | T3 | lead-the-root-level-with-all-and-uncategorized, keep-the-backend-order-below-the-root | roots and children both arriving in non-alphabetical order | root level's first two items are "All" then "Uncategorized", in that order, ahead of the roots sorted by name; a deeper level's siblings stay in arrival order |
 | T4 | show-only-the-category-name | a category with children | its row shows the name only — no count, no second line |
-| T5 | offer-a-gear-in-every-level-header, target-the-selected-row | no selection at a level | gear opens; Rename/Move/Delete are disabled; Add is enabled and, on confirm, creates a child of that level's own category |
-| T6 | target-the-selected-row | "All" or "Uncategorized" selected, gear opened | Rename/Move/Delete disabled (neither names a real category) |
+| T5 | offer-a-gear-in-every-level-header, target-the-selected-row | no selection at a level | gear opens with exactly five actions in order — Add, Rename, Move, Also file, Delete; Rename/Move/Also file/Delete are disabled; Add is enabled and, on confirm, creates a child of that level's own category |
+| T6 | target-the-selected-row | "All" or "Uncategorized" selected, gear opened | Rename/Move/Also file/Delete disabled (neither names a real category) |
 | T7 | say-what-a-delete-keeps | delete a category with one child filed only there and one child also filed elsewhere | confirmation names the first child as also-deleted and not the second; item filed under the deleted category becomes uncategorized (not removed) |
 | T8 | leave-other-filings-alone-on-move, follow-a-move-to-its-new-place | move a category filed under two parents, walked in via parent A | filing under parent A is rewritten to the new parent; the filing under parent B is untouched; the route becomes the new parent's chain + the moved category + the tail that hung below it |
 | T9 | select-by-slug-not-id | select a real category | `onSelectChain` receives the category's slug appended to the ancestor slugs, not its id |
 | T10 | clear-to-the-parent-level | at depth 2, call the level's `onClear` | selection becomes the depth-1 chain (one segment shorter), not the root |
 | T11 | follow-a-delete-to-the-surviving-level | standing on `work/q3/budget`, delete "Work" from the ROOT level's gear | the route becomes `[]`, not `work/q3`; deleting "Q3" from its own level instead leaves `["work"]`; a delete that rejects leaves the route untouched |
-| T15 | follow-a-move-to-its-new-place | the add resolves and the remove rejects | `onChanged` fires exactly once before the rejection surfaces, the dialog stays open showing the reason, and no navigation happens; re-confirming the same move issues only the remove |
-| T13 | not-guess-a-contested-slug | standing in `work`, rename Work to a name that slugifies exactly as a sibling root's does | the route is left alone (no navigation); the rail degrades to the level above once the write lands |
-| T14 | follow-a-move-to-its-new-place, not-guess-a-contested-slug | Work holds twins "Q 3" (`q-3`) and "Q-3" (`q-3-2`); standing in `work/q-3-2`, move that twin under Archive, which holds no `q-3` | the route becomes `archive/q-3` — the bare slug, not the `-2` it carried under Work |
-| T16 | file-a-category-in-a-second-place | Q3 is filed under Work; standing in `work/q3`, choose Also file and pick Archive | exactly one `addCategoryParent("q3", "archive")`, zero `removeCategoryParent`, and no `onSelectChain` call — the route stays on `work/q3` |
-| T17 | file-a-category-in-a-second-place | open Also file for Q3 (filed under Work and Planning, holding child Budget) | Work, Planning, Q3 itself and Budget are all present but `aria-disabled`; Archive is enabled; Confirm is disabled until a real row is picked |
-| T18 | not-call-an-unfiling-a-rooting | Q3 filed under Work AND Planning; standing in `work/q3`, open Move | the no-parent row reads "Remove from “Work”"; confirming it removes only the Work edge, adds nothing, and does NOT navigate. With Q3 filed under Work alone, the same row reads "Top level" and the route becomes `["q3"]` |
 | T12 | select-by-slug-not-id | three sibling categories named "Q3 Plans", "Q3: plans" and "q3 plans" | their slugs are `q3-plans`, `q3-plans-2` and `q3-plans-3`; each resolves to its own row, and a cousin under another parent still gets the bare slug |
+| T13 | not-guess-a-contested-slug | standing in `work`, rename Work to a name that slugifies exactly as a sibling root's does | the route is left alone (no navigation); the rail degrades to the level above once the write lands |
+| T14 | rederive-the-moved-segment-not-carry-it-over, not-guess-a-contested-slug | Work holds twins "Q 3" (`q-3`) and "Q-3" (`q-3-2`); standing in `work/q-3-2`, move that twin under Archive, which holds no `q-3` | the route becomes `archive/q-3` — the bare slug, not the `-2` it carried under Work |
+| T15 | refresh-before-surfacing-a-half-move, skip-an-existing-edge-on-retry, not-navigate-on-a-move-off-chain-or-failed | the add resolves and the remove rejects | `onChanged` fires exactly once before the rejection surfaces, the dialog stays open showing the reason, and no navigation happens; re-confirming the same move issues only the remove |
+| T16 | file-a-category-in-a-second-place, not-navigate-on-file | Q3 is filed under Work; standing in `work/q3`, choose Also file and pick Archive | exactly one `addCategoryParent("q3", "archive")`, zero `removeCategoryParent`, and no `onSelectChain` call — the route stays on `work/q3` |
+| T17 | disable-not-hide-an-invalid-file-target | open Also file for Q3 (filed under Work and Planning, holding child Budget) | Work, Planning, Q3 itself and Budget are all present but `aria-disabled`; Archive is enabled; Confirm is disabled until a real row is picked |
+| T18 | not-call-an-unfiling-a-rooting | Q3 filed under Work AND Planning; standing in `work/q3`, open Move | the no-parent row reads "Remove from “Work”"; confirming it removes only the Work edge, adds nothing, and does NOT navigate. With Q3 filed under Work alone, the same row reads "Top level" and the route becomes `["q3"]` |
+| T19 | follow-a-rename-to-the-new-slug | standing on the currently selected category, rename it to an uncontested name | the route swaps only that segment to the new slug and keeps the tail below it unchanged; renaming a category that is not the current selection leaves the route alone; a rename that fails leaves the route alone too |
 
 ## Edge Cases
 
@@ -294,7 +326,8 @@ Narrow-mode drill-down, disclosure, and the breadcrumb are entirely HTDV's — s
 - **A category filed under two parents.** It appears as a real row under BOTH
   parents' levels — walking in through either shows the same subtree beneath it.
   A rename or delete acts on the category (affects both placements); a move
-  rewrites only the filing walked in through (`leave-other-filings-alone-on-move`);
+  rewrites only the filing walked in through
+  (#integration-requirements/leave-other-filings-alone-on-move);
   Also file is what CREATES this state from the rail in the first place.
 - **Unfiling a multi-filed category.** Picking the Move picker's no-parent row is
   two different operations depending on how many filings the category carries, and
@@ -320,131 +353,165 @@ Narrow-mode drill-down, disclosure, and the breadcrumb are entirely HTDV's — s
   `MAX_TREE_NODES + rows.length` nodes. It never renders an error or leaves the rail
   blank; it exists so a pathological or corrupted DAG (exponential path count)
   cannot hang the rail.
-- **Renaming the currently-open category out from under the URL.** The chain is
-  re-resolved by slug on every render from the (possibly now-stale) URL slugs;
-  since `slugFor` derives the slug from the CURRENT name, a rename changes the
-  slug too, and the next navigation from this level uses the new one. The already
-  -open level itself does not silently vanish mid-render — `onChanged` triggers a
-  refetch, after which the resolved chain reflects the new name.
+- **Renaming the currently-open category out from under the URL.** Since
+  `slugFor` derives the slug from the CURRENT name, a rename changes the slug the
+  instant it lands — see
+  #integration-requirements/follow-a-rename-to-the-new-slug. The hook re-selects
+  the chain under its new slug as soon as the write succeeds, in the same call
+  that also triggers `onChanged`'s refetch, so the already-open level never
+  resolves against a slug the rename just invalidated.
 - **Deleting the currently-open category.** `chainAfterDelete` finds the deleted
   category ON the chain and truncates there, and the dialog's `onConfirm` navigates
-  only once the write has landed. Dropping the LAST segment instead — which this
-  recipe blessed until the rule above was written — is the same mistake
-  `chainAfterMove` exists to avoid: the gear at depth *d* targets `chain[d]`, so
-  deleting a category the user has walked PAST would have cut a segment off the far
-  end and moved them somewhere they never asked to go, while still leaving the dead
-  category in the route. Off the chain entirely, `chainAfterDelete` returns `null`
-  and the route is left alone.
+  only once the write has landed. Dropping the LAST segment instead would be the
+  same mistake `chainAfterMove` exists to avoid: the gear at depth *d* targets
+  `chain[d]`, so deleting a category the user has walked PAST would cut a segment
+  off the far end and move them somewhere they never asked to go, while still
+  leaving the dead category in the route. Off the chain entirely,
+  `chainAfterDelete` returns `null` and the route is left alone.
 - **A rename or move onto a contested slug.** `chainAfterRename` and
   `chainAfterMove` both have to predict a slug the next fold has not assigned yet,
-  and a slug is only a name until `siblingSlugs` has seen the level. They used to
-  skip that step entirely — the rename returned `slugFor(nextName, id)` and the move
-  reused the slug the category carried under its OLD parent — so renaming "Reports"
-  to "My notes" beside a sibling actually named "my-notes" navigated into the
-  SIBLING, and moving a suffixed twin to a level where its bare slug is free
-  navigated to a segment naming nothing. Both now go through `freeSlugAmong`, which
-  answers exactly when the base slug is free among the other siblings and `null`
-  when it is contested (`not-guess-a-contested-slug`).
+  and a slug is only a name until `siblingSlugs` has seen the level. Both go
+  through `freeSlugAmong`, which answers exactly when the base slug is free among
+  the other siblings and `null` when it is contested (see
+  #integration-requirements/not-guess-a-contested-slug).
 - **Moving the currently-open category out from under the URL.** Every slug on the
   chain survives a move — but the chain is resolved by WALKING children, so the
   moment the category stops being a child of the parent the URL walked in through,
   that segment and everything below it resolve to nothing. `chainAfterMove` rebuilds
   the route from the pre-move forest (the new parent's own ancestry is not what the
   move changed, so reading it there is exact) and hands it to `onSelectChain` only
-  after the write lands (`follow-a-move-to-its-new-place`).
+  after the write lands
+  (#integration-requirements/follow-a-move-to-its-new-place).
 
 ## Platform Notes
 
 - **React / Web (TypeScript):** `packages/web/packages/features/categories/src/useCategoryLevels.tsx`, exported from `@agentic-toolkit/categories`. `"use client"`.
-- Built on `buildCategoryTree`/`resolveCategoryChain`/`categoryKey`/`chainAfterRename`/`chainAfterMove` (which returns `null` for an unfiling that leaves the category filed elsewhere) (`ui/src/blocks/category-tree.ts`) and `CategoryGearMenu`/`CategoryPickerDialog`/`CategoryRenameDialog`/`CategoryDeleteDialog` (`ui/src/blocks/*`), all re-exported from `@agenticdevelopertoolkit/ui/blocks`.
-- The two route-following functions, `chainAfterRename` and `chainAfterMove`, sit in
-  `ui/src/blocks/category-tree.ts` beside the forest and slug functions whose contracts they
-  follow — pure functions over a forest and a slug chain, with no notion of a notebook, a list
-  query, or a network. `features/categories/src/category-scope.ts` re-exports them, so the
+- Built on `buildCategoryTree`/`resolveCategoryChain`/`categoryKey`/`chainAfterRename`/`chainAfterMove`/`chainAfterDelete` (which returns `null` for an unfiling that leaves the category filed elsewhere) (`external/agenticdevelopertoolkit/packages/web/packages/ui/src/blocks/category-tree.ts`) and `CategoryGearMenu`/`CategoryPickerDialog`/`CategoryRenameDialog`/`CategoryDeleteDialog` (`external/agenticdevelopertoolkit/packages/web/packages/ui/src/blocks/*`), all re-exported from `@agenticdevelopertoolkit/ui/blocks`.
+- The three route-following functions, `chainAfterRename`, `chainAfterMove` and
+  `chainAfterDelete`, sit in
+  `external/agenticdevelopertoolkit/packages/web/packages/ui/src/blocks/category-tree.ts`
+  beside the forest and slug functions whose contracts they follow — pure functions over a
+  forest and a slug chain, with no notion of a notebook, a list query, or a network.
+  `packages/web/packages/features/categories/src/category-scope.ts` re-exports them, so the
   import site every consumer already names still works, and anything that links only
   `@agenticdevelopertoolkit/ui` (the showcase demo among them) calls the SAME function the hub does
   rather than mirroring it.
-- `CategoryScope` and the `-all`/`-none` synthetic-row slugs live in `features/categories/src/category-scope.ts`, imported by both hosts — there is exactly one copy (`note-model.ts`'s former local copy was deleted when notebook adopted the shared hook).
-- Consumers: `features/notebook/src/NotebookPane.tsx` (rail + note list, `itemNoun="notes"`) and `features/research/src/ResearchPane.tsx` (rail + document list, `itemNoun="documents"`), each supplying its own `rows` fetch, `idPrefix`, and `workspaceSlug`.
-- Demo: `local/ui-showcase/app/page.tsx` (Topic id `hierarchical-category-browser`) + the showcase source registry. The demo assembles the same `ui/blocks` primitives this hook composes — `buildCategoryTree`, `chainAfterRename`, `chainAfterMove`, `CategoryGearMenu`, `CategoryPickerDialog`, `CategoryRenameDialog`, `CategoryDeleteDialog` — against an in-memory `CategoryTreeNode[]` fixture, since `useCategoryLevels` itself reaches a real `taxonomyApi`/`markdownApi` the showcase has no backend for.
-- Responsive: verify via the ui-showcase demo at 375 / 768 / 1440 — the rail levels inherit [[hierarchical-topic-detail]]'s own disclosure/narrow-mode behavior; this recipe adds no layout of its own to verify beyond the gear menu and its dialogs at each width.
+- `CategoryScope` and the `-all`/`-none` synthetic-row slugs live in
+  `packages/web/packages/features/categories/src/category-scope.ts`, imported by both hosts —
+  there is exactly one copy (`note-model.ts`'s former local copy was deleted when notebook
+  adopted the shared hook).
+- Consumers: `packages/web/packages/features/notebook/src/NotebookPane.tsx` (rail + note list, `itemNoun="notes"`) and `packages/web/packages/features/research/src/ResearchPane.tsx` (rail + document list, `itemNoun="documents"`), each supplying its own `rows` fetch, `idPrefix`, and `workspaceSlug`.
+- Demo: `local/ui-showcase/app/page.tsx` (Topic id `hierarchical-category-browser`) + the showcase source registry. The demo assembles the same `external/agenticdevelopertoolkit/packages/web/packages/ui/src/blocks` primitives this hook composes — `buildCategoryTree`, `chainAfterRename`, `chainAfterMove`, `CategoryGearMenu`, `CategoryPickerDialog`, `CategoryRenameDialog`, `CategoryDeleteDialog` — against an in-memory `CategoryTreeNode[]` fixture, since `useCategoryLevels` itself reaches a real `taxonomyApi`/`markdownApi` the showcase has no backend for.
+- Responsive: verify via the ui-showcase demo at 375 / 768 / 1440 — the rail levels inherit
+  [Hierarchical Topic Detail](agenticdevelopertoolkit://recipes/hierarchical-topic-detail)'s
+  own disclosure/narrow-mode behavior; this recipe adds no layout of its own to verify beyond
+  the gear menu and its dialogs at each width.
+- **SwiftUI**: Not applicable — web-only (platforms: typescript, web).
+- **Compose**: Not applicable — web-only (platforms: typescript, web).
+- **AppKit / UIKit**: Not applicable — web-only (platforms: typescript, web).
+- **WinUI 3**: Not applicable — web-only (platforms: typescript, web).
 
 ## Design Decisions
 
-- **One hook, two hosts, zero divergence.** `useCategoryLevels` is called
-  identically by `features/notebook` and `features/research` — same options
-  shape, same result shape, same dialogs. The category rail is not
-  "notebook's browser, later adapted for research"; it is one shared element two
-  features happen to mount (well-factored, decoupled, DRY). A third markdown
-  surface (see this plan's Open Question on "docs") would call the same hook
-  unchanged.
-- **The walk stops at an empty level, never publishes one.** HTDV treats an
-  empty level as its frontier and stops rendering anything past it — publishing
-  one for a childless category would silently hide the item list underneath,
-  which is the opposite of what selecting a leaf category should do. Stopping the
-  walk one level early is simpler than teaching HTDV to skip empty levels, and it
-  keeps the "what levels exist" answer entirely local to this hook
-  (separation-of-concerns).
-- **All/Uncategorized are synthetic rows, not a filter toggle.** They occupy the
-  same list as real categories (same keyboard nav, same selection model) rather
-  than a separate control, so "show me everything" and "show me the unfiled" are
-  just two more rows to pick — no second UI to learn, no second state to keep in
-  sync with the rail's own selection.
-- **No subcategory count, ever.** The spec is explicit that a category row shows
-  only its name. A count is a fact ABOUT the rail (how many children a node
-  materialised), not about the category, and displaying it would have made every
-  row two competing pieces of information instead of one legible name
+- **Decision**: `useCategoryLevels` is called identically by
+  `features/notebook` and `features/research` — same options shape, same
+  result shape, same dialogs.
+  **Rationale**: The category rail is not "notebook's browser, later adapted
+  for research"; it is one shared element two features happen to mount
+  (well-factored, decoupled, DRY). A third markdown surface would call the
+  same hook unchanged.
+  **Approved**: pending
+- **Decision**: The walk stops at an empty level; it never publishes one.
+  **Rationale**: HTDV treats an empty level as its frontier and stops
+  rendering anything past it — publishing one for a childless category would
+  silently hide the item list underneath, which is the opposite of what
+  selecting a leaf category should do. Stopping the walk one level early is
+  simpler than teaching HTDV to skip empty levels, and it keeps the "what
+  levels exist" answer entirely local to this hook (separation-of-concerns).
+  **Approved**: pending
+- **Decision**: All/Uncategorized are synthetic rows, not a filter toggle.
+  **Rationale**: They occupy the same list as real categories (same keyboard
+  nav, same selection model) rather than a separate control, so "show me
+  everything" and "show me the unfiled" are just two more rows to pick — no
+  second UI to learn, no second state to keep in sync with the rail's own
+  selection.
+  **Approved**: pending
+- **Decision**: No subcategory count, ever.
+  **Rationale**: The spec is explicit that a category row shows only its
+  name. A count is a fact ABOUT the rail (how many children a node
+  materialised), not about the category, and displaying it would have made
+  every row two competing pieces of information instead of one legible name
   (principle-of-least-astonishment: the rail is a place to navigate, not a
   dashboard).
-- **The gear reads its target from a plain prop, every render.** `CategoryGearMenu`
-  is deliberately dumb (see [[category-picker]]'s sibling components) and the
-  hook feeds it `selectedNode`/`levelParent` recomputed in the SAME render that
-  builds `selectedId` — because HTDV's `levelsKey` cache ignores `ReactNode`
-  props, a gear that closed over a stale target at registration time would act on
-  the wrong category after a rename. Keeping the target reachable from a prop
-  that DOES change (`selectedId`) is what keeps the gear honest.
-- **Add is never disabled by the selection.** Every other gear verb acts on the
-  selected ROW; Add acts on the level's own category (its parent), which is a
-  property of which level you are looking at, not of what is selected within it —
-  so it stays enabled with no selection, unlike Rename/Move/Delete.
-- **Only the ROOT level sorts.** The root is the level with no context to read an
-  order from, and the one the spec constrains ("followed by the root categories
-  sorted by name") — a top-level list scanned alphabetically is one the owner can
-  find a category in without remembering how it was entered. Below it, the order
-  that arrives is already meaningful: it is the backend's `sortOrder`, which is the
-  owner's own arrangement, and `buildCategoryTree` promises to preserve it. Sorting
-  everywhere was one line shorter and made the rail contradict both that promise and
-  the [[category-picker]] rendering the same subtree unsorted beside it.
-- **Move adds before it removes.** The hook writes the new parent edge before
-  removing the old one specifically so a refused add (a cycle the client-side
-  snapshot could not see, caught by the backend's guard) leaves the category
-  filed where it started rather than orphaned at the top level mid-write.
-- **A move that only half-lands.** The two edge writes share no transaction, so the
-  add can succeed and the remove fail, leaving the category filed in BOTH places.
-  Two rules make that survivable rather than silent. The rail MUST be refreshed
-  before the failure surfaces — a rejection otherwise skips the refresh, and the
-  user reads "the move failed" while looking at a tree drawn from the pre-move
-  forest that shows neither filing. And the add MUST be skipped when the category is
-  already filed under the destination (`node.parentIds` carries every filing,
-  in-forest or not), or the retry re-issues an edge that exists and the move can
-  never be finished.
+  **Approved**: pending
+- **Decision**: The gear reads its target from a plain prop, every render.
+  **Rationale**: `CategoryGearMenu` is deliberately dumb (see
+  [Category Picker](agenticdevelopertoolkit://recipes/category-picker-dialog)'s
+  sibling components) and the hook feeds it `selectedNode`/`levelParent`
+  recomputed in the SAME render that builds `selectedId` — because HTDV's
+  `levelsKey` cache ignores `ReactNode` props, a gear that closed over a stale
+  target at registration time would act on the wrong category after a rename.
+  Keeping the target reachable from a prop that DOES change (`selectedId`) is
+  what keeps the gear honest.
+  **Approved**: pending
+- **Decision**: Add is never disabled by the selection.
+  **Rationale**: Every other gear verb acts on the selected ROW; Add acts on
+  the level's own category (its parent), which is a property of which level
+  you are looking at, not of what is selected within it — so it stays enabled
+  with no selection, unlike Rename/Move/Delete.
+  **Approved**: pending
+- **Decision**: Only the ROOT level sorts.
+  **Rationale**: The root is the level with no context to read an order from,
+  and the one the spec constrains ("followed by the root categories sorted by
+  name") — a top-level list scanned alphabetically is one the owner can find a
+  category in without remembering how it was entered. Below it, the order
+  that arrives is already meaningful: it is the backend's `sortOrder`, which
+  is the owner's own arrangement, and `buildCategoryTree` promises to
+  preserve it. Sorting everywhere was one line shorter and made the rail
+  contradict both that promise and the
+  [Category Picker](agenticdevelopertoolkit://recipes/category-picker-dialog)
+  rendering the same subtree unsorted beside it.
+  **Approved**: pending
+- **Decision**: A move writes the new parent edge before removing the old one
+  (see #integration-requirements/add-before-remove-on-move).
+  **Rationale**: A refused add — a cycle the client-side snapshot could not
+  see, caught by the backend's guard — then leaves the category filed where
+  it started rather than orphaned at the top level mid-write.
+  **Approved**: pending
+- **Decision**: A move that only half-lands is made survivable rather than
+  silent (see #integration-requirements/refresh-before-surfacing-a-half-move
+  and #integration-requirements/skip-an-existing-edge-on-retry).
+  **Rationale**: The two edge writes behind a move share no transaction, so
+  the add can succeed and the remove fail, leaving the category filed in BOTH
+  places, with no single write to roll back.
+  **Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |---|---|---|
-| Artifact formatting (recipe) | passed | artifact-formatting |
-| UI guidelines — `apt-*` tokens, no raw hex, no `!important` | passed | adh-ui-guidelines |
-| Live demo exists in ui-showcase (`hierarchical-category-browser`) | passed | demo-exists |
-| One hook, two identical hosts (notebook, research); no per-host divergence | passed | implementation |
-| Level-per-depth walk with no empty leaf level; All/Uncategorized lead the root | passed | implementation |
-| Gear (add/rename/move/also-file/delete) target rules match the spec | passed | implementation |
-| Base UI only (via the shared `Dialog`/`AlertModal` primitives), never Radix | passed | adh-ui-guidelines |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [focus-management](agenticdevelopercookbook://compliance/accessibility#focus-management) | passed | Accessibility |
+| [semantic-markup](agenticdevelopercookbook://compliance/accessibility#semantic-markup) | passed | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | partial | Accessibility |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+
+Passed rows rest on the WAI-ARIA tree/listbox/treeitem/option roles, `aria-*`
+attributes, and roving-tabindex keyboard handling in
+`category-picker-dialog.tsx` and the shared `Dialog` primitive's focus trap;
+the partial rows reflect that the source uses `apt-*` theme tokens throughout
+(no raw hex) but states neither their computed contrast values nor explicit
+hit-target dimensions; the failed row reflects that every UI string in
+`useCategoryLevels.tsx` and its dialogs is a hardcoded English literal with no
+localization framework in the source.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 1.0.0 | 2026-08-23 | Mike Fullerton | Initial recipe, documenting `useCategoryLevels` and the notebook/research rail it drives. |
-| 1.1.0 | 2026-08-24 | Mike Fullerton | Added the fifth gear verb, Also file (`must-file-a-category-in-a-second-place`), so the DAG is reachable from the rail; made the Move picker's no-parent row say whether it roots or merely unfiles (`must-not-call-an-unfiling-a-rooting`). |
+| 1.1.0 | 2026-08-24 | Mike Fullerton | Added the fifth gear verb, Also file (`file-a-category-in-a-second-place`), so the DAG is reachable from the rail; made the Move picker's no-parent row say whether it roots or merely unfiles (`not-call-an-unfiling-a-rooting`); added slug de-collision (`select-by-slug-not-id`) and the route-following rules for a rename, a move, and a delete (`follow-a-rename-to-the-new-slug`, `follow-a-move-to-its-new-place`, `follow-a-delete-to-the-surviving-level`), the contested-slug guard (`not-guess-a-contested-slug`), and the half-move failure-handling rules (`add-before-remove-on-move`, `refresh-before-surfacing-a-half-move`, `skip-an-existing-edge-on-retry`). |
 | 1.2.0 | 2026-09-23 | Mike Fullerton | Renamed every requirement to subject-only kebab-case, dropping the old prefix everywhere it is cited. |
+| 1.3.0 | 2026-09-23 | Mike Fullerton | Lint pass: replaced wiki-links with full `agenticdevelopertoolkit://` recipe links and converted backtick requirement citations to `#integration-requirements/<name>` fragments; split `file-a-category-in-a-second-place` and `follow-a-move-to-its-new-place` into separately named requirements (`disable-not-hide-an-invalid-file-target`, `not-navigate-on-file`, `rederive-the-moved-segment-not-carry-it-over`, `not-navigate-on-a-move-off-chain-or-failed`); promoted three MUST rules out of Design Decisions into named Integration Requirements (`add-before-remove-on-move`, `refresh-before-surfacing-a-half-move`, `skip-an-existing-edge-on-retry`); reformatted every Design Decision into Decision/Rationale/Approved form and removed a dangling reference to an outside plan document; rebuilt the Compliance table against real catalog checks (Accessibility, Internationalization) in place of invented categories; added the missing rename-follow test vector and Also file to the disabled-action vectors, then renumbered every vector ID in order; corrected the `clear-to-the-parent-level` wording and the "Renaming the currently-open category" edge case to state the current (immediate) behavior, and moved two edge cases' historical narrative out of Edge Cases; corrected `ui/src/blocks/*` paths to their repo-rooted `external/agenticdevelopertoolkit/...` form and the route-following function count from two to three; shortened the frontmatter summary and dropped a tag past the five-tag limit; added SwiftUI/Compose/AppKit-UIKit/WinUI 3 Platform Notes bullets; added `dialog`, `dialog-actions`, and `alert-and-dialog` to `related`. |
