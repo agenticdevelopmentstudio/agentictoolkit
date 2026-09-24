@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { TriangleAlert } from "lucide-react";
 import { useAction } from "@agentic-toolkit/crud";
 import { useResourceList } from "@agentic-toolkit/data";
 import { SettingsBody } from "@agentic-toolkit/resource";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { Checkbox } from "@agenticdevelopertoolkit/ui/components/checkbox";
+import { Alert, AlertDescription, AlertTitle } from "@agenticdevelopertoolkit/ui/components/alert";
+import { errorMessage } from "@agenticdevelopertoolkit/ui/lib/errors";
 import { Select } from "@agenticdevelopertoolkit/ui/components/select";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { Field } from "@agenticdevelopertoolkit/ui/blocks/field";
@@ -193,7 +196,13 @@ export function AssistantsPanel() {
       {/* The FAILURE is read first: a failed read leaves the rows null, so testing for null
           first would leave the panel saying "Loading…" over a read that has already given up. */}
       {personasError !== null ? (
-        <ErrorText error={personasError} />
+        // The same load-failure card the settings tables draw for their own failed read, so a
+        // panel that fails BEFORE its table exists does not look like a different site's error.
+        <Alert variant="error">
+          <TriangleAlert />
+          <AlertTitle>Couldn&apos;t load your assistants</AlertTitle>
+          <AlertDescription>{errorMessage(personasError)}</AlertDescription>
+        </Alert>
       ) : personas === null ? (
         <p className="text-sm text-apt-text-muted">Loading…</p>
       ) : personas.length === 0 ? (

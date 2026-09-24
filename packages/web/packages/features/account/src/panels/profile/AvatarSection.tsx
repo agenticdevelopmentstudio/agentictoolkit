@@ -3,9 +3,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { User as UserIcon, Upload } from "lucide-react";
 
-import { Avatar, AvatarImage, AvatarFallback } from "@agenticdevelopertoolkit/ui/components/avatar";
+import {
+  Avatar,
+  AvatarImage,
+  AvatarFallback,
+} from "@agenticdevelopertoolkit/ui/components/avatar";
 import { PrivacyLevelSelect } from "@agenticdevelopertoolkit/ui/components/privacy-level-select";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
+import { Card, CardContent } from "@agenticdevelopertoolkit/ui/components/card";
 import {
   setPrivacyGrant,
   resolvePrivacyLevel,
@@ -52,53 +57,54 @@ export function AvatarSection({ me, grants }: AvatarSectionProps) {
 
   return (
     <DetailSection title="Avatar">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-        {/* Avatar preview */}
-        <Avatar className="size-20 shrink-0">
-          {me.avatarUrl && (
-            <AvatarImage
-              src={me.avatarUrl}
-              alt={`${displayName} avatar`}
-            />
-          )}
-          <AvatarFallback>
-            {initials || (
-              <UserIcon
-                className="size-7 text-apt-text-muted"
-                aria-hidden="true"
-              />
+      {/* In a Card like Public profile above it: a section whose controls float on the page
+          background reads as a different form from the carded ones around it. */}
+      <Card>
+        <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          {/* Avatar preview */}
+          <Avatar className="size-20 shrink-0">
+            {me.avatarUrl && (
+              <AvatarImage src={me.avatarUrl} alt={`${displayName} avatar`} />
             )}
-          </AvatarFallback>
-        </Avatar>
+            <AvatarFallback>
+              {initials || (
+                <UserIcon
+                  className="size-7 text-apt-text-muted"
+                  aria-hidden="true"
+                />
+              )}
+            </AvatarFallback>
+          </Avatar>
 
-        {/* Controls */}
-        <div className="flex flex-col gap-3">
-          {/* Avatar upload — intentionally deferred this branch */}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled
-            aria-disabled="true"
-            className="w-fit cursor-not-allowed opacity-50"
-          >
-            <Upload data-icon="inline-start" />
-            Upload coming soon
-          </Button>
+          {/* Controls */}
+          <div className="flex flex-col gap-3">
+            {/* Avatar upload — intentionally deferred this branch */}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled
+              aria-disabled="true"
+              className="w-fit cursor-not-allowed opacity-50"
+            >
+              <Upload data-icon="inline-start" />
+              Upload coming soon
+            </Button>
 
-          {/* Privacy */}
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-apt-text-muted">Visibility</span>
-            <div className="w-40">
-              <PrivacyLevelSelect
-                value={level}
-                onChange={(next) => privacyMutation.mutate(next)}
-                ariaLabel="Avatar visibility"
-                disabled={privacyMutation.isPending}
-              />
+            {/* Privacy */}
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-apt-text-muted">Visibility</span>
+              <div className="w-40">
+                <PrivacyLevelSelect
+                  value={level}
+                  onChange={(next) => privacyMutation.mutate(next)}
+                  ariaLabel="Avatar visibility"
+                  disabled={privacyMutation.isPending}
+                />
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </DetailSection>
   );
 }

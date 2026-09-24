@@ -21,7 +21,8 @@ import { Checkbox } from "@agenticdevelopertoolkit/ui/components/checkbox";
 import { Label } from "@agenticdevelopertoolkit/ui/components/label";
 
 import { SettingRow } from "@agentic-toolkit/account";
-import { SettingsBody } from "@agentic-toolkit/resource";
+import { DetailSection, SettingsBody } from "@agentic-toolkit/resource";
+import { Card, CardContent } from "@agenticdevelopertoolkit/ui/components/card";
 
 /**
  * Appearance: accessibility preferences, plus a dev-only theme picker. Each control writes
@@ -148,7 +149,12 @@ function CheckboxRow({
 }) {
   return (
     <div className="flex items-start gap-3">
-      <Checkbox id={id} checked={checked} onCheckedChange={onCheckedChange} className="mt-0.5" />
+      <Checkbox
+        id={id}
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+        className="mt-0.5"
+      />
       <div className="min-w-0">
         <Label htmlFor={id} className="cursor-pointer">
           {label}
@@ -180,10 +186,12 @@ function CheckboxRow({
  * see tsup.config.ts and the debug-env/SiteThemeConsole entry it mirrors.
  */
 const ThemePickerRow =
-  process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === 'local' ||
-  process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === 'testing' ||
-  process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === 'staging'
-    ? dynamic(() => import('@agentic-toolkit/adh/settings/ThemePickerRow'), { ssr: false })
+  process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === "local" ||
+  process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === "testing" ||
+  process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === "staging"
+    ? dynamic(() => import("@agentic-toolkit/adh/settings/ThemePickerRow"), {
+        ssr: false,
+      })
     : (): null => null;
 
 export function AppearancePanel(): ReactElement {
@@ -197,54 +205,66 @@ export function AppearancePanel(): ReactElement {
         in the family.
       </p>
 
-      <ThemePickerRow />
+      {/* Sections in Cards, as Account and Profile draw them — rows floating on the page
+          background looked like a different site's settings. */}
+      <DetailSection title="Display">
+        <Card>
+          <CardContent className="flex flex-col gap-6">
+            <ThemePickerRow />
 
-      <SegmentedRow
-        label="Reduce motion"
-        description="Minimise animations and transitions."
-        value={prefs.reduceMotion}
-        options={REDUCE_MOTION_OPTIONS}
-        onChange={(reduceMotion) => set({ reduceMotion })}
-      />
+            <SegmentedRow
+              label="Reduce motion"
+              description="Minimise animations and transitions."
+              value={prefs.reduceMotion}
+              options={REDUCE_MOTION_OPTIONS}
+              onChange={(reduceMotion) => set({ reduceMotion })}
+            />
 
-      <SegmentedRow
-        label="Contrast"
-        description="Strengthen text and border contrast."
-        value={prefs.contrast}
-        options={CONTRAST_OPTIONS}
-        onChange={(contrast) => set({ contrast })}
-      />
+            <SegmentedRow
+              label="Contrast"
+              description="Strengthen text and border contrast."
+              value={prefs.contrast}
+              options={CONTRAST_OPTIONS}
+              onChange={(contrast) => set({ contrast })}
+            />
 
-      <SegmentedRow
-        label="Text size"
-        value={prefs.textSize}
-        options={TEXT_SIZE_OPTIONS}
-        onChange={(textSize) => set({ textSize })}
-      />
+            <SegmentedRow
+              label="Text size"
+              value={prefs.textSize}
+              options={TEXT_SIZE_OPTIONS}
+              onChange={(textSize) => set({ textSize })}
+            />
 
-      <SegmentedRow
-        label="Spacing"
-        description="Density of layout spacing."
-        value={prefs.spacing}
-        options={SPACING_OPTIONS}
-        onChange={(spacing) => set({ spacing })}
-      />
+            <SegmentedRow
+              label="Spacing"
+              description="Density of layout spacing."
+              value={prefs.spacing}
+              options={SPACING_OPTIONS}
+              onChange={(spacing) => set({ spacing })}
+            />
+          </CardContent>
+        </Card>
+      </DetailSection>
 
-      <div className="space-y-4 border-t border-apt-border pt-6">
-        <CheckboxRow
-          id="appearance-focus-outlines"
-          label="Always show focus outlines"
-          description="Show the focus ring even when navigating with a mouse."
-          checked={prefs.focusOutlines}
-          onCheckedChange={(focusOutlines) => set({ focusOutlines })}
-        />
-        <CheckboxRow
-          id="appearance-underline-links"
-          label="Always underline links"
-          checked={prefs.underlineLinks}
-          onCheckedChange={(underlineLinks) => set({ underlineLinks })}
-        />
-      </div>
+      <DetailSection title="Accessibility">
+        <Card>
+          <CardContent className="flex flex-col gap-4">
+            <CheckboxRow
+              id="appearance-focus-outlines"
+              label="Always show focus outlines"
+              description="Show the focus ring even when navigating with a mouse."
+              checked={prefs.focusOutlines}
+              onCheckedChange={(focusOutlines) => set({ focusOutlines })}
+            />
+            <CheckboxRow
+              id="appearance-underline-links"
+              label="Always underline links"
+              checked={prefs.underlineLinks}
+              onCheckedChange={(underlineLinks) => set({ underlineLinks })}
+            />
+          </CardContent>
+        </Card>
+      </DetailSection>
     </SettingsBody>
   );
 }

@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactElement,
+} from "react";
 
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import {
@@ -23,7 +29,8 @@ import {
   setSiteMenuShortcut,
   useHubPreferences,
 } from "@agentic-toolkit/adh/header/hub-preferences";
-import { SettingsBody } from "@agentic-toolkit/resource";
+import { DetailSection, SettingsBody } from "@agentic-toolkit/resource";
+import { Card, CardContent } from "@agenticdevelopertoolkit/ui/components/card";
 
 /** The site menu's own registration, so the conflict check does not report the shortcut
  *  colliding with itself. Must match the `label` SiteMenu passes as `openShortcut`. */
@@ -88,7 +95,7 @@ export function HubPreferencesPanel(): ReactElement {
       // Keep listening rather than treating it as an answer.
       if (keys === null) return;
       const clash = registeredRef.current.find(
-        (s) => s.label !== SITE_MENU_LABEL && sameChord(s.keys, keys),
+        (s) => s.label !== SITE_MENU_LABEL && sameChord(s.keys, keys)
       );
       if (clash) {
         setRecording({ state: "conflict", keys, with: clash.label });
@@ -107,71 +114,85 @@ export function HubPreferencesPanel(): ReactElement {
   return (
     <SettingsBody>
       <p className="text-sm text-apt-text-muted">
-        Preferences for the hub&rsquo;s own chrome. Unlike the rest of your settings,
-        these are saved to this browser rather than to your account &mdash; a keyboard
-        shortcut belongs to the keyboard in front of you.
+        Preferences for the hub&rsquo;s own chrome. Unlike the rest of your
+        settings, these are saved to this browser rather than to your account
+        &mdash; a keyboard shortcut belongs to the keyboard in front of you.
       </p>
 
-      <SettingRow
-        label="Site menu shortcut"
-        description="Opens and closes the site menu from anywhere, including while you are typing."
-      >
-        <div className="flex items-center gap-2">
-          <span
-            className="min-w-24 rounded-md border border-apt-border px-3 py-1.5 text-center font-mono text-sm text-apt-text"
-            aria-live="polite"
-          >
-            {recording.state === "listening"
-              ? "Press keys…"
-              : !mounted
-                ? " "
-                : isOff
-                  ? "Off"
-                  : formatChord(siteMenuShortcut)}
-          </span>
-          {recording.state === "listening" ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRecording({ state: "idle" })}
+      {/* A section in a Card, as Account and Profile draw theirs — see AppearancePanel. */}
+      <DetailSection title="Keyboard shortcuts">
+        <Card>
+          <CardContent className="flex flex-col gap-3">
+            <SettingRow
+              label="Site menu shortcut"
+              description="Opens and closes the site menu from anywhere, including while you are typing."
             >
-              Cancel
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setRecording({ state: "listening" })}
-            >
-              {isOff ? "Set" : "Change"}
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={isDefault}
-            onClick={() => save(DEFAULT_SITE_MENU_SHORTCUT)}
-          >
-            Reset
-          </Button>
-          <Button variant="ghost" size="sm" disabled={isOff} onClick={() => save("")}>
-            Turn off
-          </Button>
-        </div>
-      </SettingRow>
+              <div className="flex items-center gap-2">
+                <span
+                  className="min-w-24 rounded-md border border-apt-border px-3 py-1.5 text-center font-mono text-sm text-apt-text"
+                  aria-live="polite"
+                >
+                  {recording.state === "listening"
+                    ? "Press keys…"
+                    : !mounted
+                    ? " "
+                    : isOff
+                    ? "Off"
+                    : formatChord(siteMenuShortcut)}
+                </span>
+                {recording.state === "listening" ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setRecording({ state: "idle" })}
+                  >
+                    Cancel
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setRecording({ state: "listening" })}
+                  >
+                    {isOff ? "Set" : "Change"}
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={isDefault}
+                  onClick={() => save(DEFAULT_SITE_MENU_SHORTCUT)}
+                >
+                  Reset
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={isOff}
+                  onClick={() => save("")}
+                >
+                  Turn off
+                </Button>
+              </div>
+            </SettingRow>
 
-      {recording.state === "listening" && (
-        <p className="text-xs text-apt-text-muted">
-          Press the combination you want. Escape cancels; Escape and Tab cannot be bound.
-        </p>
-      )}
+            {recording.state === "listening" && (
+              <p className="text-xs text-apt-text-muted">
+                Press the combination you want. Escape cancels; Escape and Tab
+                cannot be bound.
+              </p>
+            )}
 
-      {recording.state === "conflict" && (
-        <p className="text-xs text-apt-red" role="alert">
-          {formatChord(recording.keys)} is already{" "}
-          <span className="font-medium">{recording.with}</span>. Pick another combination.
-        </p>
-      )}
+            {recording.state === "conflict" && (
+              <p className="text-xs text-apt-red" role="alert">
+                {formatChord(recording.keys)} is already{" "}
+                <span className="font-medium">{recording.with}</span>. Pick
+                another combination.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </DetailSection>
     </SettingsBody>
   );
 }
