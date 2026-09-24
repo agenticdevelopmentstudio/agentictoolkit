@@ -232,6 +232,15 @@ function collectEnvVars(names, read) {
   }
   return out;
 }
+function parseEnvEntries(body) {
+  const entries = body?.entries;
+  return Array.isArray(entries) && entries.every(isEnvVarEntry) ? entries : null;
+}
+function isEnvVarEntry(row) {
+  if (typeof row !== "object" || row === null) return false;
+  const { name, value, secret } = row;
+  return typeof name === "string" && typeof value === "string" && typeof secret === "boolean";
+}
 var SITE_ENV_VARS = [
   // Deployment / backend wiring
   "DEPLOYMENT_ENV",
@@ -288,7 +297,9 @@ var CLIENT_ENV = {
   NEXT_PUBLIC_TELEMETRY_DEBUG: process.env.NEXT_PUBLIC_TELEMETRY_DEBUG
 };
 function fetchEntries(url) {
-  return fetch(url).then((r) => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))).then((d) => d.entries);
+  return fetch(url).then((r) => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))).then(
+    (body) => parseEnvEntries(body) ?? Promise.reject(new Error("debug-env body is not { entries }"))
+  );
 }
 function EnvironmentPanel() {
   const [site, setSite] = useState3(null);

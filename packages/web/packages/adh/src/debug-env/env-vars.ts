@@ -48,6 +48,32 @@ export function collectEnvVars(
 }
 
 /**
+ * Read a debug-env response body — `{ entries: EnvVarEntry[] }`, the contract both the
+ * hub's `/api/public/debug-env` and the backend's `/api/system/debug-env` answer — or
+ * `null` when the body is anything else.
+ *
+ * A reader, not a cast, because the Environment panel hands the result straight to a React
+ * state setter, and a setter CALLS a function argument as an updater. A bare `[]` — what
+ * the hub's e2e catch-all answers for every /api/ GET, and what any list-shaped error body
+ * would be — has an inherited `entries`: the function `Array.prototype.entries`. The cast
+ * read it, the setter ran it with no receiver, and the TypeError, thrown inside React's
+ * render, took the whole page (header included) to the app's error boundary; the signed-out
+ * Debug Options e2e in the hub's site-menu.spec.ts lost to it whenever the fetch beat the
+ * dialog's visibility poll. A row off the contract is refused the same way, since an
+ * object-valued `value` would throw in the list's JSX just as surely.
+ */
+export function parseEnvEntries(body: unknown): EnvVarEntry[] | null {
+  const entries = (body as { entries?: unknown } | null | undefined)?.entries
+  return Array.isArray(entries) && entries.every(isEnvVarEntry) ? entries : null
+}
+
+function isEnvVarEntry(row: unknown): row is EnvVarEntry {
+  if (typeof row !== 'object' || row === null) return false
+  const { name, value, secret } = row as Record<string, unknown>
+  return typeof name === 'string' && typeof value === 'string' && typeof secret === 'boolean'
+}
+
+/**
  * The env vars the platform (shared code + hub) reads. Only the `NEXT_PUBLIC_*`
  * ones exist in the browser; the rest are server-only, so a debug view that wants
  * the full picture must read these on the SERVER (see `debugEnvEntries`).

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { collectEnvVars, type EnvVarEntry } from './env-vars'
+import { collectEnvVars, parseEnvEntries, type EnvVarEntry } from './env-vars'
 import { EnvVarList } from './EnvVarList'
 
 type Fetched = EnvVarEntry[] | 'unavailable' | null
@@ -18,7 +18,13 @@ const CLIENT_ENV: Record<string, string | undefined> = {
 function fetchEntries(url: string): Promise<EnvVarEntry[]> {
   return fetch(url)
     .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-    .then((d: { entries: EnvVarEntry[] }) => d.entries)
+    // Read, never cast: whatever resolves here goes straight into a state setter below, and
+    // a bare `[]` once put `Array.prototype.entries` there and crashed the page — see
+    // parseEnvEntries. A body off the contract is shown as "unavailable" instead.
+    .then(
+      (body: unknown) =>
+        parseEnvEntries(body) ?? Promise.reject(new Error('debug-env body is not { entries }')),
+    )
 }
 
 export function EnvironmentPanel() {
