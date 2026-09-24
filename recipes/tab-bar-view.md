@@ -3,11 +3,11 @@ id: 5c0cc9f5-bc89-4e06-8d24-3db6424ff075
 title: TabBarView
 domain: agentictoolkit://recipes/tab-bar-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -196,20 +196,7 @@ renders a `.title` item with its own close icon.
   MUST each be usable only on the main actor; all three are declared
   `@MainActor`.
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined.
-`TabBarView.swift` declares `onReorder` and documents it, in a doc comment, as
-firing "after the user finishes dragging a tab to a new index," and
-`MultiTabbedViewController.swift` wires that closure straight to a delegate
-callback — but nothing in `TabBarView.swift` itself ever calls `onReorder`.
-There is no `NSDraggingSource` conformance, no pasteboard registration, and no
-other drag-and-drop or keyboard-driven reordering mechanism anywhere in this
-file; `items`' only path to a new order is a caller directly calling
-`setItems(_:selectedID:)` with a different array, which does not go through
-`onReorder` at all. What is missing: the interaction — mouse drag or a
-keyboard equivalent — that determines a target index and invokes
-`onReorder(id, newIndex)`. What would settle it: an implementation of a drag
-session in `TabBarView.swift` (or the confirmation that reordering is a
-future, not-yet-built feature and the callback exists ahead of it).
+- **onreorder-never-fires**: NEEDS REVIEW: Not implemented in source. `TabBarView.swift` declares `onReorder` and documents it, in a doc comment, as firing "after the user finishes dragging a tab to a new index," and `MultiTabbedViewController.swift` wires that closure straight to a delegate callback — but nothing in `TabBarView.swift` itself ever calls `onReorder`; there is no `NSDraggingSource` conformance, pasteboard registration, or other drag-and-drop or keyboard-driven reordering mechanism anywhere in the file, and `items`' only path to a new order is a caller directly calling `setItems(_:selectedID:)`, which does not go through `onReorder` at all. What is missing: the interaction — mouse drag or a keyboard equivalent — that determines a target index and invokes `onReorder(id, newIndex)`. What would settle it: an implementation of a drag session in `TabBarView.swift`, or confirmation that reordering is a future, not-yet-built feature and the callback exists ahead of it.
 
 ## Appearance
 
@@ -286,28 +273,23 @@ future, not-yet-built feature and the callback exists ahead of it).
   originates from a click or from a caller's `setSelected(_:)`
   (**tab-button-highlight-updates-accessibility-value**) — so, unlike a
   purely click-driven implementation, this file's own value updates are
-  consistent for both origins. NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. Nothing in `TabBarView.swift` posts an explicit
-  `NSAccessibility.post(element:notification:)` beyond `accessibilityValue`'s
-  own setter when selection changes. What is missing: whether a VoiceOver
-  user whose cursor is positioned elsewhere is told that a different tab
-  became selected. What would settle it: a VoiceOver pass exercising a
-  programmatic `setSelected(_:)` call, or an explicit decision that the
-  per-element value update is sufficient on its own.
-- **Keyboard / assistive-technology navigation**: NEEDS REVIEW: Not
-  implemented in source. Behavior undefined. `TabButton` and
+  consistent for both origins. `TabBarView.swift` posts no explicit
+  `NSAccessibility.post(element:notification:)` announcement anywhere;
+  a VoiceOver user whose cursor is positioned elsewhere is not told that a
+  different tab became selected — the update relies entirely on the moved
+  focus element's own `accessibilityValue` being read if and when the
+  cursor lands there.
+- **Keyboard / assistive-technology navigation**: `TabButton` and
   `TabItemHostView` are plain `NSView` subclasses with no
   `acceptsFirstResponder`, `keyDown`, or key-view-loop wiring; a tab is
   reachable only by a pointer click (`mouseDown`) or an existing VoiceOver
   cursor's `accessibilityPerformPress()`. `closeButton` is a real `NSButton`
   and so remains independently reachable through the ordinary AppKit
   key-view loop (Full Keyboard Access), meaning a keyboard-only user may be
-  able to close a tab yet has no way at all to select one. What is missing:
-  a way for a keyboard-only or Full Keyboard Access user to move focus onto
-  a tab and activate it without a pointer or VoiceOver already positioned
-  there. What would settle it: a keyboard-only pass over a real window, or an
-  explicit decision that tab selection is pointer/VoiceOver-only and out of
-  scope.
+  able to close a tab yet has no way at all to select one — there is no
+  keyboard-only or Full Keyboard Access path to move focus onto a tab and
+  activate it without a pointer or VoiceOver cursor already positioned
+  there.
 - **Minimum tap target**: `closeButton`'s hit area is a fixed `14×14pt`; the
   rest of `TabButton` (background, label) is clickable everywhere outside
   that frame. macOS is a pointer-driven desktop platform; the `44×44pt`
@@ -423,7 +405,7 @@ future, not-yet-built feature and the callback exists ahead of it).
 | `hostController` | `NSViewController?` (weak) | `nil` | Parent a `.viewController` item's controller is added to; unset means hosted controllers are never parented (see Edge Cases). |
 | `onSelect` | `((UUID) -> Void)?` | `nil` | Invoked when a tab is clicked, or when an assistive-technology press activates one. |
 | `onClose` | `((UUID) -> Void)?` | `nil` | Invoked when a tab's close control is activated. |
-| `onReorder` | `((UUID, Int) -> Void)?` | `nil` | Declared for a caller to observe reordering; never invoked by this file itself (see the open question under Behavioral Requirements). |
+| `onReorder` | `((UUID, Int) -> Void)?` | `nil` | Declared for a caller to observe reordering; never invoked by this file itself (see the open question on onreorder-never-fires). |
 
 ## Deep Linking
 
@@ -437,15 +419,12 @@ driven entirely by direct, in-process method calls from its owner.
 |-----------|-------------|---------|
 | — | "Close Tab" | `NSImage(systemSymbolName:accessibilityDescription:)`'s description for `TabButton`'s close icon |
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined. "Close Tab" is a
-hardcoded English `String` literal passed directly to
+"Close Tab" is a hardcoded English `String` literal passed directly to
 `accessibilityDescription`, not routed through `NSLocalizedString` or any
 other localization mechanism used in this file — it is the one non-data-driven,
 user/AT-facing string this component owns (a tab's own title text is always
 supplied by the caller, so it carries no localization concern of this
-component's making). What is missing: a translated string table entry for
-this description. What would settle it: adding it to the app's string
-catalog/`.strings` file and replacing the literal with a lookup.
+component's making). No translated string table entry exists for it.
 
 ## Accessibility Options
 
@@ -458,19 +437,15 @@ catalog/`.strings` file and replacing the literal with a lookup.
   `.windowBackground`) is a semantic palette role; Increase Contrast
   handling, if any, belongs to the theme/palette system this file defers to,
   not to `TabBarView.swift` itself.
-- **Differentiate Without Color**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. `TabButton.updateAppearance()` distinguishes selected
-  from unselected purely by fill color (`.selection` vs. transparent) and a
-  text/icon color-role swap (`.selectionText` vs. `.secondaryText`/
-  `.tertiaryText`); `titleLabel`'s `textRole` (and therefore its font) never
-  changes, so no weight, size, border, or icon accompanies the change. A
-  `.viewController` item on a vertical bar gets a color-independent
-  stacking/overlap cue from its `stackDepth`, but a `.title` tab never gets
-  one, on any edge. What is missing: whether Differentiate Without Color
-  should add e.g. a border or bold weight to a selected `TabButton`. What
-  would settle it: a decision from the theme/accessibility owner on the
-  substitute cue, or confirmation that the `.selection` background/text
-  contrast alone is judged sufficient.
+- **Differentiate Without Color**: `TabButton.updateAppearance()`
+  distinguishes selected from unselected purely by fill color (`.selection`
+  vs. transparent) and a text/icon color-role swap (`.selectionText` vs.
+  `.secondaryText`/`.tertiaryText`); `titleLabel`'s `textRole` (and therefore
+  its font) never changes, so no weight, size, border, or icon accompanies
+  the change, and the component does not implement Differentiate Without
+  Color support. A `.viewController` item on a vertical bar gets a
+  color-independent stacking/overlap cue from its `stackDepth`, but a
+  `.title` tab never gets one, on any edge.
 
 ## Feature Flags
 
@@ -664,3 +639,4 @@ Localization).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: state requirements and test vectors as observable behavior instead of private internals, rebuild the Compliance table to only the checks that apply with corrected statuses and categories, move documented quirks from Design Decisions to Edge Cases, correct the WinUI glyph and SwiftUI shape, sharpen test vector precision, add a stack-order tie-break vector, and shorten the summary. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

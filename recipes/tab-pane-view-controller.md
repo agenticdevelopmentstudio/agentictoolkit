@@ -3,11 +3,11 @@ id: a30725ca-fa2f-4a04-8cb0-8beddf264a0a
 title: TabPaneViewController
 domain: agentictoolkit://recipes/tab-pane-view-controller
 type: ingredient
-version: 1.1.1
+version: 1.1.2
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -196,15 +196,15 @@ Not applicable: `TabPaneViewController` is an embedded tab-bar item shown inside
 
 All other visible text - agent name, model name, session name, working directory, branch, and summary - is opaque data supplied by `TabPaneDataSource`, not UI copy authored by this component; localizing that content, if ever needed, is the data source's responsibility, not `TabPaneView`'s.
 
-NEEDS REVIEW: Not implemented in source. The `Close` description is an AppKit
-`String` literal with no localization lookup, so VoiceOver reads it in English
-only.
+The `Close` description is an AppKit `String` literal with no localization
+lookup, so VoiceOver reads it in English only, regardless of the user's
+locale.
 
 ## Accessibility Options
 
 | Option | Behavior |
 |--------|----------|
-| Reduce Motion | NEEDS REVIEW: Not implemented in source. Behavior undefined. `place(animated:)` wraps the depth-driven recession/overhang move in `NSAnimationContext`/`allowsImplicitAnimation` whenever the card's view has a window, with no check of `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` anywhere in `TabPaneView.swift` or `TabPaneViewController.swift` (confirmed absent by inspection). Because this is a positional/size animation - a slide of the card's paint and text inset, not an opacity-only cross-fade - it falls outside the fade exemption and needs a real check the source does not have. |
+| Reduce Motion | Not implemented in source. `place(animated:)` wraps the depth-driven recession/overhang move in `NSAnimationContext`/`allowsImplicitAnimation` whenever the card's view has a window, with no check of `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` anywhere in `TabPaneView.swift` or `TabPaneViewController.swift`. Because this is a positional/size animation - a slide of the card's paint and text inset, not an opacity-only cross-fade - it falls outside the fade exemption, and the move animates unconditionally whenever the view has a window, regardless of the Reduce Motion setting. |
 | Increase Contrast | Not applicable: `TabPaneView` draws only theme-resolved semantic colors (`.primaryText`, `.secondaryText`, `.tertiaryText`, `.accent`, `.border`, `.windowBackground`, `.projectPaneBackdrop`, `.projectPaneOutline`) obtained from `resolvedThemeScope.palette`; any Increase Contrast adaptation of those values is the palette resolver's responsibility, not a branch this file takes itself. |
 | Differentiate Without Color | Supported. A card behind the front one is not distinguished by color alone: it is also drawn measurably smaller and pulled back from the workspace edge (`recession`/`workspaceOverhang`, confirmed by `testACardBehindIsPaintedSmallerThanTheCardInFront`), so size and position remain as independent, non-color cues to which card is selected. |
 
@@ -263,7 +263,7 @@ Not applicable: no logging call (`os_log`, `Logger`, `print`, or `NSLog`) appear
 | [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | failed | Accessibility |
 | [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
 
-`screen-reader-support` and `keyboard-navigable` are `partial` because the card has no focus behavior or accessibility role of its own, no combined accessibility label across its fields, and the close button's `accessibilityDescription` is an unlocalized literal (see **close-button-callback** and the open question in Localization above); `reduced-motion` and `touch-target-size` are `failed` on the confirmed absence of a Reduce Motion check and a fixed `14`pt close-button hit area below the 44pt minimum; `string-externalization` is `failed` on the hardcoded `Close` literal.
+`screen-reader-support` and `keyboard-navigable` are `partial` because the card has no focus behavior or accessibility role of its own, no combined accessibility label across its fields, and the close button's `accessibilityDescription` is an unlocalized literal (see **close-button-callback** and the Localization section above); `reduced-motion` and `touch-target-size` are `failed` on the confirmed absence of a Reduce Motion check and a fixed `14`pt close-button hit area below the 44pt minimum; `string-externalization` is `failed` on the hardcoded `Close` literal.
 
 ## Change History
 
@@ -272,3 +272,4 @@ Not applicable: no logging call (`os_log`, `Logger`, `print`, or `NSLog`) appear
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only names, merged the duplicate selection/depth requirements, added an explicit per-label role/color table, fixed frontmatter references and moved the misplaced cookbook link to `related`, added missing test vectors and corrected several test-vector-to-requirement mappings, moved the edge-dependent measurement quirk from Design Decisions to Edge Cases, reformatted Design Decisions to the bold three-line form, deleted leftover template instructions, corrected Platform Notes for Compose/React header reordering and Compose's easing curve, and marked two Compliance checks `partial` with a supporting sentence |
 | 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog, remapped reduce-motion-support to reduced-motion |
+| 1.1.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

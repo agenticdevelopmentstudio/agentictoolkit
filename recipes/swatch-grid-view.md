@@ -3,11 +3,11 @@ id: f4740433-221c-4c89-b888-ee8da7aa4b3c
 title: SwatchGridView
 domain: agentictoolkit://recipes/swatch-grid-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -132,21 +132,18 @@ target-action, control, or user-interaction code of any kind.
 
 ## Accessibility
 
-- **Role/trait**: NEEDS REVIEW: Not implemented in source. Behavior
-  undefined. No `setAccessibilityRole`, `setAccessibilityElement`, or
+- **Role/trait**: No `setAccessibilityRole`, `setAccessibilityElement`, or
   similar call appears anywhere in `SwatchGridView.swift`; `container`,
   each row, and each swatch are plain `NSStackView`/`NSView` instances with
   whatever default accessibility role AppKit assigns to an untouched
-  `NSView` (effectively none). What is missing: whether the grid, its
-  rows, or its swatches are meant to be exposed to VoiceOver as discrete
-  elements at all. What would settle it: a VoiceOver pass over an
-  instantiated grid, or an explicit design decision on which role(s) to
-  assign.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source. No
-  swatch carries an `accessibilityLabel` or `accessibilityValue` describing
-  the color it shows (e.g., a color name or hex value); a VoiceOver user
-  landing on a swatch has no source-provided way to learn which color it
-  represents. Default SHOULD, pending review: `makeSwatch(_:)` SHOULD call
+  `NSView` (effectively none). Whether the grid, its rows, or its swatches
+  should be exposed to VoiceOver as discrete elements is an open design
+  question that source does not answer.
+- **Label requirements**: No swatch carries an `accessibilityLabel` or
+  `accessibilityValue` describing the color it shows (e.g., a color name
+  or hex value); a VoiceOver user landing on a swatch has no
+  source-provided way to learn which color it represents. Default SHOULD,
+  pending review: `makeSwatch(_:)` SHOULD call
   `setAccessibilityLabel(_:)` with a caller-supplied name for that color
   when one is available, falling back to a computed hex string (e.g.
   `#RRGGBB`) when no name is supplied. What would settle it: review
@@ -158,12 +155,7 @@ target-action, control, or user-interaction code of any kind.
   trackpad-driven composition with no touch input path in source, and, per
   the States section, no interactive element exists at all to size a tap
   target for.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
-  each swatch's 0.5pt border text color resolves from the active theme's border role against
-  the hosting background at runtime; the component performs no contrast
-  check, so whether a given theme's resolved pair meets 4.5:1 cannot be
-  determined from this file. This would be settled by a theme-level
-  contrast audit of border against the backgrounds it sits on.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. Each swatch's 0.5pt border color resolves from the active theme's border role against the hosting background at runtime; the component performs no contrast check, so whether a given theme's resolved pair meets the 3:1 non-text contrast threshold cannot be determined from this file. This would be settled by a theme-level contrast audit of border against the backgrounds it sits on.
 
 ## Conformance Test Vectors
 
@@ -254,10 +246,10 @@ kind — no `Text`, `NSTextField`, or similar. `colors` is structured
   Contrast handling exists in `SwatchGridView.swift` itself.
 - **Differentiate Without Color**: this component's entire purpose is
   conveying distinct colors as colors, with no accompanying label, pattern,
-  or text differentiator in source — see the open question in
-  Accessibility about missing per-swatch labels, which is the same gap
-  that would let a Differentiate Without Color user distinguish swatches
-  without relying on color perception alone.
+  or text differentiator in source — see **Label requirements** in
+  Accessibility, which is the same gap that would let a Differentiate
+  Without Color user distinguish swatches without relying on color
+  perception alone.
 
 ## Feature Flags
 
@@ -411,3 +403,4 @@ differentiator on any swatch.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for SwatchGridView, covering row-wrapping layout, full-rebuild update strategy, theme-reactive swatch border vs. fixed fill, and two open accessibility questions (role and per-swatch label) for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved AppKit implementation identifiers out of Behavioral Requirements into Platform Notes; relaxed replaces-colors-and-rebuilds and recorded the rebuild strategy as a Design Decision; reframed the fixed-fill edge case as current MAY behavior and dropped the unsupported Increase Contrast claim; removed the requirement-count Design Decision and reformatted Design Decisions to the bold Decision/Rationale/Approved form; promoted three Edge Case MUSTs to named requirements with test vectors; rephrased test vectors 004-007 and 011-012 to observable structure, a named theme-change mechanism, and a death-test note; added a default SHOULD recommendation for swatch accessibility labels; fixed Platform Notes formatting, shortened the summary, and cleaned up the Compliance table; records the unverified theme-token contrast as an open question. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

@@ -3,11 +3,11 @@ id: b02bf1ad-408a-4ebc-9e62-2ad5ae5220d2
 title: StepperView
 domain: agentictoolkit://recipes/stepper-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -161,20 +161,17 @@ component keeps in sync with the stepper's value on every change.
   built-in AppKit accessibility role for a stepper control; `label` and
   `valueLabel` keep AppKit's default for a non-editable field (`ThemedLabel`
   sets `isEditable = false`) — static-text elements.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source. `stepper` has no accessibility
-  title/label linkage in source — no `setAccessibilityTitleUIElement`,
+- **Label requirements**: Not implemented in source. `stepper` has no
+  accessibility title/label linkage — no `setAccessibilityTitleUIElement`,
   `accessibilityLabel`, or `accessibilityTitle` call appears anywhere in
   `StepperView.swift`. Every sibling `ComposableSettings` row that pairs a
   label with an interactive control does link them —
   `CheckboxView.toggle.setAccessibilityTitleUIElement(label)` and
   `IntegerFieldView`'s wrapped `NumberFieldView.textField` do the same — so
   the omission here is a plain gap against the row's own family pattern, not
-  a documented design choice. Without it, VoiceOver announces `stepper` as an
-  unlabeled control, and `valueLabel`'s current number is a separate static
-  text element rather than the stepper's own spoken value. This cannot be
-  settled by reading more of the source; it requires either an accessibility
-  audit confirming the regression or a source change adding
-  `stepper.setAccessibilityTitleUIElement(label)` to match the sibling rows.
+  a documented design choice. VoiceOver announces `stepper` as an unlabeled
+  control, and `valueLabel`'s current number is a separate static text
+  element rather than the stepper's own spoken value.
 - **Announce state changes (e.g., loading, disabled)**: Not applicable —
   there is no loading state, and disabling is left entirely to a caller (see
   States); a value change updates `stepper.integerValue` directly, which
@@ -187,12 +184,7 @@ component keeps in sync with the stepper's value on every change.
   path in source; the 44×44pt guidance is iOS/touch-specific. No
   `controlSize` is set on `stepper`, so it keeps `NSStepper`'s regular system
   metrics.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
-  the label and value-label text text color resolves from the active theme's primaryText/secondaryText role against
-  the hosting background at runtime; the component performs no contrast
-  check, so whether a given theme's resolved pair meets 4.5:1 cannot be
-  determined from this file. This would be settled by a theme-level
-  contrast audit of primaryText/secondaryText against the backgrounds it sits on.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. The label and value-label text color resolves from the active theme's primaryText/secondaryText role against the hosting background at runtime; the component performs no contrast check, so whether a given theme's resolved pair meets 4.5:1 cannot be determined from this file. This would be settled by a theme-level contrast audit of primaryText/secondaryText against the backgrounds it sits on.
 
 ## Conformance Test Vectors
 
@@ -390,3 +382,4 @@ observe the same view model instance directly — the same trade-off
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requires-designated-initializer to rejects-coder-initialization; added replaces-view-model-onchange requirement, test vector, and Design Decision; recorded inverted-bounds handling as a Design Decision instead of an edge-case aside; reformatted Design Decisions to bold three-line form; moved the init(frame:) message typo out of Design Decisions into a Platform Notes aside; dropped a tag to meet the 1-5 limit; populated related with sibling recipes; corrected test vectors 001, 003, 016, and 017; removed the unverified arrow-disable claim under Differentiate Without Color; fixed bare RFC 2119 usage in Edge Cases; records the unverified theme-token contrast as an open question. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
