@@ -3,11 +3,11 @@ id: 765b853f-36a2-4e4f-b8aa-2cd15714a67f
 title: Vertical Stack View
 domain: agentictoolkit://recipes/vertical-stack-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: 2026-09-23
-modified: 2026-09-23
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -176,8 +176,12 @@ Not applicable: the source contains no logging calls (no `os_log`, `Logger`, or 
 
 | Check | Status | Category |
 |-------|--------|----------|
+| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
+| [unit-test-coverage](agenticdevelopercookbook://compliance/best-practices#unit-test-coverage) | failed | Best Practices |
+| [dynamic-type-support](agenticdevelopercookbook://compliance/accessibility#dynamic-type-support) | passed | Accessibility |
+| [text-expansion-tolerance](agenticdevelopercookbook://compliance/internationalization#text-expansion-tolerance) | passed | Internationalization |
 
-No catalog compliance check applies: `VerticalStackView` is a pure layout container that renders no text, color, or interactive elements of its own (see Appearance, States, and Accessibility) and handles no user data, links, or logging (see Privacy and Logging), so none of the accessibility, security, privacy-and-data, user-safety, or internationalization checks are triggered.
+Notes: separation-of-concerns passes trivially because `VerticalStackView`, like its horizontal sibling, contains no business logic — it only wraps and pins an `NSStackView` and forwards one method call. unit-test-coverage fails because no test file exists for this type (`git ls-files` under this repo shows no `VerticalStackViewTests.swift` or equivalent). dynamic-type-support passes because the component sets no min/max size of its own and is sized entirely by its arranged subviews' intrinsic content size (see Appearance), so a child's text growing under a larger system font size is never fought or clipped by this container. text-expansion-tolerance passes for the same reason: the flush-pinned, unconstrained-size layout accommodates a translated child label expanding without truncation or overflow at this container's own level.
 
 ## Change History
 
@@ -185,3 +189,4 @@ No catalog compliance check applies: `VerticalStackView` is a pure layout contai
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: downgraded ignores-explicit-frame to SHOULD with a strengthened Design Decision rationale; deduped the repeated stackView-visibility note into Design Decisions with cross-references elsewhere; replaced the repeated 20.0pt literal with the groupSpacing token reference in Appearance, States, Edge Cases, and test vector 004; added the missing 1.0.0 Change History row; fixed the Design Decisions `**Approved**:` formatting; shortened the summary; unquoted the created/modified dates; removed a stray WinUI 3 sentence; made test vectors 001, 007, and 009 independently checkable; cited SettingsLayout's Observable/@Published declaration in Edge Cases; cleaned up the Compliance table to cite only catalog checks |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Compliance section rewritten as linked checks against the compliance catalog |

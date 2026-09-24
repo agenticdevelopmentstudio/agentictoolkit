@@ -4,11 +4,11 @@ title: ADH Offline Sync Client
 domain: agentictoolkit://recipes/adh-offline-sync-client
 type: ingredient
 category: engine
-version: 1.1.0
+version: 1.1.1
 status: draft
 language: en
 created: '2026-07-22'
-modified: '2026-09-09'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -333,11 +333,22 @@ at this call site.
 
 | Check | Status | Category |
 |---|---|---|
-| Frontmatter valid (id, domain, type `ingredient`, category `engine`, platforms) | pass | recipe schema |
-| Sections present and in ingredient order | pass | recipe schema |
-| Category `engine` ⇒ Appearance/Accessibility omitted, no demo required | pass | recipe schema |
-| Every Behavioral Requirement has a Conformance Test Vector row | pass | contract fidelity |
-| Cited tests exist in the two XCTest bundles | pass | contract fidelity |
+| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
+| [unit-test-coverage](agenticdevelopercookbook://compliance/best-practices#unit-test-coverage) | passed | Best Practices |
+| [explicit-error-handling](agenticdevelopercookbook://compliance/best-practices#explicit-error-handling) | passed | Best Practices |
+| [error-recovery](agenticdevelopercookbook://compliance/reliability#error-recovery) | passed | Reliability |
+| [graceful-degradation](agenticdevelopercookbook://compliance/reliability#graceful-degradation) | passed | Reliability |
+| [fault-tolerance](agenticdevelopercookbook://compliance/reliability#fault-tolerance) | passed | Reliability |
+| [state-recovery](agenticdevelopercookbook://compliance/reliability#state-recovery) | passed | Reliability |
+| [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | Reliability |
+| [data-integrity](agenticdevelopercookbook://compliance/reliability#data-integrity) | passed | Reliability |
+| [health-observability](agenticdevelopercookbook://compliance/reliability#health-observability) | passed | Reliability |
+| [offline-behavior](agenticdevelopercookbook://compliance/access-patterns#offline-behavior) | passed | Access Patterns |
+| [retry-with-backoff](agenticdevelopercookbook://compliance/access-patterns#retry-with-backoff) | partial | Access Patterns |
+| [timeout-configuration](agenticdevelopercookbook://compliance/access-patterns#timeout-configuration) | failed | Access Patterns |
+| [error-response-handling](agenticdevelopercookbook://compliance/access-patterns#error-response-handling) | passed | Access Patterns |
+
+Notes: separation-of-concerns passes because the pull, reconcile, and push phases, the SyncStore/SyncTransport/SyncTriggerSource protocols, and the client-side ADHSyncCatalog each live behind their own type, with the server kept as the sole authority the client never re-derives. unit-test-coverage passes because the two XCTest bundles (`SyncEngineTests.swift`, `InMemorySyncStoreTests.swift`, `GRDBSyncStoreTests.swift`, `SyncEngineGRDBIntegrationTests.swift`, `SyncWireTests.swift`, `ADHSyncCatalogTests.swift`, `SyncEventTests.swift`, `TriggerSourceTests.swift`, `SyncMirrorProjectionTests.swift`) exercise every Behavioral Requirement, one row per requirement in Conformance Test Vectors. explicit-error-handling passes because every push outcome (applied, conflict, rejected) and transport failure (401, 410, transient 5xx) is routed to a named terminal state (quarantine, resync, backoff) rather than swallowed. error-recovery and graceful-degradation pass because the AuthRequired and Backing-off states resume automatically from transient failures and dependency loss without user intervention or a crash. fault-tolerance passes because an unparseable conflict `sync_version` is routed to the same terminal quarantine path as an explicit rejection instead of throwing mid-batch. state-recovery passes because recovery-never-deletes-database and resync-preserves-outbox guarantee the mirror and outbox restore correctly after interruption. idempotent-operations passes because retried pushes are tracked by opId and a rejected or conflicting op is never re-pushed under the same id. data-integrity passes because a pull batch's cursor is persisted only together with an atomically applied batch, so a mid-batch failure cannot leave a corrupt or partially-applied mirror. health-observability passes because the SyncEvent stream (`started`/`pulledBatch`/`pushed`/`failed`/`idle`/etc.) gives a host everything it needs to build monitoring or status UI over the engine's health. offline-behavior passes because AuthRequired, Backing-off, and quarantine are all explicitly defined responses to a network-unavailable or backend-rejecting state. retry-with-backoff is partial: the engine defines exponential backoff via `baseBackoff`/`maxBackoff`, but neither the recipe nor the source adds jitter to the retry delay, which the catalog check requires alongside the exponential curve. timeout-configuration fails because neither the Configuration table nor the source (`SyncEngine.swift`, `SyncProtocols.swift`) sets or exposes a request timeout for the pull/push transport calls. error-response-handling passes because every documented push status (applied, conflict, rejected, with its listed rejection reasons) and pull-side HTTP condition (401, 410) has a defined client-side resolution.
 
 ## Change History
 
@@ -345,3 +356,4 @@ at this call site.
 |---|---|---|---|
 | 1.0.0 | 2026-07-22 | Mike Fullerton | Initial draft |
 | 1.1.0 | 2026-09-09 | Mike Fullerton | Split from the public `offline-sync-client`, which was genericized when it moved to agenticdevelopertoolkit. Restores the file-level citations against the Swift targets in this repo; repoints the backend paths at adhbackend after the 2026-09 split; refreshes the catalog counts (79/27 → 97/44). |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Compliance section rewritten as linked checks against the compliance catalog |

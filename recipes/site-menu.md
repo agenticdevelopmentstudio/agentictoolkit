@@ -3,11 +3,11 @@ id: f2d56415-ac36-4a27-bee5-b447c4186513
 title: SiteMenu
 domain: agentictoolkit://recipes/site-menu
 type: recipe
-version: 1.0.0
+version: 1.0.1
 status: draft
 language: en
 created: '2026-07-05'
-modified: '2026-07-05'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -253,13 +253,35 @@ LOGGED OUT (marketing)               LOGGED IN (/home + workspace)
 
 | Check | Status | Category |
 |---|---|---|
-| No raw hex / arbitrary colors (`check_ui.py`) | required | ui-tokens |
-| Reuses `@agentic-toolkit/adh` chrome; no bespoke menu | required | ui-consistency |
-| Keyboard + ARIA (menu roles, focus return) | required | accessibility |
-| Recents stores no PII beyond local place labels/URLs on-device | n/a | privacy |
+| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
+| [unit-test-coverage](agenticdevelopercookbook://compliance/best-practices#unit-test-coverage) | partial | Best Practices |
+| [explicit-error-handling](agenticdevelopercookbook://compliance/best-practices#explicit-error-handling) | passed | Best Practices |
+| [test-pyramid](agenticdevelopercookbook://compliance/best-practices#test-pyramid) | partial | Best Practices |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [focus-management](agenticdevelopercookbook://compliance/accessibility#focus-management) | passed | Accessibility |
+| [semantic-markup](agenticdevelopercookbook://compliance/accessibility#semantic-markup) | passed | Accessibility |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+| [rtl-layout-support](agenticdevelopercookbook://compliance/internationalization#rtl-layout-support) | failed | Internationalization |
+| [text-expansion-tolerance](agenticdevelopercookbook://compliance/internationalization#text-expansion-tolerance) | failed | Internationalization |
+| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | Platform Compliance |
+| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
+| [deep-linking-support](agenticdevelopercookbook://compliance/platform-compliance#deep-linking-support) | partial | Platform Compliance |
+| [graceful-degradation](agenticdevelopercookbook://compliance/reliability#graceful-degradation) | passed | Reliability |
+| [data-integrity](agenticdevelopercookbook://compliance/reliability#data-integrity) | passed | Reliability |
+| [state-recovery](agenticdevelopercookbook://compliance/reliability#state-recovery) | passed | Reliability |
+| [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | Reliability |
+| [fault-tolerance](agenticdevelopercookbook://compliance/reliability#fault-tolerance) | passed | Reliability |
+| [data-minimization](agenticdevelopercookbook://compliance/privacy-and-data#data-minimization) | passed | Privacy and Data |
+| [data-retention-policy](agenticdevelopercookbook://compliance/privacy-and-data#data-retention-policy) | passed | Privacy and Data |
+| [progress-indication](agenticdevelopercookbook://compliance/performance#progress-indication) | passed | Performance |
+
+Notes: separation-of-concerns passes because the recipe composes a generic, registry-free `NavigationPopover` with an ADH-specific `MenuGroup[]` config, keeping the reusable chrome and the ADH vocabulary (`SiteMenu`, `menu-icons`) apart. unit-test-coverage is partial: `recents.test.ts`, `navigationPopover.test.tsx`, and `useSiteMenu.test.tsx` cover the recents store, the keyboard/flyout mechanics, and row resolution, but no test file exists for `SiteMenu.tsx`, `MarketingSiteMenu.tsx`, `WorkspaceSiteMenu.tsx`, or `menu-icons.ts`, so the auth-conditional top section and the Hub inline-subitem inventory go untested. explicit-error-handling passes because the recorder's localStorage access is documented as try/catch-swallowed (recents-persist-local) and a Recents entry pointing at a deleted entity is routed to the destination feature's own not-found state rather than thrown. test-pyramid is partial because the Integration Test Vectors (T1-T12) are defined exclusively at the rendering/integration level — full-menu composition, flyouts, keyboard flows — with no unit-level vectors for isolated pieces like the icon resolver or the settle-debounce timer. screen-reader-support and semantic-markup pass because keyboard-accessible requires retaining `NavigationPopover`'s full keyboard/ARIA model, including menu roles, unchanged. keyboard-navigable passes because the enhanced menu is required to retain arrow navigation, flyout entry/exit, and Escape-to-close (T12). focus-management passes because keyboard-accessible and T12 both require focus to return to the trigger once the menu or a flyout closes. string-externalization and no-hardcoded-strings fail because every visible label (Login, Sign up, Home, Workspaces, Recents, Hub, BitBag, Community, and the rest of the Hub inventory) appears as a literal string in this recipe with no localization resource, key, or i18n library named anywhere in Overview, Ingredients, or Platform Notes. rtl-layout-support fails because nothing in the recipe addresses right-to-left mirroring for the menu's flyouts or row layout. text-expansion-tolerance fails because Edge Cases states long labels and descriptions truncate via ellipsis rather than accommodating expansion. platform-design-language and native-controls-preference pass because the menu reuses the existing `NavigationPopover` chrome rather than a bespoke implementation, per the "One shared core, two configs" Design Decision. deep-linking-support is partial because recents-deep-link requires linking to the recorded view's deep URL, but Edge Cases notes a not-yet-URL-addressable view falls back to its feature route — an explicitly open gap ("As deep-linking lands, the same place records a precise URL"). graceful-degradation passes because a localStorage failure leaves Recents empty and hidden rather than crashing, and a loading or empty Workspaces flyout shows a Spinner or EmptyState instead of blocking. data-integrity and idempotent-operations pass because recents-dedupe-cap requires re-recording an existing place to move it to the front rather than duplicate it, with the store capped at exactly 10 and oldest-eviction on overflow. state-recovery passes because recents-persist-local requires recents to survive a reload (T11). fault-tolerance passes because a recent referencing a deleted entity still navigates and lets the destination feature render its own not-found state rather than erroring. data-minimization and data-retention-policy pass because Recents is scoped to place labels and URLs only, with a fixed cap of 10 and oldest-eviction as its retention rule. progress-indication passes because the Workspaces flyout is required to show a Spinner while its data loads.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
 | 1.0.0 | 2026-07-05 | Mike Fullerton | Initial spec: icons SSoT, inline sub-items, Hub gathering, auth top section, Recents. |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Compliance section rewritten as linked checks against the compliance catalog |

@@ -3,11 +3,11 @@ id: 5e9843b1-cc8d-4048-97e7-21991bf5830c
 title: Horizontal Stack View
 domain: agentictoolkit://recipes/horizontal-stack-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -176,8 +176,13 @@ Not applicable: the source contains no logging calls (no `os_log`, `Logger`, or 
 
 | Check | Status | Category |
 |-------|--------|----------|
+| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
+| [unit-test-coverage](agenticdevelopercookbook://compliance/best-practices#unit-test-coverage) | failed | Best Practices |
+| [dynamic-type-support](agenticdevelopercookbook://compliance/accessibility#dynamic-type-support) | passed | Accessibility |
+| [text-expansion-tolerance](agenticdevelopercookbook://compliance/internationalization#text-expansion-tolerance) | passed | Internationalization |
+| [rtl-layout-support](agenticdevelopercookbook://compliance/internationalization#rtl-layout-support) | passed | Internationalization |
 
-No check in the compliance catalog applies: every accessibility check's "Applies when" clause requires interactive elements, text, color, tappable targets, animation, focus management, or web/ARIA markup, and `HorizontalStackView` has none of those — it is a transparent, non-interactive layout container (see Appearance, States, and Accessibility above). The security, privacy-and-data, internationalization, reliability, best-practices, platform-compliance, access-patterns, and user-safety catalogs likewise have no check whose applicability condition this component meets, since it handles no user data, network access, links, logging, or text.
+Notes: separation-of-concerns passes trivially because `HorizontalStackView` contains no business logic to entangle with presentation — it is a single-layer AppKit view that only wraps and pins an `NSStackView`. unit-test-coverage fails because no test file exists for this type (`git ls-files` under this repo turns up only the `HorizontalStackView.swift` source and the unrelated `NSStackView+FullWidth.swift`, no `HorizontalStackViewTests.swift` or equivalent). dynamic-type-support passes because the component sets no min/max size of its own (see Appearance) and is sized entirely by its arranged subviews' intrinsic content size, so a child's text growing under a larger system font size is never fought or clipped by this container. text-expansion-tolerance passes for the same reason: the flush-pinned, unconstrained-size layout accommodates a translated child label expanding without truncation or overflow at this container's own level. rtl-layout-support passes because the component wraps a plain `NSStackView` with `orientation = .horizontal` and adds children only through the standard `addArrangedSubview` API, so it inherits AppKit's native RTL mirroring rather than implementing any custom left/right-sensitive positioning that could get RTL wrong.
 
 ## Change History
 
@@ -185,3 +190,4 @@ No check in the compliance catalog applies: every accessibility check's "Applies
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved private implementation identifiers (`addSubview(_:)`, `Self.pinToEdges(_:of:)`, `stackView.addArrangedSubview(view)`, the `fatalError` message) out of requirements and into Platform Notes; named the `SettingsLayout.default[.groupSpacing]` token everywhere the spacing value is mentioned instead of repeating the literal; shortened two requirement names to subject-only kebab-case; fixed the Design Decisions `**Approved**:` format; listed sibling recipes in `related`; added this Change History table; fixed test vectors to reach the private `stackView` via `view.subviews.first as? NSStackView`, made vector 008 a concrete post-init assertion, and marked vector 001 as a compile-time check; removed an unsupported claim from the WinUI 3 note; cleaned up the Compliance table to cite only checks defined in the compliance catalog |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Compliance section rewritten as linked checks against the compliance catalog |
