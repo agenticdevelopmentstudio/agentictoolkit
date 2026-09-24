@@ -3,11 +3,11 @@ id: 8aee173a-25e4-443e-a9ab-d629b58817e1
 title: WindowExplorerView
 domain: agentictoolkit://recipes/window-explorer-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -209,24 +209,16 @@ binding.
   view — the section header's icon/name/count `HStack` for the select-all
   toggle, and the title/dimensions/badge `VStack` for a row toggle — since
   no explicit `.accessibilityLabel` is set on either. The "Open Settings"
-  button carries its own visible text as its label. **NEEDS REVIEW: the
-  refresh button is icon-only (`Image(systemName: "arrow.clockwise")`) with
-  no `.accessibilityLabel` set; it relies on the SF Symbol's implicit
-  accessibility description plus `.help("Refresh window list")` (a tooltip
-  hint, not a guaranteed VoiceOver label) to convey its purpose. Confirm
-  with a VoiceOver pass on macOS (this component is macOS-only) whether the
-  announced label clearly reads as "Refresh" before treating this as
-  sufficient — resolvable by the toolkit's accessibility reviewer running
-  VoiceOver over this button.**
+  button carries its own visible text as its label — see
+  **refresh-button-label** for the refresh button.
+- **refresh-button-label**: The refresh button is icon-only (`Image(systemName: "arrow.clockwise")`) and sets no explicit `.accessibilityLabel`; VoiceOver gets only the SF Symbol's implicit description plus `.help("Refresh window list")`, which SwiftUI exposes as a tooltip and accessibility hint, not as the label.
 - Announce state changes: the loading, empty, and populated states are
   distinct view trees that SwiftUI swaps directly (no `Text`/state is kept
-  visible across the transition), and no `.accessibilityAddTraits`,
+  visible across the transition); no `.accessibilityAddTraits`,
   UIAccessibility/NSAccessibility posting, or focus-move call accompanies
-  any of these swaps. **NEEDS REVIEW: whether a VoiceOver user is reliably
-  notified when a scan finishes (loading to list/empty) is not addressed in
-  source — no explicit announcement or accessibility-focus change is made
-  on that transition. Resolvable by a VoiceOver test of `refreshAsync()`'s
-  completion, or by the toolkit's accessibility reviewer.**
+  any of these swaps, so a VoiceOver user gets no explicit announcement and
+  no accessibility-focus change when a scan finishes (loading to
+  list/empty).
 - Minimum control size: macOS is a pointer-driven platform with no mandated
   minimum touch-target size (unlike iOS); the view uses standard
   `NSButton`/checkbox-style control sizing throughout — `.controlSize(.small)`
@@ -367,10 +359,8 @@ The `(untitled)` fallback is the exception among the literals:
 ternary to a `String`, so `Text` takes its verbatim `String` initializer and
 the literal is never looked up as a localization key — as built, this
 behavior is defined: the fallback always renders in English regardless of
-the user's locale. **NEEDS REVIEW: whether `(untitled)` should instead be
-localized (for example by branching to two `Text` views, or wrapping the
-literal in `String(localized:)`) is unresolved; nothing in the source
-resolves this open decision.**
+the user's locale, and the source contains no branch to a second `Text`
+view or `String(localized:)` wrapping that would localize it instead.
 
 ## Accessibility Options
 
@@ -514,7 +504,7 @@ palette.
 | [data-minimization](agenticdevelopercookbook://compliance/privacy-and-data#data-minimization) | passed | Privacy & Data |
 
 `screen-reader-support` is partial because the refresh button has no explicit
-`.accessibilityLabel` (see the open question under Accessibility);
+`.accessibilityLabel` (see **refresh-button-label**);
 `keyboard-navigable` passes because every interactive element is a standard,
 keyboard-focusable `Toggle`/`Button`. `contrast-ratio` and
 `no-hardcoded-strings`/`string-externalization` are partial for the same two
@@ -534,3 +524,4 @@ only currently-running window data needed for display, filtered by
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only kebab-case; reformatted Design Decisions to the bolded form; linked `badge` under `related`; reworded the AX-banner requirement, boundary/garbled test vectors, and edge cases to match source behavior instead of implying a MUST; rebuilt Compliance against the real catalog; fixed the accessibility, localization, and privacy prose contradictions. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from `WindowExplorerView.swift`. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

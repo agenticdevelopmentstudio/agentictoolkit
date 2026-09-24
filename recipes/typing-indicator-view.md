@@ -3,11 +3,11 @@ id: 653874b6-86c4-41cb-9350-5f61bb5fca85
 title: TypingIndicatorView
 domain: agentictoolkit://recipes/typing-indicator-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -75,9 +75,9 @@ approved-date: ''
 
 ## Accessibility
 
-- **Role**: NEEDS REVIEW: Not implemented in source. Behavior undefined. Neither the container nor any dot subview has an accessibility role set (contrast with sibling `ChatDayBannerView`, which explicitly sets `.staticText`); a screen reader has no way to identify this element at all. Settling this needs a decision on what role best represents a transient status indicator (e.g. `.staticText` or `.busyIndicator`, where available) and where it should be assigned.
-- **Label**: NEEDS REVIEW: Not implemented in source. Behavior undefined. No accessibility label describing the indicator's meaning (e.g. "Assistant is typing") is set anywhere in `setup()`, `startAnimating()`, or `tick()`.
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source. Behavior undefined. Neither `startAnimating()` nor `tick()` nor `removeFromSuperview()` posts any `NSAccessibility` notification, so a VoiceOver user is given no indication that the assistant has started or stopped composing a reply.
+- **Role**: Neither the container nor any dot subview has an accessibility role set (contrast with sibling `ChatDayBannerView`, which explicitly sets `.staticText`); nothing identifies this element to a screen reader.
+- **Label**: No accessibility label describing the indicator's meaning (e.g. "Assistant is typing") is set anywhere in `setup()`, `startAnimating()`, or `tick()`.
+- **Announce state changes**: Neither `startAnimating()` nor `tick()` nor `removeFromSuperview()` posts any `NSAccessibility` notification, so a VoiceOver user is given no indication that the assistant has started or stopped composing a reply.
 - **Minimum tap target**: Not applicable — the view has no target-action or click handling of any kind, so Apple's [44×44pt tap-target guidance](https://developer.apple.com/design/human-interface-guidelines/layout) does not apply.
 
 ## Conformance Test Vectors
@@ -124,9 +124,11 @@ Not applicable: the component renders no text or string content of any kind — 
 
 | Option | Behavior |
 |--------|----------|
-| Reduce Motion | NEEDS REVIEW: Not implemented in source. Behavior undefined. The pulsing alpha animation in `tick()` runs unconditionally once `startAnimating()` is called; nothing in `setup()`, `startAnimating()`, or `tick()` reads `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` or observes `NSWorkspace.accessibilityDisplayOptionsDidChangeNotification`, so a user with Reduce Motion enabled sees the same continuous looping pulse as everyone else. Settling this needs a decision on the Reduce Motion substitute (e.g. a static, fully-opaque dot, or a slower single cross-fade) and whether the check belongs in this view or its caller. |
-| Increase Contrast | NEEDS REVIEW: Not implemented in source. Behavior undefined. The container fill (0.08 alpha) and the dimmed dot state (0.3 alpha) are both deliberately low-contrast by design, and nothing in the source reads `NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast` to raise either value. The dot color itself is delegated to the active `SemanticPalette`, but the two fixed alpha multipliers are this component's own and are not adjusted by anything in this file. |
+| Reduce Motion | The pulsing alpha animation in `tick()` runs unconditionally once `startAnimating()` is called; nothing in `setup()`, `startAnimating()`, or `tick()` reads `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` or observes `NSWorkspace.accessibilityDisplayOptionsDidChangeNotification`, so a user with Reduce Motion enabled sees the same continuous looping pulse as everyone else. |
+| Increase Contrast | The container fill (0.08 alpha) and the dimmed dot state (0.3 alpha) are both deliberately low-contrast by design, and the component does not respond to Increase Contrast: nothing in the source reads `NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast` to raise either value; see the open question on low-alpha-contrast. |
 | Differentiate Without Color | Not applicable: the indicator conveys no state through color — every dot and the container share the same `secondaryText` hue throughout, and which dot is "active" is conveyed by opacity/brightness within that single hue, not by a color-coded distinction that would need a non-color alternative. |
+
+- **low-alpha-contrast**: NEEDS REVIEW: Not implemented in source. The container fill (0.08 alpha) and the dimmed dot state (0.3 alpha) are fixed alpha multipliers this component applies over a host-supplied background, and the dot color itself comes from the active `SemanticPalette`; the source defines no contrast floor for either, so whether the dimmed dots and container remain distinguishable against a given host background requires a human judging the rendered contrast in the running UI.
 
 ## Feature Flags
 
@@ -167,7 +169,7 @@ Not applicable: the source contains no logging calls (no `os_log`, `Logger`, or 
 **Approved**: pending
 
 **Decision**: Reduce Motion and Increase Contrast are left unhandled in this file.
-**Rationale**: Not explained in source comments; recorded here as known technical debt affecting behavioral correctness for users with either preference enabled — see the open questions under Accessibility Options above.
+**Rationale**: Not explained in source comments; recorded here as known technical debt affecting behavioral correctness for users with either preference enabled — the component does not respond to Increase Contrast, and the rendered contrast is the open question on low-alpha-contrast.
 **Approved**: pending
 
 ## Compliance
@@ -189,3 +191,4 @@ Not applicable: the source contains no logging calls (no `os_log`, `Logger`, or 
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Claude Sonnet 5 | Initial creation from the macOS/AppKit source (TypingIndicatorView.swift) |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: fixed Design Decisions' `**Approved**: pending` formatting; renamed `dots-centered-in-stack` to `stack-centered-in-container` and updated its citations and vector; replaced named cross-recipe mentions of Message Bubble and Chat Day Banner with domain URL fragments (and their current `AIChatBubbleView` name); rewrote AppKit-specific requirement wording (`NSStackView`, `alphaValue`, layer `cornerRadius`) into platform-neutral behavior and moved the private `timer`/`step` identifiers and the `init(coder:)` compile-time constraint into the AppKit/UIKit Platform Note, dropping its untestable conformance vector; rewrote the vectors for the timer-schedule and timer-invalidation requirements to assert observable dot behavior instead of private state; corrected the WinUI 3 note's invented brush resource, simplified its sibling-Border reasoning, and fixed its `ThemeResource` live-refresh contradiction; added references for the tap-target guidance, `RunLoop.Mode.default` suspension, and WinUI `AnimationsEnabled` and cited them inline; and removed source-audit phrasing ("per the class's own doc comment", "the source gives no rationale") from the Overview, Appearance, and conformance vectors, stating the behavior directly |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
