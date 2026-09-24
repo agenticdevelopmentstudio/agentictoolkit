@@ -3,7 +3,7 @@ id: 5e9843b1-cc8d-4048-97e7-21991bf5830c
 title: Horizontal Stack View
 domain: agentictoolkit://recipes/horizontal-stack-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -22,7 +22,9 @@ tags:
 - macos
 - settings
 depends-on: []
-related: []
+related:
+- agentictoolkit://recipes/vertical-stack-view
+- agentictoolkit://recipes/divider-view
 references: []
 approved-by: ''
 approved-date: ''
@@ -39,32 +41,32 @@ approved-date: ''
 - **confines-to-main-actor**: The component MUST be usable only on the main actor; the class is declared `@MainActor`.
 - **disables-autoresizing-mask-translation**: The component MUST set `translatesAutoresizingMaskIntoConstraints = false` on itself.
 - **wraps-a-horizontal-nsstackview**: The component MUST construct an internal `NSStackView` with `orientation = .horizontal`.
-- **sets-arranged-subview-spacing-from-group-spacing-token**: The component MUST set the internal stack view's `spacing` to `SettingsLayout.default[.groupSpacing]` (20.0pt, per `ViewLayout.swift`'s `SettingsLayout.default` values) at initialization.
-- **disables-autoresizing-mask-translation-on-inner-stack-view**: The component MUST set `translatesAutoresizingMaskIntoConstraints = false` on the internal stack view.
-- **adds-stack-view-as-subview**: The component MUST add the internal stack view to itself via `addSubview(_:)`.
-- **pins-stack-view-to-container-edges**: The component MUST activate constraints pinning the internal stack view's top, leading, trailing, and bottom anchors to the corresponding anchors of the component itself, via `Self.pinToEdges(_:of:)` (defined in `ViewLayout.swift`).
+- **group-spacing**: The component MUST set the internal stack view's `spacing` to `SettingsLayout.default[.groupSpacing]` (20.0pt, per `ViewLayout.swift`'s `SettingsLayout.default` values) at initialization.
+- **inner-stack-constraints-only**: The component MUST set `translatesAutoresizingMaskIntoConstraints = false` on the internal stack view.
+- **adds-stack-view-as-subview**: The internal stack view MUST be a subview of the component itself (see Platform Notes for how the source wires this).
+- **pins-stack-view-to-container-edges**: The component MUST activate constraints pinning the internal stack view's top, leading, trailing, and bottom anchors to the corresponding anchors of the component itself (see Platform Notes for the helper the source uses).
 - **ignores-explicit-frame**: The designated initializer, `init(frame frameRect: NSRect)`, MUST discard the caller-supplied `frameRect` and call `super.init(frame: .zero)` unconditionally, regardless of the argument's value.
 - **convenience-init-uses-zero-frame**: The public `convenience init()` MUST call `self.init(frame: .zero)`.
-- **rejects-coder-initializer**: `required init?(coder: NSCoder)` MUST fatal-error with the message `init(coder:) has not been implemented`.
-- **forwards-added-views-to-inner-stack-view**: The public `addArrangedSubview(_ view: NSView)` method MUST forward its argument to the internal stack view via `stackView.addArrangedSubview(view)`.
+- **rejects-coder-initializer**: `required init?(coder: NSCoder)` MUST fatal-error (trap) unconditionally when invoked (see Platform Notes for the source's trap message).
+- **forwards-added-views-to-inner-stack-view**: The public `addArrangedSubview(_ view: NSView)` method MUST forward its argument to the internal stack view (see Platform Notes for the call the source uses).
 - **conforms-to-settings-view-protocol**: The component MUST conform to `SettingsViewProtocol`.
 
 ## Appearance
 
 - **Corner radius**: None; the source never sets `wantsLayer` or `layer?.cornerRadius` — the view is not layer-backed.
-- **Padding**: None of its own. The internal stack view is pinned flush to all four edges of the component with zero additional inset (see **pins-stack-view-to-container-edges**); the only spacing the component introduces is the 20.0pt gap between arranged subviews (see **sets-arranged-subview-spacing-from-group-spacing-token**).
+- **Padding**: None of its own. The internal stack view is pinned flush to all four edges of the component with zero additional inset (see **pins-stack-view-to-container-edges**); the only spacing the component introduces is the `SettingsLayout.default[.groupSpacing]` gap between arranged subviews (see **group-spacing**).
 - **Font**: Not applicable — `HorizontalStackView` renders no text or other font-dependent content of its own.
 - **Background**: None; the view is not layer-backed and sets no `layer?.backgroundColor` or `NSColor`-based fill — it is fully transparent, showing whatever sits behind it.
 - **Foreground/Text**: Not applicable — `HorizontalStackView` has no text or foreground content; it only positions its arranged subviews.
 - **Border**: None; the source never sets `layer?.borderWidth` or `layer?.borderColor`.
 - **Shadow**: None; the source never sets any shadow property.
-- **Min/Max size**: No explicit min/max width or height constraints of its own. Because the internal stack view is pinned flush to all four edges with zero inset, the component's size is driven entirely by its arranged subviews' intrinsic content sizes plus the 20.0pt inter-item spacing.
+- **Min/Max size**: No explicit min/max width or height constraints of its own. Because the internal stack view is pinned flush to all four edges with zero inset, the component's size is driven entirely by its arranged subviews' intrinsic content sizes plus the `SettingsLayout.default[.groupSpacing]` inter-item spacing (see **group-spacing**).
 
 ## States
 
 | State | Appearance change |
 |-------|------------------|
-| Default | Renders as an invisible layout container, arranging its arranged subviews horizontally with 20.0pt spacing between them; there is no other state. |
+| Default | Renders as an invisible layout container, arranging its arranged subviews horizontally with `SettingsLayout.default[.groupSpacing]` spacing between them (see **group-spacing**); there is no other state. |
 | Pressed | Not applicable: `HorizontalStackView` sets no target/action, gesture recognizer, or tracking area on itself — it cannot receive or respond to a press. (An arranged subview may itself be pressable; that is the subview's own concern, not this wrapper's.) |
 | Disabled | Not applicable: the source never reads or sets `isEnabled` or any dimmed appearance — `HorizontalStackView` has no enabled/disabled concept. |
 | Focused | Not applicable: `HorizontalStackView` never overrides `acceptsFirstResponder` and participates in no key view loop — it cannot become focused or show a focus ring. |
@@ -81,23 +83,23 @@ approved-date: ''
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| horizontal-stack-view-001 | confines-to-main-actor | Attempt to construct or mutate a `HorizontalStackView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
+| horizontal-stack-view-001 | confines-to-main-actor | Attempt to construct or mutate a `HorizontalStackView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking. This is a static/compile-time check, not one a runtime conformance suite executes. |
 | horizontal-stack-view-002 | disables-autoresizing-mask-translation | Any initialized `HorizontalStackView` | `view.translatesAutoresizingMaskIntoConstraints == false` |
-| horizontal-stack-view-003 | wraps-a-horizontal-nsstackview | Any initialized `HorizontalStackView` | The internal `NSStackView`'s `orientation == .horizontal` |
-| horizontal-stack-view-004 | sets-arranged-subview-spacing-from-group-spacing-token | Any initialized `HorizontalStackView` | The internal `NSStackView`'s `spacing == 20.0` (`SettingsLayout.default[.groupSpacing]`) |
-| horizontal-stack-view-005 | disables-autoresizing-mask-translation-on-inner-stack-view | Any initialized `HorizontalStackView` | The internal `NSStackView`'s `translatesAutoresizingMaskIntoConstraints == false` |
-| horizontal-stack-view-006 | adds-stack-view-as-subview | Any initialized `HorizontalStackView` | The internal `NSStackView` is present in `view.subviews` |
-| horizontal-stack-view-007 | pins-stack-view-to-container-edges | Any initialized `HorizontalStackView`, laid out in a window with a non-zero frame | The internal `NSStackView`'s frame exactly matches `view.bounds` (top/leading/trailing/bottom anchors resolve equal) |
-| horizontal-stack-view-008 | ignores-explicit-frame | Construct via `HorizontalStackView(frame: NSRect(x: 10, y: 10, width: 200, height: 50))` | Construction proceeds as though `frame: .zero` had been passed; resulting layout is governed solely by the activated edge-pinning constraints, not the supplied rect |
+| horizontal-stack-view-003 | wraps-a-horizontal-nsstackview | `let stack = view.subviews.first as? NSStackView` on any initialized `HorizontalStackView` (`stackView` is `private`, so this is how a test reaches it) | `stack?.orientation == .horizontal` |
+| horizontal-stack-view-004 | group-spacing | `let stack = view.subviews.first as? NSStackView` on any initialized `HorizontalStackView` | `stack?.spacing == SettingsLayout.default[.groupSpacing]` |
+| horizontal-stack-view-005 | inner-stack-constraints-only | `let stack = view.subviews.first as? NSStackView` on any initialized `HorizontalStackView` | `stack?.translatesAutoresizingMaskIntoConstraints == false` |
+| horizontal-stack-view-006 | adds-stack-view-as-subview | Any initialized `HorizontalStackView` | `view.subviews.first is NSStackView` (the internal stack view is `view`'s only subview) |
+| horizontal-stack-view-007 | pins-stack-view-to-container-edges | `let stack = view.subviews.first as? NSStackView` on any initialized `HorizontalStackView`, laid out in a window with a non-zero frame | `stack?.frame` exactly matches `view.bounds` (top/leading/trailing/bottom anchors resolve equal) |
+| horizontal-stack-view-008 | ignores-explicit-frame | Construct via `HorizontalStackView(frame: NSRect(x: 10, y: 10, width: 200, height: 50))` | `view.frame == .zero` immediately after `init`, before any layout pass runs |
 | horizontal-stack-view-009 | convenience-init-uses-zero-frame | Construct via `HorizontalStackView()` | No crash; behavior identical to `HorizontalStackView(frame: .zero)` |
-| horizontal-stack-view-010 | rejects-coder-initializer | Construct via `HorizontalStackView(coder:)` with any `NSCoder` | Execution traps via `fatalError` with message `init(coder:) has not been implemented` |
-| horizontal-stack-view-011 | forwards-added-views-to-inner-stack-view | Construct a `HorizontalStackView`, then call `addArrangedSubview(childView)` | `childView` appears in the internal `NSStackView`'s `arrangedSubviews`, in the order it was added |
+| horizontal-stack-view-010 | rejects-coder-initializer | Construct via `HorizontalStackView(coder:)` with any `NSCoder` | Execution traps via `fatalError` (any trap message satisfies the requirement; the source's is `init(coder:) has not been implemented`, see Platform Notes) |
+| horizontal-stack-view-011 | forwards-added-views-to-inner-stack-view | Construct a `HorizontalStackView`, obtain `let stack = view.subviews.first as? NSStackView`, then call `view.addArrangedSubview(childView)` | `childView` appears in `stack?.arrangedSubviews`, in the order it was added |
 | horizontal-stack-view-012 | conforms-to-settings-view-protocol | Any initialized `HorizontalStackView` | `view is SettingsViewProtocol` is `true` |
 
 ## Edge Cases
 
 - **Null/empty input**: Not applicable — `addArrangedSubview(_:)`'s parameter is a non-optional `NSView`; Swift's type system rejects a `nil` argument at compile time. The parameterless `convenience init()` and the inherited `init(frame:)` (whose argument is discarded, see **ignores-explicit-frame**) leave no other caller-supplied value that could be null or empty. Calling `addArrangedSubview(_:)` zero times is a valid, un-special-cased path: the internal stack view's `arrangedSubviews` stays empty and the component collapses to whatever intrinsic size an empty `NSStackView` resolves to.
-- **Boundary values**: `SettingsLayout.default[.groupSpacing]` (20.0pt) is read exactly once, into `stackView.spacing`, at `init` time. `SettingsLayout` is `Observable`/`@Published`, but `HorizontalStackView` never subscribes to it, so if a caller mutates `SettingsLayout.default`'s underlying value after a `HorizontalStackView` instance already exists, that instance's spacing does not update — it stays at whatever `.groupSpacing` was when it was constructed. This is the same staleness pattern documented for the sibling `DividerView` and `VerticalStackView` wrappers.
+- **Boundary values**: `SettingsLayout.default[.groupSpacing]` (see **group-spacing**) is read exactly once, into `stackView.spacing`, at `init` time. `SettingsLayout` is `Observable`/`@Published`, but `HorizontalStackView` never subscribes to it, so if a caller mutates `SettingsLayout.default`'s underlying value after a `HorizontalStackView` instance already exists, that instance's spacing does not update — it stays at whatever `.groupSpacing` was when it was constructed. This is the same staleness pattern documented for the sibling `DividerView` and `VerticalStackView` wrappers.
 - **Concurrent access**: Not applicable — the class is declared `@MainActor`, so construction and every mutation path (`addArrangedSubview`) are serialized to the main actor by the Swift compiler.
 - **Error states**: Not applicable — `HorizontalStackView` has no dependency on network, database, or file-system access, and the source shows no error path of any kind.
 - **Offline/disconnected state**: Not applicable — `HorizontalStackView` performs no networking.
@@ -147,8 +149,8 @@ Not applicable: the source contains no logging calls (no `os_log`, `Logger`, or 
 - **SwiftUI**: `HStack(spacing:)` is the direct equivalent, with `spacing` sourced from the equivalent of `SettingsLayout.default[.groupSpacing]`. Unlike this AppKit type, which takes children imperatively via repeated `addArrangedSubview(_:)` calls after construction, an `HStack` takes its children declaratively as trailing-closure content at the call site — there is no separate "add a child later" step to port.
 - **Compose**: `Row(horizontalArrangement = Arrangement.spacedBy(...))`, with the spacing value sourced from the equivalent of the `groupSpacing` token. As with SwiftUI, Compose children are declared inline rather than appended imperatively after construction, so a port drops the `addArrangedSubview`-style API entirely.
 - **React/Web**: A `<div>` with `display: flex; flex-direction: row; gap: <groupSpacing>px;` (a CSS Flexbox row). The `gap` property supplies the equivalent of `NSStackView.spacing` directly, with no manual spacer elements needed; children are ordinary DOM children in document order, corresponding to the order arranged subviews are added.
-- **AppKit / UIKit (source)**: `HorizontalStackView.swift` (`packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/HorizontalStackView.swift`) is macOS-only (`import AppKit`) — there is no iOS/UIKit counterpart in this file. It wraps a single `NSStackView` (`orientation = .horizontal`), pinned to all four edges of the outer `NSView` via `Self.pinToEdges(_:of:)` (`ViewLayout.swift`), and exposes exactly one mutating method, `addArrangedSubview(_:)`, that forwards to the wrapped stack view; the outer `NSView` itself renders nothing. A UIKit port would use `UIStackView` directly (no wrapping `UIView` needed, since `UIStackView` is itself a `UIView`), making this wrapper layer unnecessary on that platform.
-- **WinUI 3**: The reason this recipe exists. Use a `StackPanel` with `Orientation="Horizontal"` and `Spacing` bound to the app's equivalent of the `GroupSpacing` layout token (WinUI's `StackPanel.Spacing` is the direct analog of `NSStackView.spacing` — no manual spacer elements needed, matching the React/Web note above). `StackPanel` has no `IsEnabled`-driven visual states of its own to define in a `VisualStateManager` group, since — like the source — it is a pure layout container with no interactive states (see States). Children are added via `panel.Children.Add(view)`, mirroring `addArrangedSubview(_:)`; there is no WinUI equivalent needed for the source's edge-pinning step, since a `StackPanel` placed directly in its parent (e.g. via `Grid` row/column stretch, or `HorizontalAlignment="Stretch"`/`VerticalAlignment="Stretch"`) already fills its allotted space without the source's separate `pinToEdges` constraint-activation call:
+- **AppKit / UIKit (source)**: `HorizontalStackView.swift` (`packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/HorizontalStackView.swift`) is macOS-only (`import AppKit`) — there is no iOS/UIKit counterpart in this file. It constructs a single `NSStackView` (`orientation = .horizontal`), adds it via `addSubview(_:)`, then pins it to all four edges of the outer `NSView` via `Self.pinToEdges(_:of:)` (`ViewLayout.swift`), and exposes exactly one mutating method, `addArrangedSubview(_:)`, that forwards to the wrapped stack view via `stackView.addArrangedSubview(view)`; the outer `NSView` itself renders nothing. `init?(coder:)` traps with the message `init(coder:) has not been implemented`. A UIKit port would use `UIStackView` directly (no wrapping `UIView` needed, since `UIStackView` is itself a `UIView`), making this wrapper layer unnecessary on that platform.
+- **WinUI 3**: Use a `StackPanel` with `Orientation="Horizontal"` and `Spacing` bound to the app's equivalent of the `GroupSpacing` layout token (WinUI's `StackPanel.Spacing` is the direct analog of `NSStackView.spacing` — no manual spacer elements needed, matching the React/Web note above). `StackPanel` has no `IsEnabled`-driven visual states of its own to define in a `VisualStateManager` group, since — like the source — it is a pure layout container with no interactive states (see States). Children are added via `panel.Children.Add(view)`, mirroring `addArrangedSubview(_:)`; there is no WinUI equivalent needed for the source's edge-pinning step, since a `StackPanel` placed directly in its parent (e.g. via `Grid` row/column stretch, or `HorizontalAlignment="Stretch"`/`VerticalAlignment="Stretch"`) already fills its allotted space without the source's separate `pinToEdges` constraint-activation call:
   ```xml
   <StackPanel Orientation="Horizontal"
               Spacing="{StaticResource GroupSpacing}"
@@ -160,23 +162,26 @@ Not applicable: the source contains no logging calls (no `os_log`, `Logger`, or 
 
 **Decision**: `init(frame frameRect: NSRect)` discards its `frameRect` argument and always calls `super.init(frame: .zero)`.
 **Rationale**: `HorizontalStackView` positions itself entirely through Auto Layout (`translatesAutoresizingMaskIntoConstraints = false` plus the activated edge-pinning constraints). The inherited frame-based initializer exists only so the type can still be constructed through it at all; the source ignores the caller-supplied rect rather than reconciling it with the Auto Layout constraints that take over immediately afterward. This is the same pattern used by the sibling `VerticalStackView` and `DividerView`.
-**Approved: pending**
+**Approved**: pending
 
 **Decision**: `addArrangedSubview(_:)` is the only public mutation entry point; no counterpart for removing an arranged subview is exposed.
 **Rationale**: Not explained in source comments. This is consistent with the ComposableSettingsWindow pattern of assembling a settings row or panel once, at construction time, rather than mutating it afterward. Recorded here as a known limitation of the public API rather than an intended, documented contract, since nothing in the source states it was deliberate.
-**Approved: pending**
+**Approved**: pending
 
 **Decision**: `stackView` is declared `private`, unlike the otherwise structurally identical `VerticalStackView`, whose `stackView` property is `public`.
 **Rationale**: Not explained in source comments. This is a genuine asymmetry between the two sibling wrappers: a caller of `HorizontalStackView` cannot reach the internal `NSStackView` to reconfigure it (e.g. alignment or distribution) or to remove an arranged subview directly, while a caller of `VerticalStackView` can. Recorded here rather than smoothed over, since the two types would otherwise read as interchangeable except for orientation.
-**Approved: pending**
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | Architecture |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | Accessibility |
 
-`main-actor-confined` passes because the class is declared `@MainActor` (see **confines-to-main-actor**). `differentiate-without-color` passes because `HorizontalStackView` conveys no state or meaning through color at all — it is not layer-backed and renders no color of its own (see Accessibility Options).
+No check in the compliance catalog applies: every accessibility check's "Applies when" clause requires interactive elements, text, color, tappable targets, animation, focus management, or web/ARIA markup, and `HorizontalStackView` has none of those — it is a transparent, non-interactive layout container (see Appearance, States, and Accessibility above). The security, privacy-and-data, internationalization, reliability, best-practices, platform-compliance, access-patterns, and user-safety catalogs likewise have no check whose applicability condition this component meets, since it handles no user data, network access, links, logging, or text.
 
 ## Change History
+
+| Version | Date | Author | Summary |
+|---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved private implementation identifiers (`addSubview(_:)`, `Self.pinToEdges(_:of:)`, `stackView.addArrangedSubview(view)`, the `fatalError` message) out of requirements and into Platform Notes; named the `SettingsLayout.default[.groupSpacing]` token everywhere the spacing value is mentioned instead of repeating the literal; shortened two requirement names to subject-only kebab-case; fixed the Design Decisions `**Approved**:` format; listed sibling recipes in `related`; added this Change History table; fixed test vectors to reach the private `stackView` via `view.subviews.first as? NSStackView`, made vector 008 a concrete post-init assertion, and marked vector 001 as a compile-time check; removed an unsupported claim from the WinUI 3 note; cleaned up the Compliance table to cite only checks defined in the compliance catalog |

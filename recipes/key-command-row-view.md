@@ -3,7 +3,7 @@ id: 1d2f69b6-1156-4dfa-a390-a240925ba1bd
 title: KeyCommandRowView
 domain: agentictoolkit://recipes/key-command-row-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -22,7 +22,8 @@ tags:
 - appkit
 - keyboard-shortcuts
 depends-on: []
-related: []
+related:
+- agentictoolkit://recipes/key-command-capture-field
 references: []
 approved-by: ''
 approved-date: ''
@@ -56,10 +57,10 @@ live in the view that loses focus — it lives in the row.
   `"<command.title>:"` — `command.title` with a trailing colon appended.
 - **arranges-main-row**: Component MUST arrange the title label, the capture
   field, the confirm/cancel pair, and the toggle left-to-right in a single
-  horizontal row built via `NSView.makeRow`.
+  horizontal row, in that order.
 - **stacks-main-and-readout-rows**: Component MUST stack the main row above
-  the readout row in a vertical `NSStackView` with 4pt spacing, and MUST pin
-  that stack to the component's own edges.
+  the readout row in a vertical stack with 4pt spacing between them, and
+  MUST pin that stack to the component's own edges.
 - **hides-confirm-cancel-when-not-editing**: Component MUST hide the
   confirm/cancel pair whenever it is not mid-edit, and MUST show it whenever
   it becomes mid-edit.
@@ -128,6 +129,10 @@ live in the view that loses focus — it lives in the row.
 - **refreshes-on-external-bindings-change**: Component MUST re-read the
   current binding and update its subviews whenever the registry posts its
   bindings-changed notification.
+- **preserves-pending-edit-on-external-change**: Component MUST NOT clear
+  the pending shortcut or leave the mid-edit state when it refreshes in
+  response to a bindings-changed notification triggered by a change made
+  elsewhere (for example, by a sibling row).
 - **reflects-bound-shortcut-on-refresh**: Component MUST set the capture
   field's displayed shortcut to the command's current binding shortcut
   whenever it refreshes.
@@ -268,7 +273,7 @@ live in the view that loses focus — it lives in the row.
 |----|-------------|-------|----------|
 | key-command-row-view-001 | appends-colon-to-title | Construct with `command.title == "Move Selection Up"` | Title label's `stringValue == "Move Selection Up:"` |
 | key-command-row-view-002 | arranges-main-row | Construct any row | Title label, capture field, confirm/cancel pair, and toggle are all subviews of one horizontal row, in that left-to-right order |
-| key-command-row-view-003 | stacks-main-and-readout-rows | Construct any row | The main row and the readout row are the only two arranged views of a vertical `NSStackView` pinned to the component's own edges, with 4pt spacing between them |
+| key-command-row-view-003 | stacks-main-and-readout-rows | Construct any row | The main row and the readout row are the only two arranged views of a vertical stack pinned to the component's own edges, with 4pt spacing between them |
 | key-command-row-view-004 | hides-confirm-cancel-when-not-editing | Construct any row (not mid-edit) | Confirm/cancel pair's `isHidden == true`; after entering the mid-edit state, `isHidden == false` |
 | key-command-row-view-005 | hides-readout-row-when-idle | Construct any row (not mid-edit, no refusal) | Readout row's `isHidden == true`; after entering the mid-edit state, `isHidden == false` |
 | key-command-row-view-006 | links-toggle-accessibility-title | Construct any row | Toggle's accessibility title UI element is the title label |
@@ -296,7 +301,7 @@ live in the view that loses focus — it lives in the row.
 | key-command-row-view-028 | reflects-enabled-state-on-refresh | Set a binding with `isEnabled == true`, then trigger refresh | Toggle's state is on |
 | key-command-row-view-029 | disables-toggle-without-a-bound-shortcut | Command has no bound shortcut; trigger refresh | Toggle's enabled flag is `false` |
 | key-command-row-view-030 | shows-refusal-in-status-label | Trigger a refused toggle-on attempt | Status label's text is `"can't switch on — <reason>"`; status label's role is danger |
-| key-command-row-view-031 | shows-unavailable-reason-while-pending | Capture a chord already bound to another command | Status label's text is `"unavailable — taken by "<other command's title>""` |
+| key-command-row-view-031 | shows-unavailable-reason-while-pending | Capture a chord already bound to another command | Status label's text is `"unavailable — taken by <other command's title>"` |
 | key-command-row-view-032 | prompts-for-a-chord-while-pending-is-empty | Enter the mid-edit state before any chord is captured | Status label's text is `"press a key combination"` |
 | key-command-row-view-033 | shows-availability-label-for-an-available-pending-chord | Capture a free chord | Status label's text is `"available"` |
 | key-command-row-view-034 | colors-status-label-by-availability | Capture a free chord, then capture one already taken | Status label's role is success for the free chord and danger for the taken chord |
@@ -305,15 +310,17 @@ live in the view that loses focus — it lives in the row.
 | key-command-row-view-037 | rejects-coder-initialization | Attempt `KeyCommandRowView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
 | key-command-row-view-038 | removes-its-notification-observer-on-deinit | Construct a row, capture its notification observer, then release the row | The observer is removed from `NotificationCenter.default`; no further calls into the deallocated row occur when the notification is posted again |
 | key-command-row-view-039 | confines-to-main-actor | Attempt to construct or mutate a `KeyCommandRowView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
+| key-command-row-view-040 | preserves-pending-edit-on-external-change | Capture a chord (mid-edit, chord pending), then post `KeyCommandRegistry.bindingsDidChangeNotification` for a change made by a sibling row | Row's pending shortcut is unchanged and the row remains in the mid-edit state; the capture field's displayed shortcut and the toggle still reflect the refreshed binding |
+| key-command-row-view-041 | clears-edit-state-after-commit-or-cancel | Capture a chord, then invoke cancel | Row's pending shortcut is `nil`, capture field's pending shortcut is `nil`, capture field is no longer recording, row leaves the mid-edit state |
+| key-command-row-view-042 | refreshes-after-commit-or-cancel | Capture a chord, then invoke cancel | Capture field's displayed shortcut and the toggle's state are re-read from the registry immediately after cancel |
 
 ## Edge Cases
 
 - Null/empty input: `command` (`KeyCommandDescriptor`) and `registry`
   (`KeyCommandRegistry`) are non-optional, typed constructor parameters;
-  Swift's type system rules out `nil` for either. `command.title` as an
-  empty string produces a title label reading `":"` with no crash. This is
-  a MUST: the component provides, and needs, no nil-handling path for its
-  two initializer parameters.
+  Swift's type system rules out `nil` for either (see
+  **requires-a-command-and-a-registry-to-construct**). `command.title` as
+  an empty string produces a title label reading `":"` with no crash.
 - Boundary values: Not this file's own boundary — `KeyCommandRowView`
   imposes no minimum-modifier or chord-shape check itself; it defers
   entirely to `registry.availability(of:for:)`, which is the component that
@@ -337,8 +344,8 @@ live in the view that loses focus — it lives in the row.
   capture field and it resigns first responder before any chord is
   captured, `onRecordingChanged(false)` fires with `pendingShortcut == nil`,
   so the row leaves the mid-edit state and the confirm/cancel pair and
-  readout row hide again — this is a MUST, per
-  **ends-editing-when-recording-stops-with-nothing-pending**, and is called
+  readout row hide again — per
+  **ends-editing-when-recording-stops-with-nothing-pending**, and called
   out in source's own comment: "Clicked in and straight back out without
   pressing anything: there is nothing to confirm, so the pair should not
   linger."
@@ -359,16 +366,19 @@ live in the view that loses focus — it lives in the row.
   shortcut/placeholder and the toggle's state/enabled flag from the current
   binding — it never touches `pendingShortcut` or the mid-edit state — so
   an edit already in progress on this row survives a binding change made
-  elsewhere (MUST, traced to `refresh()`'s body).
+  elsewhere (see **preserves-pending-edit-on-external-change**, traced to
+  `refresh()`'s body).
 - A refusal shown after a toggle refusal, with no active recording: the
   refusal path (`toggleChanged`) sets `refusal` without ever setting
   `isEditing`; `updateReadoutVisibility()` still reveals the readout row
   because it reacts to `refusal != nil` independently of `isEditing`. The
-  refusal message is cleared only when the next edit begins (`isEditing`'s
-  `didSet` clears `refusal` when it becomes `true`), so it otherwise
-  persists on screen until the user starts recording again — traced
-  directly to the class's own doc comment: "shown in the readout until the
-  next edit."
+  refusal message clears along either of two paths: the next edit
+  beginning (`isEditing`'s `didSet` clears `refusal` when it becomes
+  `true`), or an accepted toggle change, which sets `refusal = nil` directly
+  in `toggleChanged()` before writing the binding (see
+  **clears-refusal-on-an-accepted-toggle-change**). Absent either, the
+  refusal persists on screen — traced directly to the class's own doc
+  comment: "shown in the readout until the next edit."
 
 ## Configuration
 
@@ -391,10 +401,14 @@ key) — each is a Swift string literal or string interpolation written
 directly in `KeyCommandRowView.swift`. `command.title` itself is a
 caller-supplied value (populated by whatever feature declares the
 `KeyCommandDescriptor`) and is out of this file's scope, matching how
-sibling settings-row recipes treat a caller-supplied title. The table below
-lists this file's own literals as they appear in source.
+sibling settings-row recipes treat a caller-supplied title. No String
+Catalog or localization key exists for any of these literals; the table
+below lists them as proposed keys, not keys present in source. The
+`"available"` / `"unavailable"` availability labels shown in the status
+label come from `KeyCommandAvailability`, not from this file, and so are
+not listed below.
 
-| String Key | Default (en) | Context |
+| Proposed String Key | Literal (en) | Context |
 |-----------|-------------|---------|
 | `key_command_row.title_format` | `"<title>:"` (trailing colon appended to `command.title`) | Title label text |
 | `key_command_row.placeholder.click_to_record` | `Click to record` | Capture field placeholder when unbound |
@@ -488,8 +502,8 @@ Not applicable: `KeyCommandRowView.swift` contains no logging call (no
   `KeyCommandCaptureField`'s.
 - **WinUI 3** (the reason this recipe exists): Build the row as a `Grid`
   with columns `Auto,*,Auto,Auto,Auto`: a `TextBlock` for the title in
-  column 0; a custom `KeyboardAccelerator`-capturing control (a `Border`
-  wrapping a `TextBlock`, focusable via `IsTabStop="True"`, overriding
+  column 0; a custom focusable key-capture control (a `Border` wrapping a
+  `TextBlock`, focusable via `IsTabStop="True"`, overriding
   `OnKeyDown`/`OnPreviewKeyDown` to capture the chord the same way
   `performKeyEquivalent`/`keyDown` do here) in column 1; a two-button
   confirm/cancel `StackPanel` (two `Button`s with `FontIcon` glyphs,
@@ -507,67 +521,58 @@ Not applicable: `KeyCommandRowView.swift` contains no logging call (no
   and set `AutomationProperties.Name` explicitly on the chord-recorder
   `Border` — WinUI's analog of the accessibility label this recipe flags as
   missing on the AppKit capture field. Raise a
-  `Windows.UI.Xaml.Automation.Peers.AutomationPeer` `NotifyLiveRegionChanged`
-  (or bind the status `TextBlock` to a `LiveSetting="Polite"`
-  `AutomationProperties`) when the refusal or availability text changes —
-  the WinUI analog of the announcement gap this recipe flags in the AppKit
-  source.
+  `Microsoft.UI.Xaml.Automation.Peers.AutomationPeer`
+  `RaiseNotificationEvent` (or set
+  `AutomationProperties.LiveSetting="Polite"` on the status `TextBlock`)
+  when the refusal or availability text changes — the WinUI analog of the
+  announcement gap this recipe flags in the AppKit source.
 
 ## Design Decisions
 
-- Decision: The row, not `KeyCommandCaptureField`, owns the pending-edit
+- **Decision**: The row, not `KeyCommandCaptureField`, owns the pending-edit
   state (`isEditing`, `pendingShortcut`) and the confirm/cancel pair's
   visibility.
-  Rationale: Per the source's own doc comment, "a captured chord is
+  **Rationale**: Per the source's own doc comment, "a captured chord is
   pending until the user commits it, and focus can leave in the middle of
   that (they click the checkmark, after all), so the state that decides
   whether ✓ and ✗ are on screen cannot live in the thing that loses focus."
-  Approved: pending
-- Decision: `commitEdit()` sets the committed binding's enabled flag to
+  **Approved**: pending
+- **Decision**: `commitEdit()` sets the committed binding's enabled flag to
   `true` whenever the command has no authored binding or its current
   shortcut is `nil`, but preserves the existing enabled flag when
   re-recording an already-authored, already-bound command.
-  Rationale: Per the source's own comment, "recording a chord is
+  **Rationale**: Per the source's own comment, "recording a chord is
   unambiguous intent to use it, so the command comes on — unless the user
   themselves switched it off, in which case the switch stays where they
   put it. A shipped 'off' is not the user's choice: the suggested global
   chords ship off, and recording over one must not save a chord that
   silently never fires."
-  Approved: pending
-- Decision: `toggleChanged()` snaps the switch back to off and shows a
+  **Approved**: pending
+- **Decision**: `toggleChanged()` snaps the switch back to off and shows a
   refusal message, rather than silently ignoring the attempt, when turning
   a command on would collide with another command's chord.
-  Rationale: Per the source's own comments, "switching on puts the chord
+  **Rationale**: Per the source's own comments, "switching on puts the chord
   back in play, so it has to be free: a chord two commands hold fires
   both," and "the switch snapping back by itself would otherwise read as a
   control that is broken rather than one that said no."
-  Approved: pending
-- Decision: The readout row's visibility is driven by `isEditing ||
+  **Approved**: pending
+- **Decision**: The readout row's visibility is driven by `isEditing ||
   refusal != nil`, not by `isEditing` alone.
-  Rationale: `toggleChanged()`'s refusal path never sets `isEditing`, so
+  **Rationale**: `toggleChanged()`'s refusal path never sets `isEditing`, so
   without this the toggle's refusal message would have nowhere visible to
   appear; the refusal persists on screen until the next edit begins,
   because `isEditing`'s `didSet` is what clears `refusal`.
-  Approved: pending
-- Decision: `onRecordingChanged(false)` clears the mid-edit state only when
-  no chord is pending; when a chord is pending, the mid-edit state is left
-  untouched.
-  Rationale: Per the source's own comment, "clicked in and straight back
-  out without pressing anything: there is nothing to confirm, so the pair
-  should not linger" — but when a chord *is* pending, the mid-edit state
-  must survive the field resigning first responder, since clicking the
-  confirm/cancel pair itself moves focus off the capture field before the
-  commit or cancel runs.
-  Approved: pending
-- Decision: This recipe carries substantially more behavioral requirements
-  (39) than the structurally simpler settings-row siblings in this family
-  (e.g. `CheckboxView` at 12, `CaptionedSliderView`'s comparable count).
-  Rationale: `KeyCommandRowView` is genuinely more complex by the
-  cross-recipe-consistency measure of distinct behaviors and states: it
-  composes four subviews instead of two, owns a multi-step pending-edit
-  state machine, and mediates conflict-checking through the shared
-  registry — none of which the simpler bound-value rows in this family do.
-  Approved: pending
+  **Approved**: pending
+- **Decision**: `onRecordingChanged(false)` clears the mid-edit state only
+  when no chord is pending; when a chord is pending, the mid-edit state is
+  left untouched.
+  **Rationale**: Per the source's own comment, "clicked in and straight
+  back out without pressing anything: there is nothing to confirm, so the
+  pair should not linger" — but when a chord *is* pending, the mid-edit
+  state must survive the field resigning first responder, since clicking
+  the confirm/cancel pair itself moves focus off the capture field before
+  the commit or cancel runs.
+  **Approved**: pending
 
 ## Compliance
 
@@ -575,16 +580,29 @@ Not applicable: `KeyCommandRowView.swift` contains no logging call (no
 |-------|--------|----------|
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
 | [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [focus-management](agenticdevelopercookbook://compliance/accessibility#focus-management) | passed | accessibility |
-| [meaningful-labels](agenticdevelopercookbook://compliance/accessibility#meaningful-labels) | needs-review | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | needs-review | accessibility |
-| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | needs-review | internationalization |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | partial | accessibility |
+| [focus-management](agenticdevelopercookbook://compliance/accessibility#focus-management) | partial | accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | internationalization |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
-| [accessibility-identifiers](agenticdevelopercookbook://compliance/ui#accessibility-identifiers) | passed | ui |
+
+The `passed` rows rest on source facts that are unconditional: the row is
+`@MainActor`-isolated throughout, composes native `NSSwitch`/AppKit
+controls per platform HIG, sets accessibility identifiers on the capture
+field and toggle, and keeps business logic (edit/commit/toggle state) out
+of its own presentation code, delegating persistence to the registry. The
+`partial` rows rest on the Accessibility section's open questions: the
+toggle is labeled via `setAccessibilityTitleUIElement`, but the capture
+field has only an accessibility identifier and no accessibility label, and
+no state change posts an `NSAccessibility` announcement, so screen-reader
+support, keyboard/focus behavior around the capture field, and label
+completeness cannot be called fully passing without an accessibility
+audit. `no-hardcoded-strings` is `failed` because every user-facing string
+this file introduces is a Swift literal with no localization mechanism, as
+the Localization section states.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved AppKit implementation names out of platform-neutral requirements into Platform Notes; reconciled the refusal-clearing edge case with its requirement and test vector; added a named requirement and test vectors for surviving an external bindings change, plus cancel-path test vectors for edit-state clearing and refresh; fixed nested-quote and WinUI-namespace errors in test vectors and Platform Notes; reformatted Design Decisions to the bold convention and dropped the unverifiable sibling-recipe requirement-count decision; relabeled invented Localization keys as proposed and noted the source of the availability labels; added the missing recipe cross-reference to `related`; corrected invalid `needs-review` Compliance statuses and downgraded two overstated accessibility checks; ran the compliance-catalog cleanup. |

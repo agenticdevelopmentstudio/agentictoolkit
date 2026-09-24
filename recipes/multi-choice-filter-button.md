@@ -3,11 +3,11 @@ id: bc43002d-faf6-4ffa-bc12-95f1a07f27e8
 title: MultiChoiceFilterButton
 domain: agentictoolkit://recipes/multi-choice-filter-button
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
-created: '2026-09-23'
-modified: '2026-09-23'
+created: 2026-09-23
+modified: 2026-09-23
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -71,13 +71,22 @@ trades a familiar system control for a hand-built one.
   "Any" action, or `setSelection(_:)`, each choice's menu item `state` MUST
   be resynchronized to `.on` when that item's id is a member of the current
   `selection` and `.off` otherwise — this resync MUST happen even when the
-  call left `selection` unchanged in value (see **fires-on-change-on-actual-
-  change** and Edge Cases).
+  call left `selection` unchanged in value (see **fires-on-change-on-actual-change** and Edge Cases).
+- **label-and-any-never-checked**: Item 0 (the label item) and the "Any"
+  item MUST NOT ever show a checkmark `state`; only a per-choice item's
+  `state` reflects `selection` membership. Neither item carries a
+  `representedObject` id, so `syncStates()`'s membership test skips both of
+  them on every resync.
 - **fires-on-change-on-actual-change**: `onChange` MUST be invoked with the
   new `selection` whenever `selection`'s value changes as a result of the
   choice toggle action, the "Any" action, or `setSelection(_:)`. `onChange`
   MUST NOT be invoked when one of those operations leaves `selection` equal
   in value to what it was before the call.
+- **initializes-selection-empty**: At construction, `selection` MUST be the
+  empty set, and `onChange` MUST NOT be invoked as a result of that initial
+  value being set — the initializer never assigns `selection` itself, so its
+  declared default bypasses `didSet`, and `onChange` is nil until the caller
+  assigns it after construction returns anyway.
 - **formats-title-none-selected**: When `selection` is empty, the button's
   displayed title MUST be `"<label>: Any"`.
 - **formats-title-few-selected**: When `selection` contains exactly one or
@@ -88,15 +97,17 @@ trades a familiar system control for a hand-built one.
 - **formats-title-many-selected**: When `selection` contains three or more
   ids, the button's displayed title MUST be `"<label>: <n> selected"`, where
   `<n>` is `selection.count`.
-- **refreshes-title-synchronously**: The component MUST call
-  `synchronizeTitleAndSelectedItem()` immediately after recomputing the
-  title text on every `selection` change, so the pull-down's on-screen title
-  is redrawn from the new item-0 title rather than the stale one a pull-down
-  otherwise keeps until its menu is next reset.
-- **resizes-for-longer-titles**: The component MUST call
-  `invalidateIntrinsicContentSize()` immediately after every title refresh,
-  so a longer summary is measured at its new width instead of being laid
-  out — and truncated — inside the button's previous intrinsic width.
+- **refreshes-title-synchronously**: On every `selection` change, the
+  button's on-screen displayed title MUST match the newly computed summary
+  before the triggering call (the choice toggle action, the "Any" action,
+  or `setSelection(_:)`) returns — never a stale title left over until some
+  later, unrelated redraw. See the AppKit / UIKit Platform Note for the
+  specific API call this requires.
+- **resizes-for-longer-titles**: After every title change, the button's
+  measured (intrinsic) size MUST already reflect the new title's length, so
+  a longer summary is never laid out — and truncated — inside a width
+  computed for the previous, shorter title. See the AppKit / UIKit Platform
+  Note for the specific API call this requires.
 - **exposes-readonly-selection**: `selection` MUST be readable from outside
   the type and MUST NOT be settable from outside the type except through
   `setSelection(_:)`.
@@ -203,40 +214,44 @@ trades a familiar system control for a hand-built one.
 | multi-choice-filter-button-005 | toggles-choice-on-select | `selection == ["a"]`; invoke choice `a`'s item action again | `selection == []` |
 | multi-choice-filter-button-006 | restricts-selection-to-known-ids | `choices` ids are `["a","b"]`; call `setSelection(["a","z"])` | `selection == ["a"]`; `"z"` is discarded |
 | multi-choice-filter-button-007 | reflects-checkmarks | `selection == []`; invoke choice `a`'s item action | `a`'s menu item `state == .on`; every other choice item's `state == .off` |
-| multi-choice-filter-button-008 | reflects-checkmarks | `selection == ["a"]`; call `setSelection(["a"])` (no-op value) | `a`'s menu item `state` is still resynchronized to `.on` by the call |
+| multi-choice-filter-button-008 | reflects-checkmarks | `selection == ["a"]`; manually set `a`'s menu item `state` to `.off` (simulating drift), then call `setSelection(["a"])` (no-op value) | `a`'s menu item `state` is resynchronized back to `.on` by the call |
 | multi-choice-filter-button-009 | fires-on-change-on-actual-change | `onChange` recorder attached; `selection == []`; invoke choice `a`'s item action | `onChange` is invoked exactly once with `["a"]` |
 | multi-choice-filter-button-010 | fires-on-change-on-actual-change | `onChange` recorder attached; `selection == []`; invoke the "Any" item's action | `onChange` is not invoked |
 | multi-choice-filter-button-011 | formats-title-none-selected | `label: "Good for"`, `selection == []` | Button title == `"Good for: Any"` |
 | multi-choice-filter-button-012 | formats-title-few-selected | `label: "Good for"`, `choices` titled `["Coding","Writing"]`, both selected | Button title == `"Good for: Coding, Writing"` |
 | multi-choice-filter-button-013 | formats-title-many-selected | `label: "Good for"`, 4 of the choices selected | Button title == `"Good for: 4 selected"` |
-| multi-choice-filter-button-014 | refreshes-title-synchronously | Invoke choice `a`'s item action | `synchronizeTitleAndSelectedItem()` is called before the method returns; the visible title matches item 0's new title with no additional user action |
-| multi-choice-filter-button-015 | resizes-for-longer-titles | Selection goes from 0 choices ("Any") to 2 choices with long titles | `invalidateIntrinsicContentSize()` is called; the button's `intrinsicContentSize` after the change is wide enough to show the new title untruncated |
+| multi-choice-filter-button-014 | refreshes-title-synchronously | Invoke choice `a`'s item action | The button's displayed title already matches `"<label>: a.title"` immediately after the call returns, with no further user action needed to refresh it |
+| multi-choice-filter-button-015 | resizes-for-longer-titles | Selection goes from 0 choices ("Any") to 2 choices with long titles | The button's `intrinsicContentSize.width` after the change is wide enough to display the new title without truncation, and is greater than it was before the change |
 | multi-choice-filter-button-016 | exposes-readonly-selection | From outside the type, attempt `button.selection = ["a"]` | Compilation fails: `selection`'s setter is not accessible outside the type |
 | multi-choice-filter-button-017 | themes-text-appearance | Construct the button, then post a theme-change notification with a new `ColorTheme` | `contentTintColor` and `font` update to the new theme's `primaryTextColor` and `font(.body)` without re-constructing the button |
 | multi-choice-filter-button-018 | rejects-coder-initialization | Attempt `MultiChoiceFilterButton(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
 | multi-choice-filter-button-019 | confines-to-main-actor | Attempt to construct or mutate a `MultiChoiceFilterButton` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
 | multi-choice-filter-button-020 | disables-autoresizing-mask-translation | Construct the button | `translatesAutoresizingMaskIntoConstraints == false` |
+| multi-choice-filter-button-021 | label-and-any-never-checked | Construct with `choices: [a, b]`; invoke choice `a`'s item action | Item 0's and the "Any" item's `state` remain `.off`; only `a`'s item is `.on` |
+| multi-choice-filter-button-022 | initializes-selection-empty | Construct the button; check `selection` immediately, before any interaction | `selection == []` |
 
 ## Edge Cases
 
 - Null/empty input: `label` (`String`) and `choices` (`[Choice]`) are
   non-optional, typed initializer parameters; Swift's type system rules out
-  `nil` for either. MUST: the component provides, and needs, no nil-handling
-  path.
+  `nil` for either. The component therefore provides, and needs, no
+  nil-handling path.
 - Empty `choices` array: `buildMenu()` still produces item 0, "Any", and the
   separator, but no choice items follow. `selection` can never become
   non-empty (there is nothing to toggle), so the title is permanently
-  `"<label>: Any"`. MUST: the component does not crash or special-case this;
-  it falls straight out of the existing menu-building and title-formatting
+  `"<label>: Any"`. The component does not crash or special-case this; it
+  falls straight out of the existing menu-building and title-formatting
   logic.
 - Duplicate ids within `choices`: the source enforces no uniqueness on
   `Choice.id`. If two entries share an id, both of their menu items match
   the same membership test in `syncStates()` and are therefore always kept
   in the same checked state as each other, while `selection` (a
   `Set<String>`) holds that id only once regardless of how many menu
-  entries reference it. MUST: this is the source's actual, as-written
-  behavior — a duplicate id is not rejected or deduplicated by
-  `MultiChoiceFilterButton` itself (see Design Decisions).
+  entries reference it. This is the source's actual, as-written behavior —
+  a duplicate id is not rejected or deduplicated by
+  `MultiChoiceFilterButton` itself (see Design Decisions). Callers MUST
+  supply unique ids across `choices`; behavior is undefined if two choices
+  share an id.
 - Boundary values: the selection-count boundaries are 0, 1–2, and 3+,
   exactly the three branches in **formats-title-none-selected**,
   **formats-title-few-selected**, and **formats-title-many-selected**. MUST:
@@ -364,114 +379,126 @@ Not applicable: `MultiChoiceFilterButton.swift` contains no logging call
   Practices convention for `menuitemcheckbox` keeps the menu open across
   multiple picks, unlike the source's per-pick close, so matching the
   source exactly means closing the menu explicitly after each selection.
-- **AppKit/UIKit** (source platform): Source file
+- **AppKit / UIKit** (source platform): Source file
   `packages/apple/AgenticToolkit/macOS/UI/Controls/MultiChoiceFilterButton.swift`.
   A macOS-only (`import AppKit`) `NSPopUpButton` subclass, `@MainActor`,
   configured `pullsDown: true`. It builds a checkable `NSMenu` by hand
   (label item, "Any", separator, one item per choice with
   `representedObject` holding the choice's id), toggles membership in a
   `Set<String>` from each item's target-action, and repaints its title and
-  theme colors through `refreshTitle()`/`applyTheme(_:)`. There is no UIKit
-  code path in source — `NSPopUpButton`/`NSMenu` have no direct UIKit
-  counterpart; a UIKit/iOS port would replace this with a `UIButton` whose
-  `menu` is a checkable `UIMenu` (`UIAction`s with `.state = .on`/`.off` and
-  `UIMenu.Options` left without `.displayInline` collapsed, so the whole
-  list of checkable actions stays visible), setting `showsMenuAsPrimaryAction
-  = true`.
-- **WinUI 3** (the reason this recipe exists): Build a `DropDownButton`
-  whose `Flyout` is a `MenuFlyout` containing one `ToggleMenuFlyoutItem` per
-  choice — `ToggleMenuFlyoutItem.IsChecked` is the WinUI analog of
-  `NSMenuItem.state`, and, like a checkable `NSMenu`, a `MenuFlyout` closes
-  after an item is invoked by default, matching the source's per-pick
-  close. Add a plain `MenuFlyoutItem` titled "Any" above a
-  `MenuFlyoutSeparator` that clears every `ToggleMenuFlyoutItem.IsChecked`.
-  Set the `DropDownButton`'s `Content` from a computed summary string
-  mirroring `refreshTitle()`'s three branches, recomputed and reassigned
-  from each `ToggleMenuFlyoutItem.Click` handler (WinUI has no built-in
-  pull-down title binding the way `NSPopUpButton` redraws item 0's title).
-  Set `AutomationProperties.Name` on the `DropDownButton` to the current
-  summary text as well, so Narrator's accessible name stays in sync the way
-  `NSPopUpButton`'s native title-based name does automatically.
+  theme colors through `refreshTitle()`/`applyTheme(_:)`. `refreshTitle()`
+  satisfies **refreshes-title-synchronously** by calling
+  `synchronizeTitleAndSelectedItem()` immediately after recomputing item
+  0's title (a pull-down otherwise keeps the stale title until its menu is
+  next reset), and satisfies **resizes-for-longer-titles** by calling
+  `invalidateIntrinsicContentSize()` right after that, so the new width is
+  measured immediately instead of truncating inside the previous width.
+  There is no UIKit code path in source — `NSPopUpButton`/`NSMenu` have no
+  direct UIKit counterpart; a UIKit/iOS port would replace this with a
+  `UIButton` whose `menu` is a checkable `UIMenu` (`UIAction`s with
+  `.state = .on`/`.off`; leave `UIMenu.Options` without `.displayInline`, so
+  the whole list of checkable actions stays visible instead of collapsing
+  into a submenu), setting `showsMenuAsPrimaryAction = true`.
+- **WinUI 3**: Build a `DropDownButton` whose `Flyout` is a `MenuFlyout`
+  containing one `ToggleMenuFlyoutItem` per choice — `ToggleMenuFlyoutItem.
+  IsChecked` is the WinUI analog of `NSMenuItem.state`, and, like a
+  checkable `NSMenu`, a `MenuFlyout` closes after an item is invoked by
+  default, matching the source's per-pick close. Add a plain
+  `MenuFlyoutItem` titled "Any" above a `MenuFlyoutSeparator` that clears
+  every `ToggleMenuFlyoutItem.IsChecked`. Recompute the `DropDownButton`'s
+  `Content` from a summary string mirroring `refreshTitle()`'s three
+  branches on every selection change — from each `ToggleMenuFlyoutItem.
+  Click` handler, the "Any" item's click handler, and any programmatic
+  selection-setting entry point (the WinUI analog of `setSelection(_:)`)
+  alike — since WinUI has no built-in pull-down title binding the way
+  `NSPopUpButton` redraws item 0's title. Set `AutomationProperties.Name` on
+  the `DropDownButton` to the current summary text as well, so Narrator's
+  accessible name stays in sync the way `NSPopUpButton`'s native
+  title-based name does automatically.
 
 ## Design Decisions
 
-- Decision: Close the menu on every pick rather than give menu items their
-  own checkbox views to keep the menu open across multiple picks.
-  Rationale: Per the source's own comment, this is "the stock behaviour of
-  a checkable menu, and the alternative — items hosting their own checkbox
-  views to keep the menu open — trades a familiar control for a hand-built
-  one."
-  Approved: pending
-- Decision: Identify choices by opaque string ids rather than a caller's
-  own enum.
-  Rationale: Per the source's own comment, this lets "one control serve any
-  caller's enum without this file knowing about it; callers map ids back to
-  their own type."
-  Approved: pending
-- Decision: Show the full selected list at one or two choices and switch to
-  a bare count at three or more.
-  Rationale: Per the source's own comment, "the summary title says what is
-  on without opening it, and 'Any' clears the whole set in one click" — the
-  count branch exists because, past two items, the full list stops fitting
-  in a glance.
-  Approved: pending
-- Decision: Call `invalidateIntrinsicContentSize()` after every title
-  refresh.
-  Rationale: Per the source's own comment, "the title just changed length,
-  and the button's intrinsic width is measured from it — without this, a
-  longer summary lays out inside the old width and gets truncated ('Good
-  for: Cod…')."
-  Approved: pending
-- Decision: Leave `syncStates()` (checkmark resync) unconditional on every
-  toggle/"Any"/`setSelection(_:)` call, while gating `refreshTitle()` and
-  `onChange` behind `selection`'s `didSet` equality check.
-  Rationale: This is an as-written asymmetry in the source, not an
-  intentional two-tier API: `syncStates()` is called directly from each
-  method's body regardless of whether the assignment above it actually
-  changed `selection`, while the title/`onChange` side effects live in
-  `didSet` and are naturally suppressed on a no-op assignment. Documented
-  here per source-fidelity requirements rather than smoothed into "both
-  paths react identically to a no-op."
-  Approved: pending
-- Decision: Do not deduplicate or reject `Choice` entries that share an
-  `id`.
-  Rationale: `selection` is a `Set<String>`, and `syncStates()` matches
-  menu items by their `representedObject` id, so two choices with the same
-  id are always kept in the same checked state as each other even though
-  they are visually distinct menu entries. The source enforces no
-  uniqueness constraint on `Choice.id`; keeping ids unique is left to the
-  caller.
-  Approved: pending
+**Decision**: Close the menu on every pick rather than give menu items their
+own checkbox views to keep the menu open across multiple picks.
+**Rationale**: Per the source's own comment, this is "the stock behaviour of
+a checkable menu, and the alternative — items hosting their own checkbox
+views to keep the menu open — trades a familiar control for a hand-built
+one."
+**Approved**: pending
+
+**Decision**: Identify choices by opaque string ids rather than a caller's
+own enum.
+**Rationale**: Per the source's own comment, this lets "one control serve any
+caller's enum without this file knowing about it; callers map ids back to
+their own type."
+**Approved**: pending
+
+**Decision**: Show the full selected list at one or two choices and switch to
+a bare count at three or more.
+**Rationale**: Per the source's own comment, "the summary title says what is
+on without opening it, and 'Any' clears the whole set in one click" — the
+count branch exists because, past two items, the full list stops fitting
+in a glance.
+**Approved**: pending
+
+**Decision**: Call `invalidateIntrinsicContentSize()` after every title
+refresh.
+**Rationale**: Per the source's own comment, "the title just changed length,
+and the button's intrinsic width is measured from it — without this, a
+longer summary lays out inside the old width and gets truncated ('Good
+for: Cod…')."
+**Approved**: pending
+
+**Decision**: Leave `syncStates()` (checkmark resync) unconditional on every
+toggle/"Any"/`setSelection(_:)` call, while gating `refreshTitle()` and
+`onChange` behind `selection`'s `didSet` equality check.
+**Rationale**: This is the source's as-written, verified behavior:
+`syncStates()` is called directly from each method's body regardless of
+whether the assignment above it actually changed `selection`, while the
+title/`onChange` side effects live in `didSet` and are naturally suppressed
+on a no-op assignment. Documented and required here (see
+**reflects-checkmarks**) rather than smoothed into "both paths react
+identically to a no-op."
+**Approved**: pending
+
+**Decision**: Do not deduplicate or reject `Choice` entries that share an
+`id`.
+**Rationale**: `selection` is a `Set<String>`, and `syncStates()` matches
+menu items by their `representedObject` id, so two choices with the same
+id are always kept in the same checked state as each other even though
+they are visually distinct menu entries. The source enforces no
+uniqueness constraint on `Choice.id`; keeping ids unique is a contract on
+the caller, stated in Edge Cases.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
-| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | accessibility |
-| [meaningful-labels](agenticdevelopercookbook://compliance/accessibility#meaningful-labels) | passed | accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | needs-review | accessibility |
-| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
+| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
+| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | Platform Compliance |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
 
 Native-controls-preference and platform-design-language pass because the
 component is a stock `NSPopUpButton`/`NSMenu` with no custom drawing.
 Keyboard-navigable passes on `NSPopUpButton`'s inherited keyboard support
 (Space/Return opens the menu; arrow keys and type-to-select navigate it),
-unmodified by this subclass. Screen-reader-support and meaningful-labels
-pass because the accessible name is the same title-based string always
-shown on screen, and that string always states both the filtered axis and
-the current selection (see **Label requirements** under Accessibility).
-Differentiate-without-color passes because selection is shown by
-`NSMenuItem`'s checkmark glyph, not by color. Contrast-ratio is
-`needs-review` because the resolved theme colors are never checked for
-contrast in source (see the open question under Accessibility).
+unmodified by this subclass. Screen-reader-support passes because the
+accessible name is the same title-based string always shown on screen, and
+that string always states both the filtered axis and the current selection
+(see **Label requirements** under Accessibility). Contrast-ratio is
+`partial` because the resolved theme colors are never checked for contrast
+in source (see the open question under Accessibility).
 String-externalization is failed because the "Any" and "{n} selected"
 strings are hardcoded English literals with no localization key (see
-Localization). Main-actor-confined passes because the class is declared
-`@MainActor`.
+Localization).
 
 ## Change History
+
+| Version | Date | Author | Summary |
+|---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reformatted frontmatter dates and Design Decisions to the template's bold three-line form; fixed the split `fires-on-change-on-actual-change` citation; downgraded descriptive Edge Cases MUSTs to prose while adding an explicit caller contract for unique `Choice.id`s; restated `refreshes-title-synchronously` and `resizes-for-longer-titles` as observable outcomes and moved their AppKit method calls into the Platform Note; added `label-and-any-never-checked` and `initializes-selection-empty` requirements with test vectors; reworded the `syncStates()` asymmetry Design Decision to align with `reflects-checkmarks` instead of contradicting it; fixed test vectors 008 (unfalsifiable no-op), 014 and 015 (spy-only assertions); cleaned up the garbled UIKit note and the incomplete WinUI 3 note; changed the Compliance table's `needs-review` status to `partial` and its categories to title case, remapped `meaningful-labels` into `screen-reader-support` and dropped the uncataloged `differentiate-without-color` and `main-actor-confined` checks, and updated the surrounding prose to match |

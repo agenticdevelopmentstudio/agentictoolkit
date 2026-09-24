@@ -3,7 +3,7 @@ id: a7653559-cb70-43db-a75c-d032e4f599b3
 title: IntegerFieldView
 domain: agentictoolkit://recipes/integer-field-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -21,10 +21,12 @@ tags:
 - form-control
 - range
 - numeric
-- macos
 - appkit
-depends-on: []
-related: []
+depends-on:
+- agentictoolkit://recipes/number-field-view
+related:
+- agentictoolkit://recipes/checkbox-view
+- agentictoolkit://recipes/captioned-slider-view
 references: []
 approved-by: ''
 approved-date: ''
@@ -44,11 +46,28 @@ already knows" — "12 points on the left" is typed, not dragged — and a
 thin, forwarding wrapper around a private `NumberFieldView<Int>`
 (`.../Views/NumberFieldView.swift`), which does the actual work: it builds
 the label and field, wires theming and accessibility, and owns the
-locale-aware parse/clamp/commit logic described below. `IntegerFieldView`
-stays as public API "because it is public API of a framework other repos
-link: a bounded integer field is still exactly this call" (source comment).
+locale-aware parse/clamp/commit logic. `IntegerFieldView` stays as public API
+"because it is public API of a framework other repos link: a bounded integer
+field is still exactly this call" (source comment).
+
+The wrapped `NumberFieldView<Int>`'s own behavior — theming, target/action and
+delegate wiring, layout when `labelWidth` is set, locale-aware parsing,
+clamping, revert-on-invalid, and external-change sync — is documented in full
+at `agentictoolkit://recipes/number-field-view`, which this recipe depends on.
+This recipe documents only what `IntegerFieldView` itself contributes:
+constructing and forwarding to that wrapped view, exposing its constituent
+views, and the initializer/actor requirements `IntegerFieldView` does not
+inherit from it.
 
 ## Behavioral Requirements
+
+The wrapped `NumberFieldView<Int>`'s own requirements — label/field
+construction, theming, target/action and delegate wiring, `labelWidth`
+layout, locale-aware parsing, clamping, revert-on-invalid, and
+external-change sync — are documented at
+`agentictoolkit://recipes/number-field-view#requirements`. The requirements
+below are `IntegerFieldView`'s own: what it does to construct, forward to,
+and expose that wrapped view.
 
 - **wraps-number-field-view**: Component MUST construct a private
   `NumberFieldView<Int>`, passing the supplied `RangeViewModel<Int>` as its
@@ -64,10 +83,11 @@ link: a bounded integer field is still exactly this call" (source comment).
 - **forwards-editing-end-to-wrapped-field**: Component's
   `controlTextDidEndEditing(_:)` MUST call `commit()` on the wrapped
   `NumberFieldView`.
-- **defaults-field-width-to-52-points**: Component's initializer MUST
-  default `fieldWidth` to 52 points when the caller supplies none, and MUST
-  pass that value through to the wrapped `NumberFieldView`'s own
-  `fieldWidth` parameter.
+- **default-field-width**: Component's initializer MUST default
+  `fieldWidth` to 52 points when the caller supplies none — narrower than
+  the wrapped `NumberFieldView`'s own uncalled default of 72 points (see
+  Design Decisions) — and MUST pass that value through to the wrapped
+  `NumberFieldView`'s own `fieldWidth` parameter.
 - **forwards-label-width**: Component's initializer MUST pass its own
   `labelWidth` parameter (default `nil`) through unchanged to the wrapped
   `NumberFieldView`.
@@ -79,70 +99,6 @@ link: a bounded integer field is still exactly this call" (source comment).
   trigger a fatal error.
 - **confines-to-main-actor**: Component MUST be usable only on the main
   actor; the class is declared `@MainActor`.
-- **builds-label-from-view-model-title**: The wrapped field's `label` MUST
-  be built via `ComposableSettings.makeRowLabel(viewModel.title)`.
-- **right-aligns-field-text**: The wrapped field's `textField` MUST set
-  `alignment = .right`.
-- **initializes-display-from-view-model**: At the end of initialization,
-  the wrapped field MUST set `label.stringValue` to `viewModel.title` and
-  `textField.stringValue` to `viewModel.value.settingsFieldString`.
-- **wires-field-target-action**: The wrapped field MUST set
-  `textField.target` to itself and `textField.action` to its
-  `fieldChanged(_:)` selector.
-- **delegates-field-to-wrapped-view**: The wrapped field MUST set
-  `textField.delegate` to itself (the `NumberFieldView` instance, not the
-  outer `IntegerFieldView`).
-- **links-field-accessibility-title**: The wrapped field MUST call
-  `textField.setAccessibilityTitleUIElement(label)`.
-- **themes-field-live**: The wrapped field MUST set `textField.font` to
-  `palette.font(.code)` and `textField.textColor` to
-  `palette.primaryTextColor`, both immediately on construction and again
-  every time the active theme changes.
-- **fixes-field-width**: The wrapped field MUST constrain
-  `textField.widthAnchor` to the constant `fieldWidth` supplied at
-  construction.
-- **aligns-label-when-width-fixed**: When `labelWidth` is non-nil, the
-  wrapped field MUST right-align `label` and pin its width to that
-  constant.
-- **lays-out-content-width-row-when-label-fixed**: When `labelWidth` is
-  non-nil, the wrapped field MUST pin the row's top, leading, and bottom
-  edges to the container and constrain the row's trailing edge
-  `lessThanOrEqualTo` the container's trailing edge.
-- **lays-out-full-width-row-by-default**: When `labelWidth` is `nil`, the
-  wrapped field MUST pin the row to all four edges of the container instead
-  of the content-width layout.
-- **commits-on-field-action**: The wrapped field MUST call `commit()`
-  whenever `textField`'s target-action fires (`fieldChanged(_:)`).
-- **commits-on-editing-end**: The wrapped field MUST call `commit()`
-  whenever its own `controlTextDidEndEditing(_:)` delegate callback fires.
-- **parses-locale-aware-integer-text**: `commit()` MUST parse
-  `textField.stringValue` as an `Int` by first attempting a POSIX parse,
-  then, only if that fails, a locale-aware decimal parse that requires the
-  entire string to be consumed and the result to be an exact, finite
-  integer within `Int`'s range; any other text MUST be treated as
-  unparseable.
-- **reverts-on-unparseable-text**: When `commit()` cannot parse
-  `textField.stringValue` as an `Int`, it MUST leave
-  `viewModel.settingObserver.value` unchanged and MUST reset both
-  `label.stringValue` and `textField.stringValue` from the view model's
-  current title/value.
-- **clamps-to-bounds**: When `minimum` and `maximum` are not both set with
-  `minimum` greater than `maximum`, `commit()` MUST clamp a successfully
-  parsed value up to `minimum` (if the value is lower) and then down to
-  `maximum` (if the value is higher) before storing it.
-- **skips-clamp-on-contradictory-bounds**: When both `minimum` and
-  `maximum` are set and `minimum` is greater than `maximum`, `commit()`
-  MUST store the parsed value unclamped.
-- **redisplays-committed-text**: After computing the value to store,
-  `commit()` MUST set `textField.stringValue` to that value's
-  `settingsFieldString` whenever it differs from the field's current text.
-- **skips-redundant-commits**: `commit()` MUST NOT write to
-  `viewModel.settingObserver.value` when the computed value equals its
-  current value.
-- **syncs-on-external-change**: The wrapped field's initializer MUST
-  assign `viewModel.onChange` to a closure that re-sets `label.stringValue`
-  and `textField.stringValue` from the view model, and that closure MUST
-  fire whenever `viewModel.onChange` is invoked.
 
 ## Appearance
 
@@ -224,89 +180,59 @@ link: a bounded integer field is still exactly this call" (source comment).
   input path in source; the 44×44pt guidance is iOS/touch-specific. No
   `controlSize` is set on `textField`, so it keeps `NSTextField`'s regular
   system metrics; its clickable width is the fixed `fieldWidth` (52pt
-  default) set by **fixes-field-width**.
+  default here, per **default-field-width**), constrained onto the wrapped
+  field's `textField.widthAnchor` by the wrapped `NumberFieldView`'s own
+  `fixes-field-width` requirement (see
+  `agentictoolkit://recipes/number-field-view#requirements/fixes-field-width`).
 
 ## Conformance Test Vectors
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| integer-field-view-001 | wraps-number-field-view | Construct `IntegerFieldView(viewModel:)` with `viewModel.minValue = 0`, `viewModel.maxValue = 10` | The private `NumberFieldView<Int>` is constructed with `minimum == 0` and `maximum == 10` |
+| integer-field-view-001 | wraps-number-field-view | Construct `IntegerFieldView(viewModel:)` with `viewModel.minValue = 0`, `viewModel.maxValue = 10`; set `textField.stringValue = "99"`, then trigger the field's target-action (`NSApplication.shared.sendAction(textField.action!, to: textField.target, from: textField)`) | `textField.stringValue` becomes `"10"` — the clamp visible on the public `textField` shows `viewModel.minValue`/`viewModel.maxValue` reached the wrapped field's `minimum`/`maximum` bounds |
 | integer-field-view-002 | exposes-constituent-views | Construct `IntegerFieldView` with any `viewModel` | `.label` and `.textField` are accessible from outside the type and are the same instances the wrapped `NumberFieldView` built |
-| integer-field-view-003 | arranges-single-child | Construct `IntegerFieldView` with any `viewModel` | The wrapped `NumberFieldView` is the only subview, pinned to `IntegerFieldView`'s top/leading/trailing/bottom with no additional constant |
+| integer-field-view-003 | arranges-single-child | Construct `IntegerFieldView` with any `viewModel`, add it to a laid-out view hierarchy of a known size | The public `label` and `textField` together occupy the full bounds of `IntegerFieldView` with no additional outer inset: `label`'s frame `minX` equals `IntegerFieldView`'s `minX`, and `textField`'s frame `maxX` equals `IntegerFieldView`'s `maxX` |
 | integer-field-view-004 | forwards-editing-end-to-wrapped-field | Set `textField.delegate` to the `IntegerFieldView` instance itself, type a valid number, then trigger `controlTextDidEndEditing` | The wrapped `NumberFieldView.commit()` runs and the new value is stored |
-| integer-field-view-005 | defaults-field-width-to-52-points | Construct `IntegerFieldView(viewModel:)` with no `fieldWidth` argument | `textField.widthAnchor`'s constant is 52 |
+| integer-field-view-005 | default-field-width | Construct `IntegerFieldView(viewModel:)` with no `fieldWidth` argument | `textField.widthAnchor`'s constant is 52 |
 | integer-field-view-006 | forwards-label-width | Construct `IntegerFieldView(viewModel:, labelWidth: 80)` | The wrapped field's `label.widthAnchor` constant is 80 and `label.alignment == .right` |
 | integer-field-view-007 | requires-designated-initializer | Attempt `IntegerFieldView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
 | integer-field-view-008 | rejects-frame-only-initialization | Attempt `IntegerFieldView(frame: .zero)` | The call traps with a fatal error; no instance is returned |
 | integer-field-view-009 | confines-to-main-actor | Attempt to construct or mutate an `IntegerFieldView` from off the main actor | Compiler rejects the call at compile time under `@MainActor` isolation checking |
-| integer-field-view-010 | builds-label-from-view-model-title | `viewModel.title = "Left Margin"` | `label.stringValue == "Left Margin"` after construction |
-| integer-field-view-011 | right-aligns-field-text | Construct with any `viewModel` | `textField.alignment == .right` |
-| integer-field-view-012 | initializes-display-from-view-model | `viewModel.title = "Left Margin"`, `viewModel.value = 12` | After init, `label.stringValue == "Left Margin"` and `textField.stringValue == "12"` |
-| integer-field-view-013 | wires-field-target-action | Any initialized field | `textField.target === field`; `textField.action == Selector("fieldChanged:")` |
-| integer-field-view-014 | delegates-field-to-wrapped-view | Any initialized field | `textField.delegate === field` (the `NumberFieldView` instance), not the outer `IntegerFieldView` |
-| integer-field-view-015 | links-field-accessibility-title | Construct with any `viewModel` | `textField`'s accessibility title UI element is `label` |
-| integer-field-view-016 | themes-field-live | Construct the field, then post a theme change to a palette with a distinct `.code` font/`.primaryText` color | `textField.font` and `textField.textColor` update to match the new palette both immediately at construction and again after the change |
-| integer-field-view-017 | fixes-field-width | Construct with `fieldWidth: 90` | `textField.widthAnchor`'s constant is 90 |
-| integer-field-view-018 | aligns-label-when-width-fixed | Construct with `labelWidth: 100` | `label.alignment == .right` and `label.widthAnchor`'s constant is 100 |
-| integer-field-view-019 | lays-out-content-width-row-when-label-fixed | Construct with `labelWidth: 100` | The row's top/leading/bottom are pinned to the container; its trailing constraint is `lessThanOrEqualTo` the container's trailing edge |
-| integer-field-view-020 | lays-out-full-width-row-by-default | Construct with `labelWidth: nil` | The row is pinned to all four edges of the container |
-| integer-field-view-021 | commits-on-field-action | Type `"7"` into `textField` and invoke `fieldChanged(textField)` directly | `viewModel.settingObserver.value == 7` after the call |
-| integer-field-view-022 | commits-on-editing-end | Type `"7"` into `textField` and invoke `controlTextDidEndEditing` on the wrapped field | `viewModel.settingObserver.value == 7` after the call |
-| integer-field-view-023 | parses-locale-aware-integer-text | With the current locale set to `de_DE`, set `textField.stringValue = "1.234"` (POSIX-parseable as `1` with trailing garbage is rejected; full-string decimal-locale parse reads it as `1234`) and commit | `viewModel.settingObserver.value == 1234` |
-| integer-field-view-024 | reverts-on-unparseable-text | `viewModel.settingObserver.value = 5`; set `textField.stringValue = "abc"` and commit | `viewModel.settingObserver.value` remains `5`; `textField.stringValue` is reset to `"5"` |
-| integer-field-view-025 | clamps-to-bounds | `minimum = 0`, `maximum = 10`; set `textField.stringValue = "99"` and commit | `viewModel.settingObserver.value == 10`; `textField.stringValue == "10"` |
-| integer-field-view-026 | skips-clamp-on-contradictory-bounds | `minimum = 10`, `maximum = 1`; set `textField.stringValue = "37"` and commit | `viewModel.settingObserver.value == 37` (stored unclamped) |
-| integer-field-view-027 | redisplays-committed-text | `minimum = 0`, `maximum = 10`; set `textField.stringValue = "99"` and commit | `textField.stringValue` changes from `"99"` to `"10"` |
-| integer-field-view-028 | skips-redundant-commits | `viewModel.settingObserver.value = 5`; set `textField.stringValue = "5"` (same value) and commit | `viewModel.settingObserver.value`'s setter is not invoked a second time (e.g. no additional write/observer notification is recorded) |
-| integer-field-view-029 | syncs-on-external-change | After construction, externally change `viewModel.title` and `viewModel.value`, then invoke `viewModel.onChange(newValue)` | `label.stringValue` and `textField.stringValue` both update to reflect the new view-model state |
 
 ## Edge Cases
 
 - **Null/empty input**: `viewModel` (`RangeViewModel<Int>`) is a
   non-optional, typed constructor parameter; Swift's type system rules out
-  `nil`. An empty `textField.stringValue` fails the `Int(settingsFieldString:)`
-  parse (a trimmed empty string fails both the POSIX and the locale-aware
-  parse), so `commit()` takes the revert path
-  (**reverts-on-unparseable-text**) rather than storing `0`. MUST.
-- **Boundary values**: A typed value exactly equal to `minimum` or
-  `maximum` commits unclamped (the clamp is a no-op at the boundary). A
-  value one below `minimum` clamps up to `minimum`; one above `maximum`
-  clamps down to `maximum`. When `minimum` and `maximum` are both set and
-  `minimum > maximum`, clamping is skipped entirely and the raw typed
-  value is stored (**skips-clamp-on-contradictory-bounds**) — a caller
-  configuration error, not a range this component enforces. MUST.
-- **Out-of-range magnitude**: A typed value whose magnitude exceeds what
-  `Int` can hold exactly — per `Int.settingsExactInt(from:)`'s
-  `Decimal`-based check, which catches the case `NSNumber.int64Value` would
-  otherwise silently saturate — is treated as unparseable and reverts
-  rather than storing a clamped `Int.max`/`Int.min`. MUST.
-- **Fractional and locale-formatted text**: A fractional string (`"1.5"`,
-  or `"1,5"` in a comma-decimal locale) is rejected outright —
-  `Int.settingsAllowsFloats` is `false`, so the locale `NumberFormatter`
-  refuses it, and the whole-string-consumed check refuses a partial parse
-  like the leading `"1"` of `"1,5"`. An integral-valued fractional spelling
-  (`"1.0"`) is refused for the same reason. Text using the process
-  locale's own decimal grammar parses via the locale-aware branch once the
-  POSIX parse fails. MUST.
-- **Concurrent access**: Not applicable — both `IntegerFieldView` and
-  `NumberFieldView` are declared `@MainActor`, so all construction and
-  mutation is serialized to the main actor by the compiler (see
-  **confines-to-main-actor**).
-- **Error states**: Not applicable — every operation in both files
-  (parsing, clamping, the `settingObserver.value` write) is synchronous and
-  non-throwing; no `try`, `Result`, or error-producing API appears in
-  source.
+  `nil`. The wrapped field's own revert-on-empty-text behavior — an empty
+  `textField.stringValue` fails the parse the same as any other unparseable
+  text — is documented at
+  `agentictoolkit://recipes/number-field-view#edge-cases`.
+- **Boundary values**: Clamping at `minimum`/`maximum`, and skipping the
+  clamp when `minimum > maximum`, is entirely the wrapped
+  `NumberFieldView<Int>`'s behavior; see
+  `agentictoolkit://recipes/number-field-view#edge-cases`. `IntegerFieldView`
+  only supplies those bounds, via `viewModel.minValue`/`viewModel.maxValue`
+  (**wraps-number-field-view**).
+- **Out-of-range magnitude and fractional/locale-formatted text**: Parsing
+  — POSIX-first with a locale-aware fallback, magnitude-exactness rejection,
+  and fractional rejection — is entirely the wrapped `NumberFieldView<Int>`'s
+  behavior; see `agentictoolkit://recipes/number-field-view#edge-cases`.
+- **Concurrent access**: Not applicable — `IntegerFieldView` is declared
+  `@MainActor` (**confines-to-main-actor**), so all construction and
+  mutation is serialized to the main actor by the compiler. The wrapped
+  `NumberFieldView<Int>` carries the same isolation independently; see
+  `agentictoolkit://recipes/number-field-view#edge-cases`.
+- **Error states**: Not applicable — every operation in
+  `IntegerFieldView.swift` (construction, forwarding, and
+  `controlTextDidEndEditing`) is synchronous and non-throwing; no `try`,
+  `Result`, or error-producing API appears in this file.
 - **Offline/disconnected state**: Not applicable — the component performs
-  no networking; it only reads from and writes to an in-process view
-  model.
-- **Overwritten external observer**: `viewModel.onChange` is a single
-  closure property. `NumberFieldView`'s initializer unconditionally assigns
-  `viewModel.onChange = { [weak self] _ in self?.sync() }`, replacing
-  whatever handler (if any) was previously registered on that view model —
-  the same closure-overwrite behavior `CheckboxView` and
-  `CaptionedSliderView` document. The component MUST NOT be assumed to
-  coexist with another `onChange` observer already registered on the same
-  view model instance.
+  no networking; it only forwards to the wrapped `NumberFieldView<Int>`,
+  which itself only reads from and writes to an in-process view model.
+- **Overwritten external observer**: This is entirely the wrapped
+  `NumberFieldView<Int>`'s behavior — its initializer, not
+  `IntegerFieldView`'s, unconditionally assigns `viewModel.onChange`; see
+  `agentictoolkit://recipes/number-field-view#edge-cases`.
 - **Delegate reassignment**: Because `textField.delegate` is set to the
   `NumberFieldView` instance, not `IntegerFieldView`, a caller that
   reassigns `textField.delegate` to something else silently disables
@@ -421,106 +347,69 @@ Not applicable: neither source file contains a logging call (no `print`,
   `UITextField.text` — UIKit has no `NSCoder`-vs-frame initializer split to
   fatal-error on the way requires-designated-initializer and
   rejects-frame-only-initialization do.
-- **WinUI 3** (the reason this recipe exists): Build the row as a `Grid`
-  with column definitions `*,Auto` (the same shape the boolean-row recipe
-  uses): a `TextBlock` for the title in column 0, and a `NumberBox` —
-  WinUI's purpose-built numeric field — in column 1, in place of a raw
-  `TextBox`. `NumberBox` already exposes `Minimum`/`Maximum` properties
-  that map directly to this component's `minimum`/`maximum`, and setting
-  `SpinButtonPlacementMode="Collapsed"` keeps it visually a bare field
-  rather than a stepper, matching this source's "a slider/stepper is the
-  wrong control" rationale. Set `NumberBox.ValidationMode="InvalidInputOverwritten"`
-  to reproduce reverts-on-unparseable-text (WinUI overwrites the box with
-  the last valid value on an invalid commit, the same behavior as this
-  source's `sync()` revert), and handle the `ValueChanged` event to write
-  the already-clamped, committed value into the bound setting with an
-  equality guard before writing, mirroring skips-redundant-commits. Set
+- **WinUI 3**: Build the row as a `Grid` with column definitions `*,Auto`
+  (the same shape the boolean-row recipe uses): a `TextBlock` for the title
+  in column 0, and a `NumberBox` — WinUI's purpose-built numeric field — in
+  column 1, in place of a raw `TextBox`. `NumberBox` already exposes
+  `Minimum`/`Maximum` properties that map directly to this component's
+  `minimum`/`maximum`, and setting `SpinButtonPlacementMode="Collapsed"`
+  keeps it visually a bare field rather than a stepper, matching this
+  source's "a slider/stepper is the wrong control" rationale. Set
+  `NumberBox.ValidationMode="InvalidInputOverwritten"` to reproduce
+  reverts-on-unparseable-text (WinUI overwrites the box with the last valid
+  value on an invalid commit, the same behavior as this source's `sync()`
+  revert), and handle the `ValueChanged` event to write the already-clamped,
+  committed value into the bound setting with an equality guard before
+  writing, mirroring skips-redundant-commits. Set
   `AutomationProperties.LabeledBy` on the `NumberBox` to the `TextBlock`,
   the WinUI analog of `setAccessibilityTitleUIElement`. Give `NumberBox` a
   fixed `Width` matching `fieldWidth` (52 by default here) rather than
-  letting it stretch, since WinUI's `NumberBox` otherwise fills its
-  column.
+  letting it stretch, since WinUI's `NumberBox` otherwise fills its column.
+  Two divergences `NumberBox` does not close: it has no POSIX-first parse —
+  its own locale-aware `NumberFormatter`-equivalent parsing has no fallback
+  ordering to reproduce this source's
+  parses-locale-aware-integer-text/POSIX-first behavior (see
+  `agentictoolkit://recipes/number-field-view#requirements/parses-posix-integer-first`),
+  so a value written by this source's POSIX `settingsFieldString` can read
+  differently under a non-en-US Windows locale; and `NumberBox.Minimum`/
+  `Maximum`, when both set with `Minimum > Maximum`, has no documented
+  skip-the-clamp behavior matching
+  skips-clamp-on-contradictory-bounds (see
+  `agentictoolkit://recipes/number-field-view#requirements/skips-clamp-on-contradictory-bounds`)
+  — a WinUI port needs an explicit `Minimum > Maximum` check before relying
+  on `NumberBox`'s own clamping.
 
 ## Design Decisions
 
-- Decision: Keep `IntegerFieldView` as a thin, forwarding wrapper around
-  `NumberFieldView<Int>` rather than folding its logic in directly.
-  Rationale: Per the source's own doc comment, "this name stays because it
-  is public API of a framework other repos link: a bounded integer field
-  is still exactly this call" — `NumberFieldView` generalizes to optional,
-  one-sided bounds that `RangeViewModel` (which requires both) cannot
-  express, so the behavior moved there while `IntegerFieldView` stayed as
-  the compatible entry point.
-  Approved: pending
-- Decision: Default `fieldWidth` to 52pt in `IntegerFieldView`'s
+- **Decision**: Keep `IntegerFieldView` as a thin, forwarding wrapper
+  around `NumberFieldView<Int>` rather than folding its logic in directly.
+  **Rationale**: Per the source's own doc comment, "this name stays because
+  it is public API of a framework other repos link: a bounded integer
+  field is still exactly this call" — `NumberFieldView` generalizes to
+  optional, one-sided bounds that `RangeViewModel` (which requires both)
+  cannot express, so the behavior moved there (see
+  `agentictoolkit://recipes/number-field-view`) while `IntegerFieldView`
+  stayed as the compatible entry point.
+  **Approved**: pending
+- **Decision**: Default `fieldWidth` to 52pt in `IntegerFieldView`'s
   initializer, rather than reusing `NumberFieldView`'s own uncalled
   default of 72pt.
-  Rationale: `IntegerFieldView` always passes an explicit `fieldWidth`
+  **Rationale**: `IntegerFieldView` always passes an explicit `fieldWidth`
   argument to `NumberFieldView`'s initializer, so `NumberFieldView`'s 72pt
   default is never reached through this type; 52pt is `IntegerFieldView`'s
   own, narrower, pre-existing default, kept for source fidelity to callers
   that relied on it.
-  Approved: pending
-- Decision: Skip clamping entirely when `minimum` and `maximum` are both
-  set and `minimum > maximum`, rather than clamping to one of them.
-  Rationale: Per the source's own comment, "a contradictory pair comes
-  from a caller's own mistake, and the field's job then is to stay usable,
-  not to enforce an empty range" — whichever bound clamping would apply
-  first is an arbitrary artifact of the code's line order, so the source
-  instead leaves the field unbounded in that case.
-  Approved: pending
-- Decision: Revert silently to the last committed value on unparseable
-  text, rather than storing a coerced or default value.
-  Rationale: Per the source's own comment, "text that is not a number of
-  this type is not a zero; it is a typo," and a silently-stored zero (or a
-  rounded fraction) would be a value the user never typed.
-  Approved: pending
-- Decision: Attach no `NSFormatter` to `textField`.
-  Rationale: Per the source's own comment, a formatter with a minimum
-  would reject valid intermediate text on the way to a valid number (e.g.
-  typing "-" before "-5", or the "1" of "12" against a minimum of 10);
-  parsing happens only on commit instead.
-  Approved: pending
-- Decision: Parse POSIX-first, falling back to a locale-aware parse only
-  when the POSIX parse fails.
-  Rationale: Per the source's own comment on `SettingsNumberValue`, the
-  field's own writer (`settingsFieldString`) is POSIX; a locale-first
-  parse would misread the POSIX text `sync()` itself just wrote (e.g.
-  reading `"1.5"`'s `.` as a German thousands separator and storing `15`),
-  multiplying a value by ten on every locale-mismatched commit cycle.
-  Approved: pending
-- Decision: Reject a parsed value whose magnitude `Int64` would otherwise
-  silently clamp, via a `Decimal`-based exactness check
-  (`Int.settingsExactInt(from:)`), rather than accepting the clamped
-  result.
-  Rationale: Per the source's own comment, `NSNumber.int64Value` saturates
-  rather than failing on overflow, and `Double(Int64.max)` rounds up to
-  exactly 2^63 — indistinguishable from a true 2^63 input as a `Double` —
-  so only the `Decimal` comparison can tell a genuinely-typed `Int.max`
-  apart from an overflow that would otherwise be silently stored as
-  `Int.max`.
-  Approved: pending
-- Decision: Keep `IntegerFieldView.controlTextDidEndEditing(_:)` even
+  **Approved**: pending
+- **Decision**: Keep `IntegerFieldView.controlTextDidEndEditing(_:)` even
   though `textField.delegate` is set to the wrapped `NumberFieldView`, not
   to `IntegerFieldView` itself.
-  Rationale: Per the source's own comment, this method is "kept because it
-  was public, and forwards for the same reason" — AppKit calls the inner
-  view's delegate method in the normal case, but any external caller still
-  holding a reference to `IntegerFieldView` as an `NSTextFieldDelegate`
-  (as public API predating this refactor allowed) still reaches
-  `commit()` through this forwarding method.
-  Approved: pending
-- Decision: This recipe carries roughly twice the behavioral-requirement
-  count of sibling `ComposableSettings` row recipes (e.g. `CheckboxView`'s
-  eleven).
-  Rationale: `IntegerFieldView` delegates its entire visible and
-  interactive behavior to `NumberFieldView<Int>`, whose locale-aware
-  parsing, bounds clamping, revert-on-invalid, and dual commit triggers
-  are each independently testable behaviors that a boolean toggle or a
-  single-drag slider does not have. Documenting that delegated behavior
-  here, rather than treating it as out of scope, follows this cookbook's
-  own instruction to trace a called helper's behavior into the recipe.
-  Approved: pending
+  **Rationale**: Per the source's own comment, this method is "kept because
+  it was public, and forwards for the same reason" — AppKit calls the
+  inner view's delegate method in the normal case, but any external caller
+  still holding a reference to `IntegerFieldView` as an
+  `NSTextFieldDelegate` (as public API predating this refactor allowed)
+  still reaches `commit()` through this forwarding method.
+  **Approved**: pending
 
 ## Compliance
 
@@ -537,3 +426,5 @@ Not applicable: neither source file contains a logging call (no `print`,
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: move NumberFieldView<Int>'s own requirements, test vectors, edge cases, and design decisions out to the number-field-view recipe and cite it via depends-on/related, keeping only IntegerFieldView's own forwarding requirements; rewrite the wraps-number-field-view and arranges-single-child test vectors to assert observable outcomes (clamp visible on textField, label/textField frames) instead of the private wrapped view's internals; rename defaults-field-width-to-52-points to default-field-width and move the 52pt value into the requirement body; drop the redundant macos tag and backfill related with sibling recipe domains; reformat Design Decisions to the **Decision**/**Rationale**/**Approved** form and drop the now-inaccurate requirement-count decision; state NumberBox's POSIX-parsing and contradictory-bounds divergences in the WinUI 3 note and drop its "(the reason this recipe exists)" aside; remap Compliance citations to the catalog; backfill the missing 1.0.0 Change History row; fix the Accessibility section's dangling citation to the now-external fixes-field-width requirement |

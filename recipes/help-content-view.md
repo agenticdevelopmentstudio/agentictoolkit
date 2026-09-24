@@ -3,7 +3,7 @@ id: 93f50554-5ae3-4a43-b8db-539d4d804890
 title: HelpContentView
 domain: agentictoolkit://recipes/help-content-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -23,6 +23,9 @@ tags:
 - appkit
 depends-on:
 - agentictoolkit://recipes/explanation-view
+- agentictoolkit://recipes/group-view
+- agentictoolkit://recipes/panel-scroll-view
+- agentictoolkit://recipes/panel-view
 related: []
 references: []
 approved-by: ''
@@ -50,52 +53,51 @@ chrome and feeds it the active panel's `HelpContent`.
 
 ## Behavioral Requirements
 
-- **shows-fixed-help-heading**: The view MUST display a label reading exactly
-  `"Help"`, pinned to the view's top edge (`titleLabel.topAnchor ==
-  self.topAnchor + inset`) and leading edge (`titleLabel.leadingAnchor ==
-  self.leadingAnchor + inset`), where `inset` is
-  `ComposableSettings.SettingsLayout.default[.panelInset]` (20pt). The
-  label's trailing edge MUST be constrained `lessThanOrEqualTo` the view's
-  trailing edge minus the same inset, so the label is free to be narrower
-  than the available width but never wider.
-- **hosts-independently-scrolling-content**: The view MUST host topic content
-  in a `ComposableSettings.PanelScrollView`, positioned directly below the
-  heading label (`scrollView.topAnchor == titleLabel.bottomAnchor`) and
-  spanning the view's full leading/trailing/bottom edges with no inset, so
-  the heading stays fixed on screen while the topic content beneath it
-  scrolls independently.
-- **renders-one-group-per-topic**: For each `HelpContent.Topic` in
+- **fixed-help-heading**: The view MUST display a label reading exactly
+  `"Help"`, inset 20pt
+  (`ComposableSettings.SettingsLayout.default[.panelInset]`) from the
+  view's top and leading edges, and free to be narrower than the available
+  width but never wider — its trailing edge never crosses the same inset
+  from the view's trailing edge. See the AppKit Platform Notes bullet for
+  the exact anchor equations.
+- **independently-scrolling-content**: The view MUST host topic content in
+  a `ComposableSettings.PanelScrollView`, positioned directly below the
+  heading with no gap, and spanning the view's full leading/trailing/bottom
+  edges with no inset, so the heading stays fixed on screen while the topic
+  content beneath it scrolls independently. See the AppKit Platform Notes
+  bullet for the exact anchor equations.
+- **topic-groups**: For each `HelpContent.Topic` in
   `content.topics`, the view MUST add one `ComposableSettings.GroupView`
   titled with the topic's `title`, containing exactly one
   `ComposableSettings.ExplanationView` showing the topic's `body`, to the
   scrolled panel, in the same order the `topics` array provides.
-- **shows-empty-state-when-no-topics**: When `setHelp(_:)` is called with
+- **empty-state**: When `setHelp(_:)` is called with
   `nil`, or with a `HelpContent` whose `topics` array is empty, the view
   MUST display exactly one group titled `"No Help Yet"` containing one
   `ExplanationView` with the fixed sentence "This panel doesn't have any
   help written for it. Its controls each carry their own explanation
   underneath." — instead of leaving the scroll area blank.
-- **replaces-content-wholesale-on-set-help**: Each call to `setHelp(_:)`
+- **wholesale-replacement**: Each call to `setHelp(_:)`
   MUST discard every previously displayed `GroupView`/`ExplanationView` and
   build an entirely new `ComposableSettings.PanelView` from the given
   content, rather than diffing or mutating the views from a prior call.
-- **resets-scroll-position-on-content-replace**: Each call to `setHelp(_:)`
+- **scroll-reset**: Each call to `setHelp(_:)`
   MUST return the visible scroll position to the top of the content, because
   it installs the new panel through
   `PanelScrollView.setContent(_:)`, which removes the document view's prior
   subviews and re-pins the new one from the document's top edge.
-- **applies-theme-on-init-and-on-change**: The view MUST resolve and apply
+- **theme-application**: The view MUST resolve and apply
   the current `SemanticPalette` immediately when constructed, and again on
   every subsequent theme change (via `ThemePaletteObserver`), updating: the
   view's own layer background color, the heading label's font, and the
   heading label's text color.
-- **shares-window-background-color**: The view's background layer color
-  SHOULD be set to `palette.windowBackgroundColor` — the same ground as the
-  window and drawer around it — per the source's own theming comment, so
-  that the topic cards (`GroupView`'s elevated-surface fill) are what visibly
-  stand out, rather than a heading-shaped band of a second, near-identical
-  color above them.
-- **rejects-storyboard-instantiation**: The view MUST NOT support
+- **window-background**: The view's background layer color MUST be set to
+  `palette.windowBackgroundColor` — the same ground as the window and
+  drawer around it — per the source's own theming comment, so that the
+  topic cards (`GroupView`'s elevated-surface fill) are what visibly stand
+  out, rather than a heading-shaped band of a second, near-identical color
+  above them.
+- **coder-init-unavailable**: The view MUST NOT support
   construction via `init(coder:)`; that initializer is marked
   `@available(*, unavailable)` and MUST trigger a fatal error.
 
@@ -138,15 +140,15 @@ chrome and feeds it the active panel's `HelpContent`.
   width or height constraint appears in source. The view fills whatever
   frame its container (the drawer) gives it; topic content that exceeds
   that frame's height scrolls rather than being clipped or truncated
-  (`hosts-independently-scrolling-content`).
+  (`independently-scrolling-content`).
 
 ## States
 
 | State | Appearance change |
 |-------|------------------|
 | Default | Heading reads "Help"; scroll area shows whatever `setHelp(_:)` was last called with. |
-| Empty (`setHelp(nil)` or empty `topics`) | Scroll area shows the single "No Help Yet" group — see **shows-empty-state-when-no-topics**. |
-| Populated (one or more topics) | Scroll area shows one `GroupView` per topic, in array order — see **renders-one-group-per-topic**. |
+| Empty (`setHelp(nil)` or empty `topics`) | Scroll area shows the single "No Help Yet" group — see **empty-state**. |
+| Populated (one or more topics) | Scroll area shows one `GroupView` per topic, in array order — see **topic-groups**. |
 | Pressed | Not applicable: `HelpContentView.swift` defines no target/action, gesture recognizer, or tracking area of its own; it is a non-interactive content view. |
 | Disabled | Not applicable: the source exposes no enabled/disabled API; it defines no `isEnabled` property or dimmed-appearance logic. |
 | Focused | Not applicable: `HelpContentView` never becomes key/first responder itself; the source overrides no responder-chain behavior, and any keyboard focus lands on the scroll view's own default targets, not on this view. |
@@ -159,9 +161,16 @@ chrome and feeds it the active panel's `HelpContent`.
   `HelpContentView.swift`. The heading label is `NSTextField(labelWithString:)`,
   which AppKit exposes to assistive technology as static text by default;
   the topic titles/bodies inherit whatever `GroupView`/`ExplanationView`
-  expose on their own.
+  expose on their own. NEEDS REVIEW: Not implemented in source. `titleLabel`
+  is never given `setAccessibilityRole(.staticText)` with a heading
+  subrole, nor any other heading designation (`HelpContentView.swift:20`,
+  `:31-32`) — AppKit's default static-text role does not by itself announce
+  to VoiceOver's rotor that "Help" is a section heading over the topic
+  list below it. Whether the fixed "Help" label should be exposed as a
+  heading, and through which AppKit API, would need to be decided and then
+  confirmed with VoiceOver's heading rotor.
 - **Label requirements**: Satisfied for the fixed heading — it always reads
-  the literal string `"Help"` (**shows-fixed-help-heading**). Per-topic
+  the literal string `"Help"` (**fixed-help-heading**). Per-topic
   labeling is `GroupView`'s and `ExplanationView`'s responsibility, not this
   file's; `ExplanationView`'s own recipe
   (`agentictoolkit://recipes/explanation-view`) covers its label behavior.
@@ -196,29 +205,28 @@ chrome and feeds it the active panel's `HelpContent`.
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| help-content-view-001 | shows-fixed-help-heading | Construct `HelpContentView()` | A subview with `stringValue == "Help"` exists, pinned 20pt from the view's top and leading edges, outside the scroll view's document |
-| help-content-view-002 | hosts-independently-scrolling-content | Call `setHelp` with topics whose combined height exceeds the view's frame, then scroll the document | The heading label's frame is unchanged while the visible topic content scrolls |
-| help-content-view-003 | renders-one-group-per-topic | `setHelp(HelpContent(topics: [Topic(title: "A", body: "a"), Topic(title: "B", body: "b")]))` | The panel contains exactly 2 `GroupView`s in order, titled "A" then "B", each with one `ExplanationView` whose text matches the topic's `body` |
-| help-content-view-004 | shows-empty-state-when-no-topics | `setHelp(nil)` | The panel contains exactly 1 `GroupView` titled "No Help Yet" with one `ExplanationView` reading the fixed empty-state sentence |
-| help-content-view-005 | shows-empty-state-when-no-topics | `setHelp(HelpContent(topics: []))` | Same result as help-content-view-004 |
-| help-content-view-006 | replaces-content-wholesale-on-set-help | Call `setHelp` with topic set A, then call it again with topic set B | After the second call, none of topic set A's `GroupView`/`ExplanationView` instances remain in the panel; only topic set B's are present |
-| help-content-view-007 | resets-scroll-position-on-content-replace | Call `setHelp` with tall content, scroll to the bottom, then call `setHelp` again with new content | The scroll view's visible origin is back at the top immediately after the second call returns |
-| help-content-view-008 | applies-theme-on-init-and-on-change | Construct `HelpContentView()` while Theme A is active | `layer.backgroundColor == ThemeA.windowBackgroundColor.cgColor`; `titleLabel.font == ThemeA.font(.heading)`; `titleLabel.textColor == ThemeA.primaryTextColor` |
-| help-content-view-009 | applies-theme-on-init-and-on-change | With the view constructed under Theme A, switch the active theme to Theme B | All three properties from help-content-view-008 update to Theme B's values without re-constructing the view |
-| help-content-view-010 | shares-window-background-color | Construct `HelpContentView()` under any theme | `layer.backgroundColor` equals that theme's `windowBackgroundColor`, not a distinct or hardcoded color |
-| help-content-view-011 | rejects-storyboard-instantiation | Attempt `HelpContentView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
+| help-content-view-001 | fixed-help-heading | Construct `HelpContentView()` | A subview with `stringValue == "Help"` exists, pinned 20pt from the view's top and leading edges, outside the scroll view's document |
+| help-content-view-002 | independently-scrolling-content | Call `setHelp` with topics whose combined height exceeds the view's frame, then scroll the document | The heading label's frame is unchanged while the visible topic content scrolls |
+| help-content-view-003 | topic-groups | `setHelp(HelpContent(topics: [Topic(title: "A", body: "a"), Topic(title: "B", body: "b")]))` | The panel contains exactly 2 `GroupView`s in order, titled "A" then "B", each with one `ExplanationView` whose text matches the topic's `body` |
+| help-content-view-004 | empty-state | `setHelp(nil)` | The panel contains exactly 1 `GroupView` titled "No Help Yet" with one `ExplanationView` reading the fixed empty-state sentence |
+| help-content-view-005 | empty-state | `setHelp(HelpContent(topics: []))` | Same result as help-content-view-004 |
+| help-content-view-006 | wholesale-replacement | Call `setHelp` with topic set A, then call it again with topic set B | After the second call, none of topic set A's `GroupView`/`ExplanationView` instances remain in the panel; only topic set B's are present |
+| help-content-view-007 | scroll-reset | Call `setHelp` with tall content, scroll to the bottom, then call `setHelp` again with new content | The scroll view's visible origin is back at the top immediately after the second call returns |
+| help-content-view-008 | theme-application, window-background | Construct `HelpContentView()` while Theme A is active | `layer.backgroundColor == ThemeA.windowBackgroundColor.cgColor` (not a distinct or hardcoded color); `titleLabel.font == ThemeA.font(.heading)`; `titleLabel.textColor == ThemeA.primaryTextColor` |
+| help-content-view-009 | theme-application | With the view constructed under Theme A, switch the active theme to Theme B | All three properties from help-content-view-008 update to Theme B's values without re-constructing the view |
+| help-content-view-010 | coder-init-unavailable | Compile `HelpContentView(coder: someCoder)` at any call site | The line fails to compile — `init(coder:)` is marked `@available(*, unavailable)`. This is a compile-time/availability check, not a runtime trap, and is not automatable via a runtime test harness. |
 
 ## Edge Cases
 
 - **Null/empty input**: `setHelp(nil)` and `setHelp(HelpContent(topics: []))`
   both MUST produce the identical single-group empty state (see
-  **shows-empty-state-when-no-topics**; help-content-view-004,
+  **empty-state**; help-content-view-004,
   help-content-view-005) — `content?.topics ?? []` treats a `nil` content
   and an empty `topics` array as the same case.
 - **Boundary values**: Not applicable in the numeric-input sense — the
   source enforces no minimum or maximum topic count. A `HelpContent` with
   one topic and one with a hundred topics both render every topic
-  (**renders-one-group-per-topic**); the scroll view grows to fit any
+  (**topic-groups**); the scroll view grows to fit any
   count rather than clipping it.
 - **Concurrent access**: Not applicable — the class is `@MainActor`-isolated;
   the Swift compiler rejects construction or mutation of `self`/`content`
@@ -229,14 +237,14 @@ chrome and feeds it the active panel's `HelpContent`.
 - **Offline/disconnected state**: Not applicable — `HelpContentView`
   performs no network operation of its own.
 - **Rapid, repeated `setHelp(_:)` calls**: Each call independently tears
-  down and rebuilds the panel (**replaces-content-wholesale-on-set-help**);
+  down and rebuilds the panel (**wholesale-replacement**);
   the source contains no debouncing, coalescing, or in-flight guard, so N
   calls in quick succession perform N full rebuilds.
 - **`setHelp(_:)` called with an unchanged, equal `HelpContent`**: The
   source performs no equality check against the previously stored
   `content` before rebuilding — even though `HelpContent` is `Equatable` —
   so passing back the same value still discards and rebuilds every group
-  and explanation view (**replaces-content-wholesale-on-set-help**).
+  and explanation view (**wholesale-replacement**).
 - **Very long single topic body**: `ExplanationView` wraps and grows
   vertically with no line limit (per its own recipe), so a very long body
   makes its `GroupView` taller and pushes later groups further down the
@@ -367,7 +375,7 @@ or logger reference anywhere in `HelpContentView.swift`).
   re-rendered from whatever list state backs `content`; render a single
   "No Help Yet" card when that list is empty, and reset
   `scrollTop = 0` on the scrollable container whenever the topic list
-  changes, mirroring **resets-scroll-position-on-content-replace**.
+  changes, mirroring **scroll-reset**.
 - **AppKit / UIKit** (source platform): Source at
   `packages/apple/AgenticToolkit/macOS/UI/Help/HelpContentView.swift` (this
   recipe's source): a macOS-only (`import AppKit`) `NSView` subclass,
@@ -377,7 +385,15 @@ or logger reference anywhere in `HelpContentView.swift`).
   `NSTextField` with a `UILabel`, `PanelScrollView`/`PanelView` with a
   `UIScrollView` hosting a `UIStackView` of card views, and
   `ThemePaletteObserver`'s AppKit-side theme-change notification with
-  UIKit's own trait-collection/theme-change hook.
+  UIKit's own trait-collection/theme-change hook. The constraint equations
+  behind **fixed-help-heading** and **independently-scrolling-content**:
+  `titleLabel.topAnchor == self.topAnchor + inset`,
+  `titleLabel.leadingAnchor == self.leadingAnchor + inset`,
+  `titleLabel.trailingAnchor <= self.trailingAnchor - inset`,
+  `scrollView.topAnchor == titleLabel.bottomAnchor`, and
+  `scrollView`'s leading/trailing/bottom anchors each equal to `self`'s
+  with no constant, where `inset` is
+  `ComposableSettings.SettingsLayout.default[.panelInset]` (20pt).
 - **WinUI 3** (the reason this recipe exists): Build this as a two-row
   `Grid`: row 0, `Auto` height, holds a `TextBlock Text="Help"` styled with
   `SubtitleTextBlockStyle` (the Fluent 2 analog of the 15pt semibold
@@ -394,13 +410,19 @@ or logger reference anywhere in `HelpContentView.swift`).
   reset it to a single "No Help Yet" item) on every call that plays the
   role of `setHelp(_:)`, and call
   `scrollViewer.ChangeView(null, 0, null, true)` immediately after, to
-  reproduce **resets-scroll-position-on-content-replace** — `ItemsRepeater`
+  reproduce **scroll-reset** — `ItemsRepeater`
   does not reset scroll position on its own the way `PanelScrollView`'s
-  `setContent(_:)` does. Bind `Border.Background`, `TextBlock.Foreground`,
-  and the grid's own `Background` to `{ThemeResource}` brushes (e.g.
-  `LayerFillColorDefaultBrush`/`TextFillColorPrimaryBrush`) rather than a
-  fixed color, so `RequestedTheme`/light-dark changes repaint automatically
-  the way `ThemePaletteObserver` repaints this view on every theme change.
+  `setContent(_:)` does. Bind `Border.Background` (the topic card) to
+  `{ThemeResource LayerFillColorDefaultBrush}` and `TextBlock.Foreground`
+  to `{ThemeResource TextFillColorPrimaryBrush}`, but bind the outer
+  `Grid`'s own `Background` to `{ThemeResource
+  SolidBackgroundFillColorBaseBrush}` — the window's own ground, not a
+  distinct layer color — to reproduce **window-background**: the cards
+  read as elevated only because the grid behind them matches the window,
+  the same way `windowBackgroundColor` does here. Bind all three through
+  `{ThemeResource}` rather than a fixed color, so `RequestedTheme`/
+  light-dark changes repaint automatically the way `ThemePaletteObserver`
+  repaints this view on every theme change.
 
 ## Design Decisions
 
@@ -435,8 +457,13 @@ or logger reference anywhere in `HelpContentView.swift`).
   panel from scratch, with no comparison against the previously stored
   `content`, even though `HelpContent` is `Equatable`.
   **Rationale**: not stated in source; inferred from the absence of any
-  equality check or partial-update path. Help content is set only when the
-  reader switches which panel's help is showing, not on a hot or
+  equality check or partial-update path. `setHelp(_:)` is called only when
+  the panel/topic selection changes — `SplitViewController.show(_:)` and
+  `refreshHelp()`, in
+  `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/SplitViewController/SplitViewController.swift`,
+  are the only call sites (reached through `PanelHostView` and
+  `HelpDrawerController.setHelp(_:)`), and both fire from the reader
+  changing which panel or topic is selected — not on a hot or
   performance-sensitive path, so a full rebuild is the simplest correct
   behavior rather than a documented optimization trade-off.
   **Approved: pending**
@@ -445,22 +472,16 @@ or logger reference anywhere in `HelpContentView.swift`).
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [theme-driven-typography](agenticdevelopercookbook://compliance/ui-tokens#theme-driven-typography) | passed | ui-tokens |
-| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | ui-tokens |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | needs-review | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | needs-review | accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | failed | accessibility |
 | [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | internationalization |
 | [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
 | [unicode-support](agenticdevelopercookbook://compliance/internationalization#unicode-support) | passed | internationalization |
 | [platform-theming](agenticdevelopercookbook://compliance/platform-compliance#platform-theming) | passed | platform-compliance |
 
-Statuses rest on: every color and font resolved from the active
-`SemanticPalette` and re-applied on every theme change
-(theme-driven-typography, no-raw-hex, platform-theming); the class being
-`@MainActor`-isolated throughout (main-actor-confined); no state anywhere in
-this view being conveyed by color alone (differentiate-without-color);
+Statuses rest on: every color resolved from the active `SemanticPalette`
+and re-applied on every theme change via `ThemePaletteObserver`, matching
+the window's own ground rather than a fixed value (platform-theming);
 `primaryTextColor` carrying no enforced minimum-contrast floor the way
 `secondaryText` does, so its contrast against `windowBackgroundColor` is
 unverified per-theme (contrast-ratio — see Accessibility); `setHelp(_:)`
@@ -478,3 +499,4 @@ and every topic string being rendered as caller-supplied `NSTextField`/
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `HelpContentView` (AppKit, macOS) source. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only kebab-case; strengthened window-background to MUST and merged its duplicate test vector into theme-application's; moved AppKit anchor equations out of requirements into the Platform Notes bullet; cited the SplitViewController call site for the wholesale-rebuild rationale instead of asserting it as fact; fixed the WinUI grid background to the window's own brush; rewrote the coder-init test vector as a compile-time/non-automatable check; corrected invalid `needs-review` compliance statuses to `partial`/`failed`; added group-view, panel-scroll-view, and panel-view to depends-on; flagged the missing heading accessibility role as an open gap; and remapped/removed Compliance rows that cited checks outside the compliance catalog. |
