@@ -3,7 +3,7 @@ id: c7201487-b696-43b9-a4f9-d1a9e6141f7c
 title: PathView
 domain: agentictoolkit://recipes/path-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -25,7 +25,8 @@ tags:
 depends-on: []
 related:
 - agentictoolkit://recipes/explanation-view
-references: []
+references:
+- https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html
 approved-by: ''
 approved-date: ''
 ---
@@ -153,7 +154,7 @@ be copied.
   or its `label`. The label is AppKit's standard read-only `NSTextField`
   (`isEditable = false`, set by `ThemedLabel.init`), which AppKit exposes to
   assistive technology as static text by default.
-- **Label requirements**: `NEEDS REVIEW: Not implemented in source.` The
+- **Label requirements**: NEEDS REVIEW: Not implemented in source. The
   visible text (`renders-path-non-wrapping-single-line`,
   `prefixes-optional-caption`) says what the path *is* by putting `caption`
   at the head — the source's own doc comment states the caption "sits at the
@@ -179,13 +180,14 @@ be copied.
   standard `NSTextField` text selection (click-drag, double-click-word-select)
   across the label's full displayed area, which is a text-selection
   affordance, not a discrete tap target subject to a minimum size.
-- **Minimum contrast ratio**: `NEEDS REVIEW: Not implemented in source.` The
+- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
   label's `.secondaryText` color is derived with an enforced *minimum*
   contrast ratio of 3.0 against the background
   (`SemanticPalette`'s `dimmed(towards:by:minContrast:)`), but the caption
   text role this label uses defaults to 11pt regular — small text under
-  WCAG 2.1's size threshold for the relaxed 3:1 large-text ratio — so the
-  guaranteed floor of 3.0 does not by itself establish the 4.5:1 the WCAG AA
+  [WCAG 2.1 SC 1.4.3](https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html)'s
+  size threshold for the relaxed 3:1 large-text ratio — so the guaranteed
+  floor of 3.0 does not by itself establish the 4.5:1 that SC 1.4.3's AA
   small-text criterion calls for. Whether any given theme's actual resolved
   `secondaryText`-on-background ratio reaches 4.5:1 cannot be determined from
   `PathView.swift` or `SemanticPalette.swift` alone — it depends on each
@@ -200,14 +202,14 @@ be copied.
 |----|-------------|-------|----------|
 | path-view-001 | renders-path-non-wrapping-single-line | Construct the view | `label.cell?.wraps == false`; `label.maximumNumberOfLines == 1`; `label.cell?.usesSingleLineMode == false` |
 | path-view-002 | truncates-middle | Construct the view | `label.lineBreakMode == .byTruncatingMiddle` |
-| path-view-003 | retains-untruncated-path | `PathView(withPath: "/very/long/path/that/does/not/fit")`, then constrain the view to a narrow width | `view.path` still equals the full, unmodified input string |
+| path-view-003 | retains-untruncated-path | `PathView(withPath: "/very/long/path/that/does/not/fit")`, constrain the view to a narrow width, and lay it out | The label's displayed glyphs are visibly truncated (the rendered string differs from `label.stringValue`, e.g. contains an ellipsis), while `view.path == "/very/long/path/that/does/not/fit"` and `label.toolTip == "/very/long/path/that/does/not/fit"` remain the full, untruncated string |
 | path-view-004 | prefixes-optional-caption | `PathView(withPath: "/tmp/x", caption: "Folder")` | `label.stringValue == "Folder: /tmp/x"` |
 | path-view-005 | omits-caption-when-absent | `PathView(withPath: "/tmp/x")` | `label.stringValue == "/tmp/x"` |
 | path-view-006 | exposes-raw-path-as-tooltip | `PathView(withPath: "/tmp/x")` | `label.toolTip == "/tmp/x"` |
 | path-view-007 | exposes-raw-path-as-tooltip | `PathView(withPath: "/tmp/x", caption: "Folder")` | `label.toolTip == "/tmp/x"` (not `"Folder: /tmp/x"`) |
 | path-view-008 | exposes-raw-path-as-accessibility-value | `PathView(withPath: "/tmp/x")` | `label.accessibilityValue() as? String == "/tmp/x"` |
 | path-view-009 | exposes-raw-path-as-accessibility-value | `PathView(withPath: "/tmp/x", caption: "Folder")` | `label.accessibilityValue() as? String == "/tmp/x"` (not `"Folder: /tmp/x"`) |
-| path-view-010 | supports-text-selection | Construct the view, then inspect the label | `label.isSelectable == true`; selecting all and copying yields `label.stringValue` in full (the caption-prefixed string when a caption is supplied), not a visually-elided substring |
+| path-view-010 | supports-text-selection | Construct the view, then inspect the label | `label.isSelectable == true`; `label.stringValue` equals the full display string (the caption-prefixed string when a caption is supplied, `path` alone otherwise) |
 | path-view-011 | yields-width-to-container | Construct the view | `label.contentCompressionResistancePriority(for: .horizontal) == .defaultLow`; `label.contentHuggingPriority(for: .horizontal) == .defaultLow` |
 | path-view-012 | fills-container-bounds | Construct the view, then lay it out inside a fixed-size superview | The label's resolved frame has zero inset from `PathView`'s frame on all four edges |
 | path-view-013 | exposes-label-property | Construct the view, then access `.label` from outside the type | The property is accessible and returns the same `NSTextField` instance built during init |
@@ -216,6 +218,13 @@ be copied.
 | path-view-016 | conforms-to-settings-view-protocol | Construct the view | The instance can be assigned to a `SettingsViewProtocol`-typed variable without a cast |
 | path-view-017 | rejects-frame-only-initialization | Attempt `PathView(frame: .zero)` | The call traps with a fatal error; no instance is returned |
 | path-view-018 | rejects-storyboard-instantiation | Attempt `PathView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
+| path-view-019 | prefixes-optional-caption | `PathView(withPath: "/tmp/x", caption: "")` | `label.stringValue == ": /tmp/x"` |
+| path-view-020 | truncates-middle | `PathView(withPath: "/tmp/x", caption: "AVeryLongCaptionThatAloneExceedsTheAvailableWidth")`, then constrain the view narrower than the caption's own rendered width | The displayed, truncated glyphs elide into the caption itself, not only the path portion; `label.lineBreakMode == .byTruncatingMiddle` |
+
+A UI-test note: verifying that selecting all and copying yields the full
+label text on the system pasteboard requires pasteboard or UI-automation
+access and cannot be asserted deterministically in a unit test; cover it in a
+UI/integration test suite instead of a conformance vector.
 
 ## Edge Cases
 
@@ -228,8 +237,9 @@ be copied.
   treats `Optional("")` as present, not absent. Passing `caption: ""`
   produces the displayed and stored string `": <path>"` — a leading
   colon-space with nothing before it — since the source guards only against
-  `caption == nil`, not `caption == ""` (MUST, per
-  `prefixes-optional-caption`).
+  `caption == nil`, not `caption == ""` (MAY: this is observed behavior of
+  `caption.map`'s emptiness-blind check, not a MUST asserted by
+  `prefixes-optional-caption`, which only distinguishes nil from non-nil).
 - **Boundary values**: Not applicable in the numeric-input sense —
   `PathView`'s inputs are caller-supplied strings; it has no length limit,
   minimum, or maximum for a numeric boundary to test.
@@ -249,8 +259,10 @@ be copied.
   whenever there is enough width to preserve some of the head, but at a
   width narrower than the caption text itself, `byTruncatingMiddle` will
   begin eliding characters from within the caption too, since no code in
-  `PathView.swift` treats the caption boundary specially (MUST, per
-  `truncates-middle`).
+  `PathView.swift` treats the caption boundary specially (MAY: this is
+  observed fallthrough behavior of `byTruncatingMiddle` at extreme widths,
+  not a MUST that `truncates-middle` itself asserts — the requirement only
+  names which `lineBreakMode` is set).
 - **Very long path with no width constraint**: with both horizontal
   priorities set to `.defaultLow` and no minimum width declared, a superview
   or stack view that constrains the view's width forces the label to
@@ -281,11 +293,20 @@ appears anywhere in `PathView.swift`.
 
 ## Localization
 
-Not applicable: `path` and `caption` are entirely caller-supplied at the call
-site as `String`/`String?` parameters, not literals owned by this type.
-`PathView.swift` defines no string literal of its own that would need
-translation — the only literal in the file is the `": "` separator glue, which
-is not user-facing prose in isolation.
+NEEDS REVIEW: Not implemented in source. `path` and `caption` are entirely
+caller-supplied at the call site as `String`/`String?` parameters, not
+literals owned by this type. But `PathView.swift:35`
+(`caption.map { "\($0): \(path)" }`) hardcodes the `": "` separator as a
+literal, user-visible glue string, not routed through
+`String(localized:)`/`NSLocalizedString`, and its punctuation is
+locale-sensitive: French convention inserts a space before the colon
+(`" : "`), and an RTL locale would need the caption/path order and
+punctuation to mirror rather than simply concatenate left-to-right. Whether
+this is intentional — programmer-facing glue exempt from translation — or a
+gap that should become a per-locale format string is a decision the source
+does not make. Evidence that would settle it: confirmation from the
+localization owner of `ComposableSettings` rows on whether the separator
+should be externalized as a localizable format key.
 
 ## Accessibility Options
 
@@ -336,21 +357,26 @@ or logger reference anywhere in `PathView.swift`).
   `yields-width-to-container`.
 - **Compose**: Use `Text(path, style = MaterialTheme.typography.labelSmall,
   color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
-  overflow = TextOverflow.MiddleEllipsis)` — Compose 1.7+'s built-in
+  overflow = TextOverflow.MiddleEllipsis)` — Compose 1.8+'s built-in
   middle-ellipsis overflow, the nearest analog to `.byTruncatingMiddle`,
   inside a layout slot with no fixed width so it shrinks like
   `yields-width-to-container`. Compose has no separate tooltip API on plain
-  `Text`; expose the full `path` via
-  `Modifier.semantics { contentDescription = path }` for the accessibility
-  analog and a `TooltipBox` wrapper for the visual tooltip analog.
+  `Text`; expose the full `path` via `Modifier.semantics { stateDescription =
+  path }` — `stateDescription` supplements what's announced the way AppKit's
+  `setAccessibilityValue` does, where `contentDescription` would instead
+  replace the accessible name — for the accessibility-value analog, and a
+  `TooltipBox` wrapper for the visual tooltip analog.
 - **React/Web**: A `<span title={path}>` (the tooltip analog) styled with
   `white-space: nowrap; overflow: hidden;` and a CSS-only end-ellipsis is not
   enough, since CSS `text-overflow` has no middle-ellipsis value; either
   split the string into head/tail segments sized against the container's
   measured width in script (recomputed on resize, the web analog of AppKit's
   cell recomputing on layout) or use a small middle-truncation utility.
-  Give the element `aria-label={path}` for the accessibility-value analog,
-  make the text selectable (the CSS default, unless a parent sets
+  `aria-label` would replace the element's accessible name rather than add a
+  value the way AppKit's `setAccessibilityValue` does; instead pair
+  `aria-describedby` with a visually-hidden (`sr-only`) span holding the full
+  `path` for the accessibility-value analog, make the text selectable (the
+  CSS default, unless a parent sets
   `user-select: none`) for `supports-text-selection`, and `width: 100%` with
   no `min-width` so it shrinks with its container, mirroring
   `yields-width-to-container`.
@@ -369,11 +395,13 @@ or logger reference anywhere in `PathView.swift`).
   exposes the tooltip only via a custom hover/hold affordance since UIKit has
   no `NSView.toolTip` equivalent, and enables selection with
   `isUserInteractionEnabled = true` plus a `UILongPressGestureRecognizer`
-  driving `UIMenuController`, since `UILabel` has no built-in `isSelectable`.
-  UIKit also has no `NSCoder`-vs-frame initializer split to fatal-error on
-  both the way `rejects-frame-only-initialization` and
-  `rejects-storyboard-instantiation` do.
-- **WinUI 3** (the reason this recipe exists): Build this as a `TextBlock`
+  driving a `UIEditMenuInteraction` (the iOS 16 API that superseded the
+  deprecated `UIMenuController`) presented via `presentEditMenu(with:)`,
+  since `UILabel` has no built-in `isSelectable`. `UIView` has the same
+  `init(frame:)`/`init(coder:)` initializer split as `NSView`, so a UIKit
+  port can fatal-error from both exactly as `rejects-frame-only-initialization`
+  and `rejects-storyboard-instantiation` require.
+- **WinUI 3**: Build this as a `TextBlock`
   bound to the full `path` string through a value converter (or a small
   behavior) that performs the middle truncation itself, since XAML's
   `TextTrimming` enum (`None`, `CharacterEllipsis`, `WordEllipsis`, `Clip`)
@@ -382,9 +410,13 @@ or logger reference anywhere in `PathView.swift`).
   `SizeChanged` (measuring candidate substrings against the `TextBlock`'s own
   `ActualWidth`, the way AppKit's cell recomputes truncation on layout), and
   keep the untruncated string separately (a bound property mirroring `path`)
-  for `ToolTipService.ToolTip` and `AutomationProperties.Name` — WinUI's
-  tooltip and UI Automation analogs of `toolTip` and
-  `setAccessibilityValue`. Set `IsTextSelectionEnabled="true"` (the analog of
+  for `ToolTipService.ToolTip` and `AutomationProperties.HelpText` (or a
+  custom `ValuePattern` automation peer) — WinUI's nearest analogs of
+  `toolTip` and `setAccessibilityValue`; `AutomationProperties.Name` would
+  replace the accessible name the way `aria-label` does elsewhere, so leave
+  it to default from the bound (caption-prefixed) `TextBlock.Text`, mirroring
+  AppKit's reliance on the visible string as the accessible name since no
+  label override is set in source. Set `IsTextSelectionEnabled="true"` (the analog of
   `isSelectable`) so the bound `TextBlock.Text` — the full string, not the
   elided glyphs — can be selected and copied, matching
   `supports-text-selection`. Use `HorizontalAlignment="Stretch"` with no
@@ -404,7 +436,7 @@ or logger reference anywhere in `PathView.swift`).
   ignore `lineBreakMode`, and the line break is the whole point here" — with
   `usesSingleLineMode` left `true`, `lineBreakMode = .byTruncatingMiddle`
   would be silently ignored.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: an optional `caption` is placed at the head of the displayed
   string (`"<caption>: <path>"`), rather than after the path or in a separate
   label.
@@ -412,7 +444,7 @@ or logger reference anywhere in `PathView.swift`).
   truncation never eats," so placing the caption there means "the row still
   says what it is at any width" — a caption placed at the tail or the middle
   would be the first thing lost as the view narrows.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: `label.toolTip` and `label.setAccessibilityValue` are both
   set to the raw `path`, never the caption-prefixed display string, while
   selecting and copying the label's text yields the full `label.stringValue`
@@ -426,14 +458,14 @@ or logger reference anywhere in `PathView.swift`).
   `shown` string) rather than a separately-tracked "path" value. This
   asymmetry is unchanged for this recipe; the open question in Accessibility
   above is whether the accessibility value should include the caption.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: the label's horizontal content-compression-resistance and
   content-hugging priorities are both lowered to `.defaultLow`.
   **Rationale**: source comments state that "a path yields its width to the
   panel instead of widening the window to stay whole — the same bargain
   every truncating label here makes," so the label is deliberately let to
   shrink to the available width instead of forcing the settings panel wider.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: force a fatal error from both `init(frame:)` and
   `init(coder:)`, leaving `init(withPath:caption:)` as the only usable
   initializer.
@@ -441,31 +473,30 @@ or logger reference anywhere in `PathView.swift`).
   anything without a `path` string — so both inherited `NSView` initializers
   that could construct it without one are intentionally disabled rather than
   left to produce a blank row.
-  **Approved: pending**
-- **Decision**: this recipe has more behavioral requirements (16) than
-  sibling `ComposableSettingsWindow` row recipe `ExplanationView` (10 MUST
-  requirements), despite both being single-label, non-interactive rows.
-  **Rationale**: `PathView` genuinely does more — optional-caption prefixing,
-  middle truncation, and the tooltip/accessibility-value/selection triad with
-  its documented asymmetry — where `ExplanationView` renders one caller
-  string with no truncation logic. The requirement count reflects that
-  difference in scope, comparable to `Badge` (14) and `CaptionedSliderView`
-  (13), not a gap in authoring effort on `ExplanationView`'s part.
-  **Approved: pending**
+  **Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [theme-driven-typography](agenticdevelopercookbook://compliance/ui-tokens#theme-driven-typography) | passed | ui-tokens |
-| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | ui-tokens |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | needs-review | accessibility |
-| [accessibility-value-parity](agenticdevelopercookbook://compliance/accessibility#accessibility-value-parity) | needs-review | accessibility |
+| [dynamic-type-support](agenticdevelopercookbook://compliance/accessibility#dynamic-type-support) | passed | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+
+Statuses rest on: the label's font tracking the theme's `.caption` role and
+`sizeScale` (`dynamic-type-support`, per Appearance above); the enforced
+3.0-minimum `.secondaryText` contrast that cannot be confirmed at 4.5:1 for
+every theme (`contrast-ratio`, per the Accessibility section's open
+question); the caption-prefixed visible text versus the raw-`path`-only
+accessibility value (`screen-reader-support`, per the Accessibility
+section's Label requirements open question); and the hardcoded `": "`
+separator literal at `PathView.swift:35` (`no-hardcoded-strings`, per
+Localization above).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: corrected the unsupported WinUI-3 motivation claim and the accessibility-value platform mappings (Compose, React/Web, WinUI 3) to use value analogs instead of name/label analogs; added a WCAG 2.1 SC 1.4.3 reference; downgraded two accidental Edge Cases from MUST to MAY; reformatted Design Decisions' Approved syntax and dropped the requirement-count-comparison decision; flagged the caption separator as an open localization gap; revised test vectors 003 and 010 and added two edge-case vectors; corrected the UIKit edit-menu API and initializer-split platform notes and the Compose version claim; and rebuilt the Compliance table against the real catalog, dropping checks with no catalog category and fixing statuses/category casing. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `PathView` (AppKit, macOS) source. |

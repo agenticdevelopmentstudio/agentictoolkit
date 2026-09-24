@@ -3,7 +3,7 @@ id: 9e21151e-dc58-49a2-be1e-4984529f4396
 title: PanelHeadingView
 domain: agentictoolkit://recipes/panel-heading-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -22,12 +22,13 @@ tags:
 - heading
 - macos
 - appkit
-depends-on: []
+depends-on:
+- agentictoolkit://recipes/explanation-view
 related:
 - agentictoolkit://recipes/explanation-view
 - agentictoolkit://recipes/header-view
-references:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -40,25 +41,19 @@ approved-date: ''
 `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/PanelHeadingView.swift`,
 is a macOS `ComposableSettings` view: an `@MainActor`, `final` `NSView`
 subclass conforming to `SettingsViewProtocol` that renders a heading over a
-*run* of groups, one level above a single group's own caption. The source's
-own doc comment draws the distinction explicitly: "A panel whose groups all
-belong to one list needs nothing above them — which is why this is not what
-`GroupView`'s header is. It exists for the panel whose cards divide into two
-kinds, where the kind is the first thing a reader has to know: the Key
-Commands panel lists a card per window, and whether a window's commands fire
-only in this app or everywhere is what separates them." It pairs a
-`titleLabel` (a `ThemedLabel` styled as a primary-emphasis heading) with an
-optional caption, which — when supplied — is wrapped in an `ExplanationView`
-rather than a label of its own; the source's own comment on `captionView`
-states this is "so it wraps inside the panel by the one policy every settings
-blurb shares instead of a copy of it," pointing at the sibling
-`ExplanationView` recipe for that wrapping behavior. `PanelView.addHeading(_:
-caption:)` (`PanelView.swift`, not part of this recipe's source) is the one
-call site in this codebase that constructs a `PanelHeadingView`; it also
-widens the gap above the heading to `1.5×` the panel's group spacing before
-adding it, but that spacing decision lives in `PanelView.swift`, not in
-`PanelHeadingView.swift`, so it is not a requirement of this component (see
-Design Decisions).
+*run* of groups, one level above a single group's own caption — distinct from
+`GroupView`'s own header, which captions a single list of rows rather than a
+run of groups. It pairs a `titleLabel` (a `ThemedLabel` styled as a
+primary-emphasis heading) with an optional caption, which — when supplied —
+is wrapped in an `ExplanationView` rather than a label of its own, so it
+wraps by the one policy every settings blurb in this system shares instead of
+a copy of it (see the `ExplanationView` recipe). Use it above a panel whose
+groups fall into more than one kind that a reader needs to see distinguished
+up front — for example, the Key Commands panel's per-window cards, split by
+whether a window's commands fire only in that app or everywhere. The one call
+site that constructs a `PanelHeadingView`, `PanelView.addHeading(_:
+caption:)`, is not part of this recipe's source; its own spacing decision is
+recorded in Design Decisions, not here.
 
 ## Behavioral Requirements
 
@@ -91,23 +86,24 @@ Design Decisions).
 - **matches-caption-width-to-stack**: When `captionView` exists, the
   component MUST constrain its width equal to the stack's `widthAnchor`. No
   equivalent width constraint is applied to `titleLabel`.
-- **pins-stack-to-own-edges**: The component MUST activate four
-  `NSLayoutConstraint`s pinning the stack's top, leading, trailing, and
-  bottom anchors to the matching anchors of the component itself, each with a
-  zero constant.
-- **disables-autoresizing-mask-on-self-stack-and-title**: The component MUST
-  set `translatesAutoresizingMaskIntoConstraints = false` on itself, on the
-  internal stack, and on `titleLabel`. (`captionView`, when constructed,
-  disables its own autoresizing-mask translation inside `ExplanationView`'s
-  own initializer — this component does not set it a second time.)
+- **fills-bounds-with-zero-inset**: The component's content MUST fill the
+  view's own bounds, with zero inset on every side. (See the AppKit Platform
+  Notes bullet for the constraint-based mechanism.)
+- **uses-auto-layout-exclusively**: The component, its internal stack, and
+  `titleLabel` MUST be laid out solely through Auto Layout constraints, never
+  the legacy autoresizing-mask frame system. (`captionView`, when
+  constructed, manages its own Auto Layout opt-in inside `ExplanationView`'s
+  own initializer — this component does not set it a second time. See the
+  AppKit Platform Notes bullet for the mechanism.)
 - **conforms-to-settings-view-protocol**: The component MUST conform to
   `SettingsViewProtocol`.
-- **rejects-frame-initializer**: The designated `init(frame frameRect:
-  NSRect)` initializer MUST fatal-error unconditionally, regardless of the
-  supplied `frameRect`'s value, with the message `init(frame frameRect:
-  NSRect)` (verbatim).
-- **rejects-coder-initializer**: `required init?(coder: NSCoder)` MUST
-  fatal-error with the message `init(coder:) has not been implemented`.
+- **rejects-frame-initializer**: The component MUST NOT support construction
+  through the frame-based initializer; calling it MUST fail unconditionally,
+  regardless of the supplied frame's value. (See the AppKit Platform Notes
+  bullet for the exact mechanism and message.)
+- **rejects-coder-initializer**: The component MUST NOT support construction
+  through coder-based initialization; calling it MUST fail. (See the AppKit
+  Platform Notes bullet for the exact mechanism and message.)
 
 ## Appearance
 
@@ -115,23 +111,24 @@ Design Decisions).
   `wantsLayer` or any `layer?.cornerRadius`; it is a plain `NSView` with no
   layer of its own.
 - **Padding**: 0 around the component's own bounds — the stack is pinned to
-  all four edges with no additional constant (`pins-stack-to-own-edges`).
+  all four edges with no additional constant (`fills-bounds-with-zero-inset`).
   Internally, the gap between `titleLabel` and `captionView` (when present)
-  is `SettingsLayout.default[.captionSpacing]` = 6pt.
-- **Font**: `titleLabel` uses the theme's `.heading` text role
-  (`ThemeTypography.defaultStyle(.heading)` = 15pt, `.semibold` weight,
+  is `SettingsLayout.default[.captionSpacing]`; treat the 6pt current value
+  as illustrative, not the assertion — the token is the source of truth.
+- **Font**: `titleLabel` uses the theme's `.heading` text role, sourced from
+  `ThemeTypography.defaultStyle(.heading)` (illustratively 15pt `.semibold`,
   system font family, scaled by the active theme's `sizeScale` unless
-  overridden). The caption's font is the theme's `.caption` text role,
-  applied by `ExplanationView`/`ComposableSettings.makeValueLabel` — see the
+  overridden — the token, not the literal, is the assertion). The caption's
+  font is the theme's `.caption` text role, applied by
+  `ExplanationView`/`ComposableSettings.makeValueLabel` — see the
   `ExplanationView` recipe for that view's own font details; this recipe
   does not duplicate them.
 - **Background**: None/transparent — `PanelHeadingView` sets no background
   color or layer of its own, and neither `ThemedLabel` nor `ExplanationView`
   draws one either (`ThemedLabel.init` sets `drawsBackground = false`).
 - **Foreground/Text**: `titleLabel`'s text color tracks the theme's
-  `.primaryText` role, which `SemanticPalette.derive(_:theme:)` returns as
-  the theme's foreground color directly (undimmed, unlike `.secondaryText`'s
-  algorithmic dimming). The caption's text color is the theme's
+  `.primaryText` role (via `SemanticPalette.derive(_:theme:)`), undimmed
+  unlike `.secondaryText`. The caption's text color is the theme's
   `.secondaryText` role, applied by `ExplanationView` — see that recipe for
   its derivation and the open question it raises about that role's contrast.
 - **Border**: None — no border is drawn or configured anywhere in
@@ -200,24 +197,29 @@ Design Decisions).
 | panel-heading-view-007 | creates-caption-view-when-caption-given | Construct `PanelHeadingView(title: "Section", caption: "Some blurb")` | The stack's arranged subviews include an `ExplanationView` whose `label.stringValue == "Some blurb"` |
 | panel-heading-view-008 | omits-caption-view-when-caption-nil | Construct `PanelHeadingView(title: "Section")` with `caption` defaulted to `nil` | The stack's arranged subviews contain no `ExplanationView`; `view.captionLabel == nil` |
 | panel-heading-view-009 | stacks-title-and-caption-vertically-leading-aligned | Construct `PanelHeadingView(title: "Section", caption: "Some blurb")` | The internal stack's `orientation == .vertical`, `alignment == .leading`, and `arrangedSubviews == [titleLabel, captionView]` in that order |
-| panel-heading-view-010 | spaces-title-from-caption | Construct the component (with or without a caption) | The internal stack's `spacing == 6.0` |
+| panel-heading-view-010 | spaces-title-from-caption | Construct the component (with or without a caption) | The internal stack's `spacing == SettingsLayout.default[.captionSpacing]` (currently 6.0) |
 | panel-heading-view-011 | matches-caption-width-to-stack | Construct `PanelHeadingView(title: "Section", caption: "Some blurb")` | An active constraint equates `captionView`'s width to the stack's `widthAnchor`; no equivalent constraint exists for `titleLabel` |
-| panel-heading-view-012 | pins-stack-to-own-edges | Construct the component | Active constraints pin the stack's top/leading/trailing/bottom anchors to the view's corresponding anchors, each with constant `0` |
-| panel-heading-view-013 | disables-autoresizing-mask-on-self-stack-and-title | Construct the component | `translatesAutoresizingMaskIntoConstraints == false` on the view, the internal stack, and `titleLabel` |
+| panel-heading-view-012 | fills-bounds-with-zero-inset | Construct the component | Active constraints pin the stack's top/leading/trailing/bottom anchors to the view's corresponding anchors, each with constant `0` |
+| panel-heading-view-013 | uses-auto-layout-exclusively | Construct the component | `translatesAutoresizingMaskIntoConstraints == false` on the view, the internal stack, and `titleLabel` |
 | panel-heading-view-014 | conforms-to-settings-view-protocol | Any initialized `PanelHeadingView` | `view is SettingsViewProtocol` is `true` |
 | panel-heading-view-015 | rejects-frame-initializer | Construct via `PanelHeadingView(frame: NSRect(x: 0, y: 0, width: 100, height: 20))` | Execution traps via `fatalError` with message `init(frame frameRect: NSRect)` |
 | panel-heading-view-016 | rejects-coder-initializer | Construct via `PanelHeadingView(coder:)` with any `NSCoder` | Execution traps via `fatalError` with message `init(coder:) has not been implemented` |
+
+Vectors 001, 015, and 016 are compile-time or fatal-error trap checks, not
+conventional runtime unit tests: 001 verifies a compiler rejection under
+`@MainActor` isolation, and 015/016 verify an unconditional `fatalError` trap;
+run each as the static or trap check it is.
 
 ## Edge Cases
 
 - **Null/empty input**: `title` is a required, non-optional `String`
   parameter, so Swift's type system rules out `nil`. An empty string (`""`)
-  renders an empty `titleLabel` with no guard against it in source (MUST,
-  per `sets-title-text-from-caller`). `caption` is `String?` and defaults to
-  `nil`; an explicit empty string (`caption: ""`) is non-`nil`, so it MUST
-  still construct a caption view whose label renders empty
-  (`creates-caption-view-when-caption-given` does not special-case an empty
-  but non-`nil` string).
+  renders an empty `titleLabel`, with no guard against it in source — a
+  consequence of `sets-title-text-from-caller`. `caption` is `String?` and
+  defaults to `nil`; an explicit empty string (`caption: ""`) is non-`nil`,
+  so it still constructs a caption view whose label renders empty, since
+  `creates-caption-view-when-caption-given` does not special-case an empty
+  but non-`nil` string.
 - **Boundary values**: Not applicable in the numeric sense — the component's
   only inputs are the two caller-supplied strings; it has no
   caller-configurable numeric range. A very long `title` is clipped, not
@@ -234,19 +236,20 @@ Design Decisions).
   performs no networking of its own.
 - **Caption text reassigned after construction**: `PanelHeadingView` exposes
   `captionLabel` as `NSTextField?`, so a caller with a non-`nil` caption can
-  reassign `captionLabel?.stringValue` directly; this is the same pattern the
-  `ExplanationView` recipe documents for its own `label` property, reached
-  here through the forwarding `captionLabel` computed property rather than
-  any `update`/`setText` method `PanelHeadingView` itself defines (SHOULD,
-  by extension of `ExplanationView`'s own `updates-text-via-label-property`
-  guidance — see Design Decisions).
+  reassign `captionLabel?.stringValue` directly, reached through the
+  forwarding `captionLabel` computed property rather than any
+  `update`/`setText` method `PanelHeadingView` itself defines. This mirrors
+  the pattern the `ExplanationView` recipe's own
+  `updates-text-via-label-property` requirement documents for that view (see
+  `agentictoolkit://recipes/explanation-view#requirements/updates-text-via-label-property`;
+  also Design Decisions).
 - **Constructed with `caption: nil` and later needing one**: `captionView`
-  is a `private let`-equivalent, constructed once at `init` time and never
-  reassigned; the source provides no way to add a caption to a
-  `PanelHeadingView` that was built without one — a caller that needs a
-  caption MUST supply it at construction (MUST-level, source-traceable
-  consequence of `omits-caption-view-when-caption-nil`: no method exists to
-  set `captionView` after `init` returns).
+  is constructed once at `init` time and never reassigned; the source
+  provides no way to add a caption to a `PanelHeadingView` that was built
+  without one — a caller that needs a caption supplies it at construction.
+  This is a source-traceable consequence of
+  `omits-caption-view-when-caption-nil`: no method exists to set
+  `captionView` after `init` returns.
 
 ## Configuration
 
@@ -313,8 +316,10 @@ or logger reference anywhere in `PanelHeadingView.swift`).
 ## Platform Notes
 
 - **SwiftUI**: Compose a `VStack(alignment: .leading, spacing: 6)` with a
-  `Text(title).font(.headline)` (or the app's `.heading` theme token) for the
-  title, and — only when `caption` is non-`nil` — a `Text(caption)
+  `Text(title)` styled from the app's `.heading` theme token (the SwiftUI
+  analog of `ThemeTypography.defaultStyle(.heading)`, not the built-in
+  `.headline` text style, which is a different size/weight on this platform)
+  for the title, and — only when `caption` is non-`nil` — a `Text(caption)
   .font(.caption).foregroundStyle(.secondary)
   .fixedSize(horizontal: false, vertical: true)` beneath it, mirroring
   `stacks-title-and-caption-vertically-leading-aligned` and
@@ -343,13 +348,23 @@ or logger reference anywhere in `PanelHeadingView.swift`).
   (this recipe's source): a macOS-only (`import AppKit`) `NSView` subclass,
   `@MainActor`, `final`, inside the `ComposableSettings` namespace, composing
   one `ThemedLabel` and, conditionally, one `ExplanationView` inside an
-  `NSStackView`. There is no UIKit code path in source. A UIKit port would
+  `NSStackView`. `uses-auto-layout-exclusively` is met by setting
+  `translatesAutoresizingMaskIntoConstraints = false` on the view itself, the
+  stack, and `titleLabel` (`captionView` opts itself in inside
+  `ExplanationView`'s own initializer). `fills-bounds-with-zero-inset` is met
+  by activating four `NSLayoutConstraint`s pinning the stack's top, leading,
+  trailing, and bottom anchors to the matching anchors of the view itself,
+  each with a zero constant. `rejects-frame-initializer` is met by overriding
+  `init(frame frameRect: NSRect)` to `fatalError("init(frame frameRect:
+  NSRect)")` unconditionally, and `rejects-coder-initializer` by overriding
+  `init?(coder: NSCoder)` to `fatalError("init(coder:) has not been
+  implemented")`. There is no UIKit code path in source. A UIKit port would
   replace `NSStackView` with `UIStackView`, `ThemedLabel`(`NSTextField`) with
   a `UILabel` styled for the heading role, and the conditionally-constructed
   `ExplanationView`/`UILabel` pairing for the caption; it would have no
   `NSCoder`-vs-frame initializer split to fatal-error on the way
   `rejects-frame-initializer` and `rejects-coder-initializer` do.
-- **WinUI 3** (the reason this recipe exists): Build this as a vertical
+- **WinUI 3**: Build this as a vertical
   `StackPanel` with `Spacing="6"` (the analog of
   `SettingsLayout.default[.captionSpacing]` /
   `spaces-title-from-caption`) containing a `TextBlock` styled
@@ -370,7 +385,7 @@ or logger reference anywhere in `PanelHeadingView.swift`).
   match the source's untouched, single-line `ThemedLabel` default). There is
   no WinUI equivalent of `NSLayoutConstraint`-based edge pinning needed
   beyond placing the `StackPanel` alone in its parent cell with no `Margin`,
-  reproducing `pins-stack-to-own-edges` directly.
+  reproducing `fills-bounds-with-zero-inset` directly.
 
 ## Design Decisions
 
@@ -382,7 +397,7 @@ or logger reference anywhere in `PanelHeadingView.swift`).
   instead of a copy of it" — the wrapping, compression, and hugging behavior
   a multi-line settings caption needs is owned once, by `ExplanationView`,
   and reused here rather than re-implemented.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: `titleLabel`'s width is never constrained to the stack's
   width, while `captionView`'s width is (`matches-caption-width-to-stack`).
   **Rationale**: not explained in source comments beyond the code itself.
@@ -393,7 +408,7 @@ or logger reference anywhere in `PanelHeadingView.swift`).
   reports its one-line intrinsic width instead of the width the panel
   actually gives it, the same reasoning the `ExplanationView` recipe
   documents for that view's own horizontal-compression decision.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: The gap above a `PanelHeadingView` inside a panel is widened
   to `1.5×` the panel's group spacing by `PanelView.addHeading(_:caption:)`,
   not by `PanelHeadingView` itself.
@@ -405,52 +420,27 @@ or logger reference anywhere in `PanelHeadingView.swift`).
   site that constructs this component, but `PanelView.swift` is not part of
   this recipe's source, so it is not a requirement of `PanelHeadingView`
   itself.
-  **Approved: pending**
-- **Decision**: `init(frame frameRect: NSRect)`'s fatal-error message,
-  `"init(frame frameRect: NSRect)"`, is correctly parenthesized here, unlike
-  the malformed (missing-parenthesis) message the sibling `ExplanationView`
-  and `HeaderView` recipes document for their own frame initializers.
-  **Rationale**: documented as a source-traceable difference between
-  siblings, not smoothed over in either direction — this file's message
-  string is well-formed as written; the other two are not.
-  **Approved: pending**
-- **Decision**: This recipe has fewer behavioral requirements than the
-  sibling `GroupView` recipe (33) but more than the sibling `HeaderView`
-  recipe (11).
-  **Rationale**: `PanelHeadingView` is `HeaderView`'s title/caption
-  composition made optional-caption-aware, with no card, no rows, and no
-  separator logic — genuinely simpler than `GroupView`'s row-management
-  responsibilities, and modestly more complex than `HeaderView`'s single
-  fixed label. The requirement count reflects that difference in scope, not
-  a gap in authoring effort.
-  **Approved: pending**
+  **Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | ui-tokens |
-| [theme-driven-typography](agenticdevelopercookbook://compliance/ui-tokens#theme-driven-typography) | passed | ui-tokens |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | needs-review | accessibility |
-| [localizable-strings](agenticdevelopercookbook://compliance/i18n#localizable-strings) | passed | i18n |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | passed | Internationalization |
 
-`main-actor-confined` passes because the class is declared `@MainActor` (see
-`confines-to-main-actor`). `no-raw-hex` passes because every color this
-component displays comes from `titleLabel`'s `.primaryText` role or
-`captionView`'s `.secondaryText` role, never a literal `NSColor` or hex
-value. `theme-driven-typography` passes because both the title's `.heading`
-font and the caption's `.caption` font come from `ThemeTypography`, not a
-hardcoded point size or weight. `differentiate-without-color` passes because
-the component conveys no state through color. `screen-reader-support` needs
-review because of the open heading-role question recorded under
-Accessibility above. `localizable-strings` passes because `title` and
-`caption` are entirely caller-supplied strings with no literal owned by this
-file.
+`screen-reader-support` is partial because `titleLabel`'s text is present and
+reads via AppKit's default `NSTextField` accessible-name behavior, but
+nothing in source marks it with an accessibility heading role, so VoiceOver
+users cannot navigate panel headings the way heading navigation would let
+them (see the open question recorded under Accessibility above).
+`no-hardcoded-strings` passes because `title` and `caption` are entirely
+caller-supplied strings, with no user-visible string literal owned by
+`PanelHeadingView.swift` itself.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: cite spacing/typography tokens instead of literals; restate two AppKit-mechanics requirements as outcomes and move their mechanism into AppKit Platform Notes; trim duplicated theme/typography prose; move the internal cookbook reference from `references` to `related` and add `explanation-view` to `depends-on`; fix Design Decision approval-line format and remove two commentary (non-decision) entries; change `screen-reader-support` from the disallowed `needs-review` status to `partial` and rebuild the Compliance table against real catalog checks (`screen-reader-support`, `no-hardcoded-strings`); drop the unsupported WinUI "reason this recipe exists" claim and point the SwiftUI note at the theme heading token instead of `.headline`; remove RFC 2119 keywords from Edge Cases in favor of citing the named requirements they follow from; mark test vectors 001/015/016 as compile-time/trap checks; trim the Overview to component identity and usage. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation, extracted from the Apple `PanelHeadingView` (AppKit, macOS) source. |

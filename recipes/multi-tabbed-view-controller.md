@@ -3,7 +3,7 @@ id: d1257c76-fb28-47a5-bc2b-d4fb1ef87b53
 title: MultiTabbedViewController
 domain: agentictoolkit://recipes/multi-tabbed-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -12,7 +12,7 @@ author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
 summary: IDE-style AppKit view controller with up to four independently toggleable
-  edge-docked tab bars sharing one center content area; exactly one tab is active
+  edge-docked tab bars sharing one center content area; at most one tab is active
   at a time.
 platforms:
 - swift
@@ -22,7 +22,6 @@ tags:
 - tab-bar
 - view-controller
 - layout
-- macos
 - appkit
 depends-on: []
 related: []
@@ -39,7 +38,7 @@ approved-date: ''
 hosts up to four edge-docked tab bars — top, right, bottom, left — around a
 single shared content area, IDE-style. Each enabled edge owns its own tab
 list; edges can be shown or hidden independently and a hidden edge keeps its
-tabs so re-enabling it restores them. Exactly one tab is active across the
+tabs so re-enabling it restores them. At most one tab is active across the
 whole controller at any time, and that tab's own view controller fills the
 center; `mainContentViewController`, if set, fills the center instead while no
 tab is active. A `Tab`'s `groupID` ties it to its siblings on other edges — one
@@ -55,7 +54,7 @@ component, since neither has a recipe of its own.
 - **top-edge-enabled-by-default**: Component MUST initialize with the `.top`
   edge enabled and the `.right`, `.bottom`, and `.left` edges disabled.
 - **edge-toggle-updates-bar-visibility**: When the view is loaded, Component
-  MUST hide that edge's bar (`isHidden = true`) and rebuild the edge
+  MUST set that edge's bar's `isHidden` to `!enabled` and rebuild the edge
   constraints whenever `setEdgeEnabled(_:_:)` changes an edge's enabled state,
   and MUST do nothing (no state change, no constraint rebuild) when the
   requested state already matches the edge's current state.
@@ -108,7 +107,7 @@ component, since neither has a recipe of its own.
 - **first-tab-on-enabled-edge-auto-activates**: `insertTab(_:at:on:)` MUST
   activate the inserted tab when there is currently no active tab and the
   target edge is enabled.
-- **removing-active-tab-selects-same-edge-neighbor**: `removeTab(id:)` MUST
+- **active-tab-removal-neighbor**: `removeTab(id:)` MUST
   activate the tab left at the removed tab's clamped index on the same edge
   when the removed tab was active and tabs remain on that edge.
 - **removing-last-tab-on-edge-triggers-fallback**: `removeTab(id:)` MUST run
@@ -119,7 +118,7 @@ component, since neither has a recipe of its own.
   the first tab of the first enabled edge.
 - **fallback-clears-when-nothing-found**: `activateFallbackTab()` MUST set the
   active tab to `nil` when no enabled edge has any tab at all.
-- **active-tab-change-notifies-delegate-even-when-nil**: Component MUST invoke
+- **active-tab-change-notification**: Component MUST invoke
   `multiTabbedViewController(_:activeTabDidChange:on:)` with `nil` id and `nil`
   edge, rather than skipping the callback, whenever the active tab is cleared.
 - **select-tab-refuses-non-member-id**: `selectTab(id:on:)` MUST have no effect
@@ -141,10 +140,10 @@ component, since neither has a recipe of its own.
 - **center-outline-reflects-color-override-or-fallback**: Component MUST draw
   a `1pt` border around the shared content area using `centerOutlineColor` when
   it is set, and the resolved theme palette's `.outline` role when it is `nil`.
-- **preferred-content-size-change-refreshes-every-bar**: Component MUST call
-  `updateThickness()` on every edge's bar — not only the bar hosting the
-  changed controller — whenever any hosted view controller reports a changed
-  `preferredContentSize`.
+- **preferred-content-size-change-refreshes-every-bar**: Whenever any hosted
+  view controller reports a changed `preferredContentSize`, every edge's
+  bar — not only the bar hosting the changed controller — MUST reflect its own
+  hosted items' current preferred content size in its thickness.
 - **tab-bar-orientation-follows-edge**: `TabBarView` MUST lay out a top or
   bottom bar's items in a horizontal row and a left or right bar's items in a
   vertical column.
@@ -156,7 +155,7 @@ component, since neither has a recipe of its own.
   padding between an item and the bar's outer (window) side, and MUST leave
   the content (workspace) side of the bar flush against its items with no
   padding.
-- **selecting-a-tab-restyles-its-button**: `TabButton` MUST fill a selected
+- **tab-button-selection-style**: `TabButton` MUST fill a selected
   tab's background with the `.selection` palette role and leave an unselected
   tab's background transparent, and MUST switch its label between the
   `.selectionText` and `.secondaryText` roles, and its close icon's tint
@@ -164,7 +163,7 @@ component, since neither has a recipe of its own.
 - **hosted-item-highlight-follows-selection**: Component MUST set a
   `.viewController` tab's `isHighlighted` to match the selection state,
   whenever the item conforms to `TabBarHostedItem`.
-- **clicking-tab-body-selects-except-close-icon**: `TabButton` MUST select the
+- **close-icon-hit-region**: `TabButton` MUST select the
   tab when a pointer-down lands outside the close button's frame, and MUST
   route a pointer-down inside the close button's frame to the close action
   instead of selecting.
@@ -295,11 +294,11 @@ component, since neither has a recipe of its own.
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
 | multi-tabbed-001 | top-edge-enabled-by-default | Construct a new `MultiTabbedViewController` | `isEdgeEnabled(.top) == true`; `isEdgeEnabled(.right/.bottom/.left) == false` |
-| multi-tabbed-002 | edge-toggle-updates-bar-visibility | View loaded; call `setEdgeEnabled(.bottom, true)` | `tabBars[.bottom]?.isHidden == false`; edge constraints rebuilt |
+| multi-tabbed-002 | edge-toggle-updates-bar-visibility | View loaded; call `setEdgeEnabled(.bottom, true)` | The bottom edge's tab bar becomes visible (no longer hidden) in the view hierarchy; the edge layout constraints are rebuilt |
 | multi-tabbed-003 | hidden-edge-retains-tabs | Add a tab on `.bottom`; disable `.bottom`; re-enable `.bottom` | `tabs(on: .bottom)` returns the same tab throughout, and its button reappears once re-enabled |
-| multi-tabbed-004 | edge-state-change-triggers-fallback-activation | Active tab lives on `.top`; call `setEdgeEnabled(.top, false)` | `activateFallbackTab()` runs; `activeTabID` changes (to another tab or `nil`) |
-| multi-tabbed-005 | disabled-edge-excluded-from-layout | `.left` disabled | The content area's leading anchor is pinned to `view.leadingAnchor`, not to `tabBars[.left]` |
-| multi-tabbed-006 | bar-spans-content-perpendicular-dimension | `.top` enabled | `tabBars[.top]`'s leading/trailing anchors equal `centerContainer`'s leading/trailing anchors |
+| multi-tabbed-004 | edge-state-change-triggers-fallback-activation | Active tab lives on `.top`; call `setEdgeEnabled(.top, false)` | Fallback activation runs; `activeTabID` changes (to another tab or `nil`) |
+| multi-tabbed-005 | disabled-edge-excluded-from-layout | `.left` disabled | The content area's leading edge is pinned directly to the view's own leading edge, not to the left bar (which is hidden and unconstrained) |
+| multi-tabbed-006 | bar-spans-content-perpendicular-dimension | `.top` enabled | The top bar spans the full width of the content area: its leading and trailing edges align with the content area's leading and trailing edges |
 | multi-tabbed-007 | add-tab-appends-to-edge | Edge already has 2 tabs; call `addTab(newTab, on: edge)` | `tabs(on: edge).last?.id == newTab.id` |
 | multi-tabbed-008 | insert-tab-clamps-index | Edge has 2 tabs; call `insertTab(tab, at: 99, on: edge)` | Tab is inserted at index `2` (the end), not out of bounds |
 | multi-tabbed-009 | remove-tab-locates-owning-edge | Tab lives on `.right`; call `removeTab(id: tab.id)` with no edge argument | `tabs(on: .right)` no longer contains the tab |
@@ -307,33 +306,37 @@ component, since neither has a recipe of its own.
 | multi-tabbed-011 | move-tab-no-op-when-index-unchanged | Tab already at index `1`; call `moveTab(id:, to: 1, on:)` | Tab list order is unchanged; `didReorderTab` delegate callback is not invoked |
 | multi-tabbed-012 | rename-tab-title-items-only | Call `renameTab(id:, title: "New")` on a `.viewController` tab | `tabs(on: edge).first { $0.id == id }?.title` is unchanged |
 | multi-tabbed-013 | set-tab-item-preserves-mounted-content | Active tab's item is replaced via `setTabItem(id:, item:)` | The tab's `viewController` (and, if it is the active tab, the mounted center content) is unchanged |
-| multi-tabbed-014 | single-active-tab-invariant | Tabs exist on 2 enabled edges | `activeTabID` names exactly one tab, never two |
+| multi-tabbed-014 | single-active-tab-invariant | Tabs exist on 2 enabled edges with unrelated groups; select a tab on `.top`, then select a different (ungrouped) tab on `.left` | After the second selection, `activeTabID` names only the `.left` tab; the `.top` bar shows no tab as selected |
 | multi-tabbed-015 | tab-defaults-to-own-group | Construct `Tab(title:, viewController:)` with no `groupID` | `tab.groupID == tab.id` |
-| multi-tabbed-016 | group-siblings-share-selection-across-edges | Top and bottom tabs share a `groupID`; select the bottom one | `tabBars[.top]?.selectedID == topTab.id` |
-| multi-tabbed-017 | ungrouped-tab-shows-no-selection-on-other-edges | Top tab has no shared group with any bottom tab; select the top tab | `tabBars[.bottom]?.selectedID == nil` |
+| multi-tabbed-016 | group-siblings-share-selection-across-edges | Top and bottom tabs share a `groupID`; select the bottom one | The top bar shows its own member of the group (`topTab`) as selected, even though the bottom tab is the one whose content is shown |
+| multi-tabbed-017 | ungrouped-tab-shows-no-selection-on-other-edges | Top tab has no shared group with any bottom tab; select the top tab | The bottom bar shows no tab as selected |
 | multi-tabbed-018 | first-tab-on-enabled-edge-auto-activates | Edge has no tabs and is enabled; call `addTab(tab, on: edge)` | `activeTabID == tab.id` |
-| multi-tabbed-019 | removing-active-tab-selects-same-edge-neighbor | Active tab at index 1 of 3 on its edge is removed | The tab now at index 1 (the old index 2) becomes active |
-| multi-tabbed-020 | removing-last-tab-on-edge-triggers-fallback | Active tab is the only tab on its edge; call `removeTab(id:)` | `activateFallbackTab()` runs |
+| multi-tabbed-019 | active-tab-removal-neighbor | Active tab at index 1 of 3 on its edge is removed | The tab now at index 1 (the old index 2) becomes active |
+| multi-tabbed-020 | removing-last-tab-on-edge-triggers-fallback | Active tab is the only tab on its edge; call `removeTab(id:)` | Fallback activation runs |
 | multi-tabbed-021 | fallback-prefers-active-group | Active tab's group has a sibling on another enabled edge; a tab unrelated to the group sits first on the first enabled edge | Fallback activates the group sibling, not the unrelated first tab |
 | multi-tabbed-022 | fallback-clears-when-nothing-found | No enabled edge has any tab; fallback runs | `activeTabID == nil` |
-| multi-tabbed-023 | active-tab-change-notifies-delegate-even-when-nil | Last tab on the last enabled edge is removed | Delegate receives `activeTabDidChange(nil, on: nil)` |
+| multi-tabbed-023 | active-tab-change-notification | Last tab on the last enabled edge is removed | Delegate receives `activeTabDidChange(nil, on: nil)` |
 | multi-tabbed-024 | select-tab-refuses-non-member-id | Call `selectTab(id: unrelatedID, on: edge)` where `unrelatedID` is not in `edge`'s tabs | `activeTabID` is unchanged |
-| multi-tabbed-025 | center-shows-active-tab-view-controller | A tab is activated | `mountedCenterController === activeTab.viewController`; its view is a subview of `centerContainer` |
-| multi-tabbed-026 | center-falls-back-to-main-content | No tab active; `mainContentViewController` is set | `mainContentViewController`'s view is mounted in `centerContainer` |
+| multi-tabbed-025 | center-shows-active-tab-view-controller | A tab is activated | The shared content area mounts the active tab's view controller as its sole child view |
+| multi-tabbed-026 | center-falls-back-to-main-content | No tab active; `mainContentViewController` is set | The shared content area mounts `mainContentViewController`'s view |
 | multi-tabbed-027 | center-mount-skips-redundant-remount | `refreshCenterContent()` called twice in a row with the same resolved target | The mounted controller's view is not removed and re-added on the second call |
-| multi-tabbed-028 | content-insets-applied-to-mounted-view | `contentInsets = NSEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)` | Mounted content's bottom/trailing constraint constants are `-4`; top/leading are `4` |
-| multi-tabbed-029 | center-outline-reflects-color-override-or-fallback | `centerOutlineColor = nil` | `centerContainer.layer?.borderColor` equals the resolved palette's `.outline` color |
-| multi-tabbed-030 | preferred-content-size-change-refreshes-every-bar | Hosted controller on `.left` changes `preferredContentSize`; `preferredContentSizeDidChange(for:)` fires | `updateThickness()` is invoked on every bar in `tabBars`, not only `.left` |
-| multi-tabbed-031 | tab-bar-orientation-follows-edge | `TabBarView(edge: .right)` built | `stack.orientation == .vertical` |
-| multi-tabbed-032 | tab-bar-thickness-floor-and-growth | `.left` bar hosts an item with `preferredContentSize.width == 200` | `thicknessConstraint?.constant == 206` (200 + 6, above the 140pt floor) |
-| multi-tabbed-033 | tab-item-padding-flush-to-content-side | `.top` bar built | `stack.edgeInsets.top == 6` (outer side); `stack.edgeInsets.bottom == 0` (workspace side) |
-| multi-tabbed-034 | selecting-a-tab-restyles-its-button | `TabButton.isHighlighted = true` | `backgroundView.layer?.backgroundColor` equals the `.selection` color; `titleLabel.role == .selectionText` |
+| multi-tabbed-028 | content-insets-applied-to-mounted-view | `contentInsets = NSEdgeInsets(top: 4, left: 4, bottom: 4, right: 4)` | The mounted content sits 4pt in from the content area's top and leading edges, and 4pt in from its bottom and trailing edges (inset inward) |
+| multi-tabbed-029 | center-outline-reflects-color-override-or-fallback | `centerOutlineColor = nil` | The content area's visible border renders in the resolved palette's `.outline` color |
+| multi-tabbed-030 | preferred-content-size-change-refreshes-every-bar | Hosted controller on `.left` changes `preferredContentSize`; `preferredContentSizeDidChange(for:)` fires | Every edge's bar — not only `.left`'s — recalculates its thickness to reflect its own hosted items' current preferred content size |
+| multi-tabbed-031 | tab-bar-orientation-follows-edge | `TabBarView(edge: .right)` built | The right bar lays out its items down a vertical column, not across a row |
+| multi-tabbed-032 | tab-bar-thickness-floor-and-growth | `.left` bar hosts an item with `preferredContentSize.width == 200` | The left bar's thickness (frame width) grows to `206pt` (200 + 6pt padding), above its `140pt` floor |
+| multi-tabbed-033 | tab-item-padding-flush-to-content-side | `.top` bar built | The top bar's first item sits `6pt` from the bar's outer (top) edge; on the workspace-facing (bottom) edge, items sit flush with a `0pt` gap |
+| multi-tabbed-034 | tab-button-selection-style | `TabButton.isHighlighted = true` | The selected tab's background fills with the `.selection` palette color, and its title text switches to the `.selectionText` role |
 | multi-tabbed-035 | hosted-item-highlight-follows-selection | A `.viewController` tab conforming to `TabBarHostedItem` is selected | Its `isHighlighted == true` |
-| multi-tabbed-036 | clicking-tab-body-selects-except-close-icon | `mouseDown` at a point inside the close button's frame | `closeAction` fires via the close button; `onSelect` is not called directly by `TabButton.mouseDown` |
+| multi-tabbed-036 | close-icon-hit-region | `mouseDown` at a point inside the close button's frame | The close action fires, closing that tab; the click does not also select the tab |
 | multi-tabbed-037 | clicking-hosted-item-selects-its-tab | Real `mouseDown` hit-tested onto a hosted item's interior label | The hosted tab becomes selected |
-| multi-tabbed-038 | vertical-edge-cards-overlap-and-order-by-distance | `.left` bar has 3 hosted items; the middle one is selected | The middle item's neighbors are placed behind it in z-order (its view is above both neighbors in `subviews`) |
+| multi-tabbed-038 | vertical-edge-cards-overlap-and-order-by-distance | `.left` bar has 3 hosted items; the middle one is selected | The middle item's neighbors are drawn and hit-tested behind it: it visually overlaps and receives clicks over both neighbors |
 | multi-tabbed-039 | cross-edge-move-preserves-foreign-controller | A hosted controller is moved from `.left`'s bar to `.right`'s bar (insert-then-remove); `.left`'s bar reconciles afterward | The controller's `parent` and mounted view are unaffected by `.left`'s reconciliation |
 | multi-tabbed-040 | new-tab-hook-delegates-without-mutating | Call `newTab(nil)` with a delegate installed | `multiTabbedViewControllerNeedsNewTab(_:)` is invoked; no tab is added by this call itself |
+| multi-tabbed-041 | explicit-group-override | Construct two `Tab` instances with the same explicit `groupID`, one per edge; select one | The other tab, sharing the same `groupID`, is also shown as selected on its own edge's bar |
+| multi-tabbed-042 | Null/empty input (Edge Cases) | Call `tabs(on: edge)` for an edge with no tabs ever added | Returns `[]`, without trapping |
+| multi-tabbed-043 | Error states (Edge Cases) | Set `delegate`, then let it deallocate (no strong reference remains); call `removeTab(id:)` for the last tab on an edge | The tab is removed from `tabs(on: edge)` (the mutation completes); no crash occurs even though `delegate` is now `nil` |
+| multi-tabbed-044 | first-tab-on-enabled-edge-auto-activates | Edge has no tabs and is enabled; call `insertTab(tab, at: 0, on: edge)` directly (not `addTab`) | `activeTabID == tab.id` |
 
 ## Edge Cases
 
@@ -343,7 +346,7 @@ component, since neither has a recipe of its own.
   `mainContentViewController == nil` and no active tab, the shared content
   area MUST be left with no mounted controller at all rather than showing a
   blank placeholder controller.
-- Boundary values (MUST): `insertTab(_:at:index:)`'s clamp
+- Boundary values (MUST): `insertTab(_:at:on:)`'s clamp
   (`max(0, min(index, count))`) and `moveTab(id:to:on:)`'s clamp
   (`max(0, min(index, count - 1))`) MUST both handle an index below `0` or
   past the end of the list the same way as one already in range — neither
@@ -364,14 +367,12 @@ component, since neither has a recipe of its own.
 - Offline/disconnected: Not applicable — this component performs no
   networking of any kind; it manages an in-memory set of tab bars and mounts
   caller-supplied view controllers.
-- Reusing one view-controller instance across two tabs: NEEDS REVIEW: Not
-  implemented in source. Behavior undefined. Nothing in `addTab`/`insertTab`
-  refuses or dedupes a `Tab` whose `viewController` is already parented
-  elsewhere or already mounted as another tab's content; only AppKit's own
-  "already has a parent"-style assertions would fire, not a check in this
-  component. What is missing: whether the component should reject or dedupe
-  such input. What would settle it: a decision on whether hosting the same
-  controller instance under two tabs is ever a legitimate use case.
+- Reusing one view-controller instance across two tabs: unguarded caller
+  precondition. Nothing in `addTab`/`insertTab` refuses or dedupes a `Tab`
+  whose `viewController` is already parented elsewhere or already mounted as
+  another tab's content; callers MUST supply a distinct controller per tab,
+  and AppKit's own view-controller containment is the only thing that reacts
+  to a violation.
 
 ## Configuration
 
@@ -498,7 +499,7 @@ Not applicable: source contains no logging call (no `print`, `os_log`, or
   stack. Compose the up-to-four bars and the center `<div>` with CSS Grid
   (`grid-template-areas` for top/left/center/right/bottom), toggling a bar's
   `display: none` to mirror `isHidden`.
-- **AppKit/UIKit** (source platform): Implemented in
+- **AppKit / UIKit** (source platform): Implemented in
   `packages/apple/AgenticToolkit/macOS/UI/ViewControllers/MultiTabbedViewController/`
   across `MultiTabbedViewController.swift` (edge/tab/selection state, layout,
   center mounting), `TabBarView.swift` (bar rendering, `TabButton`,
@@ -511,8 +512,15 @@ Not applicable: source contains no logging call (no `print`, `os_log`, or
   hand-built container using `UIStackView`s for each edge (mirroring this
   file's own `NSStackView`-per-edge structure) and a custom container view
   controller for the center, rather than `UITabBarController`, which supports
-  only one bottom bar and no cross-edge group selection.
-- **WinUI 3** (the reason this recipe exists): There is no single WinUI 3
+  only one bottom bar and no cross-edge group selection. Internally (private,
+  not part of the conformance contract above — cited here rather than in the
+  test vectors): `tabBars: [Edge: TabBarView]` holds each edge's bar view;
+  `centerContainer` is the shared content wrapper and `mountedCenterController`
+  tracks the controller currently mounted in it; each bar keeps its thickness
+  in `thicknessConstraint` and lays items out in an `NSStackView` (`stack`)
+  whose `edgeInsets` hold the per-side padding; `TabButton` draws selection
+  through `backgroundView.layer` and a `titleLabel` role swap.
+- **WinUI 3**: There is no single WinUI 3
   control that docks tab bars on all four sides with cross-edge sibling
   selection, so build the frame as a `Grid` with `Auto`-sized
   `RowDefinition`s/`ColumnDefinition`s for the top/bottom/left/right bar slots
@@ -531,103 +539,97 @@ Not applicable: source contains no logging call (no `print`, `os_log`, or
   on every other edge's `ListView` to reproduce
   `group-siblings-share-selection-across-edges`. Bind each bar's
   `MinWidth`/`MinHeight` (top/bottom vs. left/right) to the hosted content's
-  measured `DesiredSize` plus `6px`, clamped to the `28px`/`140px` floor, to
+  measured `DesiredSize` plus `6epx`, clamped to the `28epx`/`140epx` floor, to
   mirror `tab-bar-thickness-floor-and-growth`. Reproduce the vertical-edge
   card overlap with a negative `Margin` on each item plus `Canvas.ZIndex` set
   from each item's index-distance from the selected one, mirroring
   `applyStackOrder()`; a close glyph can use the Segoe Fluent Icons
-  `` ("Cancel") glyph sized to match the `14×14pt` hit area.
+  `\uE711` ("Cancel") glyph sized to match the `14×14pt` hit area.
 
 ## Design Decisions
 
-- Decision: A tab's `groupID` defaults to its own `id` rather than requiring
-  every caller to supply one.
-  Rationale: Per `Tab.init`'s doc comment, this "makes a tab its own group of
-  one — the behaviour every host had before groups existed," so a caller with
-  only one edge needs no change to keep working.
-  Approved: pending
-- Decision: `activateFallbackTab()` looks for a same-group sibling on any
-  enabled edge before falling back to the first tab of the first enabled edge.
-  Rationale: Per the method's doc comment, turning an edge off "is a decision
-  about where tabs are drawn," and jumping instead to an unrelated tab on the
-  first enabled edge "dropped [the user] onto an unrelated checkout" — the
-  group-first fallback keeps the user's actual selection stable across edge
-  visibility changes.
-  Approved: pending
-- Decision: `contentInsets` is applied by `MultiTabbedViewController` around
-  the mounted content, rather than left to the content itself.
-  Rationale: Per the property's doc comment, the tab bars "have to stay flush
-  against the window," so the gap belongs between the bars and what they
-  frame, and "this controller is the only thing that owns both."
-  Approved: pending
-- Decision: `activeTabDidChange` fires on every activation — including
-  transitions to `nil` — while `didSelectTab` fires only for a user-driven
-  pick (a click, or the neighbor/fallback a close hands the user).
-  Rationale: Per the delegate's doc comments, a host that only needs "which
-  pane is in front now" should not have to separately filter fallback and
-  clearing transitions out of genuine user picks; the two callbacks
-  deliberately separate "what changed" from "the user chose this."
-  Approved: pending
-- Decision: `TabBarView.rebuildButtons()`'s reconciliation tears down a hosted
-  controller only if that controller's view still sits in *this* bar's own
-  wrapper.
-  Rationale: Per the method's doc comment, a cross-edge move reparents the
-  controller's view onto the new bar's wrapper before the old bar notices the
-  id is gone from its own items; tearing it down there too "would rip the
-  view out of the new bar's display."
-  Approved: pending
-- Decision (documented quirk, not a deliberate design choice): the
-  front-to-back z-reordering and `stackDepth` reporting in
-  `TabBarView.applyStackOrder()` only cover `.viewController` items (via
-  `hostViews`/`hostedControllers`). A `.title` `TabButton` on a vertical
-  (`.left`/`.right`) edge still receives the same `-16pt` overlapping
-  `stack.spacing` as hosted items, but is never reordered by distance from the
-  selected item — its z-order, and therefore which overlapping title tab
-  draws and hit-tests on top, is left at whatever order
-  `NSStackView.addArrangedSubview` produced (list order), regardless of which
-  tab is selected.
-  Rationale: `hostViews`/`hostedControllers` are populated only for
-  `.viewController` items, so `applyStackOrder()`'s reordering loops have
-  nothing to reorder for title tabs; nothing in source suggests this was a
-  deliberate choice for the title-tab case rather than an oversight. Recorded
-  here, per source fidelity, rather than smoothed over.
-  Approved: pending
+**Decision**: A tab's `groupID` defaults to its own `id` rather than requiring
+every caller to supply one.
+**Rationale**: Per `Tab.init`'s doc comment, this "makes a tab its own group of
+one — the behaviour every host had before groups existed," so a caller with
+only one edge needs no change to keep working.
+**Approved**: pending
+
+**Decision**: `activateFallbackTab()` looks for a same-group sibling on any
+enabled edge before falling back to the first tab of the first enabled edge.
+**Rationale**: Per the method's doc comment, turning an edge off "is a decision
+about where tabs are drawn," and jumping instead to an unrelated tab on the
+first enabled edge "dropped [the user] onto an unrelated checkout" — the
+group-first fallback keeps the user's actual selection stable across edge
+visibility changes.
+**Approved**: pending
+
+**Decision**: `contentInsets` is applied by `MultiTabbedViewController` around
+the mounted content, rather than left to the content itself.
+**Rationale**: Per the property's doc comment, the tab bars "have to stay flush
+against the window," so the gap belongs between the bars and what they
+frame, and "this controller is the only thing that owns both."
+**Approved**: pending
+
+**Decision**: `activeTabDidChange` fires on every activation — including
+transitions to `nil` — while `didSelectTab` fires only for a user-driven
+pick (a click, or the neighbor/fallback a close hands the user).
+**Rationale**: Per the delegate's doc comments, a host that only needs "which
+pane is in front now" should not have to separately filter fallback and
+clearing transitions out of genuine user picks; the two callbacks
+deliberately separate "what changed" from "the user chose this."
+**Approved**: pending
+
+**Decision**: `TabBarView.rebuildButtons()`'s reconciliation tears down a hosted
+controller only if that controller's view still sits in *this* bar's own
+wrapper.
+**Rationale**: Per the method's doc comment, a cross-edge move reparents the
+controller's view onto the new bar's wrapper before the old bar notices the
+id is gone from its own items; tearing it down there too "would rip the
+view out of the new bar's display."
+**Approved**: pending
+
+**Decision** (documented quirk, not a deliberate design choice): the
+front-to-back z-reordering and `stackDepth` reporting in
+`TabBarView.applyStackOrder()` only cover `.viewController` items (via
+`hostViews`/`hostedControllers`). A `.title` `TabButton` on a vertical
+(`.left`/`.right`) edge still receives the same `-16pt` overlapping
+`stack.spacing` as hosted items, but is never reordered by distance from the
+selected item — its z-order, and therefore which overlapping title tab
+draws and hit-tests on top, is left at whatever order
+`NSStackView.addArrangedSubview` produced (list order), regardless of which
+tab is selected.
+**Rationale**: `hostViews`/`hostedControllers` are populated only for
+`.viewController` items, so `applyStackOrder()`'s reordering loops have
+nothing to reorder for title tabs; nothing in source suggests this was a
+deliberate choice for the title-tab case rather than an oversight. Recorded
+here, per source fidelity, rather than smoothed over.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [single-active-tab-invariant](agenticdevelopercookbook://compliance/architecture#single-active-tab-invariant) | passed | architecture |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | failed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | accessibility |
-| [live-region-announcements](agenticdevelopercookbook://compliance/accessibility#live-region-announcements) | flagged | accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | failed | accessibility |
-| [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | not-applicable | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | not-applicable | accessibility |
-| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | failed | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
 
-Main-actor-confined passes because `MultiTabbedViewController`, `TabBarView`,
-and `MultiTabbedViewControllerDelegate` are all declared `@MainActor`.
-Single-active-tab-invariant passes because `activeTabID` is the sole source of
-truth for the active tab and every activation path (`setActiveTab`,
-`activateFallbackTab`, `insertTab`'s auto-select) funnels through
-`setActiveTab(_:)`'s single idempotent setter. Keyboard-navigable is failed
-because `TabButton`/`TabItemHostView` have no key-view-loop or `keyDown`
-wiring (see the open question in Accessibility). Screen-reader-support passes
-for `.title` tabs: `TabButton` sets a real accessibility role, title, value,
-and a republished close-button child. Live-region-announcements is flagged
-because no accessibility notification is posted for a programmatic active-tab
-change (see Accessibility). Differentiate-without-color is failed because a
-`.title` tab's selected state is conveyed by color and text-role alone, with
-no non-color cue (see Accessibility Options). Touch-target-size and
-contrast-ratio are not-applicable because this is a pointer-driven macOS
-desktop control, not a touch surface, and its colors are palette tokens whose
-contrast is defined outside this source. String-externalization is failed
-because the close button's "Close Tab" accessibility description is a
-hardcoded English literal (see Localization).
+Keyboard-navigable is failed because `TabButton`/`TabItemHostView` have no
+key-view-loop or `keyDown` wiring (see the open question in Accessibility).
+Screen-reader-support is partial: it holds for `.title` tabs, where
+`TabButton` sets a real accessibility role, title, value, and a republished
+close-button child, but no accessibility notification is posted for a
+programmatic active-tab change — a fallback activation, or the sibling-selection
+update across an edge's other tabs (see Accessibility). String-externalization
+is failed because the close button's "Close Tab" accessibility description is
+a hardcoded English literal (see Localization). `@MainActor` confinement, the
+single-active-tab invariant, and the color-only selection cue are true of the
+source (see Behavioral Requirements and Accessibility Options) but are not
+compliance-catalog checks, so they are not listed here.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: at-most-one-active-tab summary/overview wording, observable (not private-internal) conformance test vector assertions, corrected edge-toggle-updates-bar-visibility and preferred-content-size-change-refreshes-every-bar wording, added Change History initial row, cleaned up and re-scoped Compliance to catalog checks, subject-only requirement renames, bold-form Design Decisions, AppKit / UIKit and WinUI 3 Platform Notes fixes, insertTab API-name correction, expanded and corrected conformance test vector coverage; states controller reuse across tabs as an unguarded caller precondition. |

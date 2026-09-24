@@ -3,7 +3,7 @@ id: 4c528e38-b70a-4ed3-bedc-9009292ad908
 title: PaneSpacing
 domain: agentictoolkit://recipes/pane-spacing
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -22,11 +22,13 @@ tags:
 - split-view
 - settings
 - appkit
-- macos
 depends-on: []
-related: []
-references:
+related:
+- agentictoolkit://recipes/composable-tabs-view-controller
+- agentictoolkit://recipes/composable-tabs-pane-view-controller
+- agentictoolkit://recipes/composable-tabs-settings-view-controller
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -51,12 +53,12 @@ Use this ingredient wherever an AppKit split-view-based pane layout needs consis
 
 - **current-reads-live-value-per-field**: `PaneSpacing.current` MUST read each of the six settings' `value` at the moment `current` is accessed; `value` (defined on `StorableSetting`, which `UserSetting` conforms to) reads through `UserSettings.shared.get(_:)` on every access rather than returning a value cached on `PaneSpacing` itself.
 - **current-populates-all-six-fields**: `PaneSpacing.current` MUST return a `Spacing` whose `top`, `leading`, `bottom`, `trailing`, `betweenColumns`, and `betweenRows` each equal the corresponding setting's current value.
-- **content-insets-maps-fields-to-nsedgeinsets**: `PaneSpacing.contentInsets` MUST return an `NSEdgeInsets` whose `top`, `left`, `bottom`, and `right` equal `current.top`, `current.leading`, `current.bottom`, and `current.trailing` respectively.
+- **content-insets-maps-fields-to-nsedgeinsets**: `PaneSpacing.contentInsets` MUST return an `NSEdgeInsets` whose `top`, `left`, `bottom`, and `right` equal `current.top`, `current.leading`, `current.bottom`, and `current.trailing` respectively, each converted from the underlying `Int` setting value to the `CGFloat` `NSEdgeInsets` requires.
 - **minimum-divider-grab-fixed**: `PaneSpacing.minimumDividerGrab` MUST equal `6` points regardless of the current values of `betweenColumns` or `betweenRows`.
 
 ### Divider thickness and paint
 
-- **divider-thickness-selects-axis-gutter**: `PaneSplitView.dividerThickness` MUST return `PaneSpacing.current.betweenColumns` when the split view's `isVertical` is `true` (panes standing side by side), and `PaneSpacing.current.betweenRows` when `isVertical` is `false` (panes stacked).
+- **divider-thickness-selects-axis-gutter**: `PaneSplitView.dividerThickness` MUST return `PaneSpacing.current.betweenColumns` when the split view's `isVertical` is `true` (panes standing side by side), and `PaneSpacing.current.betweenRows` when `isVertical` is `false` (panes stacked), converting the underlying `Int` gutter setting to the `CGFloat` `dividerThickness` requires.
 - **divider-paint-defers-when-hairline**: `PaneSplitView.drawDivider(in:)` MUST call `super.drawDivider(in:)` and MUST NOT fill the divider rect itself when `dividerThickness` is `1` point or less.
 - **divider-paint-fills-with-pane-backdrop**: `PaneSplitView.drawDivider(in:)` MUST fill the entire divider rect with `NSColor(currentPalette.projectPaneBackdrop)` when `dividerThickness` is greater than `1` point, and MUST NOT call `super.drawDivider(in:)` in that case.
 
@@ -96,7 +98,7 @@ Use this ingredient wherever an AppKit split-view-based pane layout needs consis
 
 - **Role/trait**: Not applicable at this level — `PaneSpacing` is configuration state, not a view. `PaneSplitView` overrides no accessibility API and inherits whatever role/trait `NSSplitView` exposes by default.
 - **Label requirements**: Not applicable — this source assigns no accessibility label or identifier to anything; a pane's own accessible content and identifier are a different component's concern (see `composable-tabs-pane-view-controller`).
-- **Announce state changes**: Not applicable — `spacingDidChange()` only redraws the divider (`dividerStyle`, `needsDisplay = true`) and re-applies insets after the user changes a spacing setting themselves; the change is purely visual, carries no information a VoiceOver user needs, and the user who made it already knows it happened.
+- **Announce state changes**: Not applicable — `spacingDidChange()` only redraws the divider (`dividerStyle`, `needsDisplay = true`) after the user changes a spacing setting themselves; the change is purely visual, carries no information a VoiceOver user needs, and the user who made it already knows it happened.
 - **Minimum interactive target**: Dragging a divider is mouse-driven on macOS; this platform has no touch-target concept analogous to iOS's 44×44pt minimum. `minimumDividerGrab` (`6pt`) is this file's own minimum draggable width, applied by consumers widening the hit-test rect (out of this recipe's scope; not applicable here as a marker, consistent with `composable-tabs-view-controller`'s own treatment of touch-target-size for the same divider).
 
 ## Conformance Test Vectors
@@ -112,9 +114,9 @@ Use this ingredient wherever an AppKit split-view-based pane layout needs consis
 | pane-spacing-007 | minimum-divider-grab-fixed | Set `betweenColumns` to `0`, then to `50` | `PaneSpacing.minimumDividerGrab == 6` in both cases |
 | pane-spacing-008 | divider-thickness-selects-axis-gutter | `PaneSplitView.isVertical = true`, `betweenColumns = 8` | `dividerThickness == 8` |
 | pane-spacing-009 | divider-thickness-selects-axis-gutter | `PaneSplitView.isVertical = false`, `betweenRows = 2` | `dividerThickness == 2` |
-| pane-spacing-010 | divider-paint-defers-when-hairline | Gutter at its `1`pt default, call `drawDivider(in:)` | `super.drawDivider(in:)` runs; the rect is not filled by the override's own fill code path |
-| pane-spacing-011 | divider-paint-fills-with-pane-backdrop | `isVertical = true`, `betweenColumns = 10`, call `drawDivider(in:)` | The full divider rect is filled with `NSColor(currentPalette.projectPaneBackdrop)`; `super.drawDivider(in:)` is not reached |
-| pane-spacing-012 | spacing-change-toggles-divider-style | `dividerStyle == .thin`, call `spacingDidChange()` | `dividerStyle` observably returns to `.thin` after the call (having passed through `.paneSplitter`) |
+| pane-spacing-010 | divider-paint-defers-when-hairline | Gutter at its `1`pt default; a test subclass overrides `drawDivider(in:)` to record whether its `super` implementation ran, then calls `drawDivider(in:)` | The recorded `super.drawDivider(in:)` call happened, and sampling a pixel inside the divider rect after the call does not show `currentPalette.projectPaneBackdrop` |
+| pane-spacing-011 | divider-paint-fills-with-pane-backdrop | `isVertical = true`, `betweenColumns = 10`; a test subclass overrides `drawDivider(in:)` to record whether its `super` implementation ran, then calls `drawDivider(in:)` and renders into a bitmap context | The recorded `super.drawDivider(in:)` call did not happen, and sampling pixels across the full divider rect in the rendered bitmap shows `NSColor(currentPalette.projectPaneBackdrop)` |
+| pane-spacing-012 | spacing-change-toggles-divider-style | `dividerStyle == .thin`; a test subclass or KVO observer records every value assigned to `dividerStyle`, then calls `spacingDidChange()` | The recorded assignments show `dividerStyle` set to a value other than `.thin` and then back to `.thin`, in that order (any other-than-original intermediate value satisfies the requirement, not only `.paneSplitter`); alternatively, an `NSSplitViewController` observably re-reads `dividerThickness` after the call |
 | pane-spacing-013 | spacing-change-marks-needs-display | `needsDisplay == false`, call `spacingDidChange()` | `needsDisplay == true` |
 | pane-spacing-014 | spacing-shared-across-windows | Two `PaneSplitView` instances, each vertical, in two different windows; change `UserSettings.paneSpacingBetweenColumns.value` once | Both instances' `dividerThickness` reflect the new value |
 | pane-spacing-015 | setting-changes-persist-via-shared-store | Set `UserSettings.paneSpacingTop.value = 5`, then read `UserSettings.shared.get(UserSettings.paneSpacingTop)` directly | Returns `5`, showing the write reached the shared store rather than only the setting object's cached `currentValue` |
@@ -124,7 +126,7 @@ Use this ingredient wherever an AppKit split-view-based pane layout needs consis
 - **Null/empty input**: Not applicable — `UserSetting<Int>`'s `default` guarantees a concrete `Int` is always returned even when nothing has been stored yet (see `edge-inset-default-zero`/`gutter-default-one-point`); there is no nil or missing-value case for any of the six settings.
 - **Boundary values — zero-point gutter**: A `0`-point gutter is a legitimate, source-supported look. It is drawn via the `dividerThickness <= 1` branch (AppKit's own hairline paint) and stays draggable only because consumers widen the hit-test rect to `minimumDividerGrab`; this file itself does no widening.
 - **Boundary values — exactly `1` point**: `drawDivider(in:)`'s own guard (`dividerThickness > 1`) treats `1` as the hairline case, not the filled case — the boundary is inclusive of `1` on the hairline side.
-- **Boundary values — negative or unusually large stored settings**: NEEDS REVIEW: Not implemented in source. Behavior undefined. `UserSetting<Int>` and `PaneSpacing.current` accept and pass through any stored `Int` — including a negative value or one set outside whatever range a settings UI would offer (for example via a direct write to the underlying store) — with no clamping or validation anywhere in this file before it reaches `NSEdgeInsets` or `dividerThickness`. What is missing: whether AppKit's behavior with a negative inset or an implausibly large gutter is acceptable, or whether `PaneSpacing` itself should clamp. What would settle it: a design decision on whether range validation belongs in `PaneSpacing` or is intentionally left to the settings-control layer that already clamps interactive edits.
+- **Boundary values — negative or unusually large stored settings**: `UserSetting<Int>` and `PaneSpacing.current` accept and pass through any stored `Int` — including a negative value or one set outside whatever range a settings UI would offer (for example via a direct write to the underlying store) — with no clamping or validation anywhere in this file before it reaches `NSEdgeInsets` or `dividerThickness`. This is by design (see Design Decisions: clamping ownership): `PaneSpacing` is a thin passthrough over `UserSetting<Int>`, and range validation on interactively-entered values is the settings-control layer's job, done through `Spacing.setting(_:to:in:)`/`Spacing.adjusting(_:by:in:)` and `Int.clamped(to:)` — mechanisms this file's `current` never calls.
 - **Concurrent access**: Not applicable — `PaneSpacing`, `PaneSplitView`, and `UserSetting` are all `@MainActor`-isolated; every read and write of the six settings in this source is confined to the main actor.
 - **Error states**: Not applicable — `UserSettings.shared.get`/`set` (reached through `StorableSetting.value`) return and accept concrete, non-optional, non-throwing values; this file exposes no failure path to handle.
 - **Offline/disconnected state**: Not applicable — this component performs only local, synchronous settings storage; it makes no network call and has no dependency on connectivity.
@@ -181,50 +183,48 @@ Not applicable: no logging call (`Logger`, `os_log`, or otherwise) appears anywh
 - **Compose**: Model the four insets as `Modifier.padding(start = , top = , end = , bottom = )` on the pane container, and each gutter as a `Spacer`-sized `Box`/`Canvas` element between panes in a `Row`/`Column`, colored from the `MaterialTheme` surface-variant token that plays the role `projectPaneBackdrop` plays here. Persist the six values with `DataStore`/`SharedPreferences` and observe changes via a `Flow`, mirroring `UserSetting`'s Combine `@Published` publisher.
 - **React/Web**: Represent the four insets as CSS custom properties (`--pane-spacing-top`, etc.) applied as padding on the pane container, and each gutter as a resizable divider element (`cursor: col-resize` / `row-resize`) whose background is the app's panel-backdrop CSS variable rather than a hardcoded color — reproducing the "backdrop, not a stripe" choice `drawDivider(in:)` makes. Give the divider element a `min-width`/`min-height` matching `minimumDividerGrab` so a zero-width gutter stays draggable, and persist the six values to `localStorage`, observed with a `storage` event listener for cross-tab updates.
 - **AppKit / UIKit**: This is the source. `PaneSpacing.swift` defines the enum, the `UserSettings` extension, and `PaneSplitView : ThemedSplitView : NSSplitView`; specific to AppKit here are `NSEdgeInsets`, the `dividerThickness`/`drawDivider(in:)` overrides, and using `NSSplitView.DividerStyle`'s stock `.thin`/`.paneSplitter` cases purely as a nudge — reassigning `dividerStyle` off and back is what makes AppKit discard the constraint constants an `NSSplitViewController` built from the old `dividerThickness`. UIKit has no direct analog to this per-pixel divider-drawing hook; `UISplitViewController`'s separator styling would be the nearest translation target, relevant only if this component is ever asked to run on iOS (`platforms` here lists macOS only).
-- **WinUI 3**: Represent the four insets as `Margin`/`Padding` on the content `Border`, and each gutter as a `GridSplitter` (from the `Microsoft.UI.Xaml.Controls` namespace) sitting in its own zero-content `ColumnDefinition`/`RowDefinition` between panes — `GridSplitter.Width`/`Height` plays the role `betweenColumns`/`betweenRows` play here. `GridSplitter.Background` swaps between the theme's default thin divider brush and an explicit pane-backdrop `ThemeResource` brush depending on whether the configured width is `<= 1` or greater, reproducing the hairline-vs-fill choice in `drawDivider(in:)`. Unlike AppKit's constraint-cached `NSSplitViewController`, WinUI's `Grid` recomputes column/row sizes as soon as a `ColumnDefinition.Width`/`RowDefinition.Height` changes, so no `spacingDidChange()`-style "toggle a style off and back" nudge is needed — binding the `GridSplitter`'s governing `GridLength` to the setting is enough. Persist the six values with `ApplicationDataContainer.LocalSettings`, the closest analog to `UserDefaultsSettingsStorageProvider`. `GridSplitter`'s built-in `Thumb` already exposes a wider drag/hover hit area than its visual thickness, which is the WinUI equivalent of `minimumDividerGrab`.
+- **WinUI 3**: Represent the four insets as `Margin`/`Padding` on the content `Border`, and each gutter as a `GridSplitter` (from `CommunityToolkit.WinUI.Controls` — the Windows Community Toolkit's Sizers package, not `Microsoft.UI.Xaml.Controls`; the app takes a package dependency on the toolkit to get it) sitting in its own zero-content `ColumnDefinition`/`RowDefinition` between panes — `GridSplitter.Width`/`Height` plays the role `betweenColumns`/`betweenRows` play here. `GridSplitter.Background` swaps between the theme's default thin divider brush and an explicit pane-backdrop `ThemeResource` brush depending on whether the configured width is `<= 1` or greater, reproducing the hairline-vs-fill choice in `drawDivider(in:)`. Unlike AppKit's constraint-cached `NSSplitViewController`, WinUI's `Grid` recomputes column/row sizes as soon as a `ColumnDefinition.Width`/`RowDefinition.Height` changes, so no `spacingDidChange()`-style "toggle a style off and back" nudge is needed — binding the `GridSplitter`'s governing `GridLength` to the setting is enough. Persist the six values with `ApplicationDataContainer.LocalSettings`, the closest analog to `UserDefaultsSettingsStorageProvider`. `GridSplitter`'s built-in `Thumb` already exposes a wider drag/hover hit area than its visual thickness, which is the WinUI equivalent of `minimumDividerGrab`.
 
 ## Design Decisions
 
-Decision: `PaneSplitView.dividerThickness` reads `PaneSpacing.current` — a fresh settings-store read — on every call rather than caching the gutter value on the instance.
-Rationale: `dividerThickness` is a computed property with no invalidation hook of its own, and `spacingDidChange()`'s entire purpose is to force AppKit to re-ask this property after a setting changes; a cached value would go stale the moment either gutter setting changed and defeat that mechanism.
-Approved: pending
+**Decision**: `PaneSplitView.dividerThickness` reads `PaneSpacing.current` — a fresh settings-store read — on every call rather than caching the gutter value on the instance.
+**Rationale**: `dividerThickness` is a computed property with no invalidation hook of its own, and `spacingDidChange()`'s entire purpose is to force AppKit to re-ask this property after a setting changes; a cached value would go stale the moment either gutter setting changed and defeat that mechanism.
+**Approved**: pending
 
-Decision: `spacingDidChange()` forces a relayout by toggling `dividerStyle` to a different value and back, rather than calling an invalidation method such as `needsLayout`.
-Rationale: the source comment explains that an `NSSplitViewController` lays its panes out with constraints built from `dividerThickness` at the moment items were installed, and only re-assigning `dividerStyle` is documented to make AppKit discard and re-ask for those constants.
-Approved: pending
+**Decision**: `spacingDidChange()` forces a relayout by toggling `dividerStyle` to a different value and back, rather than calling an invalidation method such as `needsLayout`.
+**Rationale**: the source comment explains that an `NSSplitViewController` lays its panes out with constraints built from `dividerThickness` at the moment items were installed, and only re-assigning `dividerStyle` is documented to make AppKit discard and re-ask for those constants.
+**Approved**: pending
 
-Decision: the two gutter settings default to `1` point (a hairline) while the four edge insets default to `0`.
-Rationale: the source comment states this preserves the pre-existing hairline divider appearance so introducing the setting does not visibly re-space any window on the update that adds it, while frame insets start at `0` because the gap around panes is an opt-in look, not the prior house style.
-Approved: pending
+**Decision**: the two gutter settings default to `1` point (a hairline) while the four edge insets default to `0`.
+**Rationale**: the source comment states this preserves the pre-existing hairline divider appearance so introducing the setting does not visibly re-space any window on the update that adds it, while frame insets start at `0` because the gap around panes is an opt-in look, not the prior house style.
+**Approved**: pending
 
-Decision: spacing is a single app-wide set of settings, not a per-window or per-project value.
-Rationale: the source comment states that a window whose panes are spaced differently from the window beside it reads as a bug, and per-window spacing would have to be carried in every saved layout to survive a relaunch.
-Approved: pending
+**Decision**: spacing is a single app-wide set of settings, not a per-window or per-project value.
+**Rationale**: the source comment states that a window whose panes are spaced differently from the window beside it reads as a bug, and per-window spacing would have to be carried in every saved layout to survive a relaunch.
+**Approved**: pending
 
-Decision: `minimumDividerGrab` is a fixed `6` points regardless of the configured gutter thickness, including when the gutter is `0`.
-Rationale: the source comment states a zero-point gutter is a legitimate look, and without a wider hit-test allowance it would be a layout the user cannot undo with the mouse; the value `6` itself is not derived from a cited platform minimum, which is the open question flagged under Accessibility.
-Approved: pending
+**Decision**: `minimumDividerGrab` is a fixed `6` points regardless of the configured gutter thickness, including when the gutter is `0`.
+**Rationale**: the source comment states a zero-point gutter is a legitimate look, and without a wider hit-test allowance it would be a layout the user cannot undo with the mouse; the value `6` itself is not derived from a cited platform minimum.
+**Approved**: pending
+
+**Decision**: `PaneSpacing` does not clamp or validate any of the six stored settings; range validation on a negative or implausibly large value is the settings-control layer's responsibility, not `PaneSpacing.current`'s.
+**Rationale**: `PaneSpacing.current` builds its `Spacing` by assigning each setting's raw `value` straight into the edge/gutter subscript, never through `Spacing.setting(_:to:in:)` or `Spacing.adjusting(_:by:in:)` — the two methods that actually call `Int.clamped(to:)`. Those methods exist for, and are used by, the settings-control layer that presents the editable control; `PaneSpacing` itself is a thin passthrough with no comparable seam, so clamping lives where the value is entered, not where it is read back.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [local-persistence-durability](agenticdevelopercookbook://compliance/data#local-persistence-durability) | passed | data |
-| [theme-token-only-colors](agenticdevelopercookbook://compliance/ui#theme-token-only-colors) | passed | ui |
-| [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | not-applicable | accessibility |
-| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | not-applicable | internationalization |
-| [template-conformance](agenticdevelopercookbook://compliance/recipe-quality#template-conformance) | passed | recipe-quality |
-| [behavioral-requirements](agenticdevelopercookbook://compliance/recipe-quality#behavioral-requirements) | passed | recipe-quality |
-| [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | passed | recipe-quality |
-| [cookbook-compliance](agenticdevelopercookbook://compliance/recipe-quality#cookbook-compliance) | passed | recipe-quality |
-| [cross-recipe-consistency](agenticdevelopercookbook://compliance/recipe-quality#cross-recipe-consistency) | passed | recipe-quality |
-| [source-fidelity](agenticdevelopercookbook://compliance/recipe-quality#source-fidelity) | passed | recipe-quality |
+| [data-minimization](agenticdevelopercookbook://compliance/privacy-and-data#data-minimization) | passed | Privacy and Data |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | partial | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
 
-Main-actor-confined passes because `PaneSpacing`, `PaneSplitView`, and `UserSetting` are all declared `@MainActor`. Local-persistence-durability passes because all six settings are non-secure `UserSetting`s that persist through `UserSettings.shared`'s configured provider (`UserDefaultsSettingsStorageProvider` by default) rather than an in-memory cache. Theme-token-only-colors passes because the only color this file paints, the divider fill, always comes from `currentPalette.projectPaneBackdrop` rather than a raw literal. Touch-target-size is not-applicable because dragging a divider is mouse-driven on macOS, which has no touch-target concept; the analogous pointer-grab concern (`minimumDividerGrab`) is flagged as an open question under Accessibility instead, consistent with how `composable-tabs-view-controller` treats the same divider. String-externalization is not-applicable because this file defines no user-facing string.
+Data-minimization passes because the six `pane_spacing_*` settings are window-chrome layout integers only — not personal or sensitive data, and nothing beyond what the layout needs is collected. Screen-reader-support and keyboard-navigable are partial because `PaneSplitView` overrides no accessibility or key-handling API for its divider and inherits whatever `NSSplitView` provides by default; the source cannot say whether that inherited behavior meets either check. Contrast-ratio is partial for the same reason: the divider fill always resolves through `currentPalette.projectPaneBackdrop`, a theme token, but the token's actual rendered color — and so its contrast against neighboring panes — is decided by `SemanticPalette`, outside this file. Touch-target-size and string-externalization are not listed: dragging a divider is mouse-driven on macOS, which has no touch-target concept, and this file defines no user-facing string for string-externalization to check.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from `PaneSpacing.swift`. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: add a Design Decision assigning clamping to the settings-control layer and resolve the negative/oversized-input edge case against it; drop the stale "flagged as an open question under Accessibility" claim; move the platform-design-languages reference from `references` to `related` and add the three sibling ComposableTabs recipes to `related`; drop the redundant `macos` tag; reformat Design Decisions into the bold three-line form; correct the WinUI 3 GridSplitter namespace; make three test vectors observable with a recording subclass/bitmap sampling instead of an unobservable claim; remove an unsupported "re-applies insets" claim from Accessibility; note the `Int`→`CGFloat` conversion in two requirements; and rebuild Compliance around checks that exist in the catalog. |

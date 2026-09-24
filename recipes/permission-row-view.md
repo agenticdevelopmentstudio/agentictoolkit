@@ -3,7 +3,7 @@ id: c3269cfa-a8ec-4ba9-bc68-9cdf98e7e1fc
 title: PermissionRowView
 domain: agentictoolkit://recipes/permission-row-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -11,8 +11,8 @@ modified: '2026-09-23'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
-summary: AppKit NSView card row showing one Permission's live grant status and a button
-  that opens System Settings or triggers its own consent dialog.
+summary: AppKit card row showing one Permission's grant status with a Settings/consent
+  action button.
 platforms:
 - swift
 - macos
@@ -95,6 +95,23 @@ completes.
   the `onAction` closure with `permission` and whatever `PermissionStatus`
   was applied by the most recent `apply(status:)` call, not a freshly
   re-read status.
+- **pre-refresh-action-enabled**: The component MUST NOT disable the action
+  button before the first `refresh()` completes; `buildLayout()` never sets
+  `isEnabled` on it, so pressing it before that point MUST invoke `onAction`
+  with `permission` and `displayedStatus`'s initial value, `.undetermined`.
+- **keyboard-activates-action**: The action button MUST be reachable by
+  keyboard focus and activatable with Space/Return, since it is an
+  unmodified `NSButton` — `buildLayout()` never overrides key handling or
+  `acceptsFirstResponder`, so AppKit's native keyboard support for a
+  standard button applies unchanged.
+- **test-observable-surface**: Beyond the three seams marked `// Test seam:`
+  in source — `statusText` (`statusLabel.stringValue`), `actionTitle`
+  (`actionButton.title`), and `performActionForTesting()` (invokes
+  `actionTapped()`) — no other member of `PermissionRowView` is `internal`
+  or `public`. A test MUST reach the title, description, icon, and
+  status-dot views by walking the public `NSView.subviews` /
+  `NSStackView.views` hierarchy `buildLayout()` builds, or by reading the
+  publicly inherited `layer` for card-appearance assertions.
 - **action-button-has-stable-identifier**: The action button MUST set its
   accessibility identifier to `"permission.\(permission.identifierToken).action"`.
 - **row-has-no-accessibility-identifier**: The row view itself MUST NOT set
@@ -188,7 +205,7 @@ completes.
 | permission-row-001 | renders-title-from-permission | Construct with `permission: .accessibility` | `titleLabel` text is exactly `"Accessibility"`. |
 | permission-row-002 | renders-title-from-permission | Construct with `permission: .automation(targetBundleID: "com.googlecode.iterm2")` where no app with that bundle id is installed | `titleLabel` text is `"Automation — com.googlecode.iterm2"` (falls back to the raw bundle id). |
 | permission-row-003 | renders-description-from-permission | Construct with `permission: .keychain(service: "Claude Code-credentials")` | Description label text reads `Lets this app read the "Claude Code-credentials" item in your keychain directly, instead of asking another tool for it.` |
-| permission-row-004 | renders-icon-from-permission | Construct with `permission: .microphone` | `icon.image` resolves the SF Symbol named `mic`. |
+| permission-row-004 | renders-icon-from-permission | Construct with `permission: .microphone` | The `NSImageView` found among the row's `subviews` resolves the SF Symbol named `mic`, reports a `symbolConfiguration` of point size 16 / weight regular, and has `contentTintColor == .secondaryLabelColor`. |
 | permission-row-005 | initial-status-is-checking | Construct a row, do not call `refresh()` | `statusText == "Checking…"`. |
 | permission-row-006 | refresh-queries-checker | Stub `checker.status(_:)` to return `.granted`; call `await row.refresh()` | `statusText == "Granted"`. |
 | permission-row-007 | cancelled-refresh-does-not-apply | Start `row.refresh()` inside a `Task`, cancel the task before `checker.status(_:)` returns, then `await` the task | `statusText` remains `"Checking…"`. |
@@ -197,36 +214,47 @@ completes.
 | permission-row-010 | undetermined-status-appearance | `checker.status(_:)` returns `.undetermined`; `await row.refresh()` | `statusText == "Unknown"`; `statusDot.layer?.backgroundColor == NSColor.secondaryLabelColor.cgColor`. |
 | permission-row-011 | status-conveyed-by-text-and-color | Refresh a row through all three statuses in turn | For each status, both `statusText` and `statusDot`'s color differ from the other two statuses — no two statuses share the same text or the same color. |
 | permission-row-012 | granted-button-title | `permission: .keychain(service:)`; `checker.status(_:)` returns `.granted`; `await row.refresh()` | `actionTitle == "Open Settings"`. |
-| permission-row-013 | ungranted-button-title | `permission: .accessibility`; `checker.status(_:)` returns `.denied`, then separately `.undetermined`; `await row.refresh()` on each | Both rows' `actionTitle == "Open Settings"`. |
+| permission-row-013 | ungranted-button-title | `permission: .keychain(service: "Claude Code-credentials")`; `checker.status(_:)` returns `.denied`, then separately `.undetermined`; `await row.refresh()` on each | Both rows' `actionTitle == "Allow…"`. |
 | permission-row-014 | button-width-fits-widest-title | Construct two rows with different permissions | Both rows' action buttons report the same `frame.width`, equal to the fitting width of the longer of `"Open Settings"` / `"Allow…"`. |
 | permission-row-015 | action-carries-displayed-status | `checker.status(_:)` returns `.denied`; `await row.refresh()`; call `row.performActionForTesting()` | `onAction` is invoked with `(permission, .denied)`. |
 | permission-row-016 | action-button-has-stable-identifier | Construct with `permission: .location` | The action button's accessibility identifier is `"permission.location.action"`. |
 | permission-row-017 | row-has-no-accessibility-identifier | Construct any row | The row `NSView` itself is not an accessibility element and has no accessibility identifier set. |
 | permission-row-018 | minimum-row-height | Construct any row and let Auto Layout resolve | Resolved height is `>= 72` points. |
-| permission-row-019 | card-appearance | Construct any row | `wantsLayer == true`; `layer?.cornerRadius == 8`; `layer?.borderWidth == 0.5`. |
+| permission-row-019 | card-appearance | Construct any row | `wantsLayer == true`; `layer?.cornerRadius == 8`; `layer?.borderWidth == 0.5`; `layer?.backgroundColor == NSColor.white.withAlphaComponent(0.03).cgColor`; `layer?.borderColor == NSColor.white.withAlphaComponent(0.06).cgColor`. |
+| permission-row-020 | keyboard-activates-action | Construct any row, move keyboard focus to the action button (for example via `makeFirstResponder`), then perform its key equivalent (Space/Return) | `onAction` is invoked the same way it is by `performActionForTesting()` or a mouse click, since `actionButton` is an unmodified `NSButton`. |
+| permission-row-021 | pre-refresh-action-enabled | Construct a row, do not call `refresh()`, then call `row.performActionForTesting()` | `actionButton.isEnabled == true` throughout, and `onAction` is invoked with `(permission, .undetermined)`. |
 
 ## Edge Cases
 
-- **Null/empty input** (MUST): `.automation(targetBundleID: "")` or
-  `.keychain(service: "")` — `NSWorkspace.urlForApplication(withBundleIdentifier:
-  "")` returns `nil` for the empty string, so `applicationName(for:)`'s
-  guard fails and it falls back to returning the bundle id string itself
-  (here, empty). The title MUST render as `"Automation — "` and the
-  Automation sentence in the description MUST render with an empty target
-  name, rather than crashing. Traced to `applicationName(for:)`'s
-  guard-let/return-bundleID fallback.
+- **Null/empty input** (MUST): `.automation(targetBundleID: "")` —
+  `NSWorkspace.urlForApplication(withBundleIdentifier: "")` returns `nil`
+  for the empty string, so `applicationName(for:)`'s guard fails and it
+  falls back to returning the bundle id string itself (here, empty). The
+  title MUST render as `"Automation — "` and the Automation sentence in the
+  description MUST render with an empty target name, rather than crashing.
+  Traced to `applicationName(for:)`'s guard-let/return-bundleID fallback.
+  `.keychain(service: "")` takes a different path: `rowTitle(for:)` only
+  special-cases `.automation`, so the title MUST still render as plain
+  `"Keychain"` (`permission.displayName`), unaffected by the empty service;
+  the description MUST render as the literal sentence with an empty quoted
+  service name (`Lets this app read the "" item in your keychain directly,
+  instead of asking another tool for it.`, from
+  `explanation(namingAutomationTarget:)`'s `.keychain` case), rather than
+  crashing or omitting the quotes.
 - **Boundary values** (MUST): an unusually long `explanation` string MUST
   wrap across multiple lines in `descLabel` (a `wrappingLabelWithString:`
   field with no line limit set), and the row MUST grow taller than the 72pt
   floor to fit it, since `heightAnchor` is a `greaterThanOrEqualToConstant`,
   not a fixed height.
-- **Concurrent access** (MUST / SHOULD): two overlapping calls to
-  `refresh()` on the same row, neither cancelling the other — the view
-  performs no internal serialization of overlapping refreshes, so the
-  displayed state MUST end up reflecting whichever call's
-  `checker.status(permission)` await resolved last. Coordinating that
-  ordering SHOULD be the caller's responsibility (as `PermissionsPanelView`
-  does with its own single `refreshTask`), not `PermissionRowView`'s.
+- **Concurrent access** (SHOULD): two overlapping calls to `refresh()` on
+  the same row, neither cancelling the other — the view performs no
+  internal serialization of overlapping refreshes, so which call's
+  `checker.status(permission)` await resolves last, and therefore which
+  result the displayed state ends up showing, is left undefined by
+  `PermissionRowView` itself; each `apply(status:)` call simply overwrites
+  whatever the previous one set. Coordinating that ordering SHOULD be the
+  caller's responsibility (as `PermissionsPanelView` does with its own
+  single `refreshTask`), not `PermissionRowView`'s.
 - **Error states**: Not applicable — `PermissionChecking.status(_:)` is
   declared non-throwing and returns a `PermissionStatus` directly;
   `.undetermined` already exists to mean "can't currently tell" (for
@@ -394,52 +422,72 @@ Not applicable: `PermissionRowView.swift` contains no `os.Logger`,
 
 ## Design Decisions
 
-- Decision: hand the pressed action the status displayed at press time
+- **Decision**: hand the pressed action the status displayed at press time
   (`displayedStatus`), not a freshly re-read one.
-  Rationale: per the source's own doc comment, the display and live TCC
+  **Rationale**: per the source's own doc comment, the display and live TCC
   state can disagree — the user can revoke a permission in System Settings
   while the panel is open — and re-reading at press time would turn a
   button that offered to open System Settings into a live consent prompt
   for a different state than what the user saw and pressed.
-  Approved: pending
-- Decision: measure `widestActionWidth` once as a static, process-wide
+  **Approved**: pending
+- **Decision**: measure `widestActionWidth` once as a static, process-wide
   probe rather than sizing each button to its own content.
-  Rationale: per the source's own doc comment, this keeps every row's
+  **Rationale**: per the source's own doc comment, this keeps every row's
   button the same fixed width, so a title change (for example Denied to
   Granted) never reflows the button or the card around it, and the
   measurement is the same for every row since it depends only on the
   titles and the system font.
-  Approved: pending
-- Decision: give the row itself no accessibility identifier and no
+  **Approved**: pending
+- **Decision**: give the row itself no accessibility identifier and no
   accessibility-element status; only the action button is addressable.
-  Rationale: per the source's own comment, a plain `NSView` is not
+  **Rationale**: per the source's own comment, a plain `NSView` is not
   published to accessibility clients by default, and turning the container
   into an accessibility group would add a VoiceOver stop nothing here asks
   for; the button is the real, per-permission handle both tests and
   VoiceOver need.
-  Approved: pending
-- Decision: resolve an Automation target's application name via
+  **Approved**: pending
+- **Decision**: resolve an Automation target's application name via
   `NSWorkspace` inside `PermissionRowView` rather than inside `Permission`.
-  Rationale: per the source's own comment, `Permission` is Foundation-only
-  so a permission-checking daemon process can link it; resolving a bundle
-  id to a display name needs `NSWorkspace`, which only exists where AppKit
-  is available, so the resolving happens here and is handed into
-  `explanation(namingAutomationTarget:)` and `rowTitle(for:)`.
-  Approved: pending
+  **Rationale**: per the source's own comment, `Permission` is
+  Foundation-only so a permission-checking daemon process can link it;
+  resolving a bundle id to a display name needs `NSWorkspace`, which only
+  exists where AppKit is available, so the resolving happens here and is
+  handed into `explanation(namingAutomationTarget:)` and `rowTitle(for:)`.
+  **Approved**: pending
+- **Decision**: ship `card-appearance`'s overlay (3% white background, 6%
+  white border) as a fixed, non-semantic color pair rather than an
+  appearance-adaptive token.
+  **Rationale**: `buildLayout()` sets `layer?.backgroundColor` and
+  `layer?.borderColor` to `NSColor.white.withAlphaComponent(...)` with no
+  Light Mode or Increase Contrast variant, which only reads as intended
+  over a dark host background; recording this as an accepted dark-only
+  assumption is more accurate than either calling it done or inventing a
+  semantic replacement the source does not have.
+  **Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
-| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | needs-review | accessibility |
-| [status-announced-to-assistive-tech](agenticdevelopercookbook://compliance/accessibility#status-announced-to-assistive-tech) | needs-review | accessibility |
+| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
+| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | partial | Platform Compliance |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+
+`native-controls-preference` is `passed` because every element is a stock
+`NSButton`/`NSTextField`/`NSImageView`/`NSStackView`; `platform-design-language`
+and `contrast-ratio` are `partial` because `buildLayout()` fills and borders
+the card with fixed, non-semantic `NSColor.white.withAlphaComponent(...)`
+values (see the dark-only Design Decision above and the Contrast item under
+Accessibility) rather than an appearance-adaptive token, so neither HIG
+conformance nor a 4.5:1 contrast ratio can be confirmed for every host
+background; `keyboard-navigable` is `passed` because the action button is an
+unmodified `NSButton`, which keeps AppKit's native keyboard focus and
+activation (see **keyboard-activates-action**).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation, extracted from `PermissionRowView.swift`. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: added pre-refresh-action, keyboard-activation, and test-observable-surface requirements with vectors; reworded concurrent-access as caller-owned/undefined ordering; detailed the empty-keychain edge case; fixed vector 013 to use `.keychain` and extended vectors 004/019 with icon/card-color assertions; bolded Design Decisions and added one for the dark-only card overlay; marked `platform-design-language`/`contrast-ratio` partial, title-cased Compliance categories, and dropped two checks with no catalog match. |

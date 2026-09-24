@@ -3,7 +3,7 @@ id: 4b1a3eb0-0a8a-4059-b2ac-824013072bd5
 title: PanelView
 domain: agentictoolkit://recipes/panel-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -21,12 +21,12 @@ tags:
 - layout
 - macos
 - appkit
-depends-on: []
-related:
+depends-on:
 - agentictoolkit://recipes/group-view
 - agentictoolkit://recipes/panel-heading-view
-references:
+related:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -60,77 +60,75 @@ second near-identical colour behind them only reads as a misprint."
 
 ## Behavioral Requirements
 
-- **conforms-to-settings-view-protocol**: The component MUST conform to
+- **settings-view-conformance**: The component MUST conform to
   `SettingsViewProtocol`.
-- **confines-to-main-actor**: The component MUST be usable only on the main
+- **main-actor-confinement**: The component MUST be usable only on the main
   actor; the class is declared `@MainActor`.
-- **provides-zero-argument-convenience-initializer**: The `public convenience
+- **zero-argument-convenience-initializer**: The `public convenience
   init()` MUST forward to `init(frame: .zero)` with no parameters of its own.
-- **ignores-caller-supplied-frame**: The designated `public override
-  init(frame frameRect: NSRect)` MUST NOT use the caller-supplied `frameRect`
-  value for anything; it MUST call `super.init(frame: .zero)` unconditionally,
-  regardless of what `frameRect` is.
-- **disables-autoresizing-mask-on-self**: The component MUST set
+- **self-autoresizing-mask**: The component MUST set
   `translatesAutoresizingMaskIntoConstraints = false` on itself at
   construction.
-- **enables-layer-backing**: The component MUST set `wantsLayer = true` at
+- **layer-backing**: The component MUST set `wantsLayer = true` at
   construction.
-- **stacks-groups-vertically-leading-aligned**: The component MUST construct
-  an internal `NSStackView` (`stackView`) with `orientation == .vertical` and
+- **vertical-leading-stack-alignment**: The component MUST construct an
+  internal vertical stack view with `orientation == .vertical` and
   `alignment == .leading`.
-- **spaces-groups-by-group-spacing**: The component MUST set `stackView`'s
+- **group-spacing**: The component MUST set the internal stack view's
   `spacing` to `SettingsLayout.default[.groupSpacing]` (20pt).
-- **disables-autoresizing-mask-on-stack**: The component MUST set
-  `translatesAutoresizingMaskIntoConstraints = false` on `stackView`.
-- **insets-stack-from-top-leading-trailing-by-panel-inset**: The component
-  MUST pin `stackView`'s top, leading, and trailing anchors to its own
-  corresponding anchors, each offset by `SettingsLayout.default[.panelInset]`
-  (20pt) inward.
-- **allows-stack-to-fall-short-of-bottom-inset**: The component MUST
-  constrain `stackView`'s bottom anchor `lessThanOrEqualTo` its own bottom
-  anchor, offset by `-SettingsLayout.default[.panelInset]` (20pt) — an
-  inequality, not an equality constraint.
-- **paints-background-from-theme-on-construction**: The component MUST set
+- **stack-autoresizing-mask**: The component MUST set
+  `translatesAutoresizingMaskIntoConstraints = false` on the internal stack
+  view.
+- **top-leading-trailing-inset**: The component MUST pin the internal stack
+  view's top, leading, and trailing anchors to its own corresponding
+  anchors, each offset by `SettingsLayout.default[.panelInset]` (20pt)
+  inward.
+- **bottom-inset-inequality**: The component MUST constrain the internal
+  stack view's bottom anchor `lessThanOrEqualTo` its own bottom anchor,
+  offset by `-SettingsLayout.default[.panelInset]` (20pt) — an inequality,
+  not an equality constraint.
+- **construction-time-background-paint**: The component MUST set
   `layer?.backgroundColor` to the current theme's `.windowBackground` role
   (`palette.windowBackgroundColor.cgColor`), resolved through a
   `ThemePaletteObserver` constructed with `host: self`, immediately at
   construction.
-- **repaints-background-on-theme-change**: The component MUST update
+- **theme-change-background-repaint**: The component MUST update
   `layer?.backgroundColor` to the new theme's `.windowBackground` role every
   time the active theme changes or the view's resolved `ThemeScope` changes,
   for the lifetime of the view (`ThemePaletteObserver`'s own notification
   subscriptions).
-- **retains-theme-observer-for-view-lifetime**: The component MUST hold its
-  `ThemePaletteObserver` in a stored property (`themeObserver`) for as long
-  as the view exists, so the observer's Combine subscriptions are not
-  deallocated early.
-- **rejects-coder-initializer**: `required init?(coder: NSCoder)` MUST
-  fatal-error with the message `not overridden`.
-- **appends-group-as-arranged-subview**: `addGroup(_:)` MUST add the given
-  `GroupView` as the next arranged subview of `stackView`, with no other
-  transformation.
-- **constructs-heading-from-title-and-caption**: `addHeading(_:caption:)`
-  MUST construct a `PanelHeadingView(title:caption:)` from its own `title`
-  and `caption` parameters.
-- **defaults-heading-caption-to-nil**: `addHeading(_:caption:)` MUST default
-  its `caption` parameter to `nil` when the caller omits it.
-- **widens-gap-before-heading-when-stack-nonempty**: When `stackView` already
-  has at least one arranged subview at the time `addHeading` is called, the
-  component MUST set `stackView`'s custom spacing after that existing last
-  arranged subview to `SettingsLayout.default[.groupSpacing] * 1.5` (30pt),
-  before adding the new heading.
-- **skips-spacing-adjustment-on-empty-stack**: When `stackView` has no
+- **theme-observer-retention**: The component MUST hold its
+  `ThemePaletteObserver` in a stored property for as long as the view
+  exists, so the observer's Combine subscriptions are not deallocated
+  early.
+- **coder-initializer-rejection**: `required init?(coder: NSCoder)` MUST
+  trap via `fatalError` when invoked; the exact message text is not part of
+  this requirement (see Design Decisions).
+- **group-arranged-subview-append**: `addGroup(_:)` MUST add the given
+  `GroupView` as the next arranged subview of the internal stack view, with
+  no other transformation.
+- **heading-construction**: `addHeading(_:caption:)` MUST construct a
+  `PanelHeadingView(title:caption:)` from its own `title` and `caption`
+  parameters.
+- **heading-caption-default**: `addHeading(_:caption:)` MUST default its
+  `caption` parameter to `nil` when the caller omits it.
+- **heading-gap**: When the internal stack view already has at least one
+  arranged subview at the time `addHeading` is called, the component MUST
+  set its custom spacing after that existing last arranged subview to
+  `SettingsLayout.default[.groupSpacing] * 1.5` (30pt), before adding the
+  new heading.
+- **empty-stack-spacing-skip**: When the internal stack view has no
   arranged subviews at the time `addHeading` is called, the component MUST
   NOT attempt to set any custom spacing (there is no prior arranged subview
   to set it after).
-- **appends-heading-as-arranged-subview**: `addHeading(_:caption:)` MUST add
-  the constructed `PanelHeadingView` as the next arranged subview of
-  `stackView`, after any spacing adjustment above has been made.
-- **matches-heading-width-to-stack**: `addHeading(_:caption:)` MUST activate
-  a constraint equating the constructed heading's `widthAnchor` to
-  `stackView.widthAnchor`.
-- **returns-constructed-heading**: `addHeading(_:caption:)` MUST return the
-  constructed `PanelHeadingView` to its caller; the method is marked
+- **heading-arranged-subview-append**: `addHeading(_:caption:)` MUST add
+  the constructed `PanelHeadingView` as the next arranged subview of the
+  internal stack view, after any spacing adjustment above has been made.
+- **heading-width-match**: `addHeading(_:caption:)` MUST activate a
+  constraint equating the constructed heading's `widthAnchor` to the
+  internal stack view's `widthAnchor`.
+- **heading-return**: `addHeading(_:caption:)` MUST return the constructed
+  `PanelHeadingView` to its caller; the method is marked
   `@discardableResult`.
 
 ## Appearance
@@ -141,7 +139,7 @@ second near-identical colour behind them only reads as a misprint."
 - **Padding**: `stackView` is inset `SettingsLayout.default[.panelInset]` =
   20pt from the panel's top, leading, and trailing edges (equality
   constraints) and at most 20pt from the bottom edge (an inequality — see
-  `allows-stack-to-fall-short-of-bottom-inset`). Between arranged subviews,
+  `bottom-inset-inequality`). Between arranged subviews,
   the default gap is `SettingsLayout.default[.groupSpacing]` = 20pt; the gap
   immediately above a heading added by `addHeading` is widened to
   `groupSpacing * 1.5` = 30pt whenever a prior arranged subview already
@@ -163,7 +161,7 @@ second near-identical colour behind them only reads as a misprint."
   whatever its superview gives it (no self-width constraint is set here,
   unlike `GroupView`'s own `viewDidMoveToSuperview` width match); its height
   is bounded below by `stackView`'s accumulated content plus the 20pt top
-  inset, but — per `allows-stack-to-fall-short-of-bottom-inset` — the view
+  inset, but — per `bottom-inset-inequality` — the view
   MAY be taller than that, leaving unused space below the last arranged
   subview.
 
@@ -204,36 +202,36 @@ second near-identical colour behind them only reads as a misprint."
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| panel-view-001 | conforms-to-settings-view-protocol | Construct `PanelView()` | `view is SettingsViewProtocol` is `true` |
-| panel-view-002 | confines-to-main-actor | Attempt to construct or mutate a `PanelView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
-| panel-view-003 | provides-zero-argument-convenience-initializer | Construct `PanelView()` | Succeeds and produces a fully initialized view with `stackView` and `themeObserver` set up |
-| panel-view-004 | ignores-caller-supplied-frame | Construct `PanelView(frame: NSRect(x: 10, y: 10, width: 300, height: 300))` | The resulting view's frame is `.zero`, not the supplied rect |
-| panel-view-005 | disables-autoresizing-mask-on-self | Construct the component | `view.translatesAutoresizingMaskIntoConstraints == false` |
-| panel-view-006 | enables-layer-backing | Construct the component | `view.wantsLayer == true` and `view.layer` is non-nil |
-| panel-view-007 | stacks-groups-vertically-leading-aligned | Construct the component | The internal stack's `orientation == .vertical`, `alignment == .leading` |
-| panel-view-008 | spaces-groups-by-group-spacing | Construct the component | The internal stack's `spacing == 20.0` |
-| panel-view-009 | disables-autoresizing-mask-on-stack | Construct the component | The internal stack's `translatesAutoresizingMaskIntoConstraints == false` |
-| panel-view-010 | insets-stack-from-top-leading-trailing-by-panel-inset | Construct the component | Active constraints pin the stack's top/leading/trailing anchors to the view's corresponding anchors, each with constant `20.0` inward |
-| panel-view-011 | allows-stack-to-fall-short-of-bottom-inset | Inspect the component's active constraints | A `lessThanOrEqualTo` constraint relates the stack's bottom anchor to the view's bottom anchor with constant `-20.0`; no equality constraint exists between them |
-| panel-view-012 | paints-background-from-theme-on-construction | Construct the component under a known theme | `layer?.backgroundColor` equals that theme's `windowBackgroundColor.cgColor` immediately after `init` returns |
-| panel-view-013 | repaints-background-on-theme-change | Construct the component, then switch the active theme | `layer?.backgroundColor` updates to the new theme's `windowBackgroundColor.cgColor` |
-| panel-view-014 | retains-theme-observer-for-view-lifetime | Construct the component, trigger a theme change some time later | The background still repaints (proving the observer was not deallocated between construction and the change) |
-| panel-view-015 | rejects-coder-initializer | Construct via `PanelView(coder: someCoder)` | Execution traps via `fatalError` with message `not overridden` |
-| panel-view-016 | appends-group-as-arranged-subview | `addGroup(someGroupView)` | `someGroupView` is an arranged subview of the internal stack, at the end |
-| panel-view-017 | constructs-heading-from-title-and-caption | `addHeading("Section", caption: "Some blurb")` | A `PanelHeadingView` is created whose `titleLabel.stringValue == "Section"` and whose caption reflects `"Some blurb"` |
-| panel-view-018 | defaults-heading-caption-to-nil | `addHeading("Section")` with no `caption` argument | The constructed `PanelHeadingView`'s `captionLabel == nil` |
-| panel-view-019 | widens-gap-before-heading-when-stack-nonempty | `addGroup(someGroupView)` then `addHeading("Section")` | The stack's custom spacing after `someGroupView` is `30.0` |
-| panel-view-020 | skips-spacing-adjustment-on-empty-stack | `addHeading("Section")` as the first call on a freshly constructed component | No custom spacing is set (the stack has no prior arranged subview); no crash occurs |
-| panel-view-021 | appends-heading-as-arranged-subview | `addHeading("Section")` | The returned `PanelHeadingView` is an arranged subview of the internal stack, at the end |
-| panel-view-022 | matches-heading-width-to-stack | `addHeading("Section")` | An active constraint equates the returned heading's `widthAnchor` to the internal stack's `widthAnchor` |
-| panel-view-023 | returns-constructed-heading | `let heading = addHeading("Section")` | `heading` is the same `PanelHeadingView` instance added to the stack; the caller can ignore the return value with no compiler warning |
+| panel-view-001 | settings-view-conformance | Construct `PanelView()` | `view is SettingsViewProtocol` is `true` |
+| panel-view-002 | main-actor-confinement | (Static/compile-time check) Attempt to construct or mutate a `PanelView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
+| panel-view-003 | zero-argument-convenience-initializer | Construct `PanelView()` | Succeeds and produces a fully initialized view with its internal stack view and theme observer set up |
+| panel-view-004 | see Design Decisions | Construct `PanelView(frame: NSRect(x: 10, y: 10, width: 300, height: 300))`, checked immediately after `init` returns, before layout | The resulting view's frame is `.zero`, not the supplied rect |
+| panel-view-005 | self-autoresizing-mask | Construct the component | `view.translatesAutoresizingMaskIntoConstraints == false` |
+| panel-view-006 | layer-backing | Construct the component | `view.wantsLayer == true` and `view.layer` is non-nil |
+| panel-view-007 | vertical-leading-stack-alignment | Construct the component | The internal stack's `orientation == .vertical`, `alignment == .leading` |
+| panel-view-008 | group-spacing | Construct the component | The internal stack's `spacing == 20.0` |
+| panel-view-009 | stack-autoresizing-mask | Construct the component | The internal stack's `translatesAutoresizingMaskIntoConstraints == false` |
+| panel-view-010 | top-leading-trailing-inset | Construct the component | Active constraints pin the stack's top/leading/trailing anchors to the view's corresponding anchors, each with constant `20.0` inward |
+| panel-view-011 | bottom-inset-inequality | Inspect the component's active constraints | A `lessThanOrEqualTo` constraint relates the stack's bottom anchor to the view's bottom anchor with constant `-20.0`; no equality constraint exists between them |
+| panel-view-012 | construction-time-background-paint | Construct the component under a known theme | `layer?.backgroundColor` equals that theme's `windowBackgroundColor.cgColor` immediately after `init` returns |
+| panel-view-013 | theme-change-background-repaint | Construct the component, then switch the active theme | `layer?.backgroundColor` updates to the new theme's `windowBackgroundColor.cgColor` |
+| panel-view-014 | theme-observer-retention | Construct the component, trigger a theme change some time later | The background still repaints (proving the observer was not deallocated between construction and the change) |
+| panel-view-015 | coder-initializer-rejection | Construct via `PanelView(coder: someCoder)` | Execution traps via `fatalError`; the source's current message text is `not overridden` (not required by this requirement — see Design Decisions) |
+| panel-view-016 | group-arranged-subview-append | `addGroup(someGroupView)` | `someGroupView` is an arranged subview of the internal stack, at the end |
+| panel-view-017 | heading-construction | `addHeading("Section", caption: "Some blurb")` | A `PanelHeadingView` is constructed with `title == "Section"` and `caption == "Some blurb"` forwarded to its initializer (see the panel-heading-view recipe for how these values render) |
+| panel-view-018 | heading-caption-default | `addHeading("Section")` with no `caption` argument | The constructed `PanelHeadingView` receives `caption == nil` (see the panel-heading-view recipe for its own nil-caption behavior) |
+| panel-view-019 | heading-gap | `addGroup(someGroupView)` then `addHeading("Section")` | The stack's custom spacing after `someGroupView` is `30.0` |
+| panel-view-020 | empty-stack-spacing-skip | `addHeading("Section")` as the first call on a freshly constructed component | No custom spacing is set (the stack has no prior arranged subview); no crash occurs |
+| panel-view-021 | heading-arranged-subview-append | `addHeading("Section")` | The returned `PanelHeadingView` is an arranged subview of the internal stack, at the end |
+| panel-view-022 | heading-width-match | `addHeading("Section")` | An active constraint equates the returned heading's `widthAnchor` to the internal stack's `widthAnchor` |
+| panel-view-023 | heading-return | `let heading = addHeading("Section")` | `heading` is the same `PanelHeadingView` instance added to the stack; the caller can ignore the return value with no compiler warning |
 
 ## Edge Cases
 
 - **Null/empty input**: `group` (`GroupView`, `addGroup(_:)`) and `title`
   (`String`, `addHeading(_:caption:)`) are non-optional, typed parameters;
-  Swift's type system rules out `nil` for either (MUST — no nil-handling
-  path is needed). `caption` (`String?`) defaults to `nil`; an explicit empty
+  Swift's type system rules out `nil` for either, so no nil-handling path is
+  needed. `caption` (`String?`) defaults to `nil`; an explicit empty
   string (`caption: ""`) is passed straight through to
   `PanelHeadingView(title:caption:)`, which — per that recipe — still
   constructs a caption view whose label renders empty.
@@ -242,7 +240,7 @@ second near-identical colour behind them only reads as a misprint."
   behavior comes from the fixed `SettingsLayout` constants (20pt panel
   inset, 20pt group spacing, the fixed `1.5×` heading-gap multiplier).
 - **Concurrent access**: Not applicable — the class is `@MainActor` (see
-  `confines-to-main-actor`), so `addGroup`, `addHeading`, and every
+  `main-actor-confinement`), so `addGroup`, `addHeading`, and every
   constraint activation are serialized on the main actor.
 - **Error states**: Not applicable — every operation in `PanelView.swift`
   (adding a group, adding a heading, repainting the background) is a
@@ -251,35 +249,30 @@ second near-identical colour behind them only reads as a misprint."
 - **Offline/disconnected state**: Not applicable — the component performs no
   networking of its own.
 - **`addHeading` called on an empty panel**: Per
-  `skips-spacing-adjustment-on-empty-stack`, the first heading in a panel
-  sits with no extra gap above it, because `stackView.arrangedSubviews.last`
-  is `nil` at that point and the `if let last = ...` guard simply does not
-  run (MUST, source-traceable — no fallback spacing is applied in its
-  place).
-- **The view's own frame is unreachable by construction**: Per
-  `ignores-caller-supplied-frame`, any `NSRect` passed to
+  **empty-stack-spacing-skip**, the first heading in a panel sits with no
+  extra gap above it, because there is no prior arranged subview at that
+  point and the spacing-adjustment guard simply does not run — no fallback
+  spacing is applied in its place.
+- **The view's own frame is unreachable by construction**: Per the design
+  decision on frame handling (see Design Decisions), any `NSRect` passed to
   `PanelView(frame:)` — including a non-zero one supplied directly by a
   caller who bypasses the `init()` convenience initializer — is discarded;
-  the view always begins at `.zero` regardless (MUST, source-traceable:
-  `super.init(frame: .zero)` never references its own `frameRect`
-  parameter).
-- **Passing the same `GroupView` (or `PanelHeadingView`) instance to
-  `addGroup`/two `addHeading`-constructed headings sharing an instance is not
-  possible, but reusing a `GroupView` already added elsewhere is)**: AppKit's
+  the view always begins at `.zero` regardless: `super.init(frame: .zero)`
+  never references its own `frameRect` parameter.
+- **Re-adding an already-parented `GroupView`**: AppKit's
   `addArrangedSubview` always detaches a view from its previous superview
   before adding it to a new one; adding the same `GroupView` instance to a
   second `PanelView` (or a second time to the same one) silently removes it
   from its first location. `PanelView.swift` contains no guard against this
   — the same source-traceable consequence the sibling `GroupView` recipe
-  documents for `addSettingSubview` (MUST-level, per
-  `appends-group-as-arranged-subview`).
+  documents for `addSettingSubview` (see **group-arranged-subview-append**).
 - **A superview taller than the panel's content**: Because
-  `allows-stack-to-fall-short-of-bottom-inset` constrains the stack's bottom
+  **bottom-inset-inequality** constrains the internal stack view's bottom
   with an inequality rather than an equality, a `PanelView` given more
   height than its groups require leaves visible, unpainted-by-content slack
   between the last arranged subview and the panel's bottom edge, rather than
-  stretching `stackView` to fill it (MUST, source-traceable: no equality or
-  centering constraint exists to distribute the extra space).
+  stretching the stack to fill it: no equality or centering constraint
+  exists to distribute the extra space.
 
 ## Configuration
 
@@ -347,16 +340,15 @@ Not applicable: `PanelView.swift` contains no logging call (no `print`,
   bottom left to the stack's own intrinsic height rather than a fixed
   `.padding(.bottom, 20)` pin — SwiftUI's default layout already lets
   content fall short of an oversized parent, mirroring
-  `allows-stack-to-fall-short-of-bottom-inset`. Give the container a
-  `.background` filled from the theme's window-background token, matching
-  `paints-background-from-theme-on-construction`/
-  `repaints-background-on-theme-change`, which SwiftUI's environment-driven
-  color already repaints automatically on a theme change with no manual
-  observer. Insert an extra `Spacer().frame(height: 10)` immediately before
-  a heading view — 10pt plus the `VStack`'s own 20pt `spacing` totals the
-  30pt of `widens-gap-before-heading-when-stack-nonempty` — but only when a
-  view already precedes it, mirroring
-  `skips-spacing-adjustment-on-empty-stack`.
+  **bottom-inset-inequality**. Give the container a `.background` filled
+  from the theme's window-background token, matching
+  **construction-time-background-paint**/**theme-change-background-repaint**,
+  which SwiftUI's environment-driven color already repaints automatically
+  on a theme change with no manual observer. Insert an extra
+  `Spacer().frame(height: 10)` immediately before a heading view — 10pt
+  plus the `VStack`'s own 20pt `spacing` totals the 30pt of **heading-gap**
+  — but only when a view already precedes it, mirroring
+  **empty-stack-spacing-skip**.
 - **Compose**: Use a `Column(verticalArrangement =
   Arrangement.spacedBy(20.dp), horizontalAlignment = Alignment.Start,
   modifier = Modifier.padding(start = 20.dp, end = 20.dp, top =
@@ -365,52 +357,45 @@ Not applicable: `PanelView.swift` contains no logging call (no `print`,
   analog of the inequality bottom constraint. Precede a heading composable
   with an extra `Spacer(Modifier.height(10.dp))` (10dp + the column's own
   20dp gap = 30dp) only when it is not the column's first child, mirroring
-  `widens-gap-before-heading-when-stack-nonempty`/
-  `skips-spacing-adjustment-on-empty-stack`.
+  **heading-gap**/**empty-stack-spacing-skip**.
 - **React/Web**: A `<div>` styled `display: flex; flex-direction: column;
   align-items: flex-start; gap: 20px; padding: 20px 20px 0 20px;
   background: var(--window-background)`, sized to its content rather than a
   fixed height so it can fall short of a taller parent, mirroring
-  `allows-stack-to-fall-short-of-bottom-inset`. Give a heading element
-  `margin-top: 10px` in addition to the flex `gap` (10px + 20px = 30px
-  total) only when a previous sibling exists (a `:not(:first-child)`
-  selector), mirroring the conditional spacing rule; rely on the CSS custom
-  property's own value updating on a theme class/attribute change for
-  `repaints-background-on-theme-change`.
-- **AppKit / UIKit** (source platform): Source file
-  `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/PanelView.swift`,
-  with layout constants from `ViewLayout.swift` and `ThemePaletteObserver`/
-  `ThemeScopeResolving` from the `agenticdevelopertoolkit` submodule's
-  `SourcesUI/Shared/Theme/ThemeBinding.swift` and
-  `ThemeScopeResolution.swift` (an `extension PlatformView:
-  ThemeScopeResolving`, so every `NSView`/`UIView` already qualifies as a
-  `host` with no extra conformance declaration needed). A macOS-only
-  (`import AppKit`) `open`, `@MainActor` `NSView` subclass inside the
-  `ComposableSettings` namespace, built on `NSStackView` and Auto Layout.
-  There is no UIKit code path in source; because `ThemePaletteObserver`
-  itself is already cross-platform (`SourcesUI/Shared`), a UIKit port would
-  only need to replace `NSStackView` with `UIStackView` and the layer
-  background assignment with the UIKit equivalent (`layer.backgroundColor`
-  on a layer-backed `UIView`, which is layer-backed by default) — the theme
-  observer and its notification-driven repaint carry over unchanged.
-- **WinUI 3** (the reason this recipe exists): Build a `StackPanel`
-  (`Orientation="Vertical"`, `Spacing="20"`, matching
-  `spaces-groups-by-group-spacing`) inside a root whose
+  **bottom-inset-inequality**. Give a heading element `margin-top: 10px` in
+  addition to the flex `gap` (10px + 20px = 30px total) only when a previous
+  sibling exists (a `:not(:first-child)` selector), mirroring the
+  conditional spacing rule; rely on the CSS custom property's own value
+  updating on a theme class/attribute change for
+  **theme-change-background-repaint**.
+- **AppKit / UIKit** (source platform): A macOS-only (`import AppKit`)
+  `open`, `@MainActor` `NSView` subclass inside the `ComposableSettings`
+  namespace (see Overview for the source file and its layout/theme
+  dependencies), built on `NSStackView` and Auto Layout. Internally, the
+  private stored properties `stackView` (`NSStackView`) and `themeObserver`
+  (`ThemePaletteObserver?`) back the stack and theme-repaint behavior
+  described under Behavioral Requirements. There is no UIKit code path in
+  source; because `ThemePaletteObserver` itself is already cross-platform
+  (`SourcesUI/Shared`), a UIKit port would only need to replace
+  `NSStackView` with `UIStackView` and the layer background assignment with
+  the UIKit equivalent (`layer.backgroundColor` on a layer-backed `UIView`,
+  which is layer-backed by default) — the theme observer and its
+  notification-driven repaint carry over unchanged.
+- **WinUI 3**: Build a `StackPanel` (`Orientation="Vertical"`,
+  `Spacing="20"`, matching **group-spacing**) inside a root whose
   `Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"` (or the
   app's own window-background resource) repaints automatically through
   WinUI's `ThemeResource` re-resolution on a `RequestedTheme` change — the
   platform-native analog of
-  `paints-background-from-theme-on-construction`/
-  `repaints-background-on-theme-change`, needing no manual observer
-  equivalent to `ThemePaletteObserver`. Give the root `Padding="20,20,20,0"`
-  and leave the `StackPanel`'s `VerticalAlignment` at its default `Top`
-  rather than `Stretch`, so it sizes to its content and leaves slack below
-  rather than stretching to fill the container — the WinUI analog of
-  `allows-stack-to-fall-short-of-bottom-inset`'s inequality constraint.
+  **construction-time-background-paint**/**theme-change-background-repaint**,
+  needing no manual observer equivalent to `ThemePaletteObserver`. Give the
+  root `Padding="20,20,20,0"` and leave the `StackPanel`'s
+  `VerticalAlignment` at its default `Top` rather than `Stretch`, so it
+  sizes to its content and leaves slack below rather than stretching to
+  fill the container — the WinUI analog of **bottom-inset-inequality**.
   Because `StackPanel.Spacing` cannot vary per-gap the way
   `NSStackView.setCustomSpacing(after:)` can, reproduce
-  `widens-gap-before-heading-when-stack-nonempty`/
-  `skips-spacing-adjustment-on-empty-stack` with an extra `<Border
+  **heading-gap**/**empty-stack-spacing-skip** with an extra `<Border
   Height="10"/>` spacer element inserted immediately before a heading
   `TextBlock`/`StackPanel` — 10 plus the panel's own 20 `Spacing` totals the
   30 of `groupSpacing * 1.5` — but only when `Children.Count > 0` at the
@@ -418,76 +403,69 @@ Not applicable: `PanelView.swift` contains no logging call (no `print`,
 
 ## Design Decisions
 
-- Decision: Constrain `stackView`'s bottom anchor with `lessThanOrEqualTo`
-  rather than an equality constraint, unlike the top/leading/trailing edges.
-  Rationale: not explained in source comments beyond the code itself. An
-  inequality lets the stack's own Auto-Layout-computed height determine the
-  panel's occupied region without forcing `stackView` to stretch and fill a
-  taller frame the panel happens to be given, the same "size to content, not
-  to container" outcome `GroupView`'s sibling recipe gets from having no
+- **Decision**: Constrain the internal stack view's bottom anchor with
+  `lessThanOrEqualTo` rather than an equality constraint, unlike the
+  top/leading/trailing edges.
+  **Rationale**: Not explained in source comments beyond the code itself.
+  An inequality lets the stack's own Auto-Layout-computed height determine
+  the panel's occupied region without forcing the stack to stretch and fill
+  a taller frame the panel happens to be given, the same "size to content,
+  not to container" outcome `GroupView`'s sibling recipe gets from having no
   height constraint of its own at all.
-  Approved: pending
-- Decision: Resolve the background color through `ThemePaletteObserver(host:
-  self)` rather than reading `ThemePaletteObserver.currentPalette` (the
-  unscoped, app-wide answer) once at construction.
-  Rationale: per the source's own comment, this keeps the panel's ground the
-  same as "the sidebar and the window," painted from `self`'s own resolved
-  `ThemeScope` rather than a single global palette, and it stays live for
-  the view's lifetime rather than being captured once.
-  Approved: pending
-- Decision: `addHeading` widens the gap above a heading to `groupSpacing *
-  1.5` only when a prior arranged subview already exists, rather than always
-  applying the wider spacing or applying it to the gap below the heading.
-  Rationale: per the source's own doc comment, "the gap above a heading is
-  wider than the gap between two cards, because that gap is what says the
-  heading belongs to what comes *after* it — at the stack's own spacing it
-  reads as a caption trailing the card above." A first heading with nothing
-  above it needs no such signal, so no adjustment is made.
-  Approved: pending
-- Decision: `required init?(coder:)` fatal-errors with the message `not
-  overridden`, a different string from the sibling `GroupView`'s and
-  `PanelHeadingView`'s own coder-initializer message
+  **Approved**: pending
+- **Decision**: The designated `init(frame:)` ignores the caller-supplied
+  `frameRect` entirely and always forwards `.zero` to `super.init(frame:)`.
+  **Rationale**: Not explained in source comments; the effect is that no
+  caller can give a `PanelView` a non-zero initial frame, even by bypassing
+  the `init()` convenience initializer. This is a known quirk rather than a
+  deliberate API contract — kept as-is because it is what the source does
+  (see **zero-argument-convenience-initializer** and the frame edge case
+  above).
+  **Approved**: pending
+- **Decision**: Resolve the background color through `ThemePaletteObserver(
+  host: self)` rather than reading `ThemePaletteObserver.currentPalette`
+  (the unscoped, app-wide answer) once at construction.
+  **Rationale**: Per the source's own comment, this keeps the panel's
+  ground the same as "the sidebar and the window," painted from `self`'s
+  own resolved `ThemeScope` rather than a single global palette, and it
+  stays live for the view's lifetime rather than being captured once.
+  **Approved**: pending
+- **Decision**: `addHeading` widens the gap above a heading to
+  `groupSpacing * 1.5` only when a prior arranged subview already exists,
+  rather than always applying the wider spacing or applying it to the gap
+  below the heading.
+  **Rationale**: Per the source's own doc comment, "the gap above a heading
+  is wider than the gap between two cards, because that gap is what says
+  the heading belongs to what comes *after* it — at the stack's own spacing
+  it reads as a caption trailing the card above." A first heading with
+  nothing above it needs no such signal, so no adjustment is made.
+  **Approved**: pending
+- **Decision**: `required init?(coder:)` traps via `fatalError`, and its
+  current message text (`not overridden`) is left as-is rather than
+  standardized to match the sibling `GroupView`/`PanelHeadingView` message
   (`init(coder:) has not been implemented`).
-  Rationale: documented as a source-traceable inconsistency between
-  siblings, not smoothed over in either direction — this file's message is
-  what is actually in source, even though it reads as though it were
-  written for an overridable hook rather than an unsupported initializer.
-  Approved: pending
-- Decision: This recipe has fewer behavioral requirements than the sibling
-  `GroupView` recipe (33) but more than the sibling `PanelHeadingView`
-  recipe (16).
-  Rationale: `PanelView` composes a stack, a theme observer, and two mutating
-  methods with real conditional logic (the heading-gap rule), but owns none
-  of `GroupView`'s per-row separator bookkeeping. The requirement count
-  reflects that difference in scope, not a gap in authoring effort.
-  Approved: pending
+  **Rationale**: The message text is not part of the
+  **coder-initializer-rejection** requirement; the mismatch is a real,
+  source-traceable inconsistency between siblings, not smoothed over in
+  either direction.
+  **Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | ui-tokens |
-| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | accessibility |
-| [localizable-strings](agenticdevelopercookbook://compliance/i18n#localizable-strings) | passed | i18n |
+| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | Accessibility |
 
-`main-actor-confined` passes because the class is declared `@MainActor` (see
-`confines-to-main-actor`). `no-raw-hex` passes because the only color this
-component sets comes from `palette.windowBackgroundColor`, a theme-resolved
-semantic role, never a literal `NSColor` or hex value.
 `native-controls-preference` passes because the component is built entirely
-from `NSView`/`NSStackView`. `differentiate-without-color` passes because
-the component conveys no state through color. `screen-reader-support`
-passes because `PanelView` is a transparent layout container with no label
-or control of its own for VoiceOver to need; each hosted child manages its
-own accessibility per its own recipe. `localizable-strings` passes because
-`PanelView.swift` owns no string literal of its own — `title`/`caption` are
-entirely caller-supplied and forwarded unchanged.
+from `NSView`/`NSStackView`. `screen-reader-support` passes because
+`PanelView` is a transparent layout container with no label or control of
+its own for VoiceOver to need; each hosted child manages its own
+accessibility per its own recipe.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation, extracted from the Apple `PanelView` (AppKit, macOS) source. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reformatted frontmatter (references moved to related, depends-on populated with GroupView/PanelHeadingView); renamed requirements to subject-noun form and updated every citation; moved the ignored-frame behavior and the coder-initializer message wording into Design Decisions; removed stray MUST labels and a garbled title from Edge Cases; marked test vector 002 as compile-time and fixed vector 004's timing and vectors 017/018 to assert PanelHeadingView's public inputs instead of its private labels; reformatted Design Decisions to the bold convention and dropped a non-decision entry; trimmed Platform Notes editorializing and moved private stack/observer identifiers there; cleaned the Compliance table to catalog-valid checks with Title Case categories. |

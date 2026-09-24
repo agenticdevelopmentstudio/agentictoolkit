@@ -3,7 +3,7 @@ id: 45b6d470-4e58-4035-b1c7-e65dbe7716b9
 title: PanelScrollView
 domain: agentictoolkit://recipes/panel-scroll-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -23,9 +23,9 @@ tags:
 - macos
 - appkit
 depends-on: []
-related: []
-references:
+related:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -66,12 +66,20 @@ detail panes in one, so rebuilt content can never tug a split view's divider.
   view.
 - **content-replacement-removes-previous**: `setContent(_:)` MUST remove every
   existing subview of the document view before installing the new content.
-- **content-replacement-resets-scroll-position**: `setContent(_:)` MUST reset
-  the scroll position to the top when it replaces the hosted content.
+- **content-replacement-resets-scroll-position**: `setContent(_:)` SHOULD
+  reset the scroll position to the top when it replaces the hosted content.
+  Source calls no explicit scroll API; the reset follows only as a side
+  effect of removing the previous content's constraints (which collapses the
+  document view to zero size until the new content is installed and
+  re-constrained).
 - **vertical-scroller-enabled**: The scroll view MUST enable a vertical
   scroller (`hasVerticalScroller = true`).
-- **horizontal-scroller-enabled**: The scroll view MUST enable a horizontal
-  scroller (`hasHorizontalScroller = true`).
+- **horizontal-scroller-enabled**: The scroll view MAY enable a horizontal
+  scroller (`hasHorizontalScroller = true`). Source sets it unconditionally in
+  `init`, but content installed via `setContent(_:)` always matches the
+  viewport width (see **content-width-matches-viewport**), so this scroller
+  can never actually be triggered through the public API; ports need not
+  mirror it.
 - **scrollers-autohide**: The scroll view MUST autohide its scrollers
   (`autohidesScrollers = true`).
 - **background-transparent**: The scroll view MUST NOT draw its own background
@@ -83,8 +91,9 @@ detail panes in one, so rebuilt content can never tug a split view's divider.
 - **main-actor-isolated**: The component MUST be isolated to the main actor
   (`@MainActor`).
 - **programmatic-instantiation-only**: The component MUST NOT support
-  archive-based instantiation; `init(coder:)` MUST terminate the process with a
-  fatal error.
+  archive-based instantiation; `init(coder:)` is marked `@available(*,
+  unavailable)`, so the compiler rejects any call at compile time before the
+  method's `fatalError()` body could ever run.
 
 ## Appearance
 
@@ -164,28 +173,29 @@ the component has no loading or progress state anywhere in
 | panel-scroll-view-004 | content-min-height-viewport | Call `setContent(view)` with `view` whose intrinsic content height is smaller than the viewport height | `view`'s height is at least `contentView.frame.height`, filling the viewport with no gap below |
 | panel-scroll-view-005 | content-fills-document-edges | Call `setContent(view)`, then inspect the edge constraints between `view` and the document view | `view`'s top, leading, trailing, and bottom anchors are each constrained equal, constant `0`, to the document view's corresponding anchors |
 | panel-scroll-view-006 | content-replacement-removes-previous | Call `setContent(viewA)`, then call `setContent(viewB)` | After the second call, `viewA` is no longer a subview of the document view; only `viewB` remains |
-| panel-scroll-view-007 | content-replacement-resets-scroll-position | Scroll to the bottom of `viewA`'s content, then call `setContent(viewB)` | The scroll position returns to the top (origin) once `setContent` installs `viewB` |
+| panel-scroll-view-007 | content-replacement-resets-scroll-position | Scroll to the bottom of `viewA`'s content, then call `setContent(viewB)` | The scroll position returns to the top (origin) once `setContent` installs `viewB`, as a side effect of removing `viewA`'s constraints rather than an explicit scroll reset |
 | panel-scroll-view-008 | vertical-scroller-enabled | Inspect a newly constructed `PanelScrollView` | `hasVerticalScroller == true` |
 | panel-scroll-view-009 | horizontal-scroller-enabled | Inspect a newly constructed `PanelScrollView` | `hasHorizontalScroller == true` |
 | panel-scroll-view-010 | scrollers-autohide | Inspect a newly constructed `PanelScrollView` | `autohidesScrollers == true` |
 | panel-scroll-view-011 | background-transparent | Inspect a newly constructed `PanelScrollView` | `drawsBackground == false` |
 | panel-scroll-view-012 | autoresizing-mask-disabled | Inspect a newly constructed `PanelScrollView` and its document view | `translatesAutoresizingMaskIntoConstraints == false` on both the scroll view and the document view |
 | panel-scroll-view-013 | main-actor-isolated | Attempt to construct or call `setContent` on a `PanelScrollView` from off the main actor | The compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
-| panel-scroll-view-014 | programmatic-instantiation-only | Attempt `PanelScrollView(coder: someCoder)` | The call traps with a fatal error; no instance is produced |
+| panel-scroll-view-014 | programmatic-instantiation-only | Attempt `PanelScrollView(coder: someCoder)` | The compiler rejects the call at compile time (the initializer is marked unavailable); no instance is produced |
+| panel-scroll-view-015 | content-width-matches-viewport | Host a `PanelScrollView` as one pane of an `NSSplitView`, record the split view's divider position, then call `setContent(view)` with `view` whose intrinsic width is wider than the pane | The divider's position is unchanged after `setContent` returns; `view`'s width still equals `contentView.frame.width`, never exceeding the pane's allotted width |
 
 ## Edge Cases
 
 - Null/empty input: `setContent(_:)` takes a non-optional `NSView`; Swift's
   type system rules out `nil` for `view`, so source contains no null-check
-  path. This is a MUST: when an empty (zero-intrinsic-size) view is installed,
-  the `equalTo`/`greaterThanOrEqualTo` constraints in `setContent` still
-  stretch it to `contentView`'s width and to at least its height, so the
-  visible area is always filled.
+  path. When an empty (zero-intrinsic-size) view is installed, the
+  `equalTo`/`greaterThanOrEqualTo` constraints in `setContent` still stretch
+  it to `contentView`'s width and to at least its height (see
+  **content-width-matches-viewport** and **content-min-height-viewport**), so
+  the visible area is always filled.
 - Boundary values (no content installed): before `setContent` is ever called,
   the document view carries only the top/leading constraints activated in
-  `init`; it has no width or height constraint of its own. This is a MUST:
-  the document view's size resolves to zero in this state, since nothing else
-  constrains it.
+  `init`; it has no width or height constraint of its own, so its size
+  resolves to zero in this state, since nothing else constrains it.
 - Boundary values (re-installing the same instance): calling `setContent(_:)`
   a second time with the same view instance that is already installed MUST
   first remove that instance via `removeFromSuperview()` and then re-add and
@@ -196,12 +206,12 @@ the component has no loading or progress state anywhere in
   including calls to `setContent`, is serialized on the main actor; source
   provides no additional synchronization because none is needed.
 - Error states: `setContent(_:)` has no error return path and performs no
-  validation of `view`. This is a MUST: if `view` already carries constraints
-  or a superview relationship that conflicts with the four edge constraints
-  `setContent` activates, `NSLayoutConstraint.activate` does not throw (the
-  API is non-throwing); any conflict SHOULD surface only as an Auto Layout
-  console diagnostic at runtime, since source contains no conflict detection
-  or recovery.
+  validation of `view`. If `view` already carries constraints or a superview
+  relationship that conflicts with the four edge constraints `setContent`
+  activates, `NSLayoutConstraint.activate` does not throw (the API is
+  non-throwing); any conflict surfaces only as an Auto Layout console
+  diagnostic at runtime, since source contains no conflict detection or
+  recovery.
 - Offline/disconnected: Not applicable — `PanelScrollView` performs no
   networking of its own; its behavior does not depend on connectivity.
 
@@ -265,9 +275,12 @@ Not applicable: `PanelScrollView.swift` contains no logging call (no `print`,
 
 ## Platform Notes
 
-- **SwiftUI**: Start from `ScrollView(.vertical)` (or `[.vertical,
-  .horizontal]` to mirror both scrollers) wrapping the content in a container
-  pinned with `.frame(maxWidth: .infinity, alignment: .top)`. Read the
+- **SwiftUI**: Start from `ScrollView(.vertical)` — content is pinned to the
+  viewport width (mirroring content-width-matches-viewport), so horizontal
+  scrolling can never trigger; adding `[.vertical, .horizontal]` only mirrors
+  horizontal-scroller-enabled's incidental configuration and is optional.
+  Wrap the content in a container pinned with `.frame(maxWidth: .infinity,
+  alignment: .top)`. Read the
   viewport size with a `GeometryReader`/`.containerRelativeFrame` and apply
   `.frame(minHeight: viewportHeight)` to the content to mirror
   content-min-height-viewport — SwiftUI has no direct
@@ -278,19 +291,26 @@ Not applicable: `PanelScrollView.swift` contains no logging call (no `print`,
   `ScrollViewReader` and call `scrollTo` the top anchor when the identity of
   the hosted content changes.
 - **Compose**: Start from a `Column` inside `Modifier.verticalScroll(
-  rememberScrollState())` combined with `Modifier.horizontalScroll(
   rememberScrollState())`, with the content given `Modifier.fillMaxWidth()`
   to mirror content-width-matches-viewport and `Modifier.heightIn(min = ...)`
   sized from a `BoxWithConstraints` to mirror content-min-height-viewport.
+  Because content always fills the available width, adding
+  `Modifier.horizontalScroll` can never trigger; it only mirrors
+  horizontal-scroller-enabled's incidental configuration and is optional.
   Compose's scroll containers are already top-down, so no flipped-coordinate
   handling is needed. Reset scroll position on content replacement by calling
   `scrollState.scrollTo(0)` inside a `LaunchedEffect` keyed on the content's
-  identity, mirroring content-replacement-resets-scroll-position.
-- **React/Web**: Start from a plain `div` with `overflow-y: auto;
-  overflow-x: auto` on the outer element and `width: 100%; min-height: 100%;
-  box-sizing: border-box` on the content, which map directly to
-  content-width-matches-viewport and content-min-height-viewport. The web's
-  default coordinate system is already top-down, so no flipped-view
+  identity, mirroring content-replacement-resets-scroll-position (source
+  itself only resets scroll position as a side effect of removing the
+  previous content's constraints, so treat this as a SHOULD, not a hard
+  guarantee, when porting).
+- **React/Web**: Start from a plain `div` with `overflow-y: auto` on the
+  outer element and `width: 100%; min-height: 100%; box-sizing: border-box`
+  on the content, which map directly to content-width-matches-viewport and
+  content-min-height-viewport. Because the content is always full width,
+  adding `overflow-x: auto` (mirroring horizontal-scroller-enabled) can never
+  trigger and is optional. The web's default coordinate system is already
+  top-down, so no flipped-view
   equivalent of document-view-flipped is needed. Scroller autohide
   (scrollers-autohide) is an OS/browser display preference rather than
   something the component sets; reset scroll position on content replacement
@@ -310,20 +330,24 @@ Not applicable: `PanelScrollView.swift` contains no logging call (no `print`,
   `showsVerticalScrollIndicator`/`showsHorizontalScrollIndicator` already
   autohide by default, so scrollers-autohide needs no extra configuration
   there either.
-- **WinUI 3** (the reason this recipe exists): Start from a `ScrollViewer`
-  with `VerticalScrollBarVisibility="Auto"` and
-  `HorizontalScrollBarVisibility="Auto"` (mirroring
-  vertical-scroller-enabled/horizontal-scroller-enabled and
-  scrollers-autohide, since WinUI's `Auto` visibility shows a scrollbar only
-  while scrolling and fades it otherwise). Give the `Content` element
+- **WinUI 3** (the reason this ingredient exists): Start from a
+  `ScrollViewer` with `VerticalScrollBarVisibility="Auto"` (mirroring
+  vertical-scroller-enabled and scrollers-autohide, since WinUI's `Auto`
+  visibility shows a scrollbar only while scrolling and fades it otherwise).
+  `HorizontalScrollBarVisibility="Auto"` mirrors horizontal-scroller-enabled
+  but is optional: since `Content` is always stretched to the viewport width
+  (below), horizontal scrolling can never trigger, so a vertical-only
+  `ScrollViewer` is an equally faithful port. Give the `Content` element
   `HorizontalAlignment="Stretch"` to mirror content-width-matches-viewport.
   `ScrollViewer` has no declarative "at least the viewport height" constraint
   the way `NSLayoutConstraint.greaterThanOrEqualTo` does, so mirror
   content-min-height-viewport by binding the content's `MinHeight` to the
   `ScrollViewer`'s `ViewportHeight`, updated from the `ScrollViewer`'s
-  `SizeChanged`/`ViewChanging` event (a value converter or code-behind
-  handler, since XAML bindings alone cannot express the inequality). WinUI
-  is already top-down, so no flipped-coordinate handling is needed
+  `SizeChanged` event only (`ViewChanging` fires on scroll, not resize, so it
+  cannot track viewport height changes; a value converter or code-behind
+  handler is needed either way, since XAML bindings alone cannot express the
+  inequality). WinUI is already top-down, so no flipped-coordinate handling
+  is needed
   (mirroring document-view-flipped is a no-op there). To mirror
   content-replacement-removes-previous and
   content-replacement-resets-scroll-position, clear and reassign `Content`
@@ -333,54 +357,58 @@ Not applicable: `PanelScrollView.swift` contains no logging call (no `print`,
 
 ## Design Decisions
 
-- Decision: Pin installed content's width equal to the viewport's width, and
-  its height only greater-than-or-equal to the viewport's height, rather than
-  letting the content's own intrinsic size dictate the panel's size.
-  Rationale: per the source's own doc comment, `SplitViewController` wraps
-  every non-self-scrolling panel in a `PanelScrollView`, and master/detail
-  pickers host their detail panes in one, specifically so that rebuilt
-  content can never tug a split view's divider; pinning width and floor-ing
-  height keeps the panel's own footprint stable regardless of what content is
-  installed.
-  Approved: pending
-- Decision: Enable both `hasVerticalScroller` and `hasHorizontalScroller`,
-  even though content-width-matches-viewport pins installed content's width
-  exactly to the viewport width, which means content added through
-  `setContent(_:)` alone can never actually trigger horizontal scrolling.
-  Rationale: source does not gate `hasHorizontalScroller` behind whether
-  content is wider than the viewport; it is set unconditionally in `init`,
-  before any content exists, so the scroll view is prepared for horizontal
-  overflow from any subview a caller might add to the document view outside
-  the sanctioned `setContent(_:)` path.
-  Approved: pending
-- Decision: Use a private `FlippedDocumentView` with `isFlipped == true`
-  rather than the AppKit default (unflipped) document view.
-  Rationale: per the source's own doc comment, settings content reads
-  top-to-bottom, and an unflipped `NSScrollView` document places its origin
-  at the bottom-left, which would anchor new content at the bottom of the
-  scrollable area instead of the top.
-  Approved: pending
-- Decision: Disable `init(coder:)` with `@available(*, unavailable)` and a
-  `fatalError`, leaving the parameterless `init()` as the only usable
-  initializer.
-  Rationale: `PanelScrollView` has no archive-restorable state — it is
-  configured entirely by `init()` and then by a caller's `setContent(_:)`
-  call — so the `NSCoding`-based initializer that Interface Builder/nib
-  loading would otherwise use is intentionally disabled rather than left to
-  produce a half-configured scroll view.
-  Approved: pending
+**Decision**: Pin installed content's width equal to the viewport's width,
+and its height only greater-than-or-equal to the viewport's height, rather
+than letting the content's own intrinsic size dictate the panel's size.
+**Rationale**: Per the source's own doc comment, `SplitViewController` wraps
+every non-self-scrolling panel in a `PanelScrollView`, and master/detail
+pickers host their detail panes in one, specifically so that rebuilt content
+can never tug a split view's divider; pinning width and floor-ing height
+keeps the panel's own footprint stable regardless of what content is
+installed.
+**Approved**: pending
+
+**Decision**: Enable both `hasVerticalScroller` and `hasHorizontalScroller`,
+even though content-width-matches-viewport pins installed content's width
+exactly to the viewport width, which means content added through
+`setContent(_:)` alone can never actually trigger horizontal scrolling.
+**Rationale**: Source sets `hasHorizontalScroller = true` unconditionally in
+`init`, before any content exists; it is not gated on content width. Because
+the document view (`document`) is private, callers have no path to add
+subviews outside `setContent(_:)`, so the horizontal scroller is incidental
+configuration rather than support for any caller-reachable overflow case.
+**Approved**: pending
+
+**Decision**: Use a private `FlippedDocumentView` with `isFlipped == true`
+rather than the AppKit default (unflipped) document view.
+**Rationale**: Per the source's own doc comment, settings content reads
+top-to-bottom, and an unflipped `NSScrollView` document places its origin at
+the bottom-left, which would anchor new content at the bottom of the
+scrollable area instead of the top.
+**Approved**: pending
+
+**Decision**: Disable `init(coder:)` with `@available(*, unavailable)` and a
+`fatalError`, leaving the parameterless `init()` as the only usable
+initializer.
+**Rationale**: `PanelScrollView` has no archive-restorable state — it is
+configured entirely by `init()` and then by a caller's `setContent(_:)` call
+— so the `NSCoding`-based initializer that Interface Builder/nib loading
+would otherwise use is intentionally disabled. Because the initializer is
+marked unavailable, any call is rejected by the compiler rather than
+reaching the `fatalError()` at runtime.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | Architecture |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
 
-`main-actor-confined` passes because the class is declared `@MainActor` (see **main-actor-isolated**). `differentiate-without-color` passes because `PanelScrollView` sets no color of its own and conveys no state through color — it only hosts and positions caller-supplied content.
+`keyboard-navigable` passes because `PanelScrollView` overrides no keyboard-handling method (`acceptsFirstResponder`, `keyDown`, or similar); keyboard scrolling and VoiceOver navigation are both provided, unmodified, by the inherited `NSScrollView`/`NSClipView` behavior (see **Accessibility**).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: downgrade content-replacement-resets-scroll-position and horizontal-scroller-enabled from MUST to SHOULD/MAY with corrected rationale; move the internal `agenticdevelopercookbook://` link from `references` to `related`; strip RFC 2119 keywords from non-requirement Edge Cases prose; fix "recipe"/"ingredient" wording in the WinUI 3 note; correct programmatic-instantiation-only and its test vector to describe compile-time rejection instead of a runtime trap; add an integration test vector for split-view divider stability; fix the WinUI 3 MinHeight binding to `SizeChanged` only; reformat Design Decisions to the canonical three-line form; replace invented Compliance citations with a real catalog check |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |

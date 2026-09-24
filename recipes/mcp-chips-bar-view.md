@@ -3,7 +3,7 @@ id: bea6525c-171f-4547-bbb3-7c709543552e
 title: MCPChipsBarView
 domain: agentictoolkit://recipes/mcp-chips-bar-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -21,7 +21,6 @@ tags:
 - chat
 - toggle
 - popover
-- macos
 - appkit
 depends-on: []
 related: []
@@ -47,8 +46,9 @@ currently reads that state (see Design Decisions).
 
 ## Behavioral Requirements
 
-- **hosts-swiftui-content**: The view MUST host `MCPChipsBar`, wrapped in
-  `.themedRoot()`, inside an `NSHostingView` added as its subview.
+- **hosts-swiftui-content**: The view MUST host `MCPChipsBar` inside an
+  `NSHostingView` added as its subview, with the app's theme environment
+  values applied to that content (see Platform Notes for the mechanism).
 - **disables-autoresizing-mask**: The view and its hosted `NSHostingView`
   MUST each set `translatesAutoresizingMaskIntoConstraints = false`.
 - **fills-parent-bounds**: The hosted view's top, leading, trailing, and
@@ -56,15 +56,18 @@ currently reads that state (see Design Decisions).
   corresponding anchors.
 - **rejects-coder-initialization**: The view MUST NOT support
   `init(coder:)` and MUST fail fast (fatal error) if it is invoked.
-- **builds-one-view-model-per-instance**: Initialization MUST construct
-  exactly one `MCPChipsBarViewModel` from the given `registry` and
-  `activeServerIds` binding.
+- **shares-one-view-model-between-bar-and-picker**: The bar's toggle button
+  and the popover's server rows MUST reflect the same active-server state,
+  backed by a single view model constructed at initialization from the given
+  `registry` and `activeServerIds` binding — so toggling a row in the popover
+  is immediately reflected in the bar's button label.
 - **snapshots-active-ids-at-init**: The view model's `activeServerIds` MUST
   be set to the wrapped value of the caller's `activeServerIds` binding at
   construction time, read exactly once.
 - **subscribes-to-registry-clients**: The view model MUST subscribe to
-  `registry.$clients` for its lifetime, retaining the subscription in
-  `cancellables`.
+  `registry.$clients` for its lifetime, so every update to `clients` is
+  picked up without the caller re-observing manually (see Platform Notes for
+  how the subscription is retained).
 - **sorts-available-servers-by-name**: On every `clients` update,
   `availableServerIds` MUST be set to the clients' keys sorted by each
   client's `name`, ascending, using `localizedCaseInsensitiveCompare`.
@@ -139,8 +142,10 @@ currently reads that state (see Design Decisions).
   `VStack`: 14pt on all sides, 8pt spacing between rows.
 - **Font**: `theme.font(.caption)` for the bar button's label/chevron and
   for the picker's empty-state message; `theme.font(.heading)` for the
-  picker's "Active MCP Servers" heading. Per `ThemeTypography.defaultStyle`
-  (`external/agenticdevelopertoolkit/.../Theme/ThemeTypography.swift`), the
+  picker's "Active MCP Servers" heading. Per
+  `ThemeTypography.defaultStyle(_:)` in
+  `external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperToolkit/Sources/Theme/ThemeTypography.swift`,
+  the
   unmodified system defaults for these roles are 11pt regular (`.caption`)
   and 15pt semibold (`.heading`), each additionally scaled by the active
   theme's `sizeScale`. Each server row's `Text` label and the checkbox's own
@@ -212,18 +217,28 @@ currently reads that state (see Design Decisions).
   (Android) minimum described in Platform Notes applies to the touch-
   platform translations, not to this AppKit-hosted SwiftUI control.
 
+NEEDS REVIEW: Not implemented in source. Neither the `"server.rack"` icon
+(`MCPChipsBarView.swift:99`) nor the `"chevron.down"` icon inside the
+button's label (`MCPChipsBarView.swift:107`) is marked
+`.accessibilityHidden(true)` or explicitly folded into the button's label
+via `.accessibilityElement(children: .combine)`; each remains its own,
+separately-spoken image element (see **Label requirements** above). Whether
+the rack icon should be hidden as purely decorative, or the chevron combined
+into the button's single spoken label, is a design decision the source does
+not make; settled once someone audits VoiceOver output for this bar.
+
 ## Conformance Test Vectors
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| mcp-chips-bar-001 | hosts-swiftui-content | Initialize `MCPChipsBarView(registry:activeServerIds:)` | Its subview tree contains exactly one `NSHostingView` whose root view is `MCPChipsBar` wrapped in `themedRoot()` |
+| mcp-chips-bar-001 | hosts-swiftui-content | Initialize `MCPChipsBarView(registry:activeServerIds:)` | Its subview tree contains exactly one `NSHostingView` whose root view is `MCPChipsBar`, and reading `\.theme` from that root view's environment returns the app's active theme (see Platform Notes for the mechanism) |
 | mcp-chips-bar-002 | disables-autoresizing-mask | Inspect the view and its hosted subview after init | Both report `translatesAutoresizingMaskIntoConstraints == false` |
-| mcp-chips-bar-003 | fills-parent-bounds | Resize the parent view after init | The hosted view's frame tracks the parent's bounds exactly on all four edges |
+| mcp-chips-bar-003 | fills-parent-bounds | Initialize with the parent view at frame `(0, 0, 300, 40)`, then resize the parent to `(0, 0, 500, 60)` and force a layout pass (`layoutSubtreeIfNeeded()`) | The hosted view's frame equals `(0, 0, 500, 60)`, matching the parent's new bounds on all four edges |
 | mcp-chips-bar-004 | rejects-coder-initialization | Attempt `MCPChipsBarView(coder:)` | The call traps with a fatal error; no instance is returned |
-| mcp-chips-bar-005 | builds-one-view-model-per-instance | Initialize the view once | Exactly one `MCPChipsBarViewModel` backs the hosted `MCPChipsBar` |
+| mcp-chips-bar-005 | shares-one-view-model-between-bar-and-picker | Initialize the view once, open the popover, then switch id1's row `Toggle` | The bar's button label recomputes to reflect the new active count without re-initializing the view — the bar and the popover are driven by the same active-server state |
 | mcp-chips-bar-006 | snapshots-active-ids-at-init | Construct with a binding whose `wrappedValue` is `{A, B}`, then mutate the binding's external storage to `{C}` before any toggle | The view model's `activeServerIds` remains `{A, B}` |
 | mcp-chips-bar-007 | subscribes-to-registry-clients, sorts-available-servers-by-name, rebuilds-server-names-on-update | Registry emits clients `[id1: "Bravo", id2: "alpha"]` | `availableServerIds == [id2, id1]` (case-insensitive "alpha" before "Bravo") and `serverNames == [id1: "Bravo", id2: "alpha"]` |
-| mcp-chips-bar-008 | defaults-missing-name-to-empty-string-for-sort | Registry emits two clients where one's `name` lookup momentarily returns `nil` during the sort comparison | The comparison treats that side as `""`, so it sorts before any non-empty name, and no crash occurs |
+| mcp-chips-bar-008 | defaults-missing-name-to-empty-string-for-sort | Code inspection of the sort comparator in `MCPChipsBarViewModel.init` (`clients[lhs]?.name ?? ""` / `clients[rhs]?.name ?? ""`) | The comparator falls back to `""` for a missing name instead of crashing or force-unwrapping; this branch is unreachable through the current call site, since `Array(clients.keys)` is always sorted against that same `clients` dictionary, but the defensive default is present and correct if that ever changes |
 | mcp-chips-bar-009 | reports-active-membership | `activeServerIds` contains id1 but not id2 | `isActive(id1) == true`, `isActive(id2) == false` |
 | mcp-chips-bar-010 | toggles-membership-on-call, propagates-toggle-to-binding | `activeServerIds` does not contain id1; call `toggle(id1)` | `activeServerIds` now contains id1, and the caller's binding's `wrappedValue` equals the new set |
 | mcp-chips-bar-011 | toggles-membership-on-call, propagates-toggle-to-binding | `activeServerIds` contains id1; call `toggle(id1)` | `activeServerIds` no longer contains id1, and the caller's binding's `wrappedValue` equals the new set |
@@ -285,6 +300,16 @@ currently reads that state (see Design Decisions).
   `availableServerIds == []` shows only the empty-state message; the
   `showingPicker` toggle and popover presentation are unaffected by whether
   any servers exist.
+- Row toggle setter is not idempotent (MUST): Each row's `Toggle` binding is
+  `Binding(get: { viewModel.isActive(id) }, set: { _ in viewModel.toggle(id)
+  })` — the setter ignores the new boolean value entirely and unconditionally
+  calls `toggle(id)`, per **row-toggle-calls-view-model-toggle**. Setting a
+  row to the value it already holds still flips membership, rather than
+  leaving it unchanged. SwiftUI's own `Toggle` only invokes a boolean
+  binding's setter when the user's interaction actually changes the
+  displayed value, so this does not manifest through normal use, but nothing
+  in the setter itself guards against being invoked with a value equal to
+  the current state.
 
 ## Configuration
 
@@ -393,7 +418,10 @@ Not applicable: source contains no logging call (no `print`, `os_log`, or
   anchored to the button. List one `Row(Checkbox(checked = isActive(id)) {
   Text(name) })` per sorted server id inside the menu — Compose's ambient
   `MaterialTheme`/`CompositionLocal`s flow into a `DropdownMenu` without
-  needing a manual reapply step, unlike `themedRoot()` here.
+  needing a manual reapply step, unlike `themedRoot()` here. Since each row
+  has no fixed height in source, give the `TextButton` and each menu `Row` a
+  minimum touch target of 48×48dp, matching Android's platform minimum (see
+  **Minimum tap target** under Accessibility).
 - **React/Web**: Render the bar as a flex row with an icon and a button
   (`aria-haspopup="true"`, `aria-expanded={showingPicker}`) that opens a
   popover component anchored below it (e.g. a Radix/Headless UI popover),
@@ -408,13 +436,18 @@ Not applicable: source contains no logging call (no `print`, `os_log`, or
   A `@MainActor`, `final` `NSView` that hosts SwiftUI content
   (`MCPChipsBar`/`MCPServerPicker`) via `NSHostingView`, pinned to its own
   bounds with Auto Layout, rather than being built as raw AppKit controls.
-  There is no UIKit code path in source; a UIKit port would keep the SwiftUI
-  content but host it with `UIHostingController`, replace the `.popover`
-  with a `UIPopoverPresentationController` (iPad) or a sheet (iPhone) — and,
-  since Toggle rows have no fixed height in source, would need to give each
-  row at least a 44pt touch target, since AppKit's `.checkbox` toggle style
-  carries no such minimum.
-- **WinUI 3** (the reason this recipe exists): Build the bar as a `StackPanel`
+  The app's `\.theme` environment value is applied to that content via the
+  shared `.themedRoot()` helper (once on `MCPChipsBar`'s root, and again on
+  `MCPServerPicker` inside the popover, since a popover is its own window —
+  see **reapplies-theme-inside-popover**); the view model retains its
+  `registry.$clients` subscription in a `Set<AnyCancellable>` property for
+  its lifetime. There is no UIKit code path in source; a UIKit port would
+  keep the SwiftUI content but host it with `UIHostingController`, replace
+  the `.popover` with a `UIPopoverPresentationController` (iPad) or a sheet
+  (iPhone) — and, since Toggle rows have no fixed height in source, would
+  need to give each row at least a 44pt touch target, since AppKit's
+  `.checkbox` toggle style carries no such minimum.
+- **WinUI 3**: Build the bar as a `StackPanel`
   (`Orientation="Horizontal"`, `Spacing="8"`) holding a `FontIcon` using a
   Segoe Fluent Icons server glyph in place of `"server.rack"`, and a
   borderless `Button` (`Style="{StaticResource TextBlockButtonStyle}"` or
@@ -436,71 +469,74 @@ Not applicable: source contains no logging call (no `print`, `os_log`, or
 
 ## Design Decisions
 
-- Decision: Read `activeServerIds.wrappedValue` once at construction into
-  the view model's own `@Published activeServerIds`, rather than observing
-  the binding for later external changes.
-  Rationale: Traceable to `MCPChipsBarViewModel.init`, which assigns
-  `self.activeServerIds = activeServerIds.wrappedValue` with no Combine
-  subscription on the binding's source; only `toggle(_:)` ever updates the
-  binding afterward (one-way, out). This keeps the model's published state
-  the single source of truth for rendering after init, at the cost of the
-  bar not reflecting an external change to the active set made through some
-  other UI while this bar is visible.
-  Approved: pending
-- Decision: Ship the bar fully functional but retained, unwired to any chat
-  consumer.
-  Rationale: Per the type's doc comment, "Not wired to any chat consumer in
-  Phase 1 — the MCP tool loop lives in `MCPChatToolSource`. This bar is
-  retained for Phase 2 when a consumer surfaces the registry selection UI
-  again." The component computes and reports active-server state correctly,
-  but no other file currently reads `activeServerIds` or observes changes
-  written through the binding.
-  Approved: pending
-- Decision: Apply `.themedRoot()` twice — once to `MCPChipsBar`'s root, and
-  again to `MCPServerPicker` inside the `.popover` content — instead of
-  once for the whole component.
-  Rationale: Per the inline source comment, "A popover is its own window,
-  so it is outside this view's environment and needs the palette injected
-  again." Reapplying it is a workaround for a limitation in how this app's
-  custom `\.theme` environment value propagates into `NSPopover`-backed
-  content, not a change in visual intent between the bar and the picker.
-  Approved: pending
+**Decision**: Read `activeServerIds.wrappedValue` once at construction into
+the view model's own `@Published activeServerIds`, rather than observing
+the binding for later external changes.
+**Rationale**: Traceable to `MCPChipsBarViewModel.init`, which assigns
+`self.activeServerIds = activeServerIds.wrappedValue` with no Combine
+subscription on the binding's source; only `toggle(_:)` ever updates the
+binding afterward (one-way, out). This keeps the model's published state
+the single source of truth for rendering after init, at the cost of the
+bar not reflecting an external change to the active set made through some
+other UI while this bar is visible. Until this decision is approved,
+**snapshots-active-ids-at-init** and the "Stale active ids outlive their
+server" edge case describe the current, accepted behavior — not
+necessarily the final design.
+**Approved**: pending
+
+**Decision**: Ship the bar fully functional but retained, unwired to any chat
+consumer.
+**Rationale**: Per the type's doc comment, "Not wired to any chat consumer in
+Phase 1 — the MCP tool loop lives in `MCPChatToolSource`. This bar is
+retained for Phase 2 when a consumer surfaces the registry selection UI
+again." The component computes and reports active-server state correctly,
+but no other file currently reads `activeServerIds` or observes changes
+written through the binding.
+**Approved**: pending
+
+**Decision**: Apply `.themedRoot()` twice — once to `MCPChipsBar`'s root, and
+again to `MCPServerPicker` inside the `.popover` content — instead of
+once for the whole component.
+**Rationale**: Per the inline source comment, "A popover is its own window,
+so it is outside this view's environment and needs the palette injected
+again." Reapplying it is a workaround for a limitation in how this app's
+custom `\.theme` environment value propagates into `NSPopover`-backed
+content, not a change in visual intent between the bar and the picker.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
-| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
+| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
+| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | Platform Compliance |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | partial | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
+| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
 
 Native-controls-preference and platform-design-language pass because the bar
 composes standard SwiftUI controls (`Button`, `Toggle`, `Text`, `Image`) with
 system styles (`.borderless`, `.checkbox`) and a system `.popover`, rather
-than custom-drawn chrome. Keyboard-navigable passes because these are all
-standard, framework-provided controls with their own default keyboard
-support; no bespoke keyboard-handling code exists or is needed in this file.
-Screen-reader-support is partial: button and row labels come from visible
+than custom-drawn chrome. Keyboard-navigable is partial: these are standard,
+framework-provided controls, but the toggle button uses `.buttonStyle(.borderless)`,
+and a borderless SwiftUI button on macOS is only Tab-reachable when Full
+Keyboard Access is enabled; no keyboard-navigation test of this bar exists in
+source. Screen-reader-support is partial: button and row labels come from visible
 `Text` content with no explicit override, but the "server.rack" icon is a
 separate, ungrouped accessibility element next to the button (see **Label
-requirements** under Accessibility) and no explicit announcement accompanies
-a label or toggle-state change. Differentiate-without-color passes because
-active state is conveyed by text and a checkbox glyph, not color.
+requirements** under Accessibility, and the open question noted there) and
+no explicit announcement accompanies a label or toggle-state change.
 String-externalization is failed because the button's three label strings
 and the "Unknown" row fallback are unlocalized `String` values (see the
-open question under Localization). Main-actor-confined passes because both
-`MCPChipsBarView` and `MCPChipsBarViewModel` are declared `@MainActor`.
-Separation-of-concerns passes because `MCPChipsBarViewModel` owns all
-registry/binding logic, leaving `MCPChipsBar` and `MCPServerPicker` as plain
-rendering of that model's published state.
+open question under Localization). Separation-of-concerns passes because
+`MCPChipsBarViewModel` owns all registry/binding logic, leaving
+`MCPChipsBar` and `MCPServerPicker` as plain rendering of that model's
+published state.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Claude Sonnet 5 | Initial ingredient recipe for MCPChipsBarView, covering the bar/picker view pair, the view model's sort/label/toggle logic, the one-time active-ids snapshot and stale-id quirks, and one open localization question (unlocalized computed label strings) for review. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded two requirements and the `cancellables`-touching one to state observable behavior instead of private identifiers, moving those identifiers into Platform Notes; added an open-question note for the ungrouped rack/chevron icons; added an edge case for the non-idempotent row-toggle setter; corrected the keyboard-navigable compliance status and the ThemeTypography citation; reformatted Design Decisions to the bold three-line form and noted two MUSTs as accepted-pending-approval behavior; tightened three underspecified test vectors; dropped a redundant tag; converted Compliance categories to display names and removed the invented `main-actor-confined` and `differentiate-without-color` checks via the compliance-catalog fixer. |

@@ -3,7 +3,7 @@ id: acd561ca-90a4-4303-a411-cfe23410b42a
 title: NumberFieldView
 domain: agentictoolkit://recipes/number-field-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -21,7 +21,6 @@ tags:
 - form-control
 - range
 - numeric
-- macos
 - appkit
 depends-on: []
 related:
@@ -48,10 +47,10 @@ is still a number, not a text box." The same file also declares
 `SettingsNumberValue` — the protocol a number type conforms to so a field can
 show it, read it back, and compare it — plus the framework's two
 conformances, `Int` and `Double`, each supplying its own locale-aware parse
-and canonical text form. `IntegerFieldView` (`recipes/integer-field-view.md`)
-is a thin, forwarding wrapper around `NumberFieldView<Int>`; this recipe
-documents the field itself, including the parsing contract that wrapper
-delegates to.
+and canonical text form. `IntegerFieldView`
+(`agentictoolkit://recipes/integer-field-view`) is a thin, forwarding wrapper
+around `NumberFieldView<Int>`; this recipe documents the field itself,
+including the parsing contract that wrapper delegates to.
 
 ## Behavioral Requirements
 
@@ -112,10 +111,10 @@ delegates to.
   unchanged and MUST reset both `label.stringValue` and
   `textField.stringValue` from the view model's current title/value (via
   `sync()`).
-- **clamps-to-bounds**: WHEN `minimum` and `maximum` are not both set with
-  `minimum` greater than `maximum`, `commit()` MUST clamp a successfully
-  parsed value up to `minimum` (if the value is lower) and then down to
-  `maximum` (if the value is higher) before storing it.
+- **clamps-to-bounds**: Unless **skips-clamp-on-contradictory-bounds**
+  applies, `commit()` MUST clamp a successfully parsed value up to `minimum`
+  (if the value is lower) and then down to `maximum` (if the value is higher)
+  before storing it.
 - **skips-clamp-on-contradictory-bounds**: WHEN both `minimum` and `maximum`
   are set and `minimum` is greater than `maximum`, `commit()` MUST store the
   parsed value unclamped.
@@ -252,6 +251,13 @@ delegates to.
   `controlSize` is set on `textField`, so it keeps `NSTextField`'s regular
   system metrics; its clickable width is the fixed `fieldWidth` (72pt
   default) set by **fixes-field-width**.
+- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
+  `label` and `textField` text colors resolve from the active theme's
+  `.primaryText` role against the hosting background at runtime; the
+  component performs no contrast check, so whether a given theme's resolved
+  pair meets 4.5:1 cannot be determined from this file. This would be
+  settled by a theme-level contrast audit of `.primaryText` against the
+  settings-row backgrounds it sits on.
 
 ## Conformance Test Vectors
 
@@ -263,7 +269,7 @@ delegates to.
 | number-field-view-004 | wires-field-target-action | Any initialized field | `textField.target === field`; `textField.action == Selector("fieldChanged:")` |
 | number-field-view-005 | delegates-field-to-self | Any initialized field | `textField.delegate === field` |
 | number-field-view-006 | links-field-accessibility-title | Construct the component | `textField`'s accessibility title UI element is `label` |
-| number-field-view-007 | themes-field-live | Construct the field, then post a theme change to a palette with a distinct `.code` font/`.primaryText` color | `textField.font` and `textField.textColor` update to match the new palette both immediately at construction and again after the change |
+| number-field-view-007 | themes-field-live | Construct the field, then call `ThemeManager.shared.selectTheme(id:)` (or post `ThemeManager.didChangeNotification` directly) to switch to a theme whose palette has a distinct `.code` font/`.primaryText` color | `textField.font` and `textField.textColor` update to match the new palette both immediately at construction and again after the change |
 | number-field-view-008 | fixes-field-width | Construct with `fieldWidth: 90` | `textField.widthAnchor`'s constant is 90 |
 | number-field-view-009 | aligns-label-when-width-fixed | Construct with `labelWidth: 100` | `label.alignment == .right` and `label.widthAnchor`'s constant is 100 |
 | number-field-view-010 | lays-out-content-width-row-when-label-fixed | Construct with `labelWidth: 100` | The row's top/leading/bottom are pinned to the container; its trailing constraint is `lessThanOrEqualTo` the container's trailing edge |
@@ -276,17 +282,17 @@ delegates to.
 | number-field-view-017 | confines-to-main-actor | Attempt to construct or mutate a `NumberFieldView` from off the main actor | Compiler rejects the call at compile time under `@MainActor` isolation checking |
 | number-field-view-018 | commits-on-field-action | Type `"7"` into `textField` and invoke `fieldChanged(textField)` directly | `viewModel.settingObserver.value == 7` after the call |
 | number-field-view-019 | commits-on-editing-end | Type `"7"` into `textField` and invoke `controlTextDidEndEditing` | `viewModel.settingObserver.value == 7` after the call |
-| number-field-view-020 | parses-committed-text-via-value-type | `textField.stringValue = "42"` | `commit()` calls `Int(settingsFieldString: "42")` and stores `42` |
+| number-field-view-020 | parses-committed-text-via-value-type | `textField.stringValue = "42"`, then commit | `viewModel.settingObserver.value == 42` |
 | number-field-view-021 | reverts-on-unparseable-text | `viewModel.settingObserver.value = 5`; set `textField.stringValue = "abc"` and commit | `viewModel.settingObserver.value` remains `5`; `textField.stringValue` is reset to `"5"` |
 | number-field-view-022 | clamps-to-bounds | `minimum = 0`, `maximum = 10`; set `textField.stringValue = "99"` and commit | `viewModel.settingObserver.value == 10`; `textField.stringValue == "10"` |
 | number-field-view-023 | skips-clamp-on-contradictory-bounds | `minimum = 10`, `maximum = 1`; set `textField.stringValue = "37"` and commit | `viewModel.settingObserver.value == 37` (stored unclamped) |
 | number-field-view-024 | redisplays-committed-text | `minimum = 0`, `maximum = 10`; set `textField.stringValue = "99"` and commit | `textField.stringValue` changes from `"99"` to `"10"` |
 | number-field-view-025 | skips-redundant-commits | `viewModel.settingObserver.value = 5`; set `textField.stringValue = "5"` (same value) and commit | `viewModel.settingObserver.value`'s setter is not invoked a second time (e.g. no additional write/observer notification is recorded) |
 | number-field-view-026 | defines-number-parsing-contract | Declare a type conforming to `SettingsNumberValue` that omits `settingsAllowsFloats` or the failable locale initializer | The declaration fails to compile |
-| number-field-view-027 | provides-current-locale-parse | Call `Int(settingsFieldString: "12")` with no locale argument, with the process locale set to `de_DE` | The call resolves through `init(settingsFieldString:locale: .current)` and returns `12` |
+| number-field-view-027 | provides-current-locale-parse | With the process locale set to `de_DE`, call `Int(settingsFieldString: "1.234")` with no locale argument | Returns `1234` — a result only produced under a German (thousands-grouped) locale reading, showing the omitted-locale form used the current locale rather than, say, `en_US` (under which the same call returns `nil`) |
 | number-field-view-028 | requires-whole-string-locale-parse | With locale `en_US` and `Int.settingsAllowsFloats == false`, call `Int(settingsFieldString: "12abc")` | Returns `nil` (the formatter consumes only `"12"`, leaving the range short of the whole string) |
 | number-field-view-029 | trims-whitespace-before-parsing-int | Call `Int(settingsFieldString: " 12 ")` | Returns `12` |
-| number-field-view-030 | parses-posix-integer-first | Call `Int(settingsFieldString: "12", locale: Locale(identifier: "de_DE"))` | Returns `12` via the POSIX branch, without invoking the locale-aware formatter |
+| number-field-view-030 | parses-posix-integer-first | Call `Int(settingsFieldString: "12", locale: Locale(identifier: "de_DE"))` | Returns `12` |
 | number-field-view-031 | falls-back-to-locale-decimal-for-int | With locale `de_DE`, call `Int(settingsFieldString: "1.234")` | The POSIX parse of `"1.234"` fails (not representable as a plain `Int` literal with a `.`), the locale-aware branch reads it as German thousands-grouped `1234`, and the call returns `1234` |
 | number-field-view-032 | disallows-fractional-values-for-int | Call `Int(settingsFieldString: "1.0")` and `Int(settingsFieldString: "1,5")` with locale `de_DE` | Both return `nil` |
 | number-field-view-033 | rejects-inexact-magnitude-for-int | Call `Int(settingsFieldString: "99999999999999999999999999")` | Returns `nil` rather than a saturated `Int.max` |
@@ -304,40 +310,41 @@ delegates to.
   `textField.stringValue` fails `Value(settingsFieldString:)` for both `Int`
   and `Double` (a trimmed empty string fails both the POSIX and the
   locale-aware parse), so `commit()` takes the revert path
-  (**reverts-on-unparseable-text**) rather than storing `0`. MUST.
+  (**reverts-on-unparseable-text**) rather than storing `0`.
 - **Boundary values**: A typed value exactly equal to `minimum` or `maximum`
   commits unclamped (the clamp is a no-op at the boundary). A value one
   below `minimum` clamps up to `minimum`; one above `maximum` clamps down to
   `maximum`. When `minimum` and `maximum` are both set and `minimum >
   maximum`, clamping is skipped entirely and the raw typed value is stored
   (**skips-clamp-on-contradictory-bounds**) — a caller configuration error,
-  not a range this component enforces. MUST.
+  not a range this component enforces.
 - **Out-of-range magnitude (Int)**: A typed value whose magnitude exceeds
   what `Int` can hold exactly — per `Int.settingsExactInt(from:)`'s
   `Decimal`-based check, which catches the case `NSNumber.int64Value` would
   otherwise silently saturate — is treated as unparseable and reverts rather
-  than storing a clamped `Int.max`/`Int.min`. MUST.
+  than storing a clamped `Int.max`/`Int.min`.
 - **Non-finite values (Double)**: `"nan"`, `"inf"`, and `"-inf"` all parse
   syntactically under `Double(_:)`, but `Double.init(settingsFieldString:
   locale:)` explicitly rejects a non-finite POSIX result and a non-finite
   locale-aware result, returning `nil` rather than storing a NaN or
   infinite value that would make every bounds comparison in `commit()`
-  false. MUST.
+  false.
 - **Fractional and locale-formatted text (Int)**: A fractional string
   (`"1.5"`, or `"1,5"` in a comma-decimal locale) is rejected outright —
   `Int.settingsAllowsFloats` is `false`, so the locale `NumberFormatter`
   refuses it, and the whole-string-consumed check refuses a partial parse
   like the leading `"1"` of `"1,5"`. An integral-valued fractional spelling
-  (`"1.0"`) is refused for the same reason. MUST.
+  (`"1.0"`) is refused for the same reason.
 - **Whole-number round-trip stability (Double)**: A stored `20.0` renders as
   `"20"` (**writes-whole-doubles-without-fraction**) rather than `"20.0"`,
   so a field showing a value the caller never edited does not visibly
-  rewrite it into a longer, decorated form. MUST.
-- **Concurrent access**: Not applicable — the class, `SettingsNumberValue`'s
-  extension methods, and the `Int`/`Double` conformances are all
-  `@MainActor`-isolated or synchronous value-type code reachable only from
-  the main actor's call sites in this file, so all construction and
-  mutation is serialized to the main actor (see **confines-to-main-actor**).
+  rewrite it into a longer, decorated form.
+- **Concurrent access**: Not applicable — `SettingsNumberValue`'s extension
+  methods and the `Int`/`Double` conformances are `nonisolated`, synchronous,
+  pure value-type code (the protocol itself requires only `Sendable`); only
+  `NumberFieldView` is `@MainActor` (see **confines-to-main-actor**), so all
+  construction and mutation of the view is serialized to the main actor even
+  though the parsing/formatting code they call is not itself isolated.
 - **Error states**: Not applicable — every operation in this file (parsing,
   clamping, the `settingObserver.value` write) is synchronous and
   non-throwing; the one `try` in the file (`formatter.getObjectValue`) is
@@ -433,16 +440,19 @@ Not applicable: `NumberFieldView.swift` contains no logging call (no
   problem the source's no-formatter comment describes), and commit/clamp
   when focus is lost (`Modifier.onFocusChanged`), mirroring
   commits-on-editing-end.
-- **React/Web**: `<input type="text" inputMode="decimal" pattern="-?[0-9]*\.?[0-9]*">`
-  (not `type="number"`, whose native spinner and silent-empty-on-invalid
-  behavior diverges from the source's explicit revert-on-invalid path)
-  paired with a `<label>` wired via `aria-labelledby`/`htmlFor`, the web
-  analog of `setAccessibilityTitleUIElement`. Parse and clamp on
-  `blur`/`Enter` (mirroring commits-on-editing-end and
-  commits-on-field-action), reverting the displayed text on a parse failure
-  rather than accepting it. Represent the `Int`-vs-`Double` distinction as
-  two thin parse/format functions passed to one shared row component, the
-  same generalization `SettingsNumberValue` gives the Swift source.
+- **React/Web**: `<input type="text" inputMode="decimal">` (not
+  `type="number"`, whose native spinner and silent-empty-on-invalid behavior
+  diverges from the source's explicit revert-on-invalid path, and no `pattern`
+  attribute, which cannot express the source's locale-aware grammar — a
+  POSIX-only pattern like `-?[0-9]*\.?[0-9]*` would reject comma-decimal
+  locales and would also accept a fraction for the `Int` case) paired with a
+  `<label>` wired via `aria-labelledby`/`htmlFor`, the web analog of
+  `setAccessibilityTitleUIElement`. Parse and clamp on `blur`/`Enter`
+  (mirroring commits-on-editing-end and commits-on-field-action), reverting
+  the displayed text on a parse failure rather than accepting it, using the
+  same two thin parse/format functions per type (rather than the `pattern`
+  attribute) to police what each type accepts — the same generalization
+  `SettingsNumberValue` gives the Swift source.
 - **AppKit/UIKit** (source platform): Source file
   `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/NumberFieldView.swift`.
   A macOS-only (`import AppKit`) `NSView` subclass, `@MainActor`, generic
@@ -471,8 +481,22 @@ Not applicable: `NumberFieldView.swift` contains no logging call (no
   value the round trip through `double` would not reproduce exactly; a
   `Double`-typed field maps directly. `NumberBox` already exposes
   `Minimum`/`Maximum` properties that map directly to this component's
-  `minimum`/`maximum` (when non-nil; leave a bound at `NumberBox`'s own
-  `double.NaN`/unset default to mirror `nil`), and setting
+  `minimum`/`maximum` when non-nil; their own unset defaults are
+  `double.MinValue`/`double.MaxValue` (not `NaN`), which already mirrors
+  `nil`'s no-clamp-at-that-end behavior with no extra sentinel needed.
+  `NumberBox` has no equivalent of **skips-clamp-on-contradictory-bounds**,
+  though: it documents no escape hatch for a caller-supplied `Minimum >
+  Maximum`, so a port either validates that bounds are non-contradictory
+  before setting them or accepts that `NumberBox`'s own (unspecified)
+  behavior governs that case instead of this source's unclamped fallback —
+  the two diverge there. `NumberBox` also parses its displayed text in the
+  current culture only, with no POSIX-first fallback, so the round-trip
+  guarantee behind this source's POSIX-first Design Decision (text this
+  component itself wrote is guaranteed to read back correctly regardless of
+  a later locale change) does not carry over automatically; a port that
+  needs it must format and re-parse `NumberBox.Text` itself with the same
+  POSIX-first-then-current-culture ordering rather than relying on
+  `NumberBox`'s own culture-aware parsing. Setting
   `SpinButtonPlacementMode="Collapsed"` keeps it visually a bare field
   rather than a stepper. Set `NumberBox.ValidationMode=
   "InvalidInputOverwritten"` to reproduce reverts-on-unparseable-text
@@ -488,71 +512,57 @@ Not applicable: `NumberFieldView.swift` contains no logging call (no
 
 ## Design Decisions
 
-- Decision: Attach no `NSFormatter` to `textField`.
-  Rationale: Per the source's own comment, a formatter with a minimum would
-  reject valid intermediate text on the way to a valid number (e.g. typing
-  "-" before "-5", or the "1" of "12" against a minimum of 10); parsing
-  happens only on commit instead.
-  Approved: pending
-- Decision: Parse POSIX-first, falling back to a locale-aware parse only
+- **Decision**: Attach no `NSFormatter` to `textField`.
+  **Rationale**: Per the source's own comment, a formatter with a minimum
+  would reject valid intermediate text on the way to a valid number (e.g.
+  typing "-" before "-5", or the "1" of "12" against a minimum of 10);
+  parsing happens only on commit instead.
+  **Approved**: pending
+- **Decision**: Parse POSIX-first, falling back to a locale-aware parse only
   when the POSIX parse fails (or, for `Double`, produces a non-finite
   result).
-  Rationale: Per the source's own comment on `SettingsNumberValue`, the
+  **Rationale**: Per the source's own comment on `SettingsNumberValue`, the
   field's own writer (`settingsFieldString`) is POSIX; a locale-first parse
-  would misread the POSIX text `sync()` itself just wrote (e.g. reading
-  `"1.5"`'s `.` as a German thousands separator and storing `15`),
-  multiplying a value by ten on every locale-mismatched commit cycle. The
-  source itself notes this ordering is unobservable and deliberately
-  untested for `Int` (`settingsFieldString` emits no separators for `Int`,
-  so neither parse branch can see a string the other reads differently),
-  while `Double`'s ordering is pinned by a dedicated test, because a
-  `Double`'s POSIX writer can emit a decimal point a locale parse could
-  misread.
-  Approved: pending
-- Decision: Skip clamping entirely when `minimum` and `maximum` are both set
-  and `minimum > maximum`, rather than clamping to one of them.
-  Rationale: Per the source's own comment, "a contradictory pair comes from
-  a caller's own mistake, and the field's job then is to stay usable, not
-  to enforce an empty range" — whichever bound clamping would apply first
-  is an arbitrary artifact of the code's line order, so the source instead
-  leaves the field unbounded in that case.
-  Approved: pending
-- Decision: Revert silently to the last committed value on unparseable
+  risks misreading the POSIX text `sync()` itself just wrote as a
+  locale-formatted number instead. The source itself notes this ordering is
+  unobservable and deliberately untested for `Int` (`settingsFieldString`
+  emits no separators for `Int`, so neither parse branch can see a string
+  the other reads differently), while `Double`'s ordering is pinned by a
+  dedicated test, because a `Double`'s POSIX writer can emit a decimal point
+  a locale parse could misread.
+  **Approved**: pending
+- **Decision**: Skip clamping entirely when `minimum` and `maximum` are both
+  set and `minimum > maximum`, rather than clamping to one of them.
+  **Rationale**: Per the source's own comment, "a contradictory pair comes
+  from a caller's own mistake, and the field's job then is to stay usable,
+  not to enforce an empty range" — whichever bound clamping would apply
+  first is an arbitrary artifact of the code's line order, so the source
+  instead leaves the field unbounded in that case.
+  **Approved**: pending
+- **Decision**: Revert silently to the last committed value on unparseable
   text, rather than storing a coerced or default value.
-  Rationale: Per the source's own comment, "text that is not a number of
+  **Rationale**: Per the source's own comment, "text that is not a number of
   this type is not a zero; it is a typo," and a silently-stored zero (or a
   rounded fraction) would be a value the user never typed.
-  Approved: pending
-- Decision: Reject a parsed `Int` whose magnitude `Int64` would otherwise
+  **Approved**: pending
+- **Decision**: Reject a parsed `Int` whose magnitude `Int64` would otherwise
   silently clamp, via a `Decimal`-based exactness check
   (`Int.settingsExactInt(from:)`), rather than accepting the clamped
   result.
-  Rationale: Per the source's own comment, `NSNumber.int64Value` saturates
-  rather than failing on overflow, and `Double(Int64.max)` rounds up to
-  exactly 2^63 — indistinguishable from a true 2^63 input as a `Double` —
-  so only the `Decimal` comparison can tell a genuinely-typed `Int.max`
-  apart from an overflow that would otherwise be silently stored as
-  `Int.max`.
-  Approved: pending
-- Decision: Render a whole `Double` without a trailing fraction
+  **Rationale**: Per the source's own comment, `NSNumber.int64Value`
+  saturates rather than failing on overflow, and `Double(Int64.max)` rounds
+  up to exactly 2^63 — indistinguishable from a true 2^63 input as a
+  `Double` — so only the `Decimal` comparison can tell a genuinely-typed
+  `Int.max` apart from an overflow that would otherwise be silently stored
+  as `Int.max`.
+  **Approved**: pending
+- **Decision**: Render a whole `Double` without a trailing fraction
   (`20.0` → `"20"`) via `Int(exactly:)`, rather than always using
   `String(self)`.
-  Rationale: Per the source's own comment, `String(20.0)` is `"20.0"`, and a
-  field that turns the `20` an extension author wrote into `20.0` the
+  **Rationale**: Per the source's own comment, `String(20.0)` is `"20.0"`,
+  and a field that turns the `20` an extension author wrote into `20.0` the
   moment it is shown has edited a setting nobody touched.
-  Approved: pending
-- Decision: Document this recipe with a behavioral-requirement count well
-  above a single-purpose sibling row (`CheckboxView`'s eleven,
-  `CaptionedSliderView`'s thirteen).
-  Rationale: This one file defines a generic view engine plus two complete,
-  independently-testable numeric conformances (`Int` and `Double`), each
-  with its own parse ordering, fractional-value policy, and canonical text
-  form; `IntegerFieldView` (recipes/integer-field-view.md) documents the
-  same view behavior again from its own wrapper's perspective for `Int`
-  alone. Tracing all of that into one recipe follows this cookbook's own
-  instruction to trace a called helper's behavior rather than treating it
-  as out of scope.
-  Approved: pending
+  **Approved**: pending
 
 ## Compliance
 
@@ -561,11 +571,24 @@ Not applicable: `NumberFieldView.swift` contains no logging call (no
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
 | [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
 | [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | reliability |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
+
+`native-controls-preference`, `platform-design-language`, `keyboard-navigable`,
+`idempotent-operations`, and `separation-of-concerns` rest on the source's use
+of a stock `NSTextField`'s own keyboard-and-focus behavior, its
+skips-redundant-commits guard, and its single-responsibility split between the
+generic view and the `SettingsNumberValue` parsing contract; `screen-reader-support`
+is `partial` because `setAccessibilityTitleUIElement` gives the field a
+spoken name, but an unparseable-text revert (**reverts-on-unparseable-text**)
+changes `textField.stringValue` with no explicit `NSAccessibility` announcement
+in source, so whether VoiceOver notices the reverted value while the field is
+focused is left to AppKit's own, unverified-in-source, default behavior.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: cites IntegerFieldView by domain URL instead of file path and drops the out-of-scope, duplicative Design Decision about this recipe's requirement count; reformats Design Decisions to the three-line form and corrects an inaccurate parsing example in the POSIX-first decision; trims tags to five; rewords clamps-to-bounds' guard as a positive cross-reference; drops dangling trailing MUST keywords from Edge Cases; corrects the Concurrent Access edge case's actor-isolation claim; strengthens three test vectors (007, 020, 027, 030) to name a real trigger API or assert only observable outcomes; corrects WinUI 3's NumberBox.Minimum/Maximum defaults and documents its contradictory-bounds and locale-first-parsing divergence from this source; drops the web input's locale-hostile pattern attribute; marks screen-reader-support partial and documents why; backfills the missing 1.0.0 history row; remaps Compliance citations to the catalog; records the unverified theme-token contrast as an open question. |
