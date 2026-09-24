@@ -52,6 +52,12 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
     private var sendable: Bool
     private var continuation: AsyncStream<ChatEvent>.Continuation?
     private var pump: Task<Void, Never>?
+    /// Which pump is allowed to write ``loaded``. Bumped by every `start()` and
+    /// every ``replaceTranscript(_:)``, and checked under the same lock as the
+    /// write — cancellation alone leaves a window between a read's
+    /// `isCancelled` check and its commit, and a read for the conversation the
+    /// reader just left landing in it puts that conversation back on screen.
+    private var generation: UInt64 = 0
 
     /// The last transcript read, and the messages written since that are not in
     /// it yet. What the view sees is the two, in that order.
@@ -147,6 +153,24 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
     /// Re-reads now, without waiting for the next interval. For a filter change
     /// or an explicit refresh — anything where waiting would look broken.
     public func refresh() { start() }
+
+    /// Puts `transcript` on screen now, and stops the running read from
+    /// replacing it — for a feed pointed at a different conversation, where
+    /// what is on screen has to change on the keystroke rather than when the
+    /// next read returns. `transcript` is whatever the host already has for
+    /// the new conversation, or empty; the poll stays stopped until the next
+    /// ``refresh()``, which reads the real thing.
+    public func replaceTranscript(_ transcript: [ChatMessage]) {
+        let running = withLock { () -> Task<Void, Never>? in
+            generation &+= 1
+            loaded = transcript
+            let running = pump
+            pump = nil
+            return running
+        }
+        running?.cancel()
+        publish()
+    }
 
     /// Writes `text` into the source, and shows it here as pending until the
     /// source reads back.
@@ -309,7 +333,10 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
     /// Replaces the running poll rather than adding one, so a burst of
     /// `refresh()` calls (a filter toggled three times) leaves exactly one.
     private func start() {
-        let existing = withLock { pump }
+        let (existing, mine) = withLock { () -> (Task<Void, Never>?, UInt64) in
+            generation &+= 1
+            return (pump, generation)
+        }
         existing?.cancel()
         let task = Task { [weak self] in
             guard let self else { return }
@@ -320,7 +347,12 @@ public final class FeedChatSession: ChatSession, @unchecked Sendable {
                 guard let cont else { return }
                 if let messages {
                     self.reconcile(messages)
-                    self.withLock { self.loaded = messages }
+                    let current = self.withLock { () -> Bool in
+                        guard self.generation == mine else { return false }
+                        self.loaded = messages
+                        return true
+                    }
+                    guard current else { return }
                     self.publish()
                 }
                 cont.yield(.stateChanged(.ready))

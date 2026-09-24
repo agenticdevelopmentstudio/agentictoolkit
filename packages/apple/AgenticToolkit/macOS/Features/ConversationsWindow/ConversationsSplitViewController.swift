@@ -65,7 +65,10 @@ public final class ConversationsSplitViewController: NSSplitViewController {
             // move-selection commands, both of which need the shelf out. A
             // narrowing that leaves the reader looking at one conversation with
             // no way to reach another is the mode doing half its job.
-            if selectionMode == .single { setShelfVisible(true) }
+            if selectionMode == .single {
+                setShelfVisible(true)
+                prefetchAroundPick()
+            }
             updateSelectionModeControl()
             onSelectionModeChanged?(selectionMode)
         }
@@ -130,6 +133,8 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         }
         feed.onRosterChanged = { [weak self] sessions in
             self?.shelf.sessions = sessions
+            // A new session is a new neighbour to have ready.
+            self?.prefetchAroundPick()
         }
         shelf.onActivityChanged = { [weak self] activity in
             self?.feed.activity = activity
@@ -140,7 +145,17 @@ public final class ConversationsSplitViewController: NSSplitViewController {
         shelf.onSoloChanged = { [weak self] id in
             self?.feed.soloSessionID = id
             self?.onSoloSessionChanged?(id)
+            self?.prefetchAroundPick()
         }
+    }
+
+    /// Has the feed read ahead every conversation the shelf lists, nearest the
+    /// pick first, so the next ⌘↑/⌘↓ — or a click — draws from memory. The
+    /// shelf knows the order a reader can reach rows in; the feed knows how to
+    /// read one. Single mode only: multi mode draws no one conversation.
+    private func prefetchAroundPick() {
+        guard selectionMode == .single else { return }
+        feed.prefetch(shelf.idsByDistanceFromSolo())
     }
 
     @available(*, unavailable)

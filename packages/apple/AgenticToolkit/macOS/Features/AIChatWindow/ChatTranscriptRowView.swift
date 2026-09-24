@@ -82,7 +82,7 @@ public final class ChatTranscriptRowView: NSView {
         }
     }
 
-    private let message: ChatMessage
+    let message: ChatMessage
     private let attribution: ChatMessage.Attribution
     private let actions: Actions
 

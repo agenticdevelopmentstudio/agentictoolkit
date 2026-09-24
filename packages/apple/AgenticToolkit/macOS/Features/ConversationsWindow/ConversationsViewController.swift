@@ -187,6 +187,9 @@ public final class ConversationsViewController: NSViewController {
     /// it is *also* drawn as bubbles, in either mode, and it stays the reader's
     /// own: leaving single mode gives it back unchanged.
     public var includeWorkOutput: Bool {
+        // No cache to invalidate here: a cached transcript is keyed by the
+        // setting it was read under (``TranscriptKey``), so flipping it reads
+        // the other half of the cache rather than a stale copy of this one.
         get { workOutputFlag.preference }
         set {
             guard newValue != workOutputFlag.preference else { return }
@@ -243,6 +246,7 @@ public final class ConversationsViewController: NSViewController {
             guard selectionMode != oldValue else { return }
             if selectionMode == .single { dismissFocus() }
             let soloMoved = syncSolo()
+            if soloMoved { showCachedSolo() }
             updateComposer()
             // Only when the answer actually moved — with the reader's own
             // setting already on and no conversation picked there is nothing to
@@ -261,14 +265,18 @@ public final class ConversationsViewController: NSViewController {
     /// Nil falls back to whichever one session the hidden set leaves showing,
     /// which is what a feed used without a shelf has.
     ///
-    /// A change re-reads after a short pause rather than at once: a reader
-    /// holding an arrow key walks through a dozen conversations a second, and
-    /// a read per step queues a dozen reads that cannot be called back, each
-    /// landing after the one the reader stopped on.
+    /// A change swaps the screen at once — to the conversation as last read,
+    /// out of ``transcripts``, or to an empty pane when it has never been read
+    /// — and re-reads after a short pause: a reader holding an arrow key walks
+    /// through a dozen conversations a second, and a read per step queues a
+    /// dozen reads that cannot be called back, each landing after the one the
+    /// reader stopped on. What the pause must never do is leave the *previous*
+    /// conversation on screen under the new pick.
     public var soloSessionID: String? {
         didSet {
             guard soloSessionID != oldValue else { return }
             guard syncSolo() else { return }
+            showCachedSolo()
             updateComposer()
             scheduleRefresh()
         }
@@ -309,6 +317,43 @@ public final class ConversationsViewController: NSViewController {
     private var chatView: ChatView?
     private var overlay: ConversationFocusOverlay?
     private var pendingRefresh: Task<Void, Never>?
+    private var pendingPrefetch: Task<Void, Never>?
+
+    /// One conversation as single mode last read it, and when.
+    struct CachedTranscript: Sendable {
+        let messages: [ChatMessage]
+        let readAt: ContinuousClock.Instant
+    }
+
+    /// What a cached transcript is filed under: the conversation, and whether
+    /// it was read with work output — the two readings of one conversation are
+    /// different transcripts, and serving one for the other would show the
+    /// reader narration they turned off, or hide narration they turned on.
+    struct TranscriptKey: Hashable, Sendable {
+        let id: String
+        let includesWorkOutput: Bool
+    }
+
+    /// Every conversation single mode has read, so a switch puts the new one on
+    /// screen from memory on the keystroke instead of after a round trip to the
+    /// source. Filled by single mode's own reads and by ``prefetch(_:)``; what
+    /// it holds may be seconds old, and the read that follows every switch
+    /// replaces it.
+    private let transcripts: LRUCache<TranscriptKey, CachedTranscript>
+
+    /// How many conversations ``transcripts`` keeps — more than a reader has
+    /// sessions running, so walking the whole shelf never evicts.
+    static let cachedConversations = 64
+
+    /// How old a cached conversation may be before ``prefetch(_:)`` reads it
+    /// again. The switch refreshes whatever it lands on regardless; this is
+    /// only how long a prefetched copy is good enough to show first.
+    static let prefetchFreshness: Duration = .seconds(30)
+
+    /// How many prefetch reads are in flight at once — enough to fill the
+    /// shelf's neighbourhood in about one round trip, few enough not to crowd
+    /// the source's own poll.
+    nonisolated static let prefetchConcurrency = 4
 
     /// How long a moved pick waits before the feed re-reads — long enough to
     /// swallow key repeat, short enough not to read as lag.
@@ -357,6 +402,9 @@ public final class ConversationsViewController: NSViewController {
         let sendTarget = self.sendTarget
         let workStatus = self.workStatus
         let statusDepth = Self.statusDepth
+        let transcripts = LRUCache<TranscriptKey, CachedTranscript>(
+            capacity: Self.cachedConversations)
+        self.transcripts = transcripts
         let session = FeedChatSession(
             refreshInterval: refreshInterval,
             // A sender from the start, resolved when a line is actually typed —
@@ -365,42 +413,61 @@ public final class ConversationsViewController: NSViewController {
             // composer is live is `canSend`, set below.
             send: { text, destination in await sendTarget.write(text, to: destination) },
             load: {
-                // The bubbles ask for what the reader asked for, in either mode.
-                // Single mode's work output comes from a read of its own below:
-                // asked for here it would take the page's room from what the
-                // agent said, and a page that is two thirds narration shows a
-                // third of the conversation.
+                // Read once, so the three reads below and the cache entry all
+                // agree about which question was asked.
+                let preference = flag.preference
+                // Single mode's work output comes from a read of its own: asked
+                // for with the bubbles it would take the page's room from what
+                // the agent said, and a page that is two thirds narration shows
+                // a third of the conversation.
+                let wantsStatus = flag.isForced && !preference
                 let bubbles: [ChatMessage]
+                let recent: [ChatMessage]?
+                let statusTarget: String?
                 if let solo = sessionFilter.solo {
                     // The merged page for the roster, the conversation's own
-                    // read for the timeline — see `apply(page:conversation:solo:)`.
-                    async let page = load(flag.preference, nil, pageLimit)
-                    async let conversation = load(flag.preference, solo, pageLimit)
+                    // read for the timeline — see `apply(page:conversation:solo:)`
+                    // — and the status line's read, all three at once: a switch
+                    // waits for the slowest of them, not for their sum.
+                    async let page = load(preference, nil, pageLimit)
+                    async let conversation = load(preference, solo, pageLimit)
+                    async let status = wantsStatus ? load(true, solo, statusDepth) : nil
                     guard let page = await page, let conversation = await conversation else { return nil }
                     // A read the reader has already moved on from says nothing
                     // about the roster or the status line any more.
                     guard !Task.isCancelled else { return nil }
-                    bubbles = sessionFilter.apply(page: page, conversation: conversation, solo: solo)
+                    bubbles = ConversationsViewController.transcriptRows(
+                        sessionFilter.apply(page: page, conversation: conversation, solo: solo),
+                        of: solo, includeWorkOutput: preference)
+                    transcripts.set(
+                        CachedTranscript(messages: bubbles, readAt: .now),
+                        for: TranscriptKey(id: solo, includesWorkOutput: preference))
+                    recent = await status
+                    statusTarget = solo
                 } else {
                     // Deepened by whatever the last page lost to the hidden
                     // sessions, so the filter takes rows out of a bigger answer
                     // rather than out of the reader's scrollback.
                     let depth = pageLimit * sessionFilter.pageDeepening
-                    guard let messages = await load(flag.preference, nil, depth) else { return nil }
+                    guard let messages = await load(preference, nil, depth) else { return nil }
                     guard !Task.isCancelled else { return nil }
                     bubbles = sessionFilter.apply(to: messages)
+                    statusTarget = wantsStatus ? sessionFilter.soleShownID : nil
+                    if let statusTarget {
+                        recent = await load(true, statusTarget, statusDepth)
+                    } else {
+                        recent = nil
+                    }
                 }
-                guard flag.isForced, !flag.preference else {
+                guard wantsStatus else {
                     workStatus.note(bubbles)
                     return bubbles
                 }
-                // The status line's own read: the newest few entries of the
-                // one conversation, work output included. A failed read leaves
-                // the line saying what it said.
-                if let target = sessionFilter.solo ?? sessionFilter.soleShownID,
-                   let recent = await load(true, target, statusDepth) {
-                    guard !Task.isCancelled else { return nil }
-                    workStatus.note(recent.filter { $0.attribution?.sourceID == target })
+                guard !Task.isCancelled else { return nil }
+                // The newest few entries of the one conversation, work output
+                // included. A failed read leaves the line saying what it said.
+                if let statusTarget, let recent {
+                    workStatus.note(recent.filter { $0.attribution?.sourceID == statusTarget })
                 }
                 // The loader was not asked for work output, but a source that
                 // sends it anyway would put it back as bubbles.
@@ -463,6 +530,95 @@ public final class ConversationsViewController: NSViewController {
         guard sessionFilter.solo != solo else { return false }
         sessionFilter.solo = solo
         return true
+    }
+
+    /// Puts the picked conversation on screen now, as ``transcripts`` last had
+    /// it — or clears the screen, when it has never been read — rather than
+    /// leaving the previous conversation up until the next read lands.
+    private func showCachedSolo() {
+        guard let solo = sessionFilter.solo else { return }
+        let key = TranscriptKey(id: solo, includesWorkOutput: workOutputFlag.preference)
+        // The reader is arriving, not returning: the new conversation opens at
+        // its newest line, whatever the old one was scrolled to.
+        chatView?.followNewest()
+        session.replaceTranscript(transcripts.value(for: key)?.messages ?? [])
+    }
+
+    /// Whether `id` is in the transcript cache under the current work-output
+    /// setting — for the tests, which have no other way to know a prefetch has
+    /// landed.
+    func hasCachedTranscript(for id: String) -> Bool {
+        transcripts.contains(TranscriptKey(id: id, includesWorkOutput: workOutputFlag.preference))
+    }
+
+    /// One conversation's rows as single mode draws and caches them: its own
+    /// lines, and its work output only when the reader asked for it.
+    nonisolated static func transcriptRows(
+        _ messages: [ChatMessage], of id: String, includeWorkOutput: Bool
+    ) -> [ChatMessage] {
+        messages.filter { message in
+            message.attribution?.sourceID == id && (includeWorkOutput || !message.isWorkOutput)
+        }
+    }
+
+    /// Reads `ids` into the transcript cache ahead of the reader, so a switch
+    /// to any of them draws from memory. Nearest first: the caller orders them
+    /// by how soon the reader could reach each.
+    ///
+    /// Waits out the same settle a switch does, and replaces any prefetch still
+    /// waiting or running — a reader holding an arrow key asks for a new
+    /// neighbourhood on every step, and only the one they stop in is worth
+    /// reading. A conversation read within ``prefetchFreshness`` is skipped.
+    public func prefetch(_ ids: [String]) {
+        pendingPrefetch?.cancel()
+        let preference = workOutputFlag.preference
+        let transcripts = self.transcripts
+        let load = self.load
+        let pageLimit = self.pageLimit
+        pendingPrefetch = Task {
+            try? await Task.sleep(for: Self.soloSettle)
+            guard !Task.isCancelled else { return }
+            let stale = ids.filter { id in
+                guard let cached = transcripts.peek(
+                    TranscriptKey(id: id, includesWorkOutput: preference))
+                else { return true }
+                return cached.readAt.duration(to: .now) > Self.prefetchFreshness
+            }
+            await Self.read(
+                stale, into: transcripts, includeWorkOutput: preference,
+                limit: pageLimit, load: load)
+        }
+    }
+
+    /// The prefetch's reads, at most ``prefetchConcurrency`` at a time and
+    /// started in the order given.
+    private nonisolated static func read(
+        _ ids: [String],
+        into transcripts: LRUCache<TranscriptKey, CachedTranscript>,
+        includeWorkOutput: Bool,
+        limit: Int,
+        load: @escaping Load
+    ) async {
+        await withTaskGroup(of: Void.self) { group in
+            var queue = ids[...]
+            func startNext() {
+                guard let id = queue.popFirst() else { return }
+                group.addTask {
+                    guard let rows = await load(includeWorkOutput, id, limit),
+                          !Task.isCancelled else { return }
+                    transcripts.set(
+                        CachedTranscript(
+                            messages: transcriptRows(rows, of: id, includeWorkOutput: includeWorkOutput),
+                            readAt: .now),
+                        for: TranscriptKey(id: id, includesWorkOutput: includeWorkOutput))
+                }
+            }
+            for _ in 0..<prefetchConcurrency { startNext() }
+            while await group.next() != nil {
+                guard !Task.isCancelled else { return }
+                startNext()
+            }
+        }
     }
 
     private func scheduleRefresh() {
@@ -531,6 +687,7 @@ public final class ConversationsViewController: NSViewController {
 
     deinit {
         pendingRefresh?.cancel()
+        pendingPrefetch?.cancel()
         session.close()
     }
 

@@ -392,6 +392,25 @@ public final class ConversationsShelfViewController: NSViewController,
         return true
     }
 
+    /// Every visible row but the pick, nearest the pick first — below, above,
+    /// two below, two above, and so on out to the ends. The order a reader
+    /// walking the list with ``moveSelection(by:)`` can reach them in, which is
+    /// the order a prefetch should read them in. With no pick, the list from
+    /// the top, where the first press lands.
+    public func idsByDistanceFromSolo() -> [String] {
+        guard let center = soloID.flatMap({ id in visible.firstIndex { $0.id == id } }) else {
+            return visible.map(\.id)
+        }
+        var ids: [String] = []
+        ids.reserveCapacity(visible.count - 1)
+        for step in 1..<max(visible.count, 1) {
+            for index in [center + step, center - step] where visible.indices.contains(index) {
+                ids.append(visible[index].id)
+            }
+        }
+        return ids
+    }
+
     /// In single mode the picked row is the table's selected row too, so the
     /// reader can see what the arrow keys just moved. In multi mode there is no
     /// such thing as *the* row, and a highlight on one of several ticked
@@ -847,8 +866,14 @@ public final class ConversationsShelfViewController: NSViewController,
     /// A checkmark, or the space where one would be. Deliberately an image view
     /// and not a control: the row is what takes the click, so a button here
     /// would only add a second, smaller target that does the same thing.
+    ///
+    /// Centred in a container rather than returned bare. The table gives a
+    /// bare cell view the row's frame but, with `usesAutomaticRowHeights`, the
+    /// image view sizes itself to the symbol and sits at the top of the row —
+    /// the tick floated above the row's line instead of beside it.
     private func checkCell(shown: Bool) -> NSView {
         let image = NSImageView()
+        image.translatesAutoresizingMaskIntoConstraints = false
         image.imageScaling = .scaleNone
         image.image = shown
             ? NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Shown")
@@ -857,7 +882,13 @@ public final class ConversationsShelfViewController: NSViewController,
         image.observeTheme { view, palette in
             view.contentTintColor = palette.nsColor(.accent)
         }
-        return image
+        let cell = NSView()
+        cell.addSubview(image)
+        NSLayoutConstraint.activate([
+            image.centerXAnchor.constraint(equalTo: cell.centerXAnchor),
+            image.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+        ])
+        return cell
     }
 
     /// `[app] project » branch » name` — the identical trail the Sessions

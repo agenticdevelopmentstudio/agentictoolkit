@@ -595,9 +595,31 @@ final class ConversationsShelfTests: XCTestCase {
         guard let table = firstTable(in: shelf.view) else { return XCTFail("no table") }
 
         let checked = (0..<table.numberOfRows).map { row in
-            (table.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSImageView)?.image != nil
+            checkImage(in: table, row: row)?.image != nil
         }
         XCTAssertEqual(checked, [true, false, false])
+    }
+
+    /// The tick sits on the row's line, not above it: a bare image view handed
+    /// to a table with automatic row heights kept the symbol's own height and
+    /// was drawn at the top of the row.
+    func testCheckmarkIsCentredInItsRow() {
+        let shelf = shelf([("a", "Alpha"), ("b", "Beta")])
+        shelf.view.frame = NSRect(x: 0, y: 0, width: 300, height: 400)
+        shelf.view.layoutSubtreeIfNeeded()
+        guard let table = firstTable(in: shelf.view) else { return XCTFail("no table") }
+        table.layoutSubtreeIfNeeded()
+        guard let image = checkImage(in: table, row: 0),
+              let cell = image.superview else { return XCTFail("no check cell") }
+        cell.layoutSubtreeIfNeeded()
+        XCTAssertGreaterThan(cell.bounds.height, image.frame.height)
+        XCTAssertEqual(image.frame.midY, cell.bounds.midY, accuracy: 0.5)
+    }
+
+    /// The check column's image view, wherever in the cell it sits.
+    private func checkImage(in table: NSTableView, row: Int) -> NSImageView? {
+        guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: true) else { return nil }
+        return cell as? NSImageView ?? cell.subviews.lazy.compactMap { $0 as? NSImageView }.first
     }
 
     // MARK: - Passing through single mode

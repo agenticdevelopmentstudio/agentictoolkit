@@ -935,6 +935,14 @@ public final class ChatView: NSView, NSTextFieldDelegate {
 
     // MARK: - Scroll
 
+    /// Lands the next rebuild on the newest message, wherever the reader had
+    /// scrolled to — for a host that has just swapped in a different
+    /// conversation, where keeping the old one's place would put the reader
+    /// somewhere arbitrary in the new one.
+    public func followNewest() {
+        isAtBottom = true
+    }
+
     @objc private func transcriptDidScroll() {
         guard !isRebuilding else { return }
         isAtBottom = distanceFromNewest() < 30
