@@ -64,17 +64,16 @@ beforeEach(() => {
 // registers — tear down each render explicitly to keep renders from bleeding across tests.
 afterEach(cleanup);
 
-// Each row's Checkbox derives its accessible name from the associated visible tool-name
-// label (base-ui wires aria-labelledby from the row's <label>), so a box is addressed by
-// its tool name.
-const box = (toolName: string) => screen.getByRole("checkbox", { name: toolName });
+// Each row's Enabled-column Checkbox is named "Allow <tool>" (the tool's human label), and the
+// table is `selectable={false}`, so the only checkboxes on screen are these allow switches.
+const box = (toolName: string) => screen.getByRole("checkbox", { name: `Allow ${toolName}` });
 
-/** Render the panel and pick persona `id`, waiting for its tool checklist to load. */
+/** Render the panel and pick persona `id`, waiting for its tool table to load. */
 async function renderAndPick(id: string) {
   render(<AssistantsPanel />);
   await screen.findByRole("option", { name: "Bitbag" });
   fireEvent.change(screen.getByRole("combobox"), { target: { value: id } });
-  await screen.findByRole("checkbox", { name: "searchThreads" });
+  await screen.findByRole("checkbox", { name: "Allow searchThreads" });
 }
 
 describe("AssistantsPanel", () => {
@@ -115,12 +114,19 @@ describe("AssistantsPanel", () => {
     render(<AssistantsPanel />);
     await screen.findByRole("option", { name: "Bitbag" });
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "a1" } });
-    // The human copy leads and is the checkbox's accessible name…
+    // The human copy leads and names the row's allow checkbox…
     await screen.findByText("Save a value");
-    expect(screen.getByRole("checkbox", { name: "Save a value" })).not.toBeNull();
+    expect(screen.getByRole("checkbox", { name: "Allow Save a value" })).not.toBeNull();
     expect(screen.getByText("Store a value under a key for the current user.")).not.toBeNull();
     // …and the raw camelCase tool name is still present (demoted caption), never hidden.
     expect(screen.getByText("dataKvSet")).not.toBeNull();
+  });
+
+  it("labels each tool's provenance in a Source column (null source alone reads Built-in)", async () => {
+    await renderAndPick("a1");
+    expect(screen.getByRole("columnheader", { name: /source/i })).not.toBeNull();
+    expect(screen.getByText("Built-in")).not.toBeNull();
+    expect(screen.getByText("Web")).not.toBeNull();
   });
 
   it("ticking an unchecked tool PUTs the new allowed set with it added", async () => {
@@ -240,7 +246,7 @@ describe("AssistantsPanel", () => {
     const select = screen.getByRole("combobox");
     fireEvent.change(select, { target: { value: "a1" } }); // a1 load starts, stays pending
     fireEvent.change(select, { target: { value: "a2" } }); // a2 load resolves and renders
-    await screen.findByRole("checkbox", { name: "onlyA2" });
+    await screen.findByRole("checkbox", { name: "Allow onlyA2" });
 
     // Release a1's since-abandoned load AFTER the switch: the loadToken guard must ignore it so
     // a1's tool never crosses into the a2 selection now on screen.
@@ -248,7 +254,7 @@ describe("AssistantsPanel", () => {
       resolveA1?.();
       await Promise.resolve();
     });
-    expect(screen.queryByRole("checkbox", { name: "onlyA1" })).toBeNull();
-    expect(screen.queryByRole("checkbox", { name: "onlyA2" })).not.toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "Allow onlyA1" })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "Allow onlyA2" })).not.toBeNull();
   });
 });

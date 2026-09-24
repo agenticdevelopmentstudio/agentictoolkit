@@ -30,8 +30,9 @@ export function sourceLabel(source: string | null): string {
 /**
  * Group `items` by their `sourceLabel(getSource(item))` heading, sorted by label — the ONE
  * "group tools by source" shape shared by every tool/catalog listing (AbilitiesPanel's grant
- * catalog, settings AssistantsPanel's per-user consent list), so built-ins and each external
- * source read as their own section identically everywhere they're listed.
+ * catalog), so built-ins and each external source read as their own section identically
+ * everywhere they're listed. (Settings AssistantsPanel shows the same `sourceLabel` as a
+ * sortable Source COLUMN instead — its list is an EditableList like every other settings table.)
  */
 export function groupBySource<T>(
   items: readonly T[],

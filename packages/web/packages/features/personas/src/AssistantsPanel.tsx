@@ -1,30 +1,41 @@
 "use client";
 
-import { useCallback, useId, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { useAction } from "@agentic-toolkit/crud";
 import { useResourceList } from "@agentic-toolkit/data";
+import { SettingsBody } from "@agentic-toolkit/resource";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { Checkbox } from "@agenticdevelopertoolkit/ui/components/checkbox";
 import { Select } from "@agenticdevelopertoolkit/ui/components/select";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
-import { List, ListItem } from "@agenticdevelopertoolkit/ui/components/list";
 import { Field } from "@agenticdevelopertoolkit/ui/blocks/field";
+import {
+  EditableList,
+  useEditableList,
+  type EditableListColumn,
+} from "@agenticdevelopertoolkit/ui/blocks";
 import {
   personaUserToolsApi,
   type UserActablePersona,
   type UserTool,
 } from "@agentic-toolkit/data/personas";
-import { groupBySource } from "./agent-tool-source";
+import { sourceLabel } from "./agent-tool-source";
 
 /** The names of the tools currently allowed, in catalog order (the PUT payload shape). */
 function allowedNames(tools: UserTool[]): string[] {
   return tools.filter((t) => t.allowed).map((t) => t.toolName);
 }
 
+/** The human name a row leads with; displayName falls back to toolName for an uncataloged tool. */
+function toolLabel(tool: UserTool): string {
+  return tool.displayName || tool.toolName;
+}
+
 /**
  * User Settings "Assistants" panel (Layer-2 per-user consent). For each persona an owner has
  * let act FOR the caller (`may_act 'user'`), the caller picks it and toggles — per tool —
- * whether it may invoke that tool on their behalf, with an all-on / all-off pair. Default
+ * whether it may invoke that tool on their behalf, with an all-on / all-off pair on the table's
+ * bar. Default
  * off: an untoggled tool is not allowed.
  *
  * Every change replaces the caller's whole allowed set (`PUT user-tools`) OPTIMISTICALLY —
@@ -36,7 +47,6 @@ function allowedNames(tools: UserTool[]): string[] {
  * an assistant you looked at a moment ago shows its checklist immediately rather than a spinner.
  */
 export function AssistantsPanel() {
-  const rowIdPrefix = useId();
   const [personaId, setPersonaId] = useState("");
   const { busy, error, run } = useAction();
 
@@ -96,30 +106,107 @@ export function AssistantsPanel() {
     applyAllowed(tools, tools.map((t) => ({ ...t, allowed })));
   }
 
-  // Group by source so built-ins and each external source read as their own section.
-  const groups = useMemo(() => groupBySource(tools ?? [], (t) => t.source), [tools]);
+  // The same table admin's Users page draws, with selection OFF: the one control a row carries is
+  // its own allow switch — inherently per-row state — and "All on / All off" act on every row, so
+  // there is nothing for a tick box to select FOR. Provenance used to be bespoke group headings;
+  // it is now the Source column the list OPENS sorted by — the same built-ins-then-each-source
+  // reading, but one the user can re-sort or search. `sourceLabel` stays the one home of the
+  // "only a genuinely null source is Built-in" rule.
+  const columns: EditableListColumn<UserTool>[] = [
+    {
+      key: "tool",
+      header: "Tool",
+      width: "14rem",
+      value: toolLabel,
+      render: (tool) => (
+        <span className="truncate font-medium text-apt-text">{toolLabel(tool)}</span>
+      ),
+    },
+    {
+      key: "description",
+      header: "Description",
+      value: (tool) => tool.description,
+      render: (tool) =>
+        tool.description ? (
+          <span className="truncate text-xs text-apt-text-muted" title={tool.description}>
+            {tool.description}
+          </span>
+        ) : (
+          <span className="text-apt-text-dim">—</span>
+        ),
+    },
+    {
+      // The raw tool name is demoted to a mono caption, never hidden — it is what an audit log
+      // or an error message will call the tool.
+      key: "name",
+      header: "Name",
+      width: "12rem",
+      value: (tool) => tool.toolName,
+      render: (tool) => (
+        <span className="truncate font-mono text-xs text-apt-text-dim" title={tool.toolName}>
+          {tool.toolName}
+        </span>
+      ),
+    },
+    {
+      key: "source",
+      header: "Source",
+      width: "10rem",
+      value: (tool) => sourceLabel(tool.source),
+    },
+    {
+      key: "enabled",
+      header: "Enabled",
+      width: "6rem",
+      resizable: false,
+      // Sortable ("what have I allowed?" is a real question) but not searchable: typing "on"
+      // into the search box must not match every allowed row.
+      value: (tool) => (tool.allowed ? "On" : "Off"),
+      searchable: false,
+      render: (tool) => (
+        <Checkbox
+          checked={tool.allowed}
+          disabled={busy}
+          onCheckedChange={(checked) => toggleTool(tool, checked)}
+          aria-label={`Allow ${toolLabel(tool)}`}
+        />
+      ),
+    },
+  ];
+
+  const list = useEditableList<UserTool>({
+    rows: tools ?? undefined,
+    getRowId: (tool) => tool.toolName,
+    columns,
+    initialSort: { key: "source", dir: "asc" },
+  });
+
+  const noTools = !tools || tools.length === 0;
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-      <div className="flex max-w-2xl flex-col gap-4">
-        <p className="text-sm text-apt-text-muted">
-          Control what each assistant may do on your behalf. Every tool is off until you allow
-          it here.
-        </p>
+    <SettingsBody width="full">
+      <p className="text-sm text-apt-text-muted">
+        Control what each assistant may do on your behalf. Every tool is off until you allow it
+        here.
+      </p>
 
-        {/* The FAILURE is read first: a failed read leaves the rows null, so testing for null
-            first would leave the panel saying "Loading…" over a read that has already given up. */}
-        {personasError !== null ? (
-          <ErrorText error={personasError} />
-        ) : personas === null ? (
-          <p className="text-sm text-apt-text-muted">Loading…</p>
-        ) : personas.length === 0 ? (
-          <p className="text-sm text-apt-text-muted">
-            No assistants can act for you yet. When an assistant is granted leave to act on your
-            behalf, it will appear here.
-          </p>
-        ) : (
-          <>
+      {/* The FAILURE is read first: a failed read leaves the rows null, so testing for null
+          first would leave the panel saying "Loading…" over a read that has already given up. */}
+      {personasError !== null ? (
+        <ErrorText error={personasError} />
+      ) : personas === null ? (
+        <p className="text-sm text-apt-text-muted">Loading…</p>
+      ) : personas.length === 0 ? (
+        <p className="text-sm text-apt-text-muted">
+          No assistants can act for you yet. When an assistant is granted leave to act on your
+          behalf, it will appear here.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {/* A labelled field ABOVE the table, not in its bar: it picks WHICH list is shown, so it
+              is not an action on the rows. Capped so the select does not stretch across a
+              full-width pane. */}
+          <div className="max-w-sm">
             <Field label="Assistant">
               <Select value={personaId} onChange={(e) => setPersonaId(e.target.value)}>
                 <option value="">Choose an assistant…</option>
@@ -130,99 +217,58 @@ export function AssistantsPanel() {
                 ))}
               </Select>
             </Field>
+          </div>
 
-            <ErrorText error={loadError ?? error} />
+          {/* The write's failure only — a failed tool READ is the table's own error state, which
+              replaces the rows rather than leaving an empty-state claim the read cannot make. */}
+          <ErrorText error={error} />
 
-            {personaId === "" ? (
-              <p className="text-sm text-apt-text-muted">
-                Pick an assistant to review what it may do for you.
-              </p>
-            ) : tools === null ? (
-              // A failed read leaves the rows null too, and the banner above already says why —
-              // so this must not go on claiming the list is still on its way.
-              loadError ? null : (
-                <p className="text-sm text-apt-text-muted">Loading…</p>
-              )
-            ) : tools.length === 0 ? (
-              <p className="text-sm text-apt-text-muted">
-                This assistant has no tools you can allow.
-              </p>
-            ) : (
-              <>
-                <div
-                  className="flex items-center gap-2"
-                  role="group"
-                  aria-label="Allow all or none"
-                >
+          {personaId === "" ? (
+            <p className="text-sm text-apt-text-muted">
+              Pick an assistant to review what it may do for you.
+            </p>
+          ) : (
+            <EditableList
+              list={list}
+              ariaLabel="Assistant tools"
+              selectable={false}
+              // A failed read leaves the rows null too, and the error state already says why — so
+              // the table must not go on claiming the list is still on its way.
+              loading={tools === null && !loadError}
+              error={loadError}
+              errorTitle="Couldn't load this assistant's tools"
+              columnWidthsKey="settings-assistant-tools"
+              describeRow={toolLabel}
+              searchPlaceholder="Tool, name or source"
+              emptyLabel="This assistant has no tools you can allow."
+              emptyFilteredLabel="No tools match this search."
+              actions={
+                <>
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
-                    disabled={busy}
+                    disabled={busy || noTools}
                     onClick={() => setAll(true)}
                   >
                     All on
                   </Button>
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
-                    disabled={busy}
+                    disabled={busy || noTools}
                     onClick={() => setAll(false)}
                   >
                     All off
                   </Button>
-                </div>
-
-                <div className="flex flex-col gap-4">
-                  {groups.map(([label, rows]) => (
-                    <div key={label} className="flex flex-col gap-2">
-                      <h4 className="font-mono text-[0.7rem] uppercase tracking-wider text-apt-text-muted">
-                        {label}
-                      </h4>
-                      <List>
-                        {rows.map((tool) => {
-                          const rowId = `${rowIdPrefix}-${tool.toolName}`;
-                          return (
-                            <ListItem key={tool.toolName} className="items-start">
-                              <Checkbox
-                                id={rowId}
-                                checked={tool.allowed}
-                                disabled={busy}
-                                onCheckedChange={(checked) => toggleTool(tool, checked)}
-                                aria-label={`allow ${tool.displayName || tool.toolName}`}
-                              />
-                              {/* Human-readable label leads (the checkbox's accessible name); the
-                                  description + raw mono tool name are demoted siblings OUTSIDE the
-                                  label. displayName falls back to toolName for an uncataloged tool. */}
-                              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                                <label htmlFor={rowId} className="text-sm text-apt-text">
-                                  {tool.displayName || tool.toolName}
-                                </label>
-                                {tool.description && (
-                                  <span className="text-[0.75rem] text-apt-text-muted">
-                                    {tool.description}
-                                  </span>
-                                )}
-                                <span
-                                  className="font-mono text-[0.7rem] text-apt-text-dim"
-                                  title={tool.toolName}
-                                >
-                                  {tool.toolName}
-                                </span>
-                              </div>
-                            </ListItem>
-                          );
-                        })}
-                      </List>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </>
-        )}
-      </div>
-    </div>
+                </>
+              }
+            />
+          )}
+        </div>
+      )}
+    </SettingsBody>
   );
 }
+
