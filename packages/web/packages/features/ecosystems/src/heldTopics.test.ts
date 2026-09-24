@@ -2,7 +2,7 @@
 // Hub" listed nineteen rows while its Manage features dialog ticked none (Mike, 2026-09-24).
 import { describe, it, expect } from "vitest";
 import type { ProvisionedFeature } from "@agentic-toolkit/data/ecosystems";
-import { heldTopics } from "./heldTopics";
+import { heldTopics, settingsLast } from "./heldTopics";
 
 const TOPICS = [
   { id: "storage", features: ["storage"] },
@@ -43,5 +43,35 @@ describe("heldTopics", () => {
   // A failed read must not make a product look empty.
   it("shows every row when the read failed", () => {
     expect(ids(heldTopics(TOPICS, null))).toEqual(ids(TOPICS));
+  });
+});
+
+// Every topics list closes on Settings, alone under a rule (Mike, 2026-09-24).
+describe("settingsLast", () => {
+  const dividers = (topics: readonly { id: string; dividerAfter?: boolean }[]) =>
+    topics.filter((t) => t.dividerAfter).map((t) => t.id);
+
+  it("moves a leading Settings to the end, behind a divider", () => {
+    const got = settingsLast([
+      { id: "settings", dividerAfter: false },
+      { id: "child-ecosystems", dividerAfter: false },
+    ]);
+    expect(ids(got)).toEqual(["child-ecosystems", "settings"]);
+    expect(dividers(got)).toEqual(["child-ecosystems"]);
+  });
+
+  // The product rail hangs its divider on Stores; a product without a store drops that row.
+  it("draws the divider above Settings whichever row the filter left above it", () => {
+    const got = settingsLast([
+      { id: "dashboards", dividerAfter: true },
+      { id: "billing", dividerAfter: false },
+      { id: "settings", dividerAfter: false },
+    ]);
+    expect(dividers(got)).toEqual(["dashboards", "billing"]);
+  });
+
+  it("never ends a list on a divider, and never divides a list that is only Settings", () => {
+    expect(dividers(settingsLast([{ id: "a" }, { id: "b", dividerAfter: true }]))).toEqual([]);
+    expect(dividers(settingsLast([{ id: "settings", dividerAfter: true }]))).toEqual([]);
   });
 });

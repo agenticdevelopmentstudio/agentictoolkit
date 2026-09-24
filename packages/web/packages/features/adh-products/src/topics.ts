@@ -1,5 +1,5 @@
 /** Sidebar topics inside a PRODUCT (the Products FTD — each product IS an ecosystem).
- * The LAST topic ("Ecosystem Settings", id "settings" for deep-link stability) is the
+ * The LAST topic ("Settings", id "settings" for deep-link stability) is the
  * entity pane itself — it edits the product's own fields and holds the Danger (delete)
  * section (see FTD spec §4–§5). Creating products happens on the Products landing / the
  * selector popup's "New Product…" dialog (rendered above these).
@@ -84,7 +84,7 @@ export const PRODUCT_TOPICS = [
   { id: "stores", label: "Stores", dividerAfter: true, features: ["stores"] },
   // The product's own entity/settings pane (name/slug/description + Danger). Last in the
   // rail; selected by id === "settings" in the toolkit's EcosystemsFeature.
-  { id: "settings", label: "Ecosystem Settings", dividerAfter: false },
+  { id: "settings", label: "Settings", dividerAfter: false },
 ] as const;
 
 export type ProductTopicId = (typeof PRODUCT_TOPICS)[number]["id"];

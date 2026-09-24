@@ -29,7 +29,7 @@ import {
   useWorkspaceDefaultEcosystemId,
   type Ecosystem,
 } from "@agentic-toolkit/data/ecosystems";
-import { heldTopics } from "./heldTopics";
+import { heldTopics, settingsLast } from "./heldTopics";
 import { EcosystemSettingsPane } from "./EcosystemSettingsPane";
 import { ManageFeaturesButton } from "./ManageFeaturesButton";
 import {
@@ -516,9 +516,8 @@ export function EcosystemsFeature({
   // host whose rows name no features (a feature site's own rail) never pays for the request.
   const featureKeyed = topicsConfig.some((t) => t.features != null);
   const provisionedQuery = useProvisionedFeatures(featureKeyed ? scopedId : undefined);
-  const shownTopics = heldTopics(
-    topicsConfig,
-    provisionedQuery.isError ? null : provisionedQuery.data,
+  const shownTopics = settingsLast(
+    heldTopics(topicsConfig, provisionedQuery.isError ? null : provisionedQuery.data),
   );
 
   const topics: ResourceTopic[] = shownTopics.map((t) => ({

@@ -28,7 +28,7 @@ import { GameOperationalFields, gameDiffers, gameNormalize, gameToInput, gameVal
  * Replaces GameOverviewPane. Two resources, one save bar: the realm's `mode` (whether this
  * product's game is on) and the game row's own operational fields (status, character
  * names, event log, retention). Name/slug/description are GONE from here — they are the
- * PRODUCT's fields now, edited under the product's own Ecosystem Settings (§1, §5.3 of the
+ * PRODUCT's fields now, edited under the product's own Settings (§1, §5.3 of the
  * product-gaming-modes design) — so a save from this pane still submits the game's WHOLE
  * `GameInput` (via `gameToInput`/`gameNormalize`/`gameDiffers`, unchanged from Engine's),
  * it just never lets the operational fields' `onChange` touch the identity ones.

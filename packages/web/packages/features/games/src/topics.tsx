@@ -4,7 +4,7 @@ import type { EcosystemsTopicConfig } from "@agentic-toolkit/ecosystems";
 /**
  * The games rail for a selected product: Engine, Content, Connections, Effects, then
  * Settings. `overview` is GONE — the game's name/slug/description are the PRODUCT's now
- * (edited under the product's own Ecosystem Settings, a different topic entirely), so
+ * (edited under the product's own Settings, a different topic entirely), so
  * there is nothing left for a games-side "Overview" to show. Settings here means the
  * gaming-mode switch plus the game's operational fields (status, character names, event
  * log, retention) — see GameSettingsPane.

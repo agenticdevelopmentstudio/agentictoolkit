@@ -203,7 +203,7 @@ function GamingModeSection({ ecosystemId }: { ecosystemId?: string }) {
 /**
  * The game's own operational fields (§4.4: status, character names, event log, event
  * retention) — everything `GameOperationalFields` renders, and nothing `features/games/` no
- * longer edits (name/slug/description are the PRODUCT's, under Ecosystem Settings). Its own
+ * longer edits (name/slug/description are the PRODUCT's, under its Settings). Its own
  * draft/save cycle, resolving "the" game via `useGameForEcosystem` rather than being handed one
  * — the one-game-per-product design (§1) is what makes that resolution safe.
  *
@@ -311,7 +311,7 @@ function GameOperationalFieldsSection({ ecosystemId }: { ecosystemId?: string })
  *     doc comment says a nested one does), while `mode !== 'none'`.
  *
  * Name, slug and description are never rendered here — they are the product's fields, edited
- * under Ecosystem Settings (§4.4), a different pane in a different package entirely.
+ * under the product's Settings (§4.4), a different pane in a different package entirely.
  */
 export function GamingSettingsPane({
   ecosystemId,

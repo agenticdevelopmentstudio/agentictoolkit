@@ -5,6 +5,33 @@ interface FeatureKeyedTopic {
   features?: readonly string[];
 }
 
+/** The fields {@link settingsLast} reads and writes. */
+interface DividedTopic {
+  id: string;
+  dividerAfter?: boolean;
+}
+
+/**
+ * The same rows with Settings moved to the END, behind a divider, whatever list they came from.
+ *
+ * Every topics list closes on Settings, alone under a rule (Mike, 2026-09-24). Each host used to
+ * place it by hand — the ecosystem site's list opened on it, and a product's hung its divider on
+ * Stores, which the held-features filter drops for any product without a store, leaving Settings
+ * run straight on from the row above. Deciding it here, AFTER that filter, is the one place that
+ * sees the rows as drawn. The other dividers are kept as authored, except on the row that is now
+ * last, which would draw a line under nothing.
+ */
+export function settingsLast<T extends DividedTopic>(topics: readonly T[]): T[] {
+  const settings = topics.find((t) => t.id === "settings");
+  const rest = topics.filter((t) => t.id !== "settings").map((t) => ({ ...t }));
+  if (!settings) {
+    if (rest.length) rest[rest.length - 1]!.dividerAfter = false;
+    return rest;
+  }
+  if (rest.length) rest[rest.length - 1]!.dividerAfter = true;
+  return [...rest, { ...settings, dividerAfter: false }];
+}
+
 /**
  * The topic rows an ecosystem actually holds: every row that names no catalog feature (Settings,
  * Child Ecosystems, a feature site's own rows), plus each row with at least one of its `features`

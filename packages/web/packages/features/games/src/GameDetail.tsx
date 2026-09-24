@@ -115,7 +115,7 @@ export function gameDiffers(a: GameInput, b: GameInput): boolean {
  * No slug/name checks here any more: `Game.id` is a plain uuid (§1 of the
  * product-gaming-modes design) — a game has no address of its own, so there is no rdid
  * leaf grammar for its slug to obey, and name/slug/description are the PRODUCT's fields
- * now (derived onto the game at mint, edited under the product's Ecosystem Settings, not
+ * now (derived onto the game at mint, edited under the product's Settings, not
  * this package). What is left to validate is the operational half this package still
  * owns: the engine config's JSON and the retention window.
  */
@@ -153,7 +153,7 @@ function set<K extends keyof GameInput>(
  * the strength of.
  *
  * Name, slug and description are NOT here — they are the PRODUCT's fields now (derived
- * onto the game at mint; edited under the product's own Ecosystem Settings, a different
+ * onto the game at mint; edited under the product's own Settings, a different
  * pane in a different package entirely). This is the operational half of what used to be
  * one `GameIdentityFields` component; the identity half is gone from this package along
  * with the games rail that used to edit it (see docs/superpowers/specs/

@@ -2,7 +2,6 @@
 
 import { useState, type ReactElement } from "react";
 import { Puzzle } from "lucide-react";
-import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { ManageFeaturesDialog } from "./ManageFeaturesDialog";
 
 /**
@@ -30,16 +29,19 @@ export function ManageFeaturesButton({
   const [managing, setManaging] = useState(false);
   return (
     <>
-      <Button
-        variant="ghost"
-        size="icon-sm"
+      {/* Drawn like the list toolbar's own search control — muted gray, 15px, no button chrome —
+          rather than a ghost Button, whose icon read brighter than the +/search beside it
+          (Mike, 2026-09-24). */}
+      <button
+        type="button"
         aria-label={label}
         title={label}
         aria-haspopup="dialog"
         onClick={() => setManaging(true)}
+        className="flex shrink-0 items-center justify-center rounded p-0.5 text-apt-text-muted outline-none hover:text-apt-text focus-visible:ring-2 focus-visible:ring-apt-gold/40"
       >
-        <Puzzle className="adh-button__icon" />
-      </Button>
+        <Puzzle size={15} aria-hidden />
+      </button>
       {managing ? (
         <ManageFeaturesDialog ecosystemId={ecosystemId} onClose={() => setManaging(false)} />
       ) : null}
