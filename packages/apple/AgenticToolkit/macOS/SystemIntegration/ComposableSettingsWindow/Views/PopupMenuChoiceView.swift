@@ -14,15 +14,7 @@ extension ComposableSettings {
             self.viewModel = viewModel
             self.label = Self.createLabel(title: viewModel.title)
             self.popUpButton = NSPopUpButton(frame: .zero)
-
-            for choice in viewModel.choices {
-                self.popUpButton.addItem(withTitle: choice.label)
-                self.popUpButton.lastItem?.representedObject = choice.value
-                if let symbol = choice.imageSystemName {
-                    self.popUpButton.lastItem?.image =
-                        NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
-                }
-            }
+            Self.populate(self.popUpButton, with: viewModel.choices)
 
             super.init(frame: .zero)
             self.translatesAutoresizingMaskIntoConstraints = false
@@ -49,6 +41,11 @@ extension ComposableSettings {
             viewModel.onChange = { [weak self] _ in
                 self?.syncSelection()
             }
+            viewModel.onChoicesChange = { [weak self] in
+                guard let self else { return }
+                Self.populate(self.popUpButton, with: self.viewModel.choices)
+                self.syncSelection()
+            }
 
             self.syncSelection()
         }
@@ -58,6 +55,19 @@ extension ComposableSettings {
             let current = viewModel.value
             if let index = viewModel.choices.firstIndex(where: { $0.value == current }) {
                 self.popUpButton.selectItem(at: index)
+            } else {
+                self.popUpButton.selectItem(at: -1)
+            }
+        }
+
+        private static func populate(_ button: NSPopUpButton, with choices: [ChoiceViewModel<Value>.Choice]) {
+            button.removeAllItems()
+            for choice in choices {
+                button.addItem(withTitle: choice.label)
+                button.lastItem?.representedObject = choice.value
+                if let symbol = choice.imageSystemName {
+                    button.lastItem?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+                }
             }
         }
 

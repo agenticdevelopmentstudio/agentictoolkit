@@ -4,7 +4,16 @@ extension ComposableSettings {
 
     public class ChoiceViewModel<Value: Codable & Sendable & Equatable>: ViewModel<Value> {
 
-        public let choices: [Choice]
+        /// The items offered. Settable because some lists are records: a
+        /// project's client is picked from clients that come and go while the
+        /// pane is open. Only `PopupMenuChoiceView` follows a change; the radio
+        /// and slider views are laid out once for a fixed set of answers.
+        public var choices: [Choice] {
+            didSet { onChoicesChange?() }
+        }
+
+        /// Fired after `choices` is replaced.
+        public var onChoicesChange: (() -> Void)?
 
         public init(
             title: String,
