@@ -3,11 +3,11 @@ id: 79c8f46f-e934-46d1-8d0e-4bbee625e163
 title: LocalModelCatalog
 domain: agentictoolkit://recipes/ai-plugin-runtime-ai-plugin-kit-local-model-catalog
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -140,45 +140,9 @@ it.
 Three concerns the code's own purpose calls for are left undefined by the
 source:
 
-- **concurrent-fetch-deduplication**: NEEDS REVIEW: Not implemented in
-  source. `sizes(baseURL:)` checks `cache[baseURL]` for freshness, then
-  `await`s `fetcher(url)`, and only afterward writes the new `Entry`. Because
-  actor methods are reentrant across `await`, two concurrent calls to
-  `sizeBytes`/`sizes` for the same expired or uncached `baseURL` can both
-  observe the same pre-fetch cache state and both invoke `fetcher`; the
-  `Entry` that ends up cached is whichever call's assignment statement runs
-  last, not necessarily the one from the most recently issued request, and
-  the server is hit twice (or more) for one logical refresh instead of once.
-  No in-flight-request tracking or coalescing exists. This cannot be resolved
-  from `LocalModelCatalog.swift` alone; it requires either an explicit
-  statement that duplicate concurrent fetches are an accepted cost (the
-  guard's own call sites are typically not highly concurrent) or an
-  in-flight-`Task` cache keyed by `baseURL`.
-- **base-url-locality-is-unenforced**: NEEDS REVIEW: Not implemented in
-  source. Both the type's own documentation comment ("Fetches and caches a
-  local server's...") and its sibling `LocalModelServer.isLoopback(baseURL:)`
-  describe and can test for a *local* server, but `LocalModelCatalog` never
-  calls `isLoopback` (or any other check) before deriving a tags URL from
-  `baseURL` and issuing a `GET` to it. A caller passing a non-loopback
-  `baseURL` — by misconfiguration or a future provider that reuses this
-  type — causes `LocalModelCatalog` to make an outbound network request to
-  that remote host on every cache miss, with nothing in this file to prevent
-  it. `LocalInferenceGuard.verdict(model:baseURL:settings:)`'s own comment
-  ("The decision for one request to a loopback provider") states the same
-  assumption without enforcing it either. Resolved by either calling
-  `LocalModelServer.isLoopback(baseURL:)` and failing closed (returning
-  `nil`) for a non-loopback `baseURL`, or a maintainer confirming that
-  locality is guaranteed by a caller not present in these sources.
-- **fetch-error-is-fully-swallowed**: NEEDS REVIEW: Not implemented in
-  source. `if let data = try? await fetcher(url)` discards whatever error
-  `fetcher` throws (a timeout, `URLError(.cannotConnectToHost)`, a
-  non-`200` status, or any error a substituted fetcher raises) with no log,
-  no diagnostic, and no way for a caller to distinguish "server refused the
-  connection" from "server returned no models" from "response failed to
-  parse." A maintainer investigating why the guard stopped seeing model
-  sizes for a given server has no signal from this type. Resolved by logging
-  the discarded error (subsystem/category to be defined) or by a maintainer
-  confirming that silence is intentional for this internal advisory cache.
+- **concurrent-fetch-deduplication**: NEEDS REVIEW: Not implemented in source. `sizes(baseURL:)` checks `cache[baseURL]` for freshness, then `await`s `fetcher(url)`, and only afterward writes the new `Entry`. Because actor methods are reentrant across `await`, two concurrent calls to `sizeBytes`/`sizes` for the same expired or uncached `baseURL` can both observe the same pre-fetch cache state and both invoke `fetcher`; the `Entry` that ends up cached is whichever call's assignment statement runs last, not necessarily the one from the most recently issued request, and the server is hit twice (or more) for one logical refresh instead of once. No in-flight-request tracking or coalescing exists. This cannot be resolved from `LocalModelCatalog.swift` alone; it requires either an explicit statement that duplicate concurrent fetches are an accepted cost (the guard's own call sites are typically not highly concurrent) or an in-flight-`Task` cache keyed by `baseURL`.
+- **base-url-locality-is-unenforced**: NEEDS REVIEW: Not implemented in source. Both the type's own documentation comment ("Fetches and caches a local server's...") and its sibling `LocalModelServer.isLoopback(baseURL:)` describe and can test for a *local* server, but `LocalModelCatalog` never calls `isLoopback` (or any other check) before deriving a tags URL from `baseURL` and issuing a `GET` to it. A caller passing a non-loopback `baseURL` — by misconfiguration or a future provider that reuses this type — causes `LocalModelCatalog` to make an outbound network request to that remote host on every cache miss, with nothing in this file to prevent it. `LocalInferenceGuard.verdict(model:baseURL:settings:)`'s own comment ("The decision for one request to a loopback provider") states the same assumption without enforcing it either. Resolved by either calling `LocalModelServer.isLoopback(baseURL:)` and failing closed (returning `nil`) for a non-loopback `baseURL`, or a maintainer confirming that locality is guaranteed by a caller not present in these sources.
+- **fetch-error-is-fully-swallowed**: NEEDS REVIEW: Not implemented in source. `if let data = try? await fetcher(url)` discards whatever error `fetcher` throws (a timeout, `URLError(.cannotConnectToHost)`, a non-`200` status, or any error a substituted fetcher raises) with no log, no diagnostic, and no way for a caller to distinguish "server refused the connection" from "server returned no models" from "response failed to parse." A maintainer investigating why the guard stopped seeing model sizes for a given server has no signal from this type. Resolved by logging the discarded error (subsystem/category to be defined) or by a maintainer confirming that silence is intentional for this internal advisory cache.
 
 ## Appearance
 
@@ -453,3 +417,4 @@ distinguish the failure modes from one another.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | | | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited NEEDS REVIEW markers against the marker rules; kept markers are one-line named bullets. |

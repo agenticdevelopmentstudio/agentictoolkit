@@ -3,11 +3,11 @@ id: 2cfe57f0-cdd4-4723-a6e0-2ce4f136ce7f
 title: Badge
 domain: agentictoolkit://recipes/badge
 type: ingredient
-version: 1.1.1
+version: 1.1.2
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -61,8 +61,8 @@ the app's theme changes.
   (`0.299·R + 0.587·G + 0.114·B` in the sRGB color space) is greater than 0.6,
   and to white otherwise. This heuristic does not compute a WCAG contrast
   ratio and is not guaranteed to meet any minimum numeric ratio against an
-  arbitrary caller-supplied `color` — see the open contrast question under
-  Accessibility and the related Design Decision.
+  arbitrary caller-supplied `color` — see the open question on
+  minimum-contrast-ratio and the related Design Decision.
 - **falls-back-to-white-on-unconvertible-color**: Badge MUST use white as the
   filled-style label text color when the caller-supplied `color` cannot be
   converted to the sRGB color space (`NSColor.usingColorSpace(.sRGB)` returns
@@ -150,20 +150,7 @@ the app's theme changes.
 - Minimum tap target: Not applicable — Badge defines no target/action,
   gesture recognizer, or click handling in the source; it is a purely visual,
   non-interactive display element with no tap target to size.
-- Minimum contrast ratio: NEEDS REVIEW: Not implemented in source. In
-  `.filled` style, `contrastingTextColor(on:)` picks black or white using a
-  perceptual-luminance heuristic (`0.299·R + 0.587·G + 0.114·B` over a 0.6
-  threshold) rather than the WCAG relative-luminance/contrast-ratio formula,
-  and enforces no minimum numeric contrast ratio against the arbitrary
-  caller-supplied `color`. In `.outlined` style, the label text and border
-  both equal `color` directly, with no contrast check against whatever
-  background the badge is placed on. Whether either path guarantees a
-  specific WCAG contrast ratio (e.g. 4.5:1) cannot be determined from
-  `Badge.swift` alone — it depends on the actual `color` values callers pass
-  in, which come from each app's `SemanticPalette`. This would be settled by
-  auditing the contrast ratio of each palette color this Badge is used with,
-  against both a computed black/white pairing (filled) and each app's actual
-  background colors (outlined).
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. `contrastingTextColor(on:)` picks black/white via a BT.601 luminance heuristic (`0.299·R + 0.587·G + 0.114·B` > 0.6) instead of the WCAG contrast-ratio formula, and `.outlined` style assigns `color` directly to text/border with no contrast check against the host background; whether either meets a specific WCAG ratio (e.g. 4.5:1) depends on each app's actual `SemanticPalette` colors and can't be settled from `Badge.swift` alone.
 
 ## Conformance Test Vectors
 
@@ -396,8 +383,8 @@ or `print`).
   white choice can be computed inline for any arbitrary caller-supplied
   color. The tradeoff is that, unlike a WCAG contrast-ratio check, this
   heuristic makes no guarantee about a specific minimum numeric contrast
-  ratio against the chosen color — see the open contrast question under
-  Accessibility.
+  ratio against the chosen color — see the open question on
+  minimum-contrast-ratio.
   **Approved**: pending
 - **Decision**: Badge exposes no accessibility role or label context beyond
   AppKit's default static-text exposure of its `NSTextField` label — there is
@@ -427,3 +414,4 @@ alone (`contrast-ratio`).
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `Badge` (AppKit, macOS) source. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: qualify the luminance-based contrasting-text-color and update-style-reset requirements against their open questions; fix `**Approved**:` formatting and edge-case `(MUST, per …)` tags to `#requirements/<name>` citations; correct badge-005/005b RGB values and add a luminance-0.6 boundary vector; note fixed-appearance test assumption and mark badge-014 as a compile-time check; fix the SwiftUI `.background`/`.clipShape` note; move the cookbook guideline citation from `references` to `related` and add external WCAG/HIG references; set `contrast-ratio` compliance status to `partial`; add Design Decisions for the luminance-heuristic choice and the lack of a distinguishing accessibility role. |
 | 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog |
+| 1.1.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited NEEDS REVIEW markers against the marker rules; kept markers are one-line named bullets. |

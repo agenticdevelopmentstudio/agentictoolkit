@@ -3,11 +3,11 @@ id: 8bdba644-d7ad-45e4-a2f5-0156bfd40e15
 title: LocalProviderModelStore
 domain: agentictoolkit://recipes/ai-plugin-runtime-ai-plugin-kit-local-provider-model-store
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -186,32 +186,20 @@ file does not touch.
   therefore held by the non-secure settings provider, never the
   Keychain-backed secure provider.
 
-Two concerns the code's own purpose calls for are left undefined by the
+One concern the code's own purpose calls for is left undefined by the
 source:
 
-- **concurrent-fetch-deduplication**: NEEDS REVIEW: Not implemented in
-  source. `fetchModels`/`fetchSizes`/`fetchMetadata` each read the current
-  cache, `await` a network call, and only afterward write a new value back;
-  because `@MainActor` methods are reentrant across `await`, two concurrent
-  calls for the same `baseURL` (or `baseURL`/`model` pair) can both observe
-  the same pre-fetch cache state and both issue their own request. The
-  cached value that survives is whichever call's write statement runs last —
-  determined by network completion order, not by which call was issued most
-  recently. This cannot be resolved from `LocalProviderModelStore.swift`
-  alone: it requires either an explicit statement that duplicate concurrent
-  fetches for the same key are an accepted cost, or an in-flight-`Task`
-  cache keyed by `baseURL`/model, mirroring `ModelCatalogStore.catalog()`'s
-  own `inflight` pattern one file over.
-- **fetch-error-is-fully-swallowed**: NEEDS REVIEW: Not implemented in
-  source. Every failure path in `fetchModels`, `fetchSizes`, `fetchMetadata`,
-  and the sources `fetchModelInfo` calls into discards its error via a bare
-  `catch { return nil }` or `try?`, with no log call anywhere in this file.
-  A maintainer investigating why a local server's models stopped refreshing
-  has no signal distinguishing "server refused the connection" from
-  "timed out" from "returned an undecodable body." Resolved by logging the
-  discarded error (subsystem/category to be defined) or by a maintainer
-  confirming that silence is intentional for this instant-paint, cache-backed
-  discovery path.
+- **concurrent-fetch-deduplication**: NEEDS REVIEW: Not implemented in source. `fetchModels`/`fetchSizes`/`fetchMetadata` each read the current cache, `await` a network call, and only afterward write a new value back; because `@MainActor` methods are reentrant across `await`, two concurrent calls for the same `baseURL` (or `baseURL`/`model` pair) can both observe the same pre-fetch cache state and both issue their own request, and the cached value that survives is whichever call's write statement runs last — determined by network completion order, not by which call was issued most recently. This cannot be resolved from `LocalProviderModelStore.swift` alone: it requires either an explicit statement that duplicate concurrent fetches for the same key are an accepted cost, or an in-flight-`Task` cache keyed by `baseURL`/model, mirroring `ModelCatalogStore.catalog()`'s own `inflight` pattern one file over.
+
+A related behavior is a fact, not a gap:
+
+- **fetch-error-is-fully-swallowed**: Every failure path in `fetchModels`,
+  `fetchSizes`, `fetchMetadata`, and the sources `fetchModelInfo` calls into
+  discards its error via a bare `catch { return nil }` or `try?`, and none of
+  them logs — there is no `Logger`/`os_log`/`print` call anywhere in this
+  file. A maintainer investigating why a local server's models stopped
+  refreshing has no signal in this file distinguishing "server refused the
+  connection" from "timed out" from "returned an undecodable body."
 
 ## Appearance
 
@@ -256,7 +244,7 @@ component.
 | local-provider-model-store-022 | mainactor-atomic-cache-update | Two concurrent tasks call `fetchModels` for two *different* base URLs (`"http://a/v1"`, `"http://b/v1"`) whose stubbed responses resolve in overlapping windows (lines 156-158). | Both entries end up correctly present afterward — `cachedModels` for `a` and for `b` each return their own fetched ids; neither call's write is lost, because each call's own read-modify-write of `cache.value` runs with no intervening `await`. |
 | local-provider-model-store-023 | cancellation-as-ordinary-failure | A task calling `fetchModels(baseURL:)` is cancelled while suspended on `URLSession.shared.data(for:)` (lines 149-162). | `fetchModels` returns `nil` (the thrown `CancellationError` is caught by the generic `catch`), and the cache entry for that `baseURL` is left exactly as it was before the call. |
 | local-provider-model-store-024 | cache-persistence, cache-non-secure-storage | Call `fetchModels` successfully against `UserSettings.shared` backed by a real `UserDefaultsSettingsStorageProvider` suite; tear down and reconstruct `UserSettings.shared` against the same suite; then call `cachedModels(baseURL:)` (lines 29-30). | The previously fetched ids are still returned after reconstruction (persisted, not memory-only); a spy `SecureSettingsStorageProvider` substituted for `UserSettings.shared`'s secure provider records zero calls across the whole scenario, since none of the five caches is `isSecure`. |
-| local-provider-model-store-025 | fetch-error-is-fully-swallowed (the open question) | `fetchModels`, `fetchSizes`, and `fetchMetadata` each invoked against a stub that throws a distinguishable error (e.g. `URLError(.cannotConnectToHost)` vs. `URLError(.timedOut)`) (lines 160-162, 181-183). | All three return `nil` with no observable difference between the two distinct causes — no log line, thrown error, or return value lets a caller or maintainer tell them apart (the open question). |
+| local-provider-model-store-025 | fetch-error-is-fully-swallowed | `fetchModels`, `fetchSizes`, and `fetchMetadata` each invoked against a stub that throws a distinguishable error (e.g. `URLError(.cannotConnectToHost)` vs. `URLError(.timedOut)`) (lines 160-162, 181-183). | All three return `nil` with no observable difference between the two distinct causes — no log line, thrown error, or return value lets a caller or maintainer tell them apart. |
 
 ## Edge Cases
 
@@ -296,8 +284,8 @@ component.
   function returns `nil` and its cache entry is left exactly as it was
   (MUST, see `models-fetch-failure`, `sizes-fetch-failure`,
   `metadata-endpoint`). None of these paths logs, throws to the caller, or
-  otherwise signals which specific failure occurred (see
-  `fetch-error-is-fully-swallowed`, the open question).
+  otherwise signals which specific failure occurred — see
+  `fetch-error-is-fully-swallowed` in Behavioral Requirements.
 - **Offline or disconnected state**: When the target `baseURL` server is
   unreachable (process not running, host down), every direct request in this
   file (`/models`, the derived `/api/tags`, and, via `fetchMetadata`, the
@@ -522,10 +510,11 @@ calls converge on the same result, but concurrent calls for the same key are
 not deduplicated (`no-request-coalescing`, `concurrent-fetch-deduplication`,
 the open question). explicit-error-handling fails because every fetch,
 HTTP-status, and parse failure is discarded with zero diagnostic signal
-(`fetch-error-is-fully-swallowed`, the open question).
+(`fetch-error-is-fully-swallowed`).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | | | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited NEEDS REVIEW markers against the marker rules; kept markers are one-line named bullets. |

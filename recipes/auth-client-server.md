@@ -3,11 +3,11 @@ id: 4a345333-b18d-48f1-806d-453c15155dfa
 title: Auth Client-Server Proxy
 domain: agentictoolkit://recipes/auth-client-server
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -237,14 +237,13 @@ Not applicable — this is a server-side request-forwarding proxy, not a visual 
 - The outbound `fetch` in `proxyToBackend` is not given the inbound
   request's `AbortSignal`, so a browser-cancelled request does not cancel the
   in-flight backend call.
-- NEEDS REVIEW: Not implemented in source. `path.join('/')` is inserted into
-  the backend target URL without re-encoding each segment; a segment
-  containing a character invalid in a URL makes the string passed to `fetch`
-  an invalid URL, which `fetch` rejects with a TypeError that neither
-  `proxyToBackend` nor `makeProxyHandlers` catches. What would settle it:
-  confirm whether Next.js's catch-all route param always yields URL-safe
-  segments, and if not, whether each segment needs percent-encoding before
-  joining.
+- No re-encoding of path segments: `proxyToBackend` builds the target URL
+  via `path.join('/')` with no percent-encoding or validation of any
+  segment. A segment containing a character invalid in a URL makes the
+  joined string an invalid URL; `fetch` rejects with a TypeError that
+  neither `proxyToBackend` nor `makeProxyHandlers` catches, so it
+  propagates unhandled to the Next.js runtime the same way the
+  backend-unreachable case above does.
 
 ## Configuration
 
@@ -389,13 +388,14 @@ writes to a log at any level.
 | [data-integrity](agenticdevelopercookbook://compliance/reliability#data-integrity) | passed | Reliability |
 | [no-pii-in-logs](agenticdevelopercookbook://compliance/privacy-and-data#no-pii-in-logs) | passed | Privacy and Data |
 
-The `explicit-error-handling` failure is the open question recorded in Edge
-Cases: a path segment that is invalid in a URL makes `fetch` throw a
-`TypeError` that neither `proxyToBackend` nor `makeProxyHandlers` catches.
-The proxy also sets no outbound timeout and does not forward cancellation.
+The `explicit-error-handling` failure reflects facts recorded in Edge Cases:
+a path segment that is invalid in a URL makes `fetch` throw a `TypeError`
+that neither `proxyToBackend` nor `makeProxyHandlers` catches. The proxy
+also sets no outbound timeout and does not forward cancellation.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited NEEDS REVIEW markers against the marker rules; kept markers are one-line named bullets. |

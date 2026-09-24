@@ -3,7 +3,7 @@ id: 3b310d80-e18d-4f45-9041-10a278f775c1
 domain: agentictoolkit://recipes/ai-plugin-runtime-core-ai
 type: ingredient
 title: Core AI Runtime
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 summary: Provider metadata, HTTP request building, and network-backed catalog stores
@@ -22,7 +22,7 @@ tags:
 - cli
 - security
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 approved-by: null
 approved-date: null
@@ -108,7 +108,7 @@ appears anywhere in this component, and none of them render anything.
 - **google-request-shape**: The Google builder MUST target `https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent?key=<apiKey>`, default an empty `config.model` to `"gemini-2.0-flash"`, remap any message whose `role == "assistant"` to Gemini's `"model"` role, and include `systemInstruction` in the body only when `systemPrompt` is non-empty.
 - **reply-parsing-by-provider**: `parseAssistantReply` MUST return `"(Unable to parse response)"` when `data` is not a JSON object, and otherwise MUST extract `content[0].text` for `.anthropic`, `choices[0].message.content` for `.openai` and `.custom`, and `candidates[0].content.parts[0].text` for `.google`.
 - **reply-parsing-empty-fallback**: `parseAssistantReply` MUST return `"(Empty response)"` whenever the provider-specific shape is not found in an otherwise-parseable JSON object.
-- **claude-cli-reply-parsing**: `parseAssistantReply`'s `.claudeCLI` case is an empty stub — the source itself flags it with a `// todo: fix this` comment before falling through to `break` — so a `.claudeCLI` reply is never actually extracted from `data`; it always falls through to the generic `"(Empty response)"` fallback regardless of what the CLI actually returned. NEEDS REVIEW: Not implemented in source.
+- **claude-cli-reply-parsing**: NEEDS REVIEW: Not implemented in source. `parseAssistantReply`'s `.claudeCLI` case is an empty stub — the source itself flags it with a `// todo: fix this` comment before falling through to `break` — so a `.claudeCLI` reply is never actually extracted from `data`; it always falls through to the generic `"(Empty response)"` fallback regardless of what the CLI actually returned.
 - **error-message-extraction**: `parseErrorMessage` MUST prefer `error.message`, then a top-level `message` field, from a parseable JSON error body, and MUST fall back to `"HTTP <statusCode>"` when the body is not JSON or carries neither field.
 - **request-builder-statelessness**: `AIRequestBuilder` is a stateless `enum` namespace; none of its declarations require actor isolation, and it MAY be called from any isolation domain.
 
@@ -192,7 +192,7 @@ appears anywhere in this component, and none of them render anything.
 - **api-key-in-memory-only-scope**: `AIRequestConfig.apiKey` and `.customBaseURL` MUST be understood as caller-supplied, in-memory values for the duration of one request — this component itself performs no persistence of them; the caller listed in `AIRequestBuilder`'s doc comment (a view model) is responsible for how they were obtained and stored.
 - **artificial-analysis-key-storage**: `ArtificialAnalysisStore.apiKey` and `.rankCache` MUST be backed by `UserSetting` constructed WITHOUT `isSecure: true`, which routes their storage through the plain (non-Keychain) settings provider rather than the secure one — this is a genuine, unmitigated plaintext-storage fact about the shipped code, not a hypothetical.
 - **google-key-in-url**: The Google request builder MUST place `config.apiKey` directly in the request URL's query string (`?key=<apiKey>`) per the Gemini API's documented contract — callers and any request-logging infrastructure downstream of this component MUST treat that URL as key-bearing.
-- **custom-endpoint-scheme-validation**: Neither `AIRequestBuilder`'s OpenAI-compatible builder (for the `.custom` provider's `customBaseURL`), nor `OpenAIModelCatalog.fetch`'s `baseURL` parameter, nor `LocalModelMetadataStore.fetch`'s `openAIBaseURL` parameter validates a URL scheme before use — an operator-supplied `http://` endpoint carries its `Authorization: Bearer <apiKey>` header in plaintext with no guard anywhere in this component. NEEDS REVIEW: Not implemented in source.
+- **custom-endpoint-scheme-validation**: NEEDS REVIEW: Not implemented in source. Neither `AIRequestBuilder`'s OpenAI-compatible builder (for the `.custom` provider's `customBaseURL`), nor `OpenAIModelCatalog.fetch`'s `baseURL` parameter, nor `LocalModelMetadataStore.fetch`'s `openAIBaseURL` parameter validates a URL scheme before use — an operator-supplied `http://` endpoint carries its `Authorization: Bearer <apiKey>` header in plaintext with no guard anywhere in this component.
 
 ## Appearance
 
@@ -355,3 +355,4 @@ Not applicable: none of the 8 source files call a logger, `print`, or `os_log` �
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | | | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited NEEDS REVIEW markers against the marker rules; kept markers are one-line named bullets. |

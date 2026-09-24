@@ -3,7 +3,7 @@ id: e886e448-6aa5-4359-979d-49fba713ab2a
 title: AI Plugin Runtime Features (AIPlugins)
 domain: agentictoolkit://recipes/ai-plugin-runtime-features-ai-plugins
 type: ingredient
-version: 1.0.1
+version: 1.0.2
 status: review
 language: en
 created: '2026-09-23'
@@ -441,13 +441,7 @@ own lock, or a plain `Sendable` value — never left unspecified.
 - **mcp-tool-source-content-flatten**: `callTool` MUST join only the `.text`
   content items of a successful call's response with `"\n"`
   (`flatten`), and MUST silently drop any non-text content item.
-- **mcp-tool-source-argument-validation**: NEEDS REVIEW: Not implemented in
-  source. `callTool` decodes `argumentsJSON` with `try?` and, on a decode
-  failure, silently substitutes `nil` arguments rather than surfacing a
-  validation error — a malformed tool-call payload from the model is
-  forwarded to `pair.client.callTool` as though no arguments were supplied,
-  instead of being reported back as a tool error the model or user could
-  act on.
+- **mcp-tool-source-argument-validation**: NEEDS REVIEW: Not implemented in source. `callTool` decodes `argumentsJSON` with `try?` and, on a decode failure, silently substitutes `nil` arguments rather than surfacing a validation error — a malformed tool-call payload from the model is forwarded to `pair.client.callTool` as though no arguments were supplied, instead of being reported back as a tool error the model or user could act on.
 
 ### PluginChatConfigProvider / SingleConfigurationChatConfigProvider
 
@@ -523,7 +517,7 @@ back an `AIPanelViewController`, never drawing anything itself).
 - **Null/empty input**: `MCPChatToolSource.callTool` decoding an empty or
   malformed `argumentsJSON` MUST NOT throw — `try? JSONDecoder().decode(...)`
   swallows the failure and passes `nil` arguments to the underlying MCP call
-  (the open question noted under Behavioral Requirements).
+  (the open question on mcp-tool-source-argument-validation).
 - **Boundary values**: `LocalChatSession.maxToolIterations == 8` is a hard
   cap. On the 8th iteration, if the model still returns `.toolUse` events,
   the outer loop MUST still end after that iteration completes — there is no
@@ -819,3 +813,4 @@ under Localization are English literals with no localization mechanism.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.0.1 | 2026-09-24 | Mike Fullerton | Compliance section rewritten as linked checks against the compliance catalog |
+| 1.0.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited NEEDS REVIEW markers against the marker rules; kept markers are one-line named bullets. |
