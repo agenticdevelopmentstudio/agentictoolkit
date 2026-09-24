@@ -3,7 +3,7 @@ id: 25046f90-559d-4e32-8516-b5dae5f09c43
 title: ExplanationView
 domain: agentictoolkit://recipes/explanation-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -21,8 +21,10 @@ tags:
 - macos
 - appkit
 depends-on: []
-related: []
-references: []
+related:
+- agentictoolkit://recipes/panel-heading-view
+references:
+- https://www.w3.org/TR/WCAG21/#contrast-minimum
 approved-by: ''
 approved-date: ''
 ---
@@ -74,21 +76,12 @@ shares instead of a copy of it."
 - **exposes-label-property**: The view MUST expose its label as a public,
   directly accessible `label` property, typed `NSTextField`.
 - **styles-as-secondary-caption**: The label MUST be styled with the theme's
-  `.secondaryText` color role and `.caption` text role, via
-  `ComposableSettings.makeValueLabel`.
-- **rejects-frame-only-initialization**: The view MUST NOT support
-  construction via `init(frame:)`; that initializer MUST trigger a fatal
-  error.
-- **rejects-storyboard-instantiation**: The view MUST NOT support
-  construction via `init(coder:)`; that initializer MUST trigger a fatal
-  error.
-- **updates-text-via-label-property**: Callers SHOULD change the displayed
-  text after construction by assigning `label.stringValue` directly, since
-  `ExplanationView` provides no `update`/`setText` method of its own — every
-  call site in the codebase that changes an `ExplanationView`'s text after
-  construction does so this way (e.g. `ExtensionsBrowsePanel.swift`). This is
-  a usage guideline for callers, not behavior `ExplanationView` itself can
-  enforce or verify — no test vector applies (see Design Decisions).
+  `.secondaryText` color role and `.caption` text role (see the AppKit
+  Platform Note for the source's factory method).
+- **requires-text-at-construction**: The view MUST require a `text` value to
+  construct a usable instance; no construction path may produce a usable
+  instance without one (see the AppKit Platform Note for how the source
+  enforces this on this platform).
 
 ## Appearance
 
@@ -149,20 +142,20 @@ shares instead of a copy of it."
 - **Minimum tap target**: Not applicable — the source defines no
   target/action, gesture recognizer, or click handling; this is a purely
   visual, non-interactive display element with no tap target to size.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
-  label's `.secondaryText` color is derived with an enforced *minimum*
-  contrast ratio of 3.0 against the background
-  (`SemanticPalette`'s `dimmed(towards:by:minContrast:)`), but the caption
-  text role this label uses defaults to 11pt regular — small text under
-  WCAG 2.1's size threshold for the relaxed 3:1 large-text ratio — so the
-  guaranteed floor of 3.0 does not by itself establish the 4.5:1 the WCAG AA
-  small-text criterion calls for. Whether any given theme's actual resolved
-  `secondaryText`-on-background ratio reaches 4.5:1 cannot be determined
-  from `ExplanationView.swift` or `SemanticPalette.swift` alone — it depends
-  on each theme's concrete foreground/background color pair. This would be
-  settled by auditing the computed contrast ratio of `.secondaryText` at
-  `.caption` size against the background it is placed on, for every theme
-  this component ships with.
+- **Minimum contrast ratio**: NEEDS REVIEW: the 3:1 floor is implemented;
+  4.5:1 for small text is unverified. The label's `.secondaryText` color is
+  derived with an enforced *minimum* contrast ratio of 3.0 against the
+  background (`SemanticPalette`'s `dimmed(towards:by:minContrast:)`), but
+  the caption text role this label uses defaults to 11pt regular — small
+  text under WCAG 2.1's size threshold for the relaxed 3:1 large-text ratio
+  (WCAG 1.4.3) — so the guaranteed floor of 3.0 does not by itself establish
+  the 4.5:1 the WCAG AA small-text criterion calls for. Whether any given
+  theme's actual resolved `secondaryText`-on-background ratio reaches 4.5:1
+  cannot be determined from `ExplanationView.swift` or `SemanticPalette.swift`
+  alone — it depends on each theme's concrete foreground/background color
+  pair. This would be settled by auditing the computed contrast ratio of
+  `.secondaryText` at `.caption` size against the background it is placed
+  on, for every theme this component ships with.
 
 ## Conformance Test Vectors
 
@@ -175,20 +168,14 @@ shares instead of a copy of it."
 | explanation-view-005 | fills-view-edge-to-edge | Construct the view, then lay it out inside a fixed-size superview | The label's resolved frame has zero inset from `ExplanationView`'s frame on all four edges |
 | explanation-view-006 | exposes-label-property | Construct the view, then access `.label` from outside the type | The property is accessible and returns the same `NSTextField` instance built during init |
 | explanation-view-007 | styles-as-secondary-caption | Construct the view | `label.font` equals the active theme's `.caption` font; `label.textColor` equals the active theme's `.secondaryText` color |
-| explanation-view-008 | rejects-frame-only-initialization | Attempt `ExplanationView(frame: .zero)` | The call traps with a fatal error; no instance is returned |
-| explanation-view-009 | rejects-storyboard-instantiation | Attempt `ExplanationView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
-
-`updates-text-via-label-property` has no test vector: it is a SHOULD
-constraining how a caller chooses to update the view, not an observable
-behavior of `ExplanationView` itself, so no component-level test can verify
-it (see Design Decisions).
+| explanation-view-008 | requires-text-at-construction | Attempt `ExplanationView(frame: .zero)` | The call traps with a fatal error; no instance is returned. Unavailable as a normal in-process assertion — XCTest cannot catch a Swift `fatalError`; this requires a crash-test harness or a compile-time/unavailable check instead. |
+| explanation-view-009 | requires-text-at-construction | Attempt `ExplanationView(coder: someCoder)` | The call traps with a fatal error; no instance is returned. Unavailable as a normal in-process assertion — XCTest cannot catch a Swift `fatalError`; this requires a crash-test harness or a compile-time/unavailable check instead. |
 
 ## Edge Cases
 
 - **Null/empty input**: `text` is a non-optional `String` constructor
   parameter, so Swift's type system rules out `nil`. An empty string (`""`)
-  renders an empty label with no guard against it in source (MUST, per
-  `renders-caller-text`).
+  renders an empty label with no guard against it in source.
 - **Boundary values**: Not applicable in the numeric-input sense —
   `ExplanationView`'s only input is a caller-supplied string; it has no
   length limit, minimum/maximum, or other caller-configurable numeric range
@@ -203,21 +190,25 @@ it (see Design Decisions).
   performs no network operation of its own.
 - **Very long text with no width constraint**: with both horizontal
   priorities set to `.defaultLow` and vertical compression-resistance set
-  to `.required`, a superview or stack view that constrains the view's
-  width forces the label to wrap across more lines and grow taller
-  (`fills-view-edge-to-edge`, `resists-vertical-compression`); if nothing
-  constrains the view's width, layout falls back to whatever the container
-  gives it, since neither the label nor the view expresses a preferred or
-  maximum width of its own in source (MUST, per
-  `compresses-and-hugs-loosely-horizontally`).
+  to `.required`, the label wraps and grows taller only once something
+  constrains `ExplanationView`'s own width (a superview's width constraint,
+  or a stack/grid cell) — `fills-view-edge-to-edge`'s edge-to-edge pins carry
+  that width straight through to the label. The source sets no
+  `preferredMaxLayoutWidth` and no width constraint of its own
+  (`compresses-and-hugs-loosely-horizontally`), so Auto Layout has no
+  authoritative width to wrap against until the container supplies one: a
+  container that does not constrain the view's width leaves the label's
+  wrapped height ambiguous at that layout pass. The container MUST constrain
+  the view's width for `wraps-across-lines`/`resists-vertical-compression`
+  to produce a determinate multi-line height.
 - **Text reassigned after construction**: callers mutate `label.stringValue`
   directly (e.g. `ExtensionsBrowsePanel.swift`'s
   `selectionName.label.stringValue = ...`); each reassignment triggers
   `NSTextField`'s standard intrinsic-content-size invalidation, which
   re-wraps and re-measures the label at its next layout pass — this is
   standard `NSTextField` behavior reached through the public `label`
-  property, not custom code in `ExplanationView.swift` itself (SHOULD, per
-  `updates-text-via-label-property`).
+  property, not custom code in `ExplanationView.swift` itself (see
+  Configuration).
 
 ## Configuration
 
@@ -231,6 +222,15 @@ it (see Design Decisions).
 ```swift
 public init(withText text: String)
 ```
+
+**Usage notes**: `ExplanationView` provides no `update`/`setText` method.
+Callers that need to change the displayed text after construction SHOULD
+assign `label.stringValue` directly — every call site in the codebase that
+changes an `ExplanationView`'s text after construction does so this way
+(e.g. `ExtensionsBrowsePanel.swift`). This is guidance for how a caller
+chooses to update the view, not behavior `ExplanationView` itself enforces
+or verifies, so no conformance test vector applies to it (see Design
+Decisions).
 
 ## Deep Linking
 
@@ -249,7 +249,7 @@ defines no string literal of its own that would need translation.
 | Option | Behavior |
 |--------|----------|
 | Reduce Motion | Not applicable — the source performs no animation, transition, or `NSAnimationContext`/`CATransaction` call; text assignment is a synchronous property set. |
-| Increase Contrast | Not applicable to this component directly — `ExplanationView.swift` sets no custom `NSColor`; its coloring comes entirely from the theme's `.secondaryText` role, resolved through `SemanticPalette`. Whether the resulting per-theme contrast is sufficient is tracked once under Accessibility above, not duplicated here — the open question there is the same one that would apply here. |
+| Increase Contrast | `ExplanationView.swift` sets no custom `NSColor` — its coloring comes entirely from the theme's `.secondaryText` role, resolved through `SemanticPalette` — and no code in `ExplanationView.swift` or `SemanticPalette.swift` observes or reacts to the system's Increase Contrast setting; the color choice is unconditional. Whether the resulting per-theme contrast is sufficient at all is the open question tracked once under Accessibility above (minimum contrast ratio), not duplicated here. |
 | Differentiate Without Color | Not applicable — the view conveys no state through color at all; it renders only the caller-supplied text in a single, fixed secondary-text color, with no color-coded meaning to differentiate. |
 
 ## Feature Flags
@@ -288,12 +288,15 @@ or logger reference anywhere in source).
   it directly in the parent's layout with no fixed frame so it shrinks and
   wraps to the width it's given, mirroring
   `compresses-and-hugs-loosely-horizontally`.
-- **Compose**: Use a `Text(text, style = MaterialTheme.typography.labelSmall,
-  color = MaterialTheme.colorScheme.onSurfaceVariant)` — Compose's nearest
-  analog to a caption/secondary-text pairing — inside a layout slot with no
-  fixed width, letting it wrap naturally; Compose `Text` wraps across lines
-  and grows its own height by default, mirroring `wraps-across-lines` and
-  `resists-vertical-compression` without extra configuration.
+- **Compose**: Use a `Text(text, style = MaterialTheme.typography.bodySmall,
+  color = MaterialTheme.colorScheme.onSurfaceVariant)` — `bodySmall` is
+  Material's regular-weight small body style, the closer fit for a wrapping
+  paragraph than the medium-weight `labelSmall` style, which pairs a
+  secondary-text color role with a caption-equivalent size — inside a layout
+  slot with no fixed width, letting it wrap naturally; Compose `Text` wraps
+  across lines and grows its own height by default, mirroring
+  `wraps-across-lines` and `resists-vertical-compression` without extra
+  configuration.
 - **React/Web**: A `<p>`/`<span>` with `white-space: normal;
   overflow-wrap: break-word` (mirroring word-wrapping with no maximum line
   count) styled from the equivalent caption/secondary-text CSS custom
@@ -303,19 +306,27 @@ or logger reference anywhere in source).
 - **AppKit / UIKit** (source platform): Source at
   `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/ExplanationView.swift`
   (this recipe's source): a macOS-only (`import AppKit`) `NSView` subclass,
-  `@MainActor`, inside the `ComposableSettings` namespace, wrapping one
-  `ComposableSettings.makeValueLabel`-built `ThemedLabel` reconfigured for
-  multi-line wrapping and pinned edge-to-edge. A UIKit port replaces
-  `NSView`/`NSTextField`(`ThemedLabel`) with `UIView`/`UILabel`, sets
-  `numberOfLines = 0` and `lineBreakMode = .byWordWrapping` (`UILabel`'s
-  direct analogs of `maximumNumberOfLines`/`lineBreakMode`), and keeps the
-  same horizontal-compressible/vertical-required priorities via
+  `@MainActor`, inside the `ComposableSettings` namespace, wrapping one label
+  built through the shared value-label factory
+  (`ComposableSettings.makeValueLabel`, styled with the theme's
+  `.secondaryText`/`.caption` roles per `styles-as-secondary-caption`) and
+  reconfigured for multi-line wrapping and pinned edge-to-edge. The source
+  satisfies `requires-text-at-construction` by making `init(withText:)` the
+  only usable initializer: both `override init(frame:)` and
+  `required init?(coder:)` call `fatalError` instead of returning a usable
+  instance — `init(frame:)`'s fatal-error message is a known source quirk
+  (see Design Decisions) that a well-formed implementation should not
+  reproduce. A UIKit port replaces `NSView`/`NSTextField` (`ThemedLabel`)
+  with `UIView`/`UILabel`, sets `numberOfLines = 0` and
+  `lineBreakMode = .byWordWrapping` (`UILabel`'s direct analogs of
+  `maximumNumberOfLines`/`lineBreakMode`), and keeps the same
+  horizontal-compressible/vertical-required priorities via
   `setContentCompressionResistancePriority(_:for:)`/
-  `setContentHuggingPriority(_:for:)`. UIKit has no `NSCoder`-vs-frame
-  initializer split to fatal-error on both the way
-  `rejects-frame-only-initialization` and `rejects-storyboard-instantiation`
-  do.
-- **WinUI 3** (the reason this recipe exists): Build this as a `TextBlock`
+  `setContentHuggingPriority(_:for:)`. Unlike `NSView`, `UIView` does carry
+  both a frame initializer and `init?(coder:)` — a UIKit port SHOULD mark
+  both unavailable or fatal the same way to preserve
+  `requires-text-at-construction`.
+- **WinUI 3**: Build this as a `TextBlock`
   with `TextWrapping="WrapWholeWords"` (the analog of `lineBreakMode =
   .byWordWrapping` with `wraps = true`) and no `MaxLines` set (the analog of
   `maximumNumberOfLines = 0`, i.e. unlimited). Bind `TextBlock.Text` to the
@@ -339,76 +350,79 @@ or logger reference anywhere in source).
 
 ## Design Decisions
 
-- **Decision**: `ExplanationView`'s label overrides `ThemedLabel`'s default
-  single-line, clipped, non-wrapping configuration (`cell?.wraps = true`,
-  `cell?.usesSingleLineMode = false`, `lineBreakMode = .byWordWrapping`,
-  `maximumNumberOfLines = 0`) instead of accepting `ThemedLabel`'s defaults.
-  **Rationale**: source comments explain that `ThemedLabel` is deliberately
-  single-line by default "so a caption in a toolbar doesn't ask for two
-  lines' height," and that "a blurb is the other case, and has to say so" —
-  without these overrides, `lineBreakMode`/`maximumNumberOfLines` are
-  ignored while the cell is in single-line mode, and the label would (per
-  the source comment) "set its wrap policy and then [run] off the right
-  edge anyway."
-  **Approved: pending**
-- **Decision**: The label's horizontal content-compression-resistance and
-  content-hugging priorities are both lowered to `.defaultLow`.
-  **Rationale**: source comments state that "a wrapping label still reports
-  its one-line intrinsic width unless it is allowed to yield
-  horizontally — otherwise a long blurb forces the whole panel (and the
-  settings window) as wide as the text," so the label is deliberately let
-  to compress and wrap to the available width instead.
-  **Approved: pending**
-- **Decision**: Force a fatal error from both `init(frame:)` and
-  `init(coder:)`, leaving `init(withText:)` as the only usable initializer.
-  **Rationale**: the view has no meaningful default state — it cannot
-  render anything without a `text` string — so both inherited `NSView`
-  initializers that could construct it without one are intentionally
-  disabled rather than left to produce a blank row.
-  **Approved: pending**
-- **Decision**: `init(frame frameRect: NSRect)`'s fatal-error message is the
-  literal string `"init(frame frameRect: NSRect"`, missing a closing
-  parenthesis and not following the `"init(coder:) has not been
-  implemented"` sentence form the sibling `init?(coder:)` message uses.
-  **Rationale**: documented here as a source quirk rather than smoothed
-  over. The string reads as a truncated fragment of the initializer's own
-  signature rather than a complete sentence, and is very likely a typo, but
-  the source is unchanged for this recipe — any implementation mirroring
-  this exact message text will reproduce the same malformed string until it
-  is corrected upstream.
-  **Approved: pending**
-- **Decision**: `ExplanationView` provides no `update`/`setText` method;
-  callers that need to change the text after construction reassign
-  `label.stringValue` directly.
-  **Rationale**: every existing call site that updates an
-  `ExplanationView`'s text after construction already does this (e.g.
-  `ExtensionsBrowsePanel.swift`), and `NSTextField.stringValue`'s setter
-  already triggers the intrinsic-size invalidation a wrapping label needs —
-  an added `update(text:)` wrapper would only duplicate behavior
-  `NSTextField` already provides for free.
-  **Approved: pending**
-- **Decision**: This recipe has fewer behavioral requirements than sibling
-  `ComposableSettingsWindow` row recipes (`CaptionedSliderView`: 13;
-  `Badge`: 14).
-  **Rationale**: `ExplanationView` is a static text display with a single
-  constructor argument and no view model, no user interaction, and no
-  dynamic state — it is genuinely simpler than a form-control row, not
-  under-analyzed. The requirement count reflects that difference in scope,
-  not a gap in authoring effort.
-  **Approved: pending**
+**Decision**: `ExplanationView`'s label overrides `ThemedLabel`'s default
+single-line, clipped, non-wrapping configuration (`cell?.wraps = true`,
+`cell?.usesSingleLineMode = false`, `lineBreakMode = .byWordWrapping`,
+`maximumNumberOfLines = 0`) instead of accepting `ThemedLabel`'s defaults.
+**Rationale**: source comments explain that `ThemedLabel` is deliberately
+single-line by default "so a caption in a toolbar doesn't ask for two
+lines' height," and that "a blurb is the other case, and has to say so" —
+without these overrides, `lineBreakMode`/`maximumNumberOfLines` are ignored
+while the cell is in single-line mode, and the label would (per the source
+comment) "set its wrap policy and then [run] off the right edge anyway."
+**Approved**: pending
+
+**Decision**: The label's horizontal content-compression-resistance and
+content-hugging priorities are both lowered to `.defaultLow`.
+**Rationale**: source comments state that "a wrapping label still reports
+its one-line intrinsic width unless it is allowed to yield
+horizontally — otherwise a long blurb forces the whole panel (and the
+settings window) as wide as the text," so the label is deliberately let to
+compress and wrap to the available width instead.
+**Approved**: pending
+
+**Decision**: Force a fatal error from both `init(frame:)` and
+`init(coder:)`, leaving `init(withText:)` as the only usable initializer.
+**Rationale**: the view has no meaningful default state — it cannot render
+anything without a `text` string — so both inherited `NSView` initializers
+that could construct it without one are intentionally disabled rather than
+left to produce a blank row (`requires-text-at-construction`).
+**Approved**: pending
+
+**Decision**: `init(frame frameRect: NSRect)`'s fatal-error message in
+source is the literal string `"init(frame frameRect: NSRect"`, missing a
+closing parenthesis and not following the `"init(coder:) has not been
+implemented"` sentence form the sibling `init?(coder:)` message uses.
+**Rationale**: a known issue, documented here rather than smoothed over —
+the string reads as a truncated fragment of the initializer's own signature
+rather than a complete sentence, and is very likely an unintentional typo.
+The source is unchanged for this recipe, but this is not a decision worth
+reproducing: a well-formed message (following the sibling `init?(coder:)`
+sentence form) is the correct target, and any implementation — including a
+future fix upstream — SHOULD use one rather than copying this exact
+malformed string.
+**Approved**: pending
+
+**Decision**: `ExplanationView` provides no `update`/`setText` method;
+callers that need to change the text after construction reassign
+`label.stringValue` directly (see Configuration).
+**Rationale**: every existing call site that updates an `ExplanationView`'s
+text after construction already does this (e.g.
+`ExtensionsBrowsePanel.swift`), and `NSTextField.stringValue`'s setter
+already triggers the intrinsic-size invalidation a wrapping label needs —
+an added `update(text:)` wrapper would only duplicate behavior
+`NSTextField` already provides for free.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [theme-driven-typography](agenticdevelopercookbook://compliance/ui-tokens#theme-driven-typography) | passed | ui-tokens |
-| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | ui-tokens |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | needs-review | accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [dynamic-type-support](agenticdevelopercookbook://compliance/accessibility#dynamic-type-support) | failed | Accessibility |
+
+Both statuses rest on `ExplanationView.swift`'s reliance on the theme's
+`.secondaryText`/`.caption` roles: contrast is partial because
+`SemanticPalette` enforces only a 3.0 minimum ratio (see Accessibility
+above), and dynamic-type-support fails because
+`ThemeTypography+NSFont.swift`'s `nsFont(scaledSize:)` builds fonts through
+fixed-point-size calls (`NSFont.systemFont(ofSize:weight:)` or a named-family
+lookup at an explicit size) rather than `NSFont.preferredFont(forTextStyle:)`
+or any observation of the system's content-size-category setting.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded the `init(frame:)` typo design decision as a known issue instead of behavior to reproduce; moved AppKit implementation mechanics (`ComposableSettings.makeValueLabel`, the fatal-error initializers) out of Behavioral Requirements and into the AppKit Platform Note; merged the two initializer-rejection requirements into a single cross-platform `requires-text-at-construction` requirement and corrected the UIKit note's false claim about `init(frame:)`/`init(coder:)`; moved the caller text-update guidance from a SHOULD requirement into Configuration usage notes; reformatted Design Decisions into the three-line Decision/Rationale/Approved form and dropped the authoring-scope-comparison entry; rebuilt the Compliance table to cite only checks that exist in the compliance catalog, with corrected statuses; added `related`/`references` frontmatter entries; reworded the contrast-ratio and Increase Contrast accessibility text to state what is and isn't implemented; clarified that a container must constrain the view's width for correct wrapped height; flagged the two fatal-error test vectors as requiring a crash-test harness; switched the Compose mapping from `labelSmall` to `bodySmall`; and dropped the ad hoc MUST/SHOULD tags on Edge Cases bullets and the WinUI 3 Platform Note's editorial aside. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `ExplanationView` (AppKit, macOS) source. |

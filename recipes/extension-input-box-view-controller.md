@@ -3,7 +3,7 @@ id: b85dc186-31e9-472b-99ea-2c097fc926c8
 title: ExtensionInputBoxViewController
 domain: agentictoolkit://recipes/extension-input-box-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -11,8 +11,8 @@ modified: '2026-09-23'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
-summary: An AppKit NSViewController presenting one vscode.window.showInputBox request
-  - an optional title and prompt, a text or secure field, and a live validation message.
+summary: 'AppKit panel for one vscode showInputBox request: optional title/prompt,
+  text or secure field, live validation.'
 platforms:
 - swift
 - macos
@@ -21,10 +21,10 @@ tags:
 - form-control
 - text-input
 - validation
-- macos
 - appkit
 depends-on: []
-related: []
+related:
+- agentictoolkit://recipes/extension-quick-pick-view-controller
 references: []
 approved-by: ''
 approved-date: ''
@@ -49,70 +49,70 @@ pre-filled value), and reports the user's decision through the `onAccept`,
 
 ## Behavioral Requirements
 
-- **renders-optional-title-label**: Component MUST create and display
+- **optional-title-label**: Component MUST create and display
   `titleLabel` as a `ThemedLabel` in the `.primaryText` role and `.heading`
   text role, populated with `model.request.title`, when
   `model.request.title` is non-nil and non-empty. Component MUST NOT
   create a title label otherwise.
-- **renders-optional-prompt-label**: Component MUST create and display
+- **optional-prompt-label**: Component MUST create and display
   `promptLabel` as a `ThemedLabel` in the `.secondaryText` role and
   `.caption` text role, populated with `model.request.prompt`, when
   `model.request.prompt` is non-nil and non-empty. Component MUST NOT
   create a prompt label otherwise.
-- **selects-secure-field-once-at-init**: Component MUST construct its
+- **secure-field-selection**: Component MUST construct its
   field as `NSSecureTextField` when `model.request.isPassword` is `true`,
   and as `NSTextField` otherwise, and MUST make that choice exactly once,
   during `init(model:)`, never re-evaluating or rebuilding the field
   afterward.
-- **seeds-field-placeholder**: Component MUST set the field's
+- **field-placeholder-seed**: Component MUST set the field's
   `placeholderString` to `model.request.placeHolder`, or to an empty
   string when `model.request.placeHolder` is `nil`.
-- **seeds-field-value-on-load**: Component MUST set the field's
+- **initial-field-value**: Component MUST set the field's
   `stringValue` to `model.value` in `viewDidLoad`.
-- **validates-prefill-once-per-appearance-cycle**: Component MUST, only
-  the first time `viewDidAppear` runs for a given presentation, call
+- **prefill-validation-once**: Component MUST, only
+  the first time `viewDidAppear` runs for a given controller instance, call
   `model.beginValidating()` followed by `onValueChanged(model.value)`.
   Component MUST NOT repeat that call on any subsequent `viewDidAppear`
-  invocation for the same presentation.
-- **commits-value-and-revalidates-on-edit**: Component MUST, on every
+  invocation for the same controller instance.
+- **value-commit-and-revalidation**: Component MUST, on every
   change to the field's text (`controlTextDidChange`), set `model.value`
   to the field's current `stringValue`, call `model.beginValidating()`,
   and invoke `onValueChanged` with that same new value, as one round trip
   per edit.
-- **clears-pending-acceptance-on-edit**: Component MUST reset
-  `acceptWhenValidationLands` to `false` on every change to the field's
-  text, before performing the commit-and-revalidate round trip.
-- **accepts-only-when-model-permits**: Component MUST invoke
+- **pending-acceptance-reset**: Component MUST discard any Return held
+  pending validation on every change to the field's text, before
+  performing the commit-and-revalidate round trip.
+- **model-gated-acceptance**: Component MUST invoke
   `onAccept(model.value)` when Return is pressed while `model.canAccept`
   is `true`. Component MUST NOT invoke `onAccept` when `model.canAccept`
   is `false`.
-- **defers-acceptance-while-validating**: Component MUST, when Return is
+- **acceptance-deferral**: Component MUST, when Return is
   pressed while `model.isValidating` is `true`, record that Return as
-  pending (`acceptWhenValidationLands = true`) rather than accepting
-  immediately or discarding the keystroke, and MUST replay it — invoking
+  pending rather than accepting immediately or discarding the keystroke,
+  and MUST replay it — invoking
   `onAccept(model.value)` — the next time `showValidation(_:)` runs and
   finds `model.canAccept` `true`.
-- **drops-return-under-standing-error**: Component MUST silently drop a
+- **return-drop-under-error**: Component MUST silently drop a
   Return pressed while `model.canAccept` is `false` and
   `model.isValidating` is also `false` (a standing `.error` validation),
   without recording it for later replay.
-- **cancels-on-escape**: Component MUST invoke `onCancel()` when Escape is
+- **escape-cancellation**: Component MUST invoke `onCancel()` when Escape is
   pressed while the view's window is the event's window, via the
   window-level Escape monitor started in `viewDidAppear` and stopped in
   `viewWillDisappear`.
-- **shows-validation-message**: Component MUST, when `showValidation(_:)`
+- **validation-message-shown**: Component MUST, when `showValidation(_:)`
   is called with a non-nil validation, set `validationLabel.isHidden` to
   `false`, set its `stringValue` to `validation.message`, and set its
   `role` to `.danger` for `.error` severity, `.warning` for `.warning`
   severity, or `.secondaryText` for `.information` severity.
-- **hides-validation-message-when-valid**: Component MUST set
+- **validation-message-hidden**: Component MUST set
   `validationLabel.isHidden` to `true` when `showValidation(_:)` is called
   with `nil`.
-- **focuses-field-then-applies-initial-selection**: Component MUST, when
+- **focus-then-initial-selection**: Component MUST, when
   `focusField()` is called, first make the field the window's first
   responder, and only then set the field editor's `selectedRange` to
   `model.initialSelectionUTF16Range()`.
-- **sizes-panel-from-fitted-layout**: Component MUST set
+- **panel-size-from-fitted-layout**: Component MUST set
   `preferredContentSize` to a fixed width of 480pt and a height equal to
   the root view's fitted Auto Layout height (`root.fittingSize.height`),
   floored at 72pt.
@@ -172,7 +172,7 @@ pre-filled value), and reports the user's decision through the `onAccept`,
 | Pressed | Not applicable — no `NSButton` or other pressable control appears anywhere in `ExtensionInputBoxViewController.swift`; the field is a text-entry control, not a press target. |
 | Disabled | Not applicable — `isEnabled` is never set on the field (or on either label) anywhere in source; the field is always enabled once the panel is on screen. |
 | Focused | The field can become first responder (via normal Tab/click focus, or via `focusField()`). No custom focus-ring styling is set in source — AppKit's default `NSTextField`/`NSSecureTextField` focus ring applies. `focusField()` additionally applies `model.initialSelectionUTF16Range()` as the field's text selection, but only when explicitly invoked — not automatically on every focus event. |
-| Loading | NEEDS REVIEW: Not implemented in source. Behavior undefined. `model.isValidating` (set true by `beginValidating()`, cleared by `recordValidation(_:)`) changes only the acceptance logic (Return is held and replayed — see `defers-acceptance-while-validating`); no view property (opacity, a spinner, a disabled state, or any other visual cue) is read from or set based on `model.isValidating` anywhere in `ExtensionInputBoxViewController.swift`. What is missing: whether a user should see any indication that the extension's `validateInput` is in flight for the currently-typed value. What would settle it: a design decision on whether to add a visible in-progress indicator (e.g. dim the validation area or show a small progress indicator) while `model.isValidating` is true, or confirmation that no indicator is intended because the round trip is expected to be fast. |
+| Loading | NEEDS REVIEW: Not implemented in source. Behavior undefined. `model.isValidating` (set true by `beginValidating()`, cleared by `recordValidation(_:)`) changes only the acceptance logic (Return is held and replayed — see `acceptance-deferral`); no view property (opacity, a spinner, a disabled state, or any other visual cue) is read from or set based on `model.isValidating` anywhere in `ExtensionInputBoxViewController.swift`. What is missing: whether a user should see any indication that the extension's `validateInput` is in flight for the currently-typed value. What would settle it: a design decision on whether to add a visible in-progress indicator (e.g. dim the validation area or show a small progress indicator) while `model.isValidating` is true, or confirmation that no indicator is intended because the round trip is expected to be fast. |
 
 ## Accessibility
 
@@ -213,35 +213,37 @@ pre-filled value), and reports the user's decision through the `onAccept`,
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| extension-input-box-view-controller-001 | renders-optional-title-label | `model.request.title = "Enter API Key"` | `titleLabel` is created, non-nil, `role == .primaryText`, `textRole == .heading`, `stringValue == "Enter API Key"` |
-| extension-input-box-view-controller-002 | renders-optional-title-label | `model.request.title = nil` (and, separately, `= ""`) | `titleLabel` is `nil`; no title view is added to `root`'s subviews |
-| extension-input-box-view-controller-003 | renders-optional-prompt-label | `model.request.prompt = "Used only for this session."` | `promptLabel` is created, non-nil, `role == .secondaryText`, `textRole == .caption`, `stringValue` matches |
-| extension-input-box-view-controller-004 | renders-optional-prompt-label | `model.request.prompt = nil` | `promptLabel` is `nil`; no prompt view is added to `root`'s subviews |
-| extension-input-box-view-controller-005 | selects-secure-field-once-at-init | Construct with `model.request.isPassword = true` | `field` is an `NSSecureTextField` instance |
-| extension-input-box-view-controller-006 | selects-secure-field-once-at-init | Construct with `model.request.isPassword = false` | `field` is a plain `NSTextField` instance, not `NSSecureTextField` |
-| extension-input-box-view-controller-007 | seeds-field-placeholder | `model.request.placeHolder = "org/repo"` | `field.placeholderString == "org/repo"` after `loadView` |
-| extension-input-box-view-controller-008 | seeds-field-placeholder | `model.request.placeHolder = nil` | `field.placeholderString == ""` after `loadView` |
-| extension-input-box-view-controller-009 | seeds-field-value-on-load | `model.value = "prefilled"` | After `viewDidLoad`, `field.stringValue == "prefilled"` |
-| extension-input-box-view-controller-010 | validates-prefill-once-per-appearance-cycle | Call `viewDidAppear()` twice in succession on a fresh instance | `model.beginValidating()`/`onValueChanged(model.value)` fire exactly once, on the first call only |
-| extension-input-box-view-controller-011 | commits-value-and-revalidates-on-edit | Set `field.stringValue = "abc"` and invoke `controlTextDidChange(_:)` | `model.value == "abc"`; `model.isValidating == true`; `onValueChanged` is invoked once with `"abc"` |
-| extension-input-box-view-controller-012 | clears-pending-acceptance-on-edit | With `acceptWhenValidationLands == true`, invoke `controlTextDidChange(_:)` | `acceptWhenValidationLands == false` after the call |
-| extension-input-box-view-controller-013 | accepts-only-when-model-permits | `model.canAccept == true`; invoke `control(_:textView:doCommandBy: #selector(NSResponder.insertNewline(_:)))` | `onAccept` is invoked exactly once, with `model.value` |
-| extension-input-box-view-controller-014 | accepts-only-when-model-permits | `model.canAccept == false`; invoke the same Return command | `onAccept` is not invoked |
-| extension-input-box-view-controller-015 | defers-acceptance-while-validating | `model.isValidating == true`; press Return; then call `showValidation(nil)` (making `model.canAccept == true`) | `acceptWhenValidationLands` is set `true` on the Return press, then `onAccept(model.value)` fires exactly once inside the `showValidation(nil)` call |
-| extension-input-box-view-controller-016 | drops-return-under-standing-error | `model.isValidating == false`, `model.canAccept == false` (standing `.error`); press Return | `onAccept` is not invoked; `acceptWhenValidationLands` remains `false` |
-| extension-input-box-view-controller-017 | cancels-on-escape | With the monitor started (`viewDidAppear` ran) and the view's window key, dispatch a `keyDown` with `keyCode == 53` for that window | `onCancel()` is invoked exactly once |
-| extension-input-box-view-controller-018 | shows-validation-message | Call `showValidation(ExtensionInputValidation(message: "Required", severity: .error))` | `validationLabel.isHidden == false`; `stringValue == "Required"`; `role == .danger` |
-| extension-input-box-view-controller-019 | shows-validation-message | Call `showValidation(ExtensionInputValidation(message: "Heads up", severity: .warning))` (and, separately, `.information`) | `role == .warning` for `.warning` (and `role == .secondaryText` for `.information`) |
-| extension-input-box-view-controller-020 | hides-validation-message-when-valid | Call `showValidation(nil)` | `validationLabel.isHidden == true` |
-| extension-input-box-view-controller-021 | focuses-field-then-applies-initial-selection | Call `focusField()` with `model.initialSelectionUTF16Range()` resolving to `NSRange(location: 2, length: 3)` | The field is first responder, and `field.currentEditor()?.selectedRange == NSRange(location: 2, length: 3)` |
-| extension-input-box-view-controller-022 | sizes-panel-from-fitted-layout | Load the view with content whose fitted Auto Layout height is 40pt (below the 72pt floor) | `preferredContentSize == NSSize(width: 480, height: 72)` |
-| extension-input-box-view-controller-023 | sizes-panel-from-fitted-layout | Load the view with content whose fitted Auto Layout height is 160pt | `preferredContentSize == NSSize(width: 480, height: 160)` |
+| extension-input-box-view-controller-001 | optional-title-label | `model.request.title = "Enter API Key"` | `titleLabel` is created, non-nil, `role == .primaryText`, `textRole == .heading`, `stringValue == "Enter API Key"` |
+| extension-input-box-view-controller-002 | optional-title-label | `model.request.title = nil` (and, separately, `= ""`) | `titleLabel` is `nil`; no title view is added to `root`'s subviews |
+| extension-input-box-view-controller-003 | optional-prompt-label | `model.request.prompt = "Used only for this session."` | `promptLabel` is created, non-nil, `role == .secondaryText`, `textRole == .caption`, `stringValue` matches |
+| extension-input-box-view-controller-004 | optional-prompt-label | `model.request.prompt = nil` | `promptLabel` is `nil`; no prompt view is added to `root`'s subviews |
+| extension-input-box-view-controller-005 | secure-field-selection | Construct with `model.request.isPassword = true` | `field` is an `NSSecureTextField` instance |
+| extension-input-box-view-controller-006 | secure-field-selection | Construct with `model.request.isPassword = false` | `field` is a plain `NSTextField` instance, not `NSSecureTextField` |
+| extension-input-box-view-controller-007 | field-placeholder-seed | `model.request.placeHolder = "org/repo"` | `field.placeholderString == "org/repo"` after `loadView` |
+| extension-input-box-view-controller-008 | field-placeholder-seed | `model.request.placeHolder = nil` | `field.placeholderString == ""` after `loadView` |
+| extension-input-box-view-controller-009 | initial-field-value | `model.value = "prefilled"` | After `viewDidLoad`, `field.stringValue == "prefilled"` |
+| extension-input-box-view-controller-010 | prefill-validation-once | Call `viewDidAppear()` twice in succession on a fresh instance | `model.beginValidating()`/`onValueChanged(model.value)` fire exactly once, on the first call only |
+| extension-input-box-view-controller-011 | value-commit-and-revalidation | Set `field.stringValue = "abc"` and invoke `controlTextDidChange(_:)` | `model.value == "abc"`; `model.isValidating == true`; `onValueChanged` is invoked once with `"abc"` |
+| extension-input-box-view-controller-012 | pending-acceptance-reset, acceptance-deferral | `model.isValidating == true`; press Return (deferring acceptance); then set `field.stringValue` and invoke `controlTextDidChange(_:)` (an edit); then call `showValidation` with a validation that makes `model.canAccept == true` | `onAccept` is not invoked — the edit discarded the held Return before validation landed |
+| extension-input-box-view-controller-013 | model-gated-acceptance | `model.canAccept == true`; invoke `control(_:textView:doCommandBy: #selector(NSResponder.insertNewline(_:)))` | `onAccept` is invoked exactly once, with `model.value` |
+| extension-input-box-view-controller-014 | model-gated-acceptance | `model.canAccept == false`; invoke the same Return command | `onAccept` is not invoked |
+| extension-input-box-view-controller-015 | acceptance-deferral | `model.isValidating == true`; press Return; then call `showValidation(nil)`, which invokes `model.recordValidation(nil)` internally, clearing `model.isValidating` and making `model.canAccept == true` | `onAccept(model.value)` is not invoked on the Return press itself; it fires exactly once, inside the `showValidation(nil)` call, once validation lands |
+| extension-input-box-view-controller-016 | return-drop-under-error | `model.isValidating == false`, `model.canAccept == false` (standing `.error`); press Return | `onAccept` is not invoked, and a validation that subsequently lands with `model.canAccept == true` does not retroactively invoke it either — the Return was dropped, not deferred |
+| extension-input-box-view-controller-017 | escape-cancellation | With the monitor started (`viewDidAppear` ran) and the view's window key, dispatch a `keyDown` with `keyCode == 53` for that window | `onCancel()` is invoked exactly once |
+| extension-input-box-view-controller-018 | validation-message-shown | Call `showValidation(ExtensionInputValidation(message: "Required", severity: .error))` | `validationLabel.isHidden == false`; `stringValue == "Required"`; `role == .danger` |
+| extension-input-box-view-controller-019 | validation-message-shown | Call `showValidation(ExtensionInputValidation(message: "Heads up", severity: .warning))` (and, separately, `.information`) | `role == .warning` for `.warning` (and `role == .secondaryText` for `.information`) |
+| extension-input-box-view-controller-020 | validation-message-hidden | Call `showValidation(nil)` | `validationLabel.isHidden == true` |
+| extension-input-box-view-controller-021 | focus-then-initial-selection | Call `focusField()` with `model.initialSelectionUTF16Range()` resolving to `NSRange(location: 2, length: 3)` | The field is first responder, and `field.currentEditor()?.selectedRange == NSRange(location: 2, length: 3)` |
+| extension-input-box-view-controller-022 | panel-size-from-fitted-layout | Load the view with content whose fitted Auto Layout height is 40pt (below the 72pt floor) | `preferredContentSize == NSSize(width: 480, height: 72)` |
+| extension-input-box-view-controller-023 | panel-size-from-fitted-layout | Load the view with content whose fitted Auto Layout height is 160pt | `preferredContentSize == NSSize(width: 480, height: 160)` |
+| extension-input-box-view-controller-024 | model-gated-acceptance | `model.value == ""`, `model.canAccept == true`; invoke the Return command | `onAccept("")` is invoked exactly once — an empty value is still accepted, not treated as nothing entered |
+| extension-input-box-view-controller-025 | escape-cancellation | With the monitor started (`viewDidAppear` ran), dispatch a `keyDown` with `keyCode == 53` for a window that is not the view's window | `onCancel()` is not invoked |
 
 ## Edge Cases
 
 - Null/empty input — title/prompt: `model.request.title`/`prompt` being
   `nil` or `""` suppresses that label entirely (see
-  `renders-optional-title-label`/`renders-optional-prompt-label`). MUST.
+  `optional-title-label`/`optional-prompt-label`). MUST.
 - Null/empty input — value: `model.value` may be `""` (an empty pre-filled
   or typed value). Per `ExtensionInputBoxModel.onAccept`'s own contract,
   "an empty string is a value, and Return accepts it" — Return with an
@@ -260,8 +262,8 @@ pre-filled value), and reports the user's decision through the `onAccept`,
   which two threads mutate the controller's state simultaneously.
 - Error states: The only failure mode that reaches this file is a
   `.error`-severity `ExtensionInputValidation`, which it MUST always
-  render via `shows-validation-message` and MUST always block acceptance
-  for via `accepts-only-when-model-permits`/`drops-return-under-standing-error`.
+  render via `validation-message-shown` and MUST always block acceptance
+  for via `model-gated-acceptance`/`return-drop-under-error`.
   This file calls no throwing or networked API itself; the extension's
   `validateInput` call and any failure within it are owned by
   `ExtensionPickerPresenter`/the `ExtensionInputBoxPresenting` conformer
@@ -270,15 +272,13 @@ pre-filled value), and reports the user's decision through the `onAccept`,
   networking of its own; validation answers arrive as already-resolved
   `ExtensionInputValidation` values passed into `showValidation(_:)`.
 - Return held, then superseded by a further edit: a Return pressed while
-  `model.isValidating` is `true` sets `acceptWhenValidationLands = true`;
-  if the user types again before the answer lands,
-  `clears-pending-acceptance-on-edit` resets that flag to `false`, so the
-  held Return is discarded rather than replayed against a value the field
-  no longer holds. MUST.
-- Repeated `viewDidAppear` for one presentation: guarded by
-  `hasValidatedPrefill` so the pre-filled value is validated once per
-  presentation, not once per `viewDidAppear` call (see
-  `validates-prefill-once-per-appearance-cycle`). MUST.
+  `model.isValidating` is `true` is held pending validation (see
+  `acceptance-deferral`); if the user types again before the answer
+  lands, `pending-acceptance-reset` discards that held Return, so it is
+  never replayed against a value the field no longer holds. MUST.
+- Repeated `viewDidAppear` for one controller instance: the pre-filled
+  value is validated once per controller instance, not once per
+  `viewDidAppear` call (see `prefill-validation-once`). MUST.
 - `isPassword` cannot change mid-presentation: the field's class is fixed
   in `init(model:)` from `model.request.isPassword`; there is no code
   path in this file that rebuilds or reclasses the field afterward, so a
@@ -292,17 +292,19 @@ pre-filled value), and reports the user's decision through the `onAccept`,
   This controller never assigns `onMoveSelection`, so pressing the up or
   down arrow while the field has focus is swallowed (marked handled, so it
   does not fall through to the field's default behavior) but produces no
-  observable change. MUST — this is the shared controller's defined
-  behavior, not an accidental gap in this file (see Design Decisions).
+  observable change. MAY — this is a documented known quirk of reusing the
+  shared controller, not a contract this component defines; whether it is
+  wanted is the open question in Design Decisions, not a requirement every
+  port must reproduce.
 
 ## Configuration
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `model` | `ExtensionInputBoxModel` | — (required, `init(model:)`) | Supplies `request.title`/`prompt`/`placeHolder`/`isPassword`/`valueSelection`, the current `value`, and validation state. Read once for the field's class at init; read again in `loadView`/`viewDidLoad` to seed content; read continuously via `model.value`/`canAccept`/`isValidating` for the lifetime of the panel. |
-| `onAccept` | `(String) -> Void` | no-op (`{ _ in }`) | Called with `model.value` when Return is accepted (see `accepts-only-when-model-permits`/`defers-acceptance-while-validating`). |
-| `onCancel` | `() -> Void` | no-op (`{}`) | Called when Escape is pressed (see `cancels-on-escape`). |
-| `onValueChanged` | `(String) -> Void` | no-op (`{ _ in }`) | Called with the field's new value whenever it needs (re)validating — on every edit and once for the pre-filled value (see `commits-value-and-revalidates-on-edit`/`validates-prefill-once-per-appearance-cycle`). |
+| `onAccept` | `(String) -> Void` | no-op (`{ _ in }`) | Called with `model.value` when Return is accepted (see `model-gated-acceptance`/`acceptance-deferral`). |
+| `onCancel` | `() -> Void` | no-op (`{}`) | Called when Escape is pressed (see `escape-cancellation`). |
+| `onValueChanged` | `(String) -> Void` | no-op (`{ _ in }`) | Called with the field's new value whenever it needs (re)validating — on every edit and once for the pre-filled value (see `value-commit-and-revalidation`/`prefill-validation-once`). |
 
 ## Deep Linking
 
@@ -393,12 +395,19 @@ source).
   `SecureField`/`TextField` bound to `@State` and driving validation from
   `.onChange(of:)`, and an optional `Text(validationMessage)` styled per
   severity (`.foregroundStyle(.red)`/`.orange`/`.secondary`), shown only
-  when a message is present — mirroring `shows-validation-message`/
-  `hides-validation-message-when-valid`. Gate `.onSubmit`'s action on the
-  SwiftUI-side equivalent of `model.canAccept`, mirroring
-  `accepts-only-when-model-permits`/`defers-acceptance-while-validating`,
-  and cancel via a `.keyboardShortcut(.cancelAction)` button, mirroring
-  `cancels-on-escape`.
+  when a message is present — mirroring `validation-message-shown`/
+  `validation-message-hidden`. `.onSubmit` alone only gates a Return
+  against the current `canAccept` value; it cannot replay one pressed
+  while validation is in flight. Mirror `model-gated-acceptance`/
+  `acceptance-deferral` with a `@State pendingSubmit` flag: `.onSubmit`
+  accepts immediately when the SwiftUI-side `canAccept` is already true,
+  otherwise (while validating) sets `pendingSubmit = true` and does not
+  accept; an `.onChange(of: canAccept)` (or the validation-result
+  callback) checks `pendingSubmit` when `canAccept` turns true, accepts,
+  and clears the flag — the same held-then-replayed Return the AppKit
+  source implements, not a drop. Cancel via a
+  `.keyboardShortcut(.cancelAction)` button, mirroring
+  `escape-cancellation`.
 - **Compose**: Use a `Column` with an optional title `Text` (`titleMedium`),
   an optional prompt `Text` (`bodySmall`, `onSurfaceVariant`), an
   `OutlinedTextField` (with `visualTransformation = PasswordVisualTransformation()`
@@ -407,7 +416,7 @@ source).
   for the validation message, shown only when non-null. Gate the IME
   "Done" action and a confirm button the same way `model.canAccept` gates
   Return here, and map system back-press to cancellation, mirroring
-  `cancels-on-escape`.
+  `escape-cancellation`.
 - **React/Web**: A `<form>` with an optional `<h2>`/`<p>` for title/prompt,
   an `<input type={isPassword ? "password" : "text"}>` wired to `onChange`
   for per-keystroke validation, and a `role="alert"` `<span>` for the
@@ -416,12 +425,16 @@ source).
   the form's `onSubmit` on the same "not currently validating and no
   active error" condition `model.canAccept` expresses, and bind an Escape
   `keydown` handler (or a Cancel button) to cancellation, mirroring
-  `cancels-on-escape`.
+  `escape-cancellation`.
 - **AppKit/UIKit** (source platform): Source file
   `packages/apple/AgenticToolkit/macOS/Features/Extensions/UI/ExtensionInputBoxViewController.swift`
   — macOS-only (`import AppKit`), `@MainActor` `NSViewController`, laid
   out entirely with programmatic Auto Layout (no XIB/Storyboard), sharing
   `PickerKeyboardController` with `ExtensionQuickPickViewController`.
+  The pending-Return and once-per-instance-prefill guards described by
+  `acceptance-deferral`/`pending-acceptance-reset` and
+  `prefill-validation-once` are backed by two private properties,
+  `acceptWhenValidationLands` and `hasValidatedPrefill`.
   There is no UIKit code path in source; a UIKit port would replace
   `NSSecureTextField`/`NSTextField` with `UITextField`
   (`isSecureTextEntry`), `NSTextFieldDelegate` with
@@ -439,59 +452,65 @@ source).
   `TextBlock` for the validation message whose `Visibility` is bound to
   "message present" and whose `Foreground` switches between the theme's
   error/caution/tertiary brushes for `.error`/`.warning`/`.information` —
-  mirroring `shows-validation-message`/`hides-validation-message-when-valid`.
+  mirroring `validation-message-shown`/`validation-message-hidden`.
   Wire the `TextBox`/`PasswordBox`'s `TextChanged`/`PasswordChanged` event
   to the same commit-and-revalidate round trip
-  `commits-value-and-revalidates-on-edit` describes; gate the dialog's
-  default `Button` (`IsDefault="True"`) — or a `KeyDown` handler for
-  `VirtualKey.Enter` — on the WinUI equivalent of `model.canAccept`,
-  mirroring `accepts-only-when-model-permits` and
-  `defers-acceptance-while-validating`; and give the Cancel button
-  `IsCancel="True"` (or handle `VirtualKey.Escape` in `KeyDown`) so it
-  fires unconditional cancellation, mirroring `cancels-on-escape`. Map
-  focus and initial selection to `TextBox`/`PasswordBox.Focus
-  (FocusState.Programmatic)` followed by `Select(start, length)`,
-  preserving `focuses-field-then-applies-initial-selection`'s
-  focus-then-select order.
+  `value-commit-and-revalidation` describes; gate the panel's default
+  action — a `ContentDialog.DefaultButton` set to `Primary` when the panel
+  is hosted as a `ContentDialog`, or a `KeyboardAccelerator` for
+  `VirtualKey.Enter` on the root otherwise — on the WinUI equivalent of
+  `model.canAccept`, mirroring `model-gated-acceptance` and
+  `acceptance-deferral`; and drive Cancel from
+  `ContentDialog.CloseButton` (or a `KeyboardAccelerator` for
+  `VirtualKey.Escape`) so it fires unconditional cancellation, mirroring
+  `escape-cancellation` — WinUI 3 has no `IsDefault`/`IsCancel` button
+  properties (those are WPF's). Map focus to
+  `TextBox`/`PasswordBox.Focus(FocusState.Programmatic)`; initial
+  selection via `Select(start, length)` applies only to `TextBox` —
+  `PasswordBox` exposes no selection API, so a secure field can only be
+  focused, not pre-selected, which is as far as
+  `focus-then-initial-selection`'s focus-then-select order can carry over
+  for a password field.
 
 ## Design Decisions
 
-- Decision: Choose the field's concrete class (`NSSecureTextField` vs.
+- **Decision**: Choose the field's concrete class (`NSSecureTextField` vs.
   `NSTextField`) once, in `init(model:)`, from
   `model.request.isPassword`, rather than allowing it to change later.
-  Rationale: Source's own comment: a field that changes class after
+  **Rationale**: Source's own comment: a field that changes class after
   gaining focus loses its caret and typed text, and `isPassword` cannot
   change during one `showInputBox` request, so there is exactly one
   moment this decision needs to be made.
-  Approved: pending
-- Decision: Hold a Return pressed while `model.isValidating` is `true`
+  **Approved**: pending
+- **Decision**: Hold a Return pressed while `model.isValidating` is `true`
   and replay it once validation lands, rather than accepting it
   immediately or dropping the keystroke.
-  Rationale: Source's own comment on `choose()`: a Return pressed
+  **Rationale**: Source's own comment on `choose()`: a Return pressed
   mid-validation is "not yet," not "no" — replaying it once the answer
   arrives lets a slow validator delay acceptance instead of silently
   swallowing the user's keystroke.
-  Approved: pending
-- Decision: Validate the pre-filled `model.value` once, on the first
-  `viewDidAppear` of a presentation, via the `hasValidatedPrefill` guard,
-  rather than in `viewDidLoad`.
-  Rationale: Source's own comment: `viewDidAppear` can run more than once
-  for one panel, so the guard keeps a re-appearance from re-triggering a
-  validation round trip for a value that never changed; `viewDidLoad` was
-  rejected because the presenter assigns `onValueChanged` only after
-  `viewDidLoad` can already have run, leaving nothing to call yet.
-  Approved: pending
-- Decision: Route the field's `doCommandBy:` selectors through the shared
-  `PickerKeyboardController`, which also recognizes `moveUp`/`moveDown`
-  (arrow keys), even though this controller never sets
-  `onMoveSelection`.
-  Rationale: `PickerKeyboardController` is shared byte-for-byte with the
-  picker views that do use `onMoveSelection` to move a row selection;
+  **Approved**: pending
+- **Decision**: Validate the pre-filled `model.value` once, on the first
+  `viewDidAppear` after the controller instance is created, via the guard
+  described in `prefill-validation-once`, rather than in `viewDidLoad`.
+  **Rationale**: Source's own comment: `viewDidAppear` can run more than
+  once for one panel, so the guard keeps a re-appearance from
+  re-triggering a validation round trip for a value that never changed;
+  `viewDidLoad` was rejected because the presenter assigns
+  `onValueChanged` only after `viewDidLoad` can already have run, leaving
+  nothing to call yet.
+  **Approved**: pending
+- **Decision**: Route the field's `doCommandBy:` selectors through the
+  shared `PickerKeyboardController`, which also recognizes
+  `moveUp`/`moveDown` (arrow keys), even though this controller never
+  sets `onMoveSelection`.
+  **Rationale**: `PickerKeyboardController` is shared byte-for-byte with
+  the picker views that do use `onMoveSelection` to move a row selection;
   reusing it here consumes the up/down arrow key events (marked handled,
   so they do not propagate further) but produces no visible effect in
   this single-field panel, since `onMoveSelection` is left at its default
   no-op closure.
-  Approved: pending
+  **Approved**: pending
 
 ## Compliance
 
@@ -501,11 +520,23 @@ source).
 | [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
 | [semantic-markup](agenticdevelopercookbook://compliance/accessibility#semantic-markup) | partial | accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
+| [secure-storage](agenticdevelopercookbook://compliance/security#secure-storage) | partial | security |
 | [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | reliability |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
+
+`secure-storage` is partial because the field holds a potential secret
+(`isPassword`) only in memory — masked on screen via
+`NSSecureTextField`, never written to Keychain or any persistent store,
+but also never explicitly zeroed on release. `contrast-ratio` is partial
+because `validationLabel`'s three severities are distinguished by a
+theme-role color change alone, with no non-color cue and no in-source
+measurement of the resulting contrast ratio (see the Differentiate
+Without Color entry under Accessibility Options).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for ExtensionInputBoxViewController, covering layout, per-edit revalidation, the Return accept/defer/drop three-way logic, and four open accessibility/UX review points (loading indicator, field accessibility label, validation-change announcement, Differentiate Without Color) for review. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: trimmed tags/summary to convention limits, added the sibling picker recipe to `related`, renamed every requirement to subject-only kebab-case, restated private-state requirements/vectors/edge cases as observable behavior, bolded the Design Decisions form, corrected the WinUI 3 bullet's WPF-only APIs and `PasswordBox` selection gap, described SwiftUI's pending-submit replay, added the secure-storage/contrast-ratio compliance rows, downgraded the arrow-key edge case from MUST to a documented known quirk, and added test vectors for empty-string acceptance and Escape from another window. |

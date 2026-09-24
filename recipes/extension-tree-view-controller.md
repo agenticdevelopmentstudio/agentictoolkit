@@ -3,7 +3,7 @@ id: 28fc5136-e1bf-4672-b783-ed2f3a8983f5
 title: ExtensionTreeViewController
 domain: agentictoolkit://recipes/extension-tree-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -22,12 +22,11 @@ tags:
 - tree-view
 - view-controller
 - appkit
-- macos
 - accessibility
 depends-on: []
-related: []
-references:
+related:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -134,6 +133,7 @@ The same file also defines `ExtensionTreeOutlineViewController`, the internal `N
 
 - **double-click-activates**: Double-clicking a row MUST activate that row's item through the data source.
 - **return-key-activates-selection**: Pressing Return (key code 36) or the numeric-keypad Enter (key code 76) while a row is selected MUST activate the selected row's item.
+- **insert-newline-activates-selection**: When AppKit interprets Return as the text-editing command instead of delivering it as a raw `keyDown` (i.e. `insertNewline(_:)` is called), the controller MUST activate the selected row's item — the same outcome as `return-key-activates-selection`, reached through the other path AppKit can take.
 - **other-keys-pass-through**: A key event that is neither Return nor keypad Enter MUST be passed to `super.keyDown(_:)` rather than consumed.
 
 ### Pane title & teardown (outline controller)
@@ -188,14 +188,13 @@ The same file also defines `ExtensionTreeOutlineViewController`, the internal `N
 | etvc-004 | container-background-tracks-theme | Switch the active theme after the pane loads | The container's layer background color updates to the new theme's `.surface` color |
 | etvc-005 | resolve-called-in-view-did-load | Instrument `loadView()` and `viewDidLoad()` | `resolve` is invoked only after `loadView()` has returned |
 | etvc-006 | first-resolve-shows-outline | Call `resolve`'s `didResolve` with a data source | Displayed content becomes an `ExtensionTreeOutlineViewController` bound to that data source |
-| etvc-007 | resolve-after-discard-ignored | Call `paneContentWillBeDiscarded()`, then invoke `didResolve` | Displayed content is unchanged; no outline is created |
+| etvc-007 | resolve-after-discard-ignored, outer-teardown-marks-discarding | Call `paneContentWillBeDiscarded()`, then invoke `didResolve` | Displayed content is unchanged; no outline is created — the discard flag `paneContentWillBeDiscarded()` sets is what suppresses it |
 | etvc-008 | duplicate-resolve-ignored | Invoke `didResolve` twice with two different data sources, back to back | Only the first data source's outline is shown; the second call has no effect |
 | etvc-009 | provider-replacement-swaps-source | With an outline shown for source A, fire `A.onProviderReplaced(B)` | Displayed content becomes a new outline bound to `B`; `B.onProviderReplaced` is non-nil afterward |
 | etvc-010 | swap-tears-down-previous-content | Swap from a placeholder implementing `PaneContentTeardown` to an outline | `paneContentWillBeDiscarded()` is called on the placeholder before it is removed from the view hierarchy |
 | etvc-011 | swap-pins-new-content-to-edges | Swap in a new child | The child's view has four active constraints pinning it to the container's leading/trailing/top/bottom |
 | etvc-012 | swap-notifies-title-change | Swap in a new child while `onPaneTitleChange` is set | The callback fires exactly once as part of the swap |
 | etvc-013 | outer-pane-title-delegates | Read `paneTitle` while the placeholder is shown, then again once the outline (title "Explorer") is shown | First read is `contributedView.name`; second read is "Explorer" |
-| etvc-014 | outer-teardown-marks-discarding | Call `paneContentWillBeDiscarded()`, then invoke `didResolve` | The internal discard flag is set; `didResolve` has no visible effect (see etvc-007) |
 | etvc-015 | outer-teardown-forwards-to-content | Content is an outline implementing `PaneContentTeardown`; call `paneContentWillBeDiscarded()` on the outer controller | The outline's own `paneContentWillBeDiscarded()` runs |
 | etvc-016 | outline-single-column-no-header | Load the outline's view | `outline.tableColumns.count == 1`; `outline.headerView` is nil |
 | etvc-017 | outline-row-height | Read `outline.rowHeight` | Equals 22 |
@@ -217,7 +216,7 @@ The same file also defines `ExtensionTreeOutlineViewController`, the internal `N
 | etvc-033 | load-marked-stale-when-busy | While a load for handle H is in flight, trigger a tree-data change for H | Once the in-flight load completes and adopts, a second load for H is issued automatically |
 | etvc-034 | load-skipped-for-unreachable-handle | Request a load for a handle whose row was already forgotten | No call reaches `dataSource.children(of:)` |
 | etvc-035 | disclosure-driven-by-declared-state | Item has `collapsibleState == .collapsed` and its load answers zero children | `isItemExpandable` still reports `true` for that row |
-| etvc-036 | load-bounded-by-budget | Set `childrenBudget = 0.1`; provider never answers | The ask is abandoned at ~0.1s rather than waiting indefinitely |
+| etvc-036 | load-bounded-by-budget | Set `childrenBudget` to a short, injected value; provider never answers | No rows are adopted for that branch (see etvc-038's later, successful ask); the ask does not wait indefinitely |
 | etvc-037 | timeout-logged | Trigger a timeout as in etvc-036 | An error is logged: "A tree provider did not answer getChildren in time; the branch stays unread" |
 | etvc-038 | timeout-leaves-branch-askable | After a timeout on handle H, request H's children again | A fresh load for H is issued and can succeed |
 | etvc-039 | late-answer-discarded-when-defunct | Call `paneContentWillBeDiscarded()` while a load is in flight, then let the provider answer | The answer is not adopted; the outline is not reloaded |
@@ -237,23 +236,24 @@ The same file also defines `ExtensionTreeOutlineViewController`, the internal `N
 | etvc-053 | untargeted-change-reloads-loaded-branches | Data source fires `onDidChangeTreeData(nil)` with branches "" and "h1" already loaded | Both "" and "h1" are re-asked |
 | etvc-054 | untargeted-change-reasks-root-when-empty | Data source fires `onDidChangeTreeData(nil)` before the root has ever loaded | The root ("") is asked |
 | etvc-055 | change-after-teardown-ignored | Call `paneContentWillBeDiscarded()`, then fire `onDidChangeTreeData(nil)` | No load is triggered |
-| etvc-056 | row-view-recycled | Scroll through 500 rows | `outlineView(_:viewFor:item:)` reuses pooled `ExtensionTreeRowView` instances rather than allocating one per row |
+| etvc-056 | row-view-recycled | Draw one screenful of rows, then scroll through 500 rows | `outline.makeView(withIdentifier: ExtensionTreeRowView.reuseIdentifier, owner:)` returns a non-nil, previously-created instance for each newly-scrolled-in row, so `outlineView(_:viewFor:item:)`'s `?? ExtensionTreeRowView()` fallback is not exercised again |
 | etvc-057 | row-icon-from-symbol-name | Item with `symbolName == "folder"`, and item with `symbolName == nil` | First row shows a tinted `.secondaryText` icon; second row's icon is hidden |
 | etvc-058 | row-label-shows-item-label | Item label longer than the column width | Label truncates with a tail ellipsis |
 | etvc-059 | row-caption-from-description | Item with `description == "3 items"`, and item with `description == nil` | First row's caption shows "3 items"; second row's caption is hidden |
 | etvc-060 | row-tooltip-fallback | Item with `tooltip == nil`, `label == "README.md"` | The row's tooltip is "README.md" |
-| etvc-061 | row-background-recycled | Scroll through 500 rows | `outlineView(_:rowViewForItem:)` reuses a pooled background row view |
+| etvc-061 | row-background-recycled | Draw one screenful of rows, then scroll through 500 rows | `outline.makeView(withIdentifier: Self.backgroundRowIdentifier, owner:)` returns a non-nil, previously-created `ThemedTableRowView` for each newly-scrolled-in row, so `outlineView(_:rowViewForItem:)`'s fresh-`ThemedTableRowView()` fallback is not exercised again |
 | etvc-062 | double-click-activates | Double-click a row | `dataSource.activate(_:)` is called with that row's item |
 | etvc-063 | return-key-activates-selection | A row is selected; post a keyDown with key code 36 (Return) | `dataSource.activate(_:)` is called with the selected row's item |
 | etvc-064 | other-keys-pass-through | Post a keyDown with key code 49 (Space) | `super.keyDown(_:)` runs; no activation occurs |
 | etvc-065 | outline-pane-title-source-or-fallback | `dataSource.title == nil`, then `dataSource.title == "Explorer"` | First read of `paneTitle` is the manifest's fallback name; second read is "Explorer" |
 | etvc-066 | outline-teardown-idempotent | Call `paneContentWillBeDiscarded()` twice | The second call has no additional effect (e.g. `visibilityDidChange(false)` is not sent twice) |
 | etvc-067 | outline-teardown-releases-callbacks-only-if-owner | Outline B has superseded outline A for the same data source (etvc-026); call `paneContentWillBeDiscarded()` on A | The data source's callbacks (still pointing at B) are left untouched; `visibilityDidChange` is not called by A |
+| etvc-068 | insert-newline-activates-selection | A row is selected; call `insertNewline(_:)` directly (AppKit's text-editing-command path for Return) | `dataSource.activate(_:)` is called with the selected row's item |
 
 ## Edge Cases
 
 - **Null/empty input**: `dataSource.title` nil or empty falls back to the manifest name (`outline-pane-title-source-or-fallback`); `dataSource.message` nil hides the banner (`message-banner-shown-conditionally`); `item.symbolName` nil hides the icon, and `item.description` nil or empty hides the caption (`row-icon-from-symbol-name`, `row-caption-from-description`); an empty `getChildren` answer draws a branch with zero rows — and, per `disclosure-driven-by-declared-state`, a row can still show a disclosure triangle that opens onto that empty list if the extension declared it `.expanded`/`.collapsed`, a quirk this recipe documents rather than smooths over (see Design Decisions). `ExtensionTreeDataSource.children(of:)` itself has no error channel: per that protocol's own documentation, a thrown error, a rejected thenable, and a genuinely empty answer are all indistinguishable `[]` results by the time they reach this file — that conversion happens in the (out-of-scope) adaptor that implements the protocol, not here.
-- **Boundary values**: `AppKit` asks `numberOfChildrenOfItem` and then `child(index:ofItem:)` in separate calls, and an answer can land from the extension in between, shrinking the list; an out-of-range index is answered with a throwaway placeholder row rather than crashing (see `ExtensionTreeRow.placeholder()`), and the reload the new answer triggers replaces it. `childrenBudget`'s default is 30 seconds; a load that completes at exactly the budget is a race between the operation and the timeout that this recipe does not resolve one way — either code path is source-correct. `loadingHandles` holds at most one entry per handle, so loads for different handles proceed fully concurrently; only same-handle re-entrancy is serialized.
+- **Boundary values**: `AppKit` asks `numberOfChildrenOfItem` and then `child(index:ofItem:)` in separate calls, and an answer can land from the extension in between, shrinking the list; an out-of-range index is answered with a throwaway placeholder row rather than crashing (see `ExtensionTreeRow.placeholder()`), and the reload the new answer triggers replaces it. `childrenBudget`'s default is 30 seconds; a load that completes at exactly the budget is undefined behavior — a genuine race between the operation and the timeout in `withWallClockBudget`, and this recipe does not pick a winner. Both the adopted-answer path and the timeout path are source-correct outcomes for that instant. `loadingHandles` holds at most one entry per handle, so loads for different handles proceed fully concurrently; only same-handle re-entrancy is serialized.
 - **Concurrent access**: Both classes are `@MainActor`-isolated, and all their mutable state (`loadingHandles`, `staleHandles`, `isSyncingSelection`, `isSyncingExpansion`, the row table, `callbackOwners`) is read and written only on the main actor. The one boundary crossing is the `Task` that awaits `askChildren(of:)` under `withWallClockBudget`; the data source itself is read only inside `askChildren(of:)`, on the actor that owns it, because `any ExtensionTreeDataSource` is not `Sendable` and only a plain `[ContributedTreeItem]` (or nothing, on timeout) crosses back into the closure.
 - **Error states**: A provider that never answers `getChildren` surfaces only as a logged error (`timeout-logged`) — there is no inline error banner, no thrown error, and no user-facing message anywhere in this file for that case; the recipe describes that as-is. A resolve that arrives after teardown, or a second resolve once an outline is already shown, is silently ignored with no error surfaced (`resolve-after-discard-ignored`, `duplicate-resolve-ignored`).
 - **Offline or disconnected state**: Not applicable. This file makes no network requests of its own; children, title, message and activation all flow through the in-process `ExtensionTreeDataSource` interface. Whatever the extension's own provider implementation does over a network, if anything, is outside this file's scope.
@@ -264,7 +264,7 @@ The same file also defines `ExtensionTreeOutlineViewController`, the internal `N
 |--------|------|---------|-------------|
 | `view` | `ContributedView` | required at init | The extension's manifest-declared tree view this pane hosts; drives the placeholder, `paneTitle`'s fallback, and the outline's accessibility-id prefix (`registryID`). |
 | `extensionDisplayName` | `String` | required at init | Shown by the placeholder while no provider has registered; not consulted again once a tree is shown. |
-| `resolve` | `ContributedTreeResolving` (closure) | required at init | Invoked once from `viewDidLoad()`; supplies the data source, and may be re-invoked later through `onProviderReplaced` on that data source. |
+| `resolve` | `ContributedTreeResolving` (closure) | required at init | Invoked exactly once, from `viewDidLoad()`, to supply the data source. It is never invoked again; a later replacement arrives only through `onProviderReplaced` on that data source (`provider-replacement-swaps-source`). |
 | `childrenBudget` | `TimeInterval` | `30` (seconds) | How long a single `getChildren` ask may take before its branch is treated as unanswered; settable, intended for tests. |
 
 ## Deep Linking
@@ -277,7 +277,7 @@ Not applicable: every string this file displays — the message banner, the row 
 
 ## Accessibility Options
 
-Document which accessibility display options (Rule 15) this component responds to:
+Document which accessibility display options this component responds to:
 
 | Option | Behavior |
 |--------|----------|
@@ -318,45 +318,43 @@ Subsystem: `{{bundle_id}}` | Category: `ExtensionTreeOutlineViewController`
 
 ## Design Decisions
 
-Decision: `resolve` is invoked from `viewDidLoad()` rather than `loadView()`.
-Rationale: An already-awake extension answers synchronously; swapping displayed content while `view` is still being assigned inside `loadView()` would have the view controller ask for its own view before it exists.
-Approved: pending
+**Decision**: `resolve` is invoked from `viewDidLoad()` rather than `loadView()`.
+**Rationale**: An already-awake extension answers synchronously; swapping displayed content while `view` is still being assigned inside `loadView()` would have the view controller ask for its own view before it exists.
+**Approved**: pending
 
-Decision: A branch's children are always answered from a cache, never by blocking the outline on the provider, and a `getChildren` ask is bounded by a 30-second wall-clock budget whose expiry leaves the branch unread rather than adopted as empty.
-Rationale: `TreeDataProvider.getChildren` is documented as commonly asynchronous, and `NSOutlineView`'s data source protocol has no way to await an answer. An unbounded wait would make a provider that never answers leave the branch not just slow but permanently unaskable — the budget stops the wait without recording a wrong (empty) answer in its place.
-Approved: pending
+**Decision**: A branch's children are always answered from a cache, never by blocking the outline on the provider, and a `getChildren` ask is bounded by a 30-second wall-clock budget whose expiry leaves the branch unread rather than adopted as empty.
+**Rationale**: `TreeDataProvider.getChildren` is documented as commonly asynchronous, and `NSOutlineView`'s data source protocol has no way to await an answer. An unbounded wait would make a provider that never answers leave the branch not just slow but permanently unaskable — the budget stops the wait without recording a wrong (empty) answer in its place.
+**Approved**: pending
 
-Decision: Installing this pane's callbacks on a data source supersedes whichever pane held them before ("one pane per view id"), and a superseded pane's teardown only clears wiring it can prove it still owns (`callbackOwners`/`callbackToken`).
-Rationale: A data source has exactly one `onDidChangeTreeData`/`onDidChangeChrome` slot; a second pane for the same contributed view (e.g. a second window) must take live updates over, and the older, now-inert pane's later teardown must not silently disable the newer, visible one. Closures can't be compared for identity, so ownership is tracked explicitly instead.
-Approved: pending
+**Decision**: Installing this pane's callbacks on a data source supersedes whichever pane held them before ("one pane per view id"), and a superseded pane's teardown only clears wiring it can prove it still owns (`callbackOwners`/`callbackToken`).
+**Rationale**: A data source has exactly one `onDidChangeTreeData`/`onDidChangeChrome` slot; a second pane for the same contributed view (e.g. a second window) must take live updates over, and the older, now-inert pane's later teardown must not silently disable the newer, visible one. Closures can't be compared for identity, so ownership is tracked explicitly instead.
+**Approved**: pending
 
-Decision: A row dropped by its parent during a refresh is held as an orphan rather than forgotten immediately, and is only forgotten once every in-flight load for that refresh has settled.
-Rationale: Refresh answers can arrive in any order; an item that genuinely moved from one open branch to another would otherwise be destroyed by whichever branch's answer happens to drop it first, discarding its whole loaded subtree and collapsing it when the claiming branch's answer arrives moments later. Deferring the forget makes both arrival orders produce the same result.
-Approved: pending
+**Decision**: A row dropped by its parent during a refresh is held as an orphan rather than forgotten immediately, and is only forgotten once every in-flight load for that refresh has settled.
+**Rationale**: Refresh answers can arrive in any order; an item that genuinely moved from one open branch to another would otherwise be destroyed by whichever branch's answer happens to drop it first, discarding its whole loaded subtree and collapsing it when the claiming branch's answer arrives moments later. Deferring the forget makes both arrival orders produce the same result.
+**Approved**: pending
 
-Decision: A row's disclosure triangle is driven solely by the extension's declared `collapsibleState`, never by whether a load has actually found any children.
-Rationale: This mirrors the source's own upstream contract (`TreeItemCollapsibleState`) rather than inferring expandability from data, which means an item declared `.expanded`/`.collapsed` that turns out to have zero real children still shows a disclosure triangle opening onto an empty list — documented here as a known consequence of following the declared contract, not smoothed into "expandable only when non-empty."
-Approved: pending
+**Decision**: A row's disclosure triangle is driven solely by the extension's declared `collapsibleState`, never by whether a load has actually found any children.
+**Rationale**: This mirrors the source's own upstream contract (`TreeItemCollapsibleState`) rather than inferring expandability from data, which means an item declared `.expanded`/`.collapsed` that turns out to have zero real children still shows a disclosure triangle opening onto an empty list — documented here as a known consequence of following the declared contract, not smoothed into "expandable only when non-empty."
+**Approved**: pending
 
-Decision: Rows and their background views are drawn through recycled, pooled view instances rather than a fresh view hierarchy per row.
-Rationale: The source's own comment notes this is what every other outline/table in the framework already does; a tree is the shape where skipping it costs the most, since a branch with a few hundred children previously rebuilt a few hundred view hierarchies on every scroll pass.
-Approved: pending
+**Decision**: Rows and their background views are drawn through recycled, pooled view instances rather than a fresh view hierarchy per row.
+**Rationale**: The source's own comment notes this is what every other outline/table in the framework already does; a tree is the shape where skipping it costs the most, since a branch with a few hundred children previously rebuilt a few hundred view hierarchies on every scroll pass.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [accessibility-identifiers](agenticdevelopercookbook://compliance/ui#accessibility-identifiers) | passed | UI |
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
-| [live-region-announcements](agenticdevelopercookbook://compliance/accessibility#live-region-announcements) | flagged | Accessibility |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | Architecture |
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
-| [no-raw-hex-tokens-only](agenticdevelopercookbook://compliance/ui#no-raw-hex-tokens-only) | passed | UI |
 | [no-pii-in-logs](agenticdevelopercookbook://compliance/privacy-and-data#no-pii-in-logs) | passed | Privacy and Data |
-| [reduce-motion-support](agenticdevelopercookbook://compliance/accessibility#reduce-motion-support) | not-applicable | Accessibility |
+
+`outline-allows-empty-selection`/`return-key-activates-selection`/`insert-newline-activates-selection`, this file's exclusive use of `ThemedOutlineView`/`NSOutlineView`/`ThemedLabel`/`NSTableRowView`, and the absence of any logged `ContributedTreeItem` field or user string in `timeout-logged`'s one log line ground the `passed` rows. The missing state-change announcements are recorded under **Announce state changes**; the catalog has no dedicated check for them.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved the cookbook guideline URI from `references` to `related`, trimmed `tags` to 5 by dropping the `platforms`-duplicate, bolded Design Decisions labels, replaced the dangling "(Rule 15)" citation, resolved `live-region-announcements` to `failed` and dropped the inapplicable `reduce-motion-support` row with a grounding sentence, corrected the `resolve`/`onProviderReplaced` Configuration description, restated the at-budget race as undefined, merged etvc-014 into etvc-007, rewrote etvc-036/etvc-056/etvc-061 as observable checks, and added `insert-newline-activates-selection` with etvc-068 for the WinUI note's `insertNewline` reference; removed Compliance rows for checks absent from the cookbook catalog |

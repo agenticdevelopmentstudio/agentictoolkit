@@ -3,7 +3,7 @@ id: 4205c688-865a-4d74-890d-f803ee66fdcb
 title: DocumentEditorViewController
 domain: agentictoolkit://recipes/document-editor-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -22,12 +22,14 @@ tags:
 - pane
 - view-controller
 - appkit
-- macos
-depends-on: []
+depends-on:
+- agentictoolkit://recipes/breadcrumb-view
+- agentictoolkit://recipes/file-editor-view
 related:
 - agentictoolkit://recipes/breadcrumb-view
-references:
+- agentictoolkit://recipes/file-editor-view
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -46,16 +48,17 @@ approved-date: ''
 - **own-file-selection**: The component MUST hold its own `FileBrowserSelection` instance, distinct from any other `DocumentEditorViewController`'s selection, so that two editors can display two different files at once.
 - **coder-init-unsupported**: The component MUST NOT support `NSCoder`-based initialization; invoking `init(coder:)` MUST call `fatalError`.
 - **restore-on-construction**: During initialization, the component MUST read `store.paneStateValue(forKey: fileURLKey)` and, when a value is present and its file exists on disk, MUST display that file.
-- **restore-skips-missing-file**: When the stored path's file does not exist on disk (per `FileManager.default.fileExists(atPath:)`), the component MUST clear the stored value for `fileURLKey` and leave `fileURL` as `nil`, rather than displaying or erroring on a missing file.
+- **missing-file-restore**: When the stored path's file does not exist on disk (per `FileManager.default.fileExists(atPath:)`), the component MUST clear the stored value for `fileURLKey` and leave `fileURL` as `nil`, rather than displaying or erroring on a missing file.
 - **restore-omits-redundant-write**: Restoring a stored file during initialization MUST NOT write that same value back to the store; only a subsequent call that changes the displayed file MUST write to the store.
+- **construction-title-change**: Restoring a stored file during initialization MUST also invoke `onTitleChange` afterward, the same as any other call that changes the displayed file.
 
 ### Displaying and Changing the File
 
 - **file-url-reflects-selection**: The `fileURL` property MUST return the `url` of the currently selected file-browser node, or `nil` when no node is selected.
 - **set-file-url-updates-selection**: Setting `fileURL` to a non-nil value MUST set the selection to a node for that URL; setting it to `nil` MUST clear the selection.
-- **set-file-url-persists**: Setting `fileURL` (other than during construction's restore) MUST write the new value — the URL's path, or `nil` — to the store under `fileURLKey`.
+- **set-file-url-persists**: Setting `fileURL` MUST write the new value — the URL's path, or `nil` — to the store under `fileURLKey`.
 - **set-file-url-updates-breadcrumb**: Setting `fileURL` MUST set the breadcrumb's `fileURL` to the same value.
-- **set-file-url-fires-title-change**: Every call that changes the displayed file MUST invoke `onTitleChange` afterward, including the call made while restoring a stored file during initialization.
+- **file-url-title-change**: Setting `fileURL` MUST invoke `onTitleChange` afterward.
 - **directory-detected-via-resource-value**: The component MUST determine whether a URL being shown is a directory by querying its `.isDirectoryKey` resource value, defaulting to `false` when that query fails, rather than assuming the URL is a file because of how it was obtained.
 - **clear-document-preserves-pane**: `clearDocument()` MUST set `fileURL` to `nil` and persist that clearing, and MUST NOT remove the pane or otherwise affect anything beyond the displayed file.
 
@@ -72,7 +75,7 @@ approved-date: ''
 - **toggle-change-writes-override**: Changing a toggle's value MUST call the matching `options.setShowLineNumbers(_:)`, `options.setShowOverview(_:)`, or `options.setShowInvisibles(_:)` with the new value.
 - **reset-button-label-and-style**: The fourth row MUST be an `NSButton` titled `"Reset to Defaults"` with `bezelStyle` `.rounded`.
 - **reset-button-enabled-matches-override**: The reset button's `isEnabled` at the moment `makePaneOptionRows()` builds it MUST equal `options.isOverridden`.
-- **reset-clears-override**: Activating the reset button MUST call `options.reset()`.
+- **reset-button-action**: Activating the reset button MUST call `options.reset()`.
 - **reset-accessibility-identity**: The reset button MUST carry the accessibility identifier `document.options.reset` and the accessibility label `"Reset Editor Options to Defaults"`.
 - **toggle-accessibility-identifiers**: The line-numbers, overview, and invisibles toggles' checkboxes MUST carry the accessibility identifiers `document.options.line-numbers`, `document.options.overview`, and `document.options.invisibles`, respectively.
 - **rows-refresh-on-options-change**: Whenever `options` publishes a change (a pane-local edit, `reset()`, or a change to the corresponding app-wide setting) while a popover built from the most recent `makePaneOptionRows()` call is still open, the component MUST update that popover's three toggles' `isOn` and its reset button's `isEnabled` to the newly resolved values.
@@ -131,16 +134,16 @@ approved-date: ''
 |----|-------------|-------|----------|
 | devc-001 | file-url-key-constant | Read `DocumentEditorViewController.fileURLKey` | Equals `"fileURL"` |
 | devc-002 | own-file-selection | Construct two controllers with the same `store`; set `fileURL` on the first only | The second controller's `fileURL` is unaffected |
-| devc-003 | coder-init-unsupported | Call `init(coder:)` | Calls `fatalError` (process traps rather than returning) |
+| devc-003 | coder-init-unsupported | Call `init(coder:)` | Calls `fatalError` (process traps rather than returning) — verified by code inspection; a trapping call cannot be asserted in XCTest |
 | devc-004 | restore-on-construction | `store` has `fileURLKey` set to a path that exists on disk; construct a controller | `fileURL` equals that path immediately after construction |
-| devc-005 | restore-skips-missing-file | `store` has `fileURLKey` set to a path with no file on disk; construct a controller | `fileURL` is `nil`; `store.paneStateValue(forKey: fileURLKey)` is now `nil`; `paneTitle` is `"Untitled"` |
+| devc-005 | missing-file-restore | `store` has `fileURLKey` set to a path with no file on disk; construct a controller | `fileURL` is `nil`; `store.paneStateValue(forKey: fileURLKey)` is now `nil`; `paneTitle` is `"Untitled"` |
 | devc-006 | restore-omits-redundant-write | `store` has `fileURLKey` set to an existing file's path; construct a controller, spying on `setPaneStateValue` | No call to `setPaneStateValue(_:forKey: fileURLKey)` occurs during construction |
 | devc-007 | file-url-reflects-selection | No selection set | `fileURL` is `nil` |
 | devc-008 | set-file-url-updates-selection | Set `fileURL = URL(fileURLWithPath: "/tmp/a/Readme.md")` | The selection's node URL equals that path |
 | devc-009 | set-file-url-persists | Set `fileURL = URL(fileURLWithPath: "/tmp/example/Readme.md")` | `store.paneStateValue(forKey: fileURLKey)` equals `"/tmp/example/Readme.md"` |
 | devc-010 | set-file-url-updates-breadcrumb | Set `fileURL` to a non-nil URL | The breadcrumb's `fileURL` equals the same URL |
-| devc-011 | set-file-url-fires-title-change | Install a closure on `onTitleChange`; set `fileURL` | The closure is called |
-| devc-012 | directory-detected-via-resource-value | Set `fileURL` to a URL for an existing directory | The selection's node has `isDirectory == true`; the hosted `FileEditorView` shows no openable file for it |
+| devc-011 | file-url-title-change | Install a closure on `onTitleChange`; set `fileURL` | The closure is called |
+| devc-012 | directory-detected-via-resource-value | Set `fileURL` to a URL for an existing directory | The selection's node has `isDirectory == true` |
 | devc-013 | clear-document-preserves-pane | Set `fileURL`, then call `clearDocument()` | `fileURL` is `nil`; `store.paneStateValue(forKey: fileURLKey)` is `nil`; the pane/controller itself still exists |
 | devc-014 | pane-title-is-filename | Set `fileURL = URL(fileURLWithPath: "/tmp/example/Readme.md")` | `paneTitle` equals `"Readme.md"` |
 | devc-015 | pane-title-untitled-when-empty | Construct a controller with an empty store | `paneTitle` equals `"Untitled"` |
@@ -150,27 +153,30 @@ approved-date: ''
 | devc-019 | toggle-change-writes-override | Toggle the "Show line numbers" checkbox | `options.setShowLineNumbers(_:)` is called with the checkbox's new value |
 | devc-020 | reset-button-label-and-style | Call `makePaneOptionRows()` | The fourth row's `title` is `"Reset to Defaults"` and `bezelStyle` is `.rounded` |
 | devc-021 | reset-button-enabled-matches-override | `options.isOverridden` is `false`; call `makePaneOptionRows()` | The reset button's `isEnabled` is `false` |
-| devc-022 | reset-clears-override | Click the reset button | `options.reset()` is called |
+| devc-022 | reset-button-action | Click the reset button | `options.reset()` is called |
 | devc-023 | reset-accessibility-identity | Inspect the reset button | Accessibility identifier is `document.options.reset`; accessibility label is `"Reset Editor Options to Defaults"` |
 | devc-024 | toggle-accessibility-identifiers | Inspect the three toggle rows' checkboxes | Identifiers are `document.options.line-numbers`, `document.options.overview`, `document.options.invisibles` respectively |
 | devc-025 | rows-refresh-on-options-change | Build rows via `makePaneOptionRows()`, keeping references; then call `options.setShowOverview(true)` | The kept "Show overview" row's `isOn` becomes `true`; the kept reset button's `isEnabled` becomes `true` |
+| devc-036 | rows-refresh-on-options-change | Build rows via `makePaneOptionRows()`, keeping references, with no pane-local override present; then change the app-wide `UserSettings.editorShowLineNumbers` value | The kept "Show line numbers" row's `isOn` updates to the new app-wide value |
+| devc-037 | rows-refresh-on-options-change | Build rows via `makePaneOptionRows()`, then let the popover close so the kept row references become `nil`; then call `options.setShowOverview(true)` | No crash occurs; `refreshOptionRows()`'s optional-chained writes to the released rows are no-ops |
 | devc-026 | pane-override-isolated | Two controllers, each with its own `EditorOptionsOverride`; toggle "Show line numbers" on the first via its row | The first's `options.showLineNumbers` flips and `isOverridden` becomes `true`; the second's `options.showLineNumbers` and `isOverridden` are unchanged |
 | devc-027 | reset-does-not-affect-other-panes-or-global | Override "Show line numbers" on both of two controllers, then click the first's reset button | The first's `isOverridden` becomes `false`; the second's `isOverridden` stays `true`; the app-wide `UserSettings.editorShowLineNumbers` value is unchanged |
 | devc-028 | breadcrumb-above-content | Load the controller's view | The root stack's arranged subviews are `[breadcrumb, hostingView]`, `orientation == .vertical`, `spacing == 0` |
 | devc-029 | breadcrumb-fixed-height | Load the controller's view | The breadcrumb's height constraint constant is `24` |
 | devc-030 | content-spans-container-width | Load the controller's view | Both the breadcrumb's and the hosting view's leading/trailing constraints pin to the stack's leading/trailing anchors |
 | devc-031 | root-view-initial-frame | Call `loadView()` | The returned root view's initial frame is `(0, 0, 520, 424)`; the stack's top/bottom/leading/trailing constraints pin to the root view |
-| devc-032 | content-uses-themed-root | Inspect the hosted `NSHostingView`'s root view modifier chain | `.themedRoot()` is applied |
+| devc-032 | content-uses-themed-root | Inspect the hosted `NSHostingView`'s root view modifier chain | `.themedRoot()` is applied — verified by code inspection; a modifier chain cannot be introspected in XCTest |
 | devc-033 | hosts-file-editor-view | Load the controller's view with a non-nil selection | The hosted content is a `FileEditorView` receiving that selection, `options`, `documentStore`, `saveScheduler`, and `languageServices` |
 | devc-034 | breadcrumb-selection-routes-out | Install a closure on `onOpenRequest`; invoke the breadcrumb's `onSelect` with a URL | `onOpenRequest` is called with that URL; `fileURL` is unchanged |
 | devc-035 | editor-open-request-routes-out | Install a closure on `onOpenRequest`; invoke the hosted content's `openFile` closure with a URL | `onOpenRequest` is called with that URL |
+| devc-038 | construction-title-change | Install a closure on `onTitleChange`; construct a controller whose `store` has `fileURLKey` set to an existing file's path | The closure is called during construction |
 
 ## Edge Cases
 
-- **Null/empty input**: `fileURL` set to `nil` clears the selection and the breadcrumb (see **set-file-url-updates-selection**, **set-file-url-updates-breadcrumb**). MUST. `rootURL` and `store` are required, non-optional values supplied at initialization, so neither has a null case to handle here.
-- **Boundary — a stored path that now names a directory**: `restoreStoredDocument()` checks only `FileManager.default.fileExists(atPath:)`, which returns `true` for a directory as well as a file. A stored path whose file has been replaced by a same-named directory therefore restores: `fileURL` becomes that directory's URL, `paneTitle` becomes the directory's last path component, and the breadcrumb shows it — while the hosted `FileEditorView` shows no openable content for it, because its own `openableNode` filter excludes directories (see **directory-detected-via-resource-value**). The pane title names a directory that is not actually open in the editor. MUST (this is what the source does, not an unresolved question).
-- **Concurrent access**: The class is declared `@MainActor`, so every mutation of `fileURL`, the selection, and the gear-popover row references happens on the main actor; `options`'s debounced persistence (`DispatchQueue.main.asyncAfter`) is also scheduled back onto the main actor. No interleaving of two `show(_:persist:)` calls, or of a `show` and a gear-row refresh, is possible. MUST.
-- **Error states**: `isDirectory(_:)` queries `url.resourceValues(forKeys: [.isDirectoryKey])` with `try?`, silently treating any failure (a permission error, a race where the file disappears mid-query) as "not a directory" (`false`) rather than surfacing an error. `restoreStoredDocument()` treats a missing file the same way — silently clearing the stored value rather than reporting an error to the caller (see **restore-skips-missing-file**). Both are documented here as the source implements them, not idealized with an error UI the source does not have. MUST.
+- **Null/empty input**: `fileURL` set to `nil` clears the selection and the breadcrumb (see **set-file-url-updates-selection**, **set-file-url-updates-breadcrumb**). `rootURL` and `store` are required, non-optional values supplied at initialization, so neither has a null case to handle here.
+- **Boundary — a stored path that now names a directory**: `restoreStoredDocument()` checks only `FileManager.default.fileExists(atPath:)`, which returns `true` for a directory as well as a file. A stored path whose file has been replaced by a same-named directory therefore restores: `fileURL` becomes that directory's URL, `paneTitle` becomes the directory's last path component, and the breadcrumb shows it — while the hosted `FileEditorView` shows no openable content for it, because its own `openableNode` filter excludes directories (see **directory-detected-via-resource-value**). The pane title names a directory that is not actually open in the editor; this is what the source does, not an unresolved question.
+- **Concurrent access**: The class is declared `@MainActor`, so every mutation of `fileURL`, the selection, and the gear-popover row references happens on the main actor; `options`'s debounced persistence (`DispatchQueue.main.asyncAfter`) is also scheduled back onto the main actor. No interleaving of two `show(_:persist:)` calls, or of a `show` and a gear-row refresh, is possible.
+- **Error states**: `isDirectory(_:)` queries `url.resourceValues(forKeys: [.isDirectoryKey])` with `try?`, silently treating any failure (a permission error, a race where the file disappears mid-query) as "not a directory" (`false`) rather than surfacing an error. `restoreStoredDocument()` treats a missing file the same way — silently clearing the stored value rather than reporting an error to the caller (see **missing-file-restore**). Both are documented here as the source implements them, not idealized with an error UI the source does not have.
 - **Offline or disconnected state**: Not applicable. This file performs no networking; its only I/O is local-disk existence and resource-value checks and reads/writes through the caller-supplied `PaneStateStore`.
 
 ## Configuration
@@ -185,8 +191,15 @@ approved-date: ''
 | `options` | `EditorOptionsOverride` | created at init from `store` | This pane's independent override of the three editor display toggles; publicly readable, not settable. |
 | `fileURL` | `URL?` | `nil`, or restored from `store` at init | The file currently displayed. Setting it updates the selection, the breadcrumb, and the store, and fires `onTitleChange`. |
 | `onTitleChange` | `(() -> Void)?` | `nil` | Called after every change to the displayed file. |
+| `paneTitle` | `String` | `fileURL`'s last path component, or `"Untitled"` | Read-only; see **pane-title-is-filename**, **pane-title-untitled-when-empty**. |
+| `onPaneTitleChange` | `(() -> Void)?` | `nil` | Getter/setter bridge onto `onTitleChange`; see **title-change-callback-bridge**. |
 | `onOpenRequest` | `((URL) -> Void)?` | `nil` | Called with a URL the breadcrumb or the hosted editor resolved but did not open in place. |
-| `clearDocument()` | Method | n/a | Sets `fileURL` to `nil` and persists that, without removing the pane. |
+
+### Methods
+
+| Method | Description |
+|--------|-------------|
+| `clearDocument()` | Sets `fileURL` to `nil` and persists that, without removing the pane; see **clear-document-preserves-pane**. |
 
 ## Deep Linking
 
@@ -207,8 +220,6 @@ NEEDS REVIEW: Not implemented in source. Behavior undefined. No localization key
 
 ## Accessibility Options
 
-Document which accessibility display options (Rule 15) this component responds to:
-
 | Option | Behavior |
 |--------|----------|
 | Reduce Motion | Not applicable: every method in this file (`show`, `clearDocument`, `refreshOptionRows`) mutates views immediately with no `NSAnimationContext`, layer animation, or transition, so there is no motion for this setting to reduce. |
@@ -228,7 +239,7 @@ Not applicable: no analytics event is emitted anywhere in this file.
 - **Data collected**: This file introduces no new data collection beyond the file path the user is already viewing in this window. No personal or sensitive data is read or written by this file itself.
 - **Storage**: Local only, through the caller-supplied `PaneStateStore`, under the key `fileURLKey`. The concrete store's durability is opaque to this file: `EphemeralPaneStateStore` (used in tests, and for a container with nothing to persist) forgets its values as soon as it is deallocated, while a project window's own store persists `pane_state` beyond app restarts. This file specifies only that it writes/reads that one key; the durability guarantee is the store's, not this file's.
 - **Transmission**: None. No network call appears anywhere in this file.
-- **Retention**: Tied to the given `store`'s own retention policy; this file's only retention-relevant action is writing `nil` for `fileURLKey` when the document is cleared or the stored file no longer exists (see **clear-document-preserves-pane**, **restore-skips-missing-file**).
+- **Retention**: Tied to the given `store`'s own retention policy; this file's only retention-relevant action is writing `nil` for `fileURLKey` when the document is cleared or the stored file no longer exists (see **clear-document-preserves-pane**, **missing-file-restore**).
 
 ## Logging
 
@@ -236,43 +247,43 @@ Not applicable: no logging call (`Logger`, `os_log`, or otherwise) appears anywh
 
 ## Platform Notes
 
-- **SwiftUI**: The hosted `DocumentEditorPaneView` is already SwiftUI; a fully SwiftUI rebuild of the outer shell would replace the `NSViewController`/`NSStackView` wrapper with a `VStack(spacing: 0)` containing a SwiftUI breadcrumb view (see its own recipe) constrained to a `24`pt frame height and the `FileEditorView` filling the remaining space, driven by an `@Observable` pane view model exposing `fileURL`, `paneTitle`, and the resolved option values in place of `EditorOptionsOverride`'s `ObservableObject`/Combine publisher, and applying `.themedRoot()` once at that `VStack`'s root exactly as this file does today.
+- **SwiftUI**: The hosted content is already SwiftUI (a private wrapper struct forwarding to `FileEditorView`; see the AppKit / UIKit note below); a fully SwiftUI rebuild of the outer shell would replace the `NSViewController`/`NSStackView` wrapper with a `VStack(spacing: 0)` containing a SwiftUI breadcrumb view (see its own recipe) constrained to a `24`pt frame height and the `FileEditorView` filling the remaining space, driven by an `@Observable` pane view model exposing `fileURL`, `paneTitle`, and the resolved option values in place of `EditorOptionsOverride`'s `ObservableObject`/Combine publisher, and applying `.themedRoot()` once at that `VStack`'s root exactly as this file does today.
 - **Compose**: Model the pane as a `Column` with a fixed-height (`24.dp`-equivalent) breadcrumb `Row` and a `Box(Modifier.weight(1f))` for the editor content. Hold the per-pane option overrides in a small `ViewModel`-scoped `StateFlow` per option, each resolving to a `Boolean?` (absent, meaning "follow the app-wide `DataStore` preference") exactly as `EditorOptionsOverride` does, and observe the shared `DataStore` flow the same way `EditorOptionsOverride.observeGlobals()` observes `UserSettings`, republishing the resolved values so a change in either scope updates any visible options sheet.
 - **React/Web**: Render a flex column: a fixed-height breadcrumb bar, then a `flex: 1; overflow: auto` editor container. Hold `fileURL` and the three option overrides in per-instance React state (not global state), persisting them to a per-pane key in `sessionStorage`/`localStorage` (mirroring the pane-scoped `PaneStateStore` key), and resolve each option as `paneOverride ?? globalSetting` on every render rather than snapshotting it once, so a later change to the global setting is still picked up by a pane that has not overridden that option.
-- **AppKit / UIKit**: Source: `DocumentEditorViewController.swift` (`packages/apple/AgenticToolkit/macOS/UI/ViewControllers/DocumentPane/`), AppKit-only — `NSViewController`, `NSHostingView`, `NSStackView`, `NSButton`, and Combine for the options observer; nothing in this file targets UIKit/iOS. A UIKit port would replace the gear-triggered popover (owned by the pane chrome, out of scope) with an options screen presented from a toolbar item, since iOS has no macOS-style gear-popover convention, and would need to post an explicit `UIAccessibility.post(notification: .screenChanged, argument:)` (or similar) when the displayed file changes, since the retitle-only signal this file provides (`onTitleChange`) has no iOS equivalent of AppKit's own title-label-update announcement (see the Announce state changes marker in Accessibility).
-- **WinUI 3**: Rebuild the shell as a `UserControl` containing a two-row `Grid`: a fixed-height row (`GridLength` matching the `24`px breadcrumb height) hosting a `BreadcrumbBar`-based analogue (see the Breadcrumb View recipe) and a content row hosting the editor. Persist the open file's path per pane through an `ApplicationData.Current.LocalSettings` composite key mirroring `PaneStateStore`'s per-pane prefix, restoring it in the control's `Loaded` handler and clearing that key when `StorageFile.GetFileFromPathAsync` throws `FileNotFoundException` (mirroring **restore-skips-missing-file**). Model the three toggles and the reset button as a `Flyout` (or `MenuFlyoutSubItem`) opened from a gear `AppBarButton`, using three `ToggleSwitch` controls bound to a small object that resolves each option as "pane override, else roaming `ApplicationData` setting" exactly as `EditorOptionsOverride` does, and refresh the flyout's `ToggleSwitch.IsOn` and the reset button's `IsEnabled` from that object's change event the same way `refreshOptionRows()` does. Route a URL this control cannot open in place through a routed or bubbled event rather than a closure, mirroring `onOpenRequest`, since WinUI favors events over stored closures for cross-control communication.
+- **AppKit / UIKit**: Source: `DocumentEditorViewController.swift` (`packages/apple/AgenticToolkit/macOS/UI/ViewControllers/DocumentPane/`), AppKit-only — `NSViewController`, `NSHostingView`, `NSStackView`, `NSButton`, and Combine for the options observer, hosting a private `DocumentEditorPaneView` SwiftUI struct that forwards to `FileEditorView`; nothing in this file targets UIKit/iOS. A UIKit port would replace the gear-triggered popover (owned by the pane chrome, out of scope) with an options screen presented from a toolbar item, since iOS has no macOS-style gear-popover convention, and would need to post an explicit `UIAccessibility.post(notification: .screenChanged, argument:)` (or similar) when the displayed file changes, since whether the retitle-only signal this file provides (`onTitleChange`) is itself already announced on macOS is the open question noted under Announce state changes in Accessibility.
+- **WinUI 3**: Rebuild the shell as a `UserControl` containing a two-row `Grid`: a fixed-height row (`GridLength` matching the `24`px breadcrumb height) hosting a `BreadcrumbBar`-based analogue (see the Breadcrumb View recipe) and a content row hosting the editor. Persist the open file's path per pane through an `ApplicationData.Current.LocalSettings` composite key mirroring `PaneStateStore`'s per-pane prefix, restoring it in the control's `Loaded` handler and clearing that key when `StorageFile.GetFileFromPathAsync` throws `FileNotFoundException` (mirroring **missing-file-restore**). Model the three toggles and the reset button as a `Flyout` (or `MenuFlyoutSubItem`) opened from a gear `AppBarButton`, using three `ToggleSwitch` controls bound to a small object that resolves each option as "pane override, else roaming `ApplicationData` setting" exactly as `EditorOptionsOverride` does, and refresh the flyout's `ToggleSwitch.IsOn` and the reset button's `IsEnabled` from that object's change event the same way `refreshOptionRows()` does. Route a URL this control cannot open in place through a routed or bubbled event rather than a closure, mirroring `onOpenRequest`, since WinUI favors events over stored closures for cross-control communication.
 
 ## Design Decisions
 
-Decision: `show(_:persist:)` determines whether a URL is a directory by asking `url.resourceValues(forKeys: [.isDirectoryKey])` rather than assuming every URL it is given names a file.
-Rationale: Every caller hands over a bare URL — a restored path, a breadcrumb choice, a go-to-definition target, the file tree's own open request — and a directory is among the things they can legitimately name; asserting it was always a file previously let `FileEditorView.openableNode` read a directory off disk.
-Approved: pending
+**Decision**: `show(_:persist:)` determines whether a URL is a directory by asking `url.resourceValues(forKeys: [.isDirectoryKey])` rather than assuming every URL it is given names a file.
+**Rationale**: Every caller hands over a bare URL — a restored path, a breadcrumb choice, a go-to-definition target, the file tree's own open request — and a directory is among the things they can legitimately name; asserting it was always a file previously let `FileEditorView.openableNode` read a directory off disk.
+**Approved**: pending
 
-Decision: The gear popover's row references (`lineNumbersRow`, `overviewRow`, `invisiblesRow`, `resetRow`) are held `weak` and individually, not as a strong array.
-Rationale: The options dialog owns its views and takes them with it when it closes; holding them weakly lets the references go `nil` on their own rather than keeping a dismissed dialog's checkboxes alive to be written to by a later `refreshOptionRows()` call.
-Approved: pending
+**Decision**: The gear popover's row references (`lineNumbersRow`, `overviewRow`, `invisiblesRow`, `resetRow`) are held `weak` and individually, not as a strong array.
+**Rationale**: The options dialog owns its views and takes them with it when it closes; holding them weakly lets the references go `nil` on their own rather than keeping a dismissed dialog's checkboxes alive to be written to by a later `refreshOptionRows()` call.
+**Approved**: pending
 
-Decision: Restoring a stored file during initialization calls `show(url, persist: false)`, while `fileURL`'s setter and `clearDocument()` call `show(_, persist: true)`.
-Rationale: A value just read from the store does not need to be written straight back to it; only a change made after construction needs to be persisted.
-Approved: pending
+**Decision**: Restoring a stored file during initialization calls `show(url, persist: false)`, while `fileURL`'s setter and `clearDocument()` call `show(_, persist: true)`.
+**Rationale**: A value just read from the store does not need to be written straight back to it; only a change made after construction needs to be persisted.
+**Approved**: pending
 
-Decision: `EditorOptionsOverride` resolves each of its three options independently, on every read (`stored.showLineNumbers ?? UserSettings.editorShowLineNumbers.value`), rather than this controller snapshotting the resolved values once.
-Rationale: An editor pane must keep following the app-wide setting for any option it has not itself overridden, so that overriding "line numbers" in one pane never silently pins "overview" or "invisibles" in that same pane, and so a later app-wide change still reaches a pane that has not overridden that option.
-Approved: pending
+**Decision**: `EditorOptionsOverride` resolves each of its three options independently, on every read (`stored.showLineNumbers ?? UserSettings.editorShowLineNumbers.value`), rather than this controller snapshotting the resolved values once.
+**Rationale**: An editor pane must keep following the app-wide setting for any option it has not itself overridden, so that overriding "line numbers" in one pane never silently pins "overview" or "invisibles" in that same pane, and so a later app-wide change still reaches a pane that has not overridden that option.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [accessibility-identifiers](agenticdevelopercookbook://compliance/ui#accessibility-identifiers) | passed | UI |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | needs-review | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
 | [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
-| [local-persistence-durability](agenticdevelopercookbook://compliance/data#local-persistence-durability) | partial | Data Persistence |
+| [state-recovery](agenticdevelopercookbook://compliance/reliability#state-recovery) | partial | Reliability |
 
-The `screen-reader-support` status is needs-review because of the open question flagged under Accessibility (Announce state changes): no accessibility notification accompanies a file change in this file itself. The `no-hardcoded-strings` status is failed because six user-facing strings in this file are hardcoded English literals with no localization mechanism (see Localization). The `local-persistence-durability` status is partial because this file specifies only that it reads and writes one key on a caller-supplied `PaneStateStore`; the actual durability guarantee belongs to whichever concrete store the caller supplies (see Privacy, Storage).
+The `screen-reader-support` status is partial: the reset button's and each toggle's accessibility labels and identifiers are set explicitly (see Accessibility, **toggle-accessibility-identifiers**, **reset-accessibility-identity**), but whether a file change is itself announced to a screen reader is the open question flagged under Accessibility (Announce state changes). The `no-hardcoded-strings` status is failed because six user-facing strings in this file are hardcoded English literals with no localization mechanism (see Localization). The `state-recovery` status is partial because this file specifies only that it reads and writes one key on a caller-supplied `PaneStateStore`; the actual durability guarantee belongs to whichever concrete store the caller supplies (see Privacy, Storage).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Claude | Initial creation from source code |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed three action-style requirements to subject form and split the title-change requirement into setter and restore variants; dropped bare trailing Edge Case MUST tags; reworded the AppKit title-announcement note to cite the open accessibility question instead of asserting it; moved the internal `references` URL to `related` and added `depends-on`/`related` entries for the hosted child recipes; trimmed `tags` to the 1-5 limit; bolded the Design Decisions labels; corrected the Compliance table to cite real catalog checks and changed its `needs-review` status to `partial`; removed leftover template scaffold text from Accessibility Options; unified the hosted-content naming around `FileEditorView`, moving the private wrapper's name into the AppKit Platform Note; narrowed devc-012 to the selection node and marked devc-003/devc-032 as verified by code inspection; added test vectors for an app-wide options change and a dismissed popover; and split `clearDocument()` into a Methods list while adding `paneTitle`/`onPaneTitleChange` to Configuration |

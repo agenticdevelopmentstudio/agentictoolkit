@@ -3,7 +3,7 @@ id: 9b1b54d5-e514-479f-b9f9-0a03cf4ebbc9
 title: FileEditorView
 domain: agentictoolkit://recipes/file-editor-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -17,19 +17,16 @@ platforms:
 - swift
 - macos
 tags:
-- ui
 - file-browser
 - editor
-- document
 - quicklook
 - autosave
-- appkit
 - macos
 depends-on: []
 related:
 - agentictoolkit://recipes/document-editor-view-controller
-references:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -67,13 +64,15 @@ approved-date: ''
 - **eviction-is-least-recently-selected**: When opening a document would exceed the cache bound, the least-recently-selected cached document other than the one just opened MUST be evicted.
 - **evicted-document-flushes-and-closes**: Evicting a cached document MUST flush its pending autosave and release its reference on the shared document store.
 - **editor-never-rebuilt-while-cached**: A document's text editor MUST NOT be rebuilt or remounted for as long as that document's URI remains in the cache.
-- **exactly-one-editor-visible**: Of every mounted cached editor, exactly one — the active document's — MUST be visible at a time; every other mounted editor MUST be hidden by removing it from hit-testing and keyboard-focus eligibility (`isHidden`), not by making it transparent.
+- **exactly-one-editor-visible**: Of every mounted cached editor, at most one — the active document's, when one is active — MUST be visible at a time, and exactly one MUST be visible when a text document is active; every other mounted editor MUST be hidden by removing it from hit-testing and keyboard-focus eligibility (`isHidden`), not by making it transparent.
 - **container-hides-when-nothing-visible**: The editor container itself MUST be hidden when no cached editor is currently the active one, so it does not intercept clicks or scrolling meant for whatever is drawn beneath it (e.g., a QuickLook preview).
 - **focus-follows-shown-editor**: When the active document changes and this pane, or nothing, already held keyboard focus, focus MUST move to the newly shown editor.
 - **focus-not-stolen-from-elsewhere**: Focus MUST NOT be moved to the newly shown editor when a view outside this pane currently holds keyboard focus.
 - **focus-released-when-empty**: When no document is being shown and this pane held keyboard focus, that focus MUST be given up rather than left on a hidden editor.
 
 ### Autosave & Persistence
+
+The debounce window is the injected `TextDocumentSaveScheduler`'s own setting (`TextDocumentSaveScheduler.init(debounce:)`), 1 second by default; this component neither sets nor reads that value, it only calls `schedule(_:)`.
 
 - **dirty-edit-schedules-save**: Every edit to a cached document MUST schedule that document for a debounced autosave.
 - **clean-document-not-scheduled**: A document with no unsaved changes MUST NOT be scheduled for autosave when its change notification fires.
@@ -96,7 +95,7 @@ approved-date: ''
 ### Error Handling
 
 - **read-failure-shows-placeholder-only**: A file the component cannot read MUST show the "Cannot open this file" placeholder; the component MUST NOT present any additional error dialog, alert, or retry control.
-- **autosave-failure-has-no-visible-indicator**: A failed autosave write MUST NOT be surfaced to the user by this component; the affected document remains marked dirty and is retried by the save scheduler in the background.
+- **autosave-failure-has-no-visible-indicator**: A failed autosave write MUST NOT be surfaced to the user by this component; the affected document remains marked dirty and MUST NOT be discarded. Retrying the write is the injected `TextDocumentSaveScheduler`'s own responsibility, not this component's — see that type's own documentation for its retry behavior.
 
 ## Appearance
 
@@ -121,7 +120,6 @@ approved-date: ''
 | Pressed | Not applicable: `FileEditorView` itself defines no button or tappable control; a mounted `SourceEditor`'s own pressed/click appearance is out of scope. |
 | Disabled | Not applicable: the component has no enabled/disabled concept of its own; nothing it directly renders is conditionally interactive. |
 | Focused | This component moves AppKit's first responder to the newly shown editor's text view when this pane already held focus or held none (see **focus-follows-shown-editor**, **focus-not-stolen-from-elsewhere**, **focus-released-when-empty**); the focus ring itself is drawn by the hosted editor, out of scope. |
-| Loading (see Text row above) | Shown as its own row; see "Loading" above. |
 
 ## Accessibility
 
@@ -142,7 +140,7 @@ approved-date: ''
 | file-editor-view-006 | non-openable-selection-clears-editor | `selectedNode` transitions from an openable file to `nil` | The editor unloads; display becomes empty |
 | file-editor-view-007 | same-url-reselection-is-noop | Call `load(from:)` twice in a row with the same URL | No new read task starts; the display and cached editors are unchanged after the second call |
 | file-editor-view-008 | cached-uri-shown-without-reread | Select file A, then file B, then re-select file A (still cached) | File A displays immediately with no `.loading` state and no new disk read |
-| file-editor-view-009 | new-uri-shows-loading | Select a large file not yet in the cache | Display becomes `.loading` before the read completes |
+| file-editor-view-009 | new-uri-shows-loading | Select a file at or under the size threshold, not yet in the cache, whose read is slowed/stubbed | Display becomes `.loading` before the read completes |
 | file-editor-view-010 | oversize-file-uses-quicklook | A file of size 8,388,609 bytes (one over the threshold), valid UTF-8 | Display becomes `.quickLook`, not `.text` |
 | file-editor-view-011 | undecodable-utf8-uses-quicklook | A file at 100 bytes containing invalid UTF-8 byte sequences | Display becomes `.quickLook`, not `.unavailable` |
 | file-editor-view-012 | unreadable-file-is-unavailable | A file whose path no longer exists on disk at read time | Display becomes `.unavailable`; an error is logged |
@@ -155,7 +153,7 @@ approved-date: ''
 | file-editor-view-019 | container-hides-when-nothing-visible | `display` is `.empty` (no active document) | The cached-editor container's `isHidden == true` |
 | file-editor-view-020 | focus-follows-shown-editor | This pane holds first responder; switch the active document | First responder moves to the newly shown editor's text view |
 | file-editor-view-021 | focus-not-stolen-from-elsewhere | A view outside this pane holds first responder; switch the active document | First responder is unchanged; it does not move to the editor |
-| file-editor-view-022 | focus-released-when-empty | This pane holds first responder; selection changes to `nil` | First responder becomes `nil` (or moves off this pane) |
+| file-editor-view-022 | focus-released-when-empty | This pane holds first responder; selection changes to `nil` | First responder becomes `nil` |
 | file-editor-view-023 | dirty-edit-schedules-save | Type a character into the active document | The document is scheduled with the autosave scheduler |
 | file-editor-view-024 | clean-document-not-scheduled | The document's change handler fires while `isDirty == false` | No autosave is scheduled |
 | file-editor-view-025 | outgoing-edits-precede-incoming-read | Edit file A (dirty), then select not-yet-cached file B | File A's pending write completes before file B's bytes are read from disk |
@@ -168,7 +166,7 @@ approved-date: ''
 | file-editor-view-032 | editor-config-reflects-live-options | Toggle "show line numbers" while a document is open | The mounted editor's gutter visibility changes without reopening the file |
 | file-editor-view-033 | wrap-lines-disabled | Inspect the `SourceEditorConfiguration.appearance` passed to any mounted editor | `wrapLines == false` |
 | file-editor-view-034 | read-failure-shows-placeholder-only | Select a file with no read permission | The "Cannot open this file" placeholder is shown; no alert or dialog appears |
-| file-editor-view-035 | autosave-failure-has-no-visible-indicator | Force the injected write function to throw for a dirty document | No error UI appears in this component; the document remains dirty and pending |
+| file-editor-view-035 | autosave-failure-has-no-visible-indicator | Force the injected write function to throw for a dirty document | No error UI appears in this component; the document remains marked dirty and is not discarded |
 
 ## Edge Cases
 
@@ -202,11 +200,11 @@ Not applicable: `FileEditorView` has no URL scheme, route, or deep-link entry po
 | (none — hardcoded literal, `String`, not `LocalizedStringKey`) | "Select a file to view its contents" | Placeholder shown when nothing openable is selected |
 | (none — hardcoded literal, `String`, not `LocalizedStringKey`) | "Cannot open this file" | Placeholder shown when the selected file could not be read |
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined. Both placeholder strings are passed as a Swift `String` (`EditorPlaceholderView.message: String`), not a `LocalizedStringKey`, so `Text(message)` renders each verbatim with no bundle lookup, unlike a string literal passed directly to `Text(_:)` at a call site typed to accept a `LocalizedStringKey`. Whether these two strings should be localized is a product decision the source does not make; resolving it needs either an app-team decision to route them through `String(localized:)`/a strings catalog, or an explicit acceptance that this chrome stays English-only.
+NEEDS REVIEW: Localization decision pending. Both placeholder strings are passed as a Swift `String` (`EditorPlaceholderView.message: String`), not a `LocalizedStringKey`, so `Text(message)` renders each verbatim with no bundle lookup, unlike a string literal passed directly to `Text(_:)` at a call site typed to accept a `LocalizedStringKey`. Whether these two strings should be localized is a product decision the source does not make; resolving it needs either an app-team decision to route them through `String(localized:)`/a strings catalog, or an explicit acceptance that this chrome stays English-only.
 
 ## Accessibility Options
 
-Document which accessibility display options (Rule 15) this component responds to:
+Document which accessibility display options (see agenticdevelopercookbook://guidelines/implementing/accessibility/accessibility#respect-accessibility-display-options) this component responds to:
 
 | Option | Behavior |
 |--------|----------|
@@ -227,7 +225,7 @@ Not applicable: no analytics event is emitted anywhere in `FileEditorView.swift`
 - **Data collected**: None of its own beyond the file the user has already selected in the file browser. The component reads that file's bytes into memory to display and, for text, into an editable buffer; it collects nothing else.
 - **Storage**: Local disk only. Edits are written back to the same file the user opened, through the injected `TextDocumentSaveScheduler`'s debounced autosave; the in-memory cache (up to 8 documents, plus their undo history) lives only as long as this view does and is not itself persisted.
 - **Transmission**: None from this component. Project language-server communication (completion, jump-to-definition, diagnostics), when `languageServices` is supplied, is a local inter-process exchange with a language server, not a network call.
-- **Retention**: A file's content on disk persists per the file system's own guarantees, subject to the debounce window described under Edge Cases (Error states) and Design Decisions. The in-memory cache retains a document only until it is evicted (least-recently-selected, past 8 documents) or this pane is deallocated, at which point its pending autosave is flushed and its reference released — nothing is retained beyond that.
+- **Retention**: A file's content on disk persists per the file system's own guarantees, subject to the debounce window stated under Autosave & Persistence and the retry behavior described in Design Decisions. The in-memory cache retains a document only until it is evicted (least-recently-selected, past 8 documents) or this pane is deallocated, at which point its pending autosave is flushed and its reference released — nothing is retained beyond that.
 
 ## Logging
 
@@ -246,45 +244,45 @@ An autosave write failure is logged at error level (`Auto-save failed for <uri>:
 - **Compose**: There is no Compose analogue to a persistently-mounted native view tree kept alive independent of the composition — Compose recomposes and can discard a composable's UI entirely when it leaves the tree. Reproduce the "undo survives switching files" requirement by keeping each open document's text buffer and undo state in a `ViewModel` (or `rememberSaveable`-backed holder) keyed by URI, scoped to the pane rather than to the composable, and drive visibility with `Modifier` (not adding/removing the composable from the tree) so an inactive editor's Compose state is preserved rather than torn down and rebuilt — the closest available parallel to `isHidden` never destroying the AppKit host.
 - **React/Web**: Mount one code-editor instance (e.g., CodeMirror or Monaco) per open document in the DOM, and toggle the inactive ones with `display: none` — the CSS property that, like `isHidden`, also excludes the element from hit-testing and (paired with `inert` or `tabindex="-1"`) from the tab order — rather than mounting/unmounting per selection, which would recreate the editor and lose its undo history exactly as an `.id()`-forced SwiftUI remount did here. Reproduce the 8-MiB/UTF-8 classification and the QuickLook fallback with a browser file-type/size check that routes to an `<img>`/`<video>`/`<iframe>`(PDF) preview, or a "no preview available" placeholder, in place of QuickLook.
 - **AppKit / UIKit**: This recipe's macOS implementation already is the AppKit/SwiftUI-hybrid pattern to follow (`CachedEditorStackView`); a UIKit (iOS) port would replace it with a `UIViewController`-containment stack — one child view controller per cached document, added via `addChild(_:)` and shown/hidden with `UIView.isHidden` (which, like AppKit's, excludes a view from both hit-testing and first-responder eligibility) — and would present non-text content with `QLPreviewController` (embedded via containment, or presented modally) in place of the macOS-only `QLPreviewView`.
-- **WinUI 3**: There is no single WinUi 3 control that is this whole component's analogue; compose it from a `Grid` or `Frame` holding one child `UIElement` per cached document in a dictionary keyed by URI (mirroring `hostsByURI`), each hosting either a native text control (e.g., a syntax-highlighting `TextBox`/`RichEditBox`, or a `WebView2` hosting Monaco) or a preview surface for non-text content, since WinUI has no built-in QuickLook equivalent (a Shell preview-handler COM interop, or a `WebView2` navigated to the file, is the closest available substitute). Toggle which child is shown with `UIElement.Visibility = Visible`/`Collapsed`, never `Opacity = 0` — `Opacity` in WinUI, like `alphaValue` in AppKit, does not remove an element from hit-testing or from the tab-focus chain, which is exactly the bug `isHidden` exists here to avoid (see Design Decisions). Drive the placeholder/loading/text/preview/unavailable branches from a view-model enum mirroring `FileEditorState.Display`, bound to each branch's `Visibility`, and implement the 1-second-debounced autosave with a `DispatcherTimer` restarted on every text-changed event, matching `TextDocumentSaveScheduler`'s per-key debounce.
+- **WinUI 3**: There is no single WinUI 3 control that is this whole component's analogue; compose it from a `Grid` or `Frame` holding one child `UIElement` per cached document in a dictionary keyed by URI (mirroring `hostsByURI`), each hosting either a native text control (e.g., a syntax-highlighting `TextBox`/`RichEditBox`, or a `WebView2` hosting Monaco) or a preview surface for non-text content, since WinUI has no built-in QuickLook equivalent (a Shell preview-handler COM interop, or a `WebView2` navigated to the file, is the closest available substitute). Toggle which child is shown with `UIElement.Visibility = Visible`/`Collapsed`, never `Opacity = 0` — `Opacity` in WinUI, like `alphaValue` in AppKit, does not remove an element from hit-testing or from the tab-focus chain, which is exactly the bug `isHidden` exists here to avoid (see Design Decisions). Drive the placeholder/loading/text/preview/unavailable branches from a view-model enum mirroring `FileEditorState.Display`, bound to each branch's `Visibility`, and implement the 1-second-debounced autosave with a `DispatcherTimer` restarted on every text-changed event, matching `TextDocumentSaveScheduler`'s per-key debounce.
 
 ## Design Decisions
 
-Decision: `body` mounts one always-live content view (`FileEditorContentView`/`CachedEditorStack`) rather than switching between conditional SwiftUI branches per display state.
-Rationale: A conditional SwiftUI branch is destroyed by SwiftUI the moment the condition it depends on no longer holds; selecting a directory used to switch such a branch and tore down every cached `SourceEditor` — and its undo stack — at once. Keeping one container mounted for the life of the view and only toggling visibility inside it is what lets a document's undo history survive switching away from and back to it.
-Approved: pending
+**Decision**: `body` mounts one always-live content view (`FileEditorContentView`/`CachedEditorStack`) rather than switching between conditional SwiftUI branches per display state.
+**Rationale**: A conditional SwiftUI branch is destroyed by SwiftUI the moment the condition it depends on no longer holds; selecting a directory used to switch such a branch and tore down every cached `SourceEditor` — and its undo stack — at once. Keeping one container mounted for the life of the view and only toggling visibility inside it is what lets a document's undo history survive switching away from and back to it.
+**Approved**: pending
 
-Decision: Cached editors are hidden with AppKit's `isHidden`, never with opacity or `alphaValue`.
-Rationale: `alphaValue == 0` does not exclude a view from `hitTest(_:)` or from `canBecomeKeyView`, so a transparent "hidden" editor still took clicks and still answered Tab — putting keystrokes into a document the user could not see, which the autosave scheduler would then dutifully write to disk. `isHidden` is AppKit's documented exclusion from both.
-Approved: pending
+**Decision**: Cached editors are hidden with AppKit's `isHidden`, never with opacity or `alphaValue`.
+**Rationale**: `alphaValue == 0` does not exclude a view from `hitTest(_:)` or from `canBecomeKeyView`, so a transparent "hidden" editor still took clicks and still answered Tab — putting keystrokes into a document the user could not see, which the autosave scheduler would then dutifully write to disk. `isHidden` is AppKit's documented exclusion from both.
+**Approved**: pending
 
-Decision: A file whose bytes fail UTF-8 decoding is routed to QuickLook, while a file whose bytes cannot be read at all is marked unavailable.
-Rationale: `FilePreviewLoader.read(_:)` treats a successful disk read of non-UTF-8 bytes as a QuickLook candidate — the same bucket as images, PDFs, and movies — and reserves `.unavailable` for the disk read itself failing. These are two different failure points in the same function, and the recipe preserves that distinction rather than collapsing both into one "can't open" outcome.
-Approved: pending
+**Decision**: A file whose bytes fail UTF-8 decoding is routed to QuickLook, while a file whose bytes cannot be read at all is marked unavailable.
+**Rationale**: `FilePreviewLoader.read(_:)` treats a successful disk read of non-UTF-8 bytes as a QuickLook candidate — the same bucket as images, PDFs, and movies — and reserves `.unavailable` for the disk read itself failing. These are two different failure points in the same function, and the recipe preserves that distinction rather than collapsing both into one "can't open" outcome.
+**Approved**: pending
 
-Decision: A failed autosave write is retried in the background with no user-facing error, alert, or retry control.
-Rationale: `TextDocumentSaveScheduler` keeps a failed write's document pending and dirty rather than discarding it, so the edit is never lost even though the user is never told a write failed. An alert on every transient failure (a sleeping external disk, a momentarily full volume) was judged worse than a silent, safe retry.
-Approved: pending
+**Decision**: A failed autosave write is retried in the background with no user-facing error, alert, or retry control.
+**Rationale**: `TextDocumentSaveScheduler` keeps a failed write's document pending and dirty rather than discarding it, so the edit is never lost even though the user is never told a write failed. An alert on every transient failure (a sleeping external disk, a momentarily full volume) was judged worse than a silent, safe retry.
+**Approved**: pending
 
-Decision: Focus moves to a newly shown editor only when this pane already held focus or nothing did; it is never taken unconditionally.
-Rationale: The file tree changes `selectedNode` on every arrow-key press. Taking first responder unconditionally on every selection change would steal focus from the tree after its very first keypress, making the tree impossible to navigate from the keyboard.
-Approved: pending
+**Decision**: Focus moves to a newly shown editor only when this pane already held focus or nothing did; it is never taken unconditionally.
+**Rationale**: The file tree changes `selectedNode` on every arrow-key press. Taking first responder unconditionally on every selection change would steal focus from the tree after its very first keypress, making the tree impossible to navigate from the keyboard.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | needs-review | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
 | [dynamic-type-support](agenticdevelopercookbook://compliance/accessibility#dynamic-type-support) | partial | Accessibility |
 | [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
 | [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
-| [rtl-layout-support](agenticdevelopercookbook://compliance/internationalization#rtl-layout-support) | passed | Internationalization |
-| [local-persistence-durability](agenticdevelopercookbook://compliance/data#local-persistence-durability) | partial | Data Persistence |
+| [rtl-layout-support](agenticdevelopercookbook://compliance/internationalization#rtl-layout-support) | partial | Internationalization |
 
-`screen-reader-support` is needs-review because of the open question flagged under Accessibility (Announce state changes): no accessibility notification accompanies a display-state change in this component itself. `dynamic-type-support` is partial because the placeholder message scales with the theme's own text-size preference while the placeholder icon's literal 48pt size does not. `contrast-ratio` is partial because every color is a semantic theme token resolved at render time, so actual contrast depends on the active theme, which this component does not control. `no-hardcoded-strings` failed because both placeholder strings (see Localization) are unlocalized `String` literals. `rtl-layout-support` passed because every string is plain Unicode text with no directional layout assumptions in this file. `local-persistence-durability` is partial because, while a failed autosave write is retried rather than discarded (see Design Decisions), an edit made within the scheduler's debounce window is not yet durable and would be lost if the process terminated abnormally before that window elapsed or before teardown's flush ran.
+`screen-reader-support` is partial because of the open question flagged under Accessibility (Announce state changes): no accessibility notification accompanies a display-state change in this component itself. `dynamic-type-support` is partial because the placeholder message scales with the theme's own text-size preference while the placeholder icon's literal 48pt size does not. `contrast-ratio` is partial because every color is a semantic theme token resolved at render time, so actual contrast depends on the active theme, which this component does not control. `no-hardcoded-strings` failed because both placeholder strings (see Localization) are unlocalized `String` literals. `rtl-layout-support` is partial because every string in this file is plain Unicode text with no directional layout assumptions, but that is no evidence of mirrored-layout or bidi handling, and the editor itself — where either would actually be exercised — is out of scope for this recipe.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Claude | Initial creation from source code |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved a cookbook reference from `references` to `related`, trimmed tags to five, fixed an invalid compliance status and bolded Design Decision labels, downgraded an unsupported RTL compliance claim, stated the autosave debounce interval once and repointed its other mentions, reworded a misleading Localization marker, fixed a requirement/state contradiction over editor visibility, removed a duplicate States row, tightened two imprecise test vectors, scoped the autosave-failure requirement and its vector to this component's own behavior, replaced a bare "Rule 15" citation with a full guideline reference, fixed a WinUI 3 typo, and reconciled the Compliance table against the catalog |

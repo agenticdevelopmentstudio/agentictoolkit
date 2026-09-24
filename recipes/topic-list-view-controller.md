@@ -3,7 +3,7 @@ id: ce223be3-818a-4310-b136-9e1e84e9af54
 title: TopicListViewController
 domain: agentictoolkit://recipes/topic-list-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -22,7 +22,6 @@ tags:
 - list
 - selection
 - view-controller
-- macos
 - appkit
 depends-on: []
 related:
@@ -66,14 +65,13 @@ inside the outline itself — a third, unrelated use of "header."
 
 - **group-items-by-section**: Component MUST render every section's items,
   in the order sections and items are given to `setSections(_:)`, as leaf
-  rows of a single flat outline (`buildRootNodes(from:)`).
+  rows of a single flat outline.
 - **header-row-for-titled-section**: Component MUST render a group header
   row carrying the section's title for every `TopicListSection` whose
   `title` is a non-nil, non-empty string.
 - **omit-header-for-untitled-section**: Component MUST NOT render a group
-  header row for a section whose `title` is `nil` or empty
-  (`buildRootNodes(from:)` only appends a `.header` node `if let title = ...,
-  !title.isEmpty`).
+  header row for a section whose `title` is `nil` or empty — only a
+  non-nil, non-empty title produces a header node.
 - **flat-row-hierarchy**: Component MUST report every row — header and item
   alike — as not expandable (`isItemExpandable` always returns `false`) and
   MUST set `indentationPerLevel = 0`, so no row is ever indented or nested
@@ -87,11 +85,12 @@ inside the outline itself — a third, unrelated use of "header."
 - **header-rows-not-selectable**: Component MUST prevent a group header row
   from becoming selected; `shouldSelectItem` returns `true` only for a node
   whose kind is `.item`.
-- **select-disabled-items-like-enabled**: Component MUST allow selecting an
+- **disabled-item-selectability**: Component MUST allow selecting an
   item whose `isDisabled == true` through exactly the same paths, and with
-  exactly the same result, as an item whose `isDisabled == false` —
-  `shouldSelectItem` and `TopicListItemLabel.accessibilityPerformPress()`
-  branch only on node kind (`.item` vs. `.header`), never on `isDisabled`.
+  exactly the same result, as an item whose `isDisabled == false` — the
+  outline delegate's `shouldSelectItem` check and an item row's
+  accessibility press handler (`accessibilityPerformPress()`) both branch
+  only on node kind (`.item` vs. `.header`), never on `isDisabled`.
 - **mute-disabled-item-appearance**: Component MUST render an item whose
   `isDisabled == true` with `palette.tertiaryTextColor` for both its label
   text and its icon tint, instead of `palette.primaryTextColor` (label) and
@@ -100,20 +99,20 @@ inside the outline itself — a third, unrelated use of "header."
   whose `icon` is `nil` with no image in its image view, since
   `TopicListItem.icon` is an `NSImage?` assigned directly to
   `cell.imageView?.image`.
-- **fire-onselect-on-user-selection-change**: Component MUST invoke
-  `onSelect` with the newly selected item, or `nil` if none, whenever
-  `outlineViewSelectionDidChange` fires while `selectionSuppressionDepth ==
-  0`.
+- **user-selection-callback**: Component MUST invoke
+  `onSelect` with the newly selected item, or `nil` if none, whenever the
+  outline's selection changes as a direct result of user interaction (i.e.
+  outside any selection-suppression scope — see
+  **suppress-onselect-on-programmatic-selection**).
 - **suppress-onselect-on-programmatic-selection**: Component MUST NOT invoke
-  `onSelect` for a selection change made inside a
-  `suppressingSelectionCallbacks` scope — i.e. the reload-and-restore
-  performed by `setSections(_:)` and by `applyTheme(_:)`, and the
-  selection made by `selectItem(withId:)`.
+  `onSelect` for a selection change made during a programmatic-selection
+  scope — i.e. the reload-and-restore performed by `setSections(_:)` and by
+  `applyTheme(_:)`, and the selection made by `selectItem(withId:)`.
 - **select-item-by-id**: `selectItem(withId:)` MUST select the row of the
-  first node in `rootNodesCache` whose item id matches, without firing
-  `onSelect`.
-- **noop-select-missing-id**: `selectItem(withId:)` MUST leave the current
-  selection unchanged when no node's item id matches the given id.
+  first item, in section/item order, whose id matches the given id, without
+  firing `onSelect`.
+- **missing-id-selection**: `selectItem(withId:)` MUST leave the current
+  selection unchanged when no item's id matches the given id.
 - **noop-select-already-selected-id**: `selectItem(withId:)` MUST leave the
   current selection unchanged, and MUST NOT call `selectRowIndexes`, when
   the matching row is already the selected row.
@@ -123,57 +122,66 @@ inside the outline itself — a third, unrelated use of "header."
 - **restore-selection-across-theme-change**: `applyTheme(_:)` MUST preserve
   the outline's selected row indexes across the `reloadData()` it performs,
   re-selecting them with `selectRowIndexes` when they differ afterward.
-- **stable-row-node-identity**: Component MUST hand the outline the same
-  `TopicListNode` instance for a given logical row on every access between
-  one `setSections(_:)` call and the next (`rootNodesCache`), rather than
-  constructing new node instances per access.
+- **stable-row-node-identity**: Component MUST let `outlineView.row(forItem:)`
+  resolve to the same valid row for a given logical row across repeated
+  accesses between one `setSections(_:)` call and the next, rather than
+  losing that identity (and returning `-1`) because a fresh instance was
+  constructed for that row on each access.
 - **hide-header-when-title-and-accessory-empty**: Component MUST hide the
-  title header view (`headerView.isHidden = true`) when the trimmed title is
-  empty AND no header accessory view is set.
-- **hide-footer-when-unset**: Component MUST hide the footer container
-  (`footerContainer.isHidden = true`) when `footerView` is `nil`.
+  title header view when the trimmed title is empty AND no header accessory
+  view is set.
+- **hide-footer-when-unset**: Component MUST hide the footer container when
+  `footerView` is `nil`.
 - **header-accessory-below-title**: When a header accessory view is set via
   `setHeaderAccessoryView(_:)`, component MUST lay it out directly below the
-  title label, spanning the header stack's width
-  (`accessoryContainer.widthAnchor.constraint(equalTo: headerStack.widthAnchor)`).
+  title label, spanning the full width of the header area.
 - **footer-spans-sidebar-width**: A footer view installed via
   `setFooterView(_:)` MUST have its leading, trailing, top, and bottom
-  anchors pinned to `footerContainer`'s, spanning the sidebar's full width.
-- **content-below-titlebar-safe-area**: Component MUST pin `contentStack`'s
-  top anchor to the root view's `safeAreaLayoutGuide.topAnchor` (not its
-  plain `topAnchor`), and its leading/trailing/bottom anchors to the root
-  view's own edges.
-- **compute-preferred-width-from-content**: `preferredWidth()` MUST return a
-  value no smaller than the widest of: the title text's rendered width plus
-  `CellMetrics.titleLeadingInset`; each section header's rendered width plus
-  `CellMetrics.headerLeadingInset`; each item's rendered width plus
-  `CellMetrics.itemChromeWidth`; the footer view's `fittingSize.width`; and
-  the header accessory view's `fittingSize.width` plus its own leading and
-  trailing insets — all summed with the fixed `outlineChromePadding` (64pt:
-  30 leading inset + 16 scroller gutter + 18 trailing margin).
+  anchors pinned to its container's, spanning the sidebar's full width.
+- **content-below-titlebar-safe-area**: Component MUST keep its list content
+  below the window's non-safe top inset (e.g. a full-height window's
+  titlebar) by pinning its content's top edge to the root view's
+  `safeAreaLayoutGuide.topAnchor` rather than its plain `topAnchor`, while
+  its leading/trailing/bottom edges match the root view's own edges.
+- **preferred-width**: `preferredWidth()` MUST return exactly
+  `max(titleCandidate, headerCandidates…, itemCandidates…) +
+  outlineChromePadding` — the widest text-based candidate (the title's
+  rendered width plus `CellMetrics.titleLeadingInset`; each section header's
+  rendered width plus `CellMetrics.headerLeadingInset`; each item's rendered
+  width plus `CellMetrics.itemChromeWidth`; defaulting to 0 when there is no
+  title, header, or item), plus the fixed `outlineChromePadding` (64pt: 30
+  leading inset + 16 scroller gutter + 18 trailing margin) — then MUST widen
+  that further to at least the footer view's `fittingSize.width` (when a
+  footer is set) and to at least the header accessory view's
+  `fittingSize.width` plus `CellMetrics.titleLeadingInset` and
+  `CellMetrics.headerTrailingInset` (when an accessory is set). The footer
+  and accessory floors are absolute widths, not added to
+  `outlineChromePadding`.
 - **item-accessibility-id-from-title**: Component MUST set each item row's
   label accessibility identifier to `"topic-list.item.\(AccessibilityID.slug(item.title))"`
   — derived from the item's **title**, not its `id`.
-- **ax-press-selects-row-with-should-select-gate**: An item row's label
-  (`TopicListItemLabel`) MUST respond to `accessibilityPerformPress()` by
-  locating its row in the enclosing outline and calling `selectRowIndexes`
-  on it, and MUST first call the delegate's `shouldSelectItem` for that row
-  and return `false` without selecting when that call returns `false`.
+- **ax-press-selection**: An item row's label MUST respond to
+  `accessibilityPerformPress()` by locating its row in the enclosing outline
+  and calling `selectRowIndexes` on it, and MUST first call the delegate's
+  `shouldSelectItem` for that row and return `false` without selecting when
+  that call returns `false`.
 - **repaint-on-theme-change**: Component MUST update the background color of
   the root view, `contentStack`, `headerView`, and `footerContainer`, the
   title label's font and text color, and the scroll/outline view background,
   to the newly observed `SemanticPalette`'s values every time
   `ThemePaletteObserver` reports a palette change.
 - **single-column-fills-width**: The outline's one `NSTableColumn` MUST be
-  resized to fill the outline's available width on every layout pass
-  (`ColumnFillingOutlineView.layout()` calls `sizeLastColumnToFit()` after
-  `super.layout()`).
+  resized to fill the outline's available width on every layout pass, so no
+  row ever clips its label regardless of when the enclosing view settles the
+  sidebar's width.
 - **overlay-autohide-scroller**: Component MUST configure the scroll view
   with `scrollerStyle = .overlay` and `autohidesScrollers = true`, so the
   vertical scroller floats over content and only appears while scrolling and
   while the list overflows.
-- **automatic-outline-style**: Component MUST set `outlineView.style =
-  .automatic` (never `.sourceList`).
+- **automatic-outline-style**: Component MUST render the outline with a
+  theme-following material rather than a forced dark source-list material,
+  regardless of the active appearance — observable as `outlineView.style ==
+  .automatic`, never `.sourceList`.
 
 ## Appearance
 
@@ -207,8 +215,8 @@ inside the outline itself — a third, unrelated use of "header."
   `isDisabled`. Group header label: `palette.secondaryTextColor`. Title
   label: `palette.secondaryTextColor`.
 - **Border**: Not set explicitly anywhere in this file; `scrollView`'s
-  `borderType` is never assigned, so it keeps AppKit's default border
-  configuration for an `NSScrollView`.
+  `borderType` is never assigned, so it keeps `NSScrollView`'s own default
+  value, `.noBorder` — no border is drawn around the scroll view.
 - **Shadow**: Not applicable — no shadow is drawn, and no `CALayer` shadow
   property is configured, anywhere in this file.
 - **Min/Max size**: No explicit min/max width or height constraint is
@@ -222,7 +230,7 @@ inside the outline itself — a third, unrelated use of "header."
 | State | Appearance change |
 |-------|------------------|
 | Default (unselected, enabled item row) | `itemFont`, `primaryTextColor` label, `accentColor`-tinted icon; row background follows `windowBackgroundColor`. |
-| Disabled item row | `itemFont`, `tertiaryTextColor` label, `tertiaryTextColor`-tinted icon; identical selection/press behavior to an enabled row (see **select-disabled-items-like-enabled**). |
+| Disabled item row | `itemFont`, `tertiaryTextColor` label, `tertiaryTextColor`-tinted icon; identical selection/press behavior to an enabled row (see **disabled-item-selectability**). |
 | Selected row | `ThemedTableRowView.drawSelection(in:)` fills a 4pt-corner-radius rect, inset 2pt horizontally / 1pt vertically, with `palette.nsColor(.selection)`. |
 | Group header row | `headerFont`, `secondaryTextColor`, `isGroupItem == true`; not selectable; no disclosure control. |
 | Pressed | Not applicable: this file defines no visual state distinct from Selected for a row's press — a click or `AXPress` both resolve directly to `selectRowIndexes`, with no separate transient "pressed" appearance. |
@@ -250,17 +258,20 @@ inside the outline itself — a third, unrelated use of "header."
   it: a VoiceOver pass over an instantiated sidebar while calling
   `setSections(_:)` with a materially different row set, or an explicit
   decision to post a notification from that method.
-- **Minimum tap target**: `outlineView.rowSizeStyle = .default` — AppKit
-  computes the row height from the active font rather than a literal
-  numeric value, and it is not overridden anywhere in this file; that
-  computed height is well under the 44×44pt iOS minimum. This is expected
-  for a pointer/keyboard-driven macOS list (not a touch surface); the
-  44×44pt (iOS) / 48×48dp (Android) minimum applies to the touch-platform
-  translations described in Platform Notes, not to this AppKit control.
-  Additionally, `TopicListItemLabel.accessibilityPerformPress()` gives
-  assistive technology a press path into a row regardless of its rendered
-  size, since activation does not depend on a pointer hitting a physical
-  target.
+- **Minimum tap target**: `outlineView.rowSizeStyle = .default` — per
+  Apple's documentation, `NSTableView.rowHeight` (whose documented default
+  is 16pt) "is used only if the table's `rowSizeStyle` is set to `custom`",
+  so with `.default` and no delegate `tableView(_:heightOfRow:)` override
+  (neither present in this file) AppKit derives the row's actual height from
+  its effective style rather than a literal value this file sets. Whatever
+  value that resolves to for the fonts this component uses is well under the
+  44×44pt iOS minimum. This is expected for a pointer/keyboard-driven macOS
+  list (not a touch surface); the 44×44pt (iOS) / 48×48dp (Android) minimum
+  applies to the touch-platform translations described in Platform Notes,
+  not to this AppKit control. Additionally, an item row label's
+  `accessibilityPerformPress()` gives assistive technology a press path into
+  a row regardless of its rendered size, since activation does not depend on
+  a pointer hitting a physical target.
 
 ## Conformance Test Vectors
 
@@ -272,28 +283,29 @@ inside the outline itself — a third, unrelated use of "header."
 | topic-list-004 | flat-row-hierarchy, hide-disclosure-controls | Any populated outline | `isItemExpandable` returns `false` for every node and `shouldShowOutlineCellForItem` returns `false` for every item, so no row shows a disclosure triangle |
 | topic-list-005 | hide-outline-column-header | Inspect `outlineView` after `loadView` | `outlineView.headerView == nil` |
 | topic-list-006 | header-rows-not-selectable | Click, or send `AXPress` to, a group header row | `shouldSelectItem` returns `false`; the row does not become selected |
-| topic-list-007 | select-disabled-items-like-enabled | An item with `isDisabled == true`; select it by click | The row becomes selected and `onSelect` is invoked with that item, identically to an enabled item |
+| topic-list-007 | disabled-item-selectability | An item with `isDisabled == true`; select it by click | The row becomes selected and `onSelect` is invoked with that item, identically to an enabled item |
 | topic-list-008 | mute-disabled-item-appearance | Two items, one `isDisabled == true`, one `isDisabled == false` | The disabled row's label/icon use `tertiaryTextColor`; the enabled row's use `primaryTextColor`/`accentColor` |
 | topic-list-009 | render-item-without-icon-when-nil | An item constructed with `icon: nil` | Its row's `imageView.image == nil`; no placeholder or broken image appears |
-| topic-list-010 | fire-onselect-on-user-selection-change | User clicks an unselected item row | `onSelect` is invoked exactly once with that item |
+| topic-list-010 | user-selection-callback | User clicks an unselected item row | `onSelect` is invoked exactly once with that item |
 | topic-list-011 | suppress-onselect-on-programmatic-selection | Call `selectItem(withId:)` for an unselected, present id | The row becomes selected but `onSelect` is NOT invoked |
-| topic-list-012 | select-item-by-id, noop-select-missing-id | Two items with ids "a" and "b"; call `selectItem(withId: "b")`, then `selectItem(withId: "z")` | First call selects "b"'s row; second call leaves "b" selected (no change, no crash) |
+| topic-list-012 | select-item-by-id, missing-id-selection | Two items with ids "a" and "b"; call `selectItem(withId: "b")`, then `selectItem(withId: "z")` | First call selects "b"'s row; second call leaves "b" selected (no change, no crash) |
 | topic-list-013 | noop-select-already-selected-id | Row for id "b" is already selected; call `selectItem(withId: "b")` again | `selectRowIndexes` is not called again; selection and `onSelect` are unaffected |
 | topic-list-014 | restore-selection-by-id-after-resection | Item "b" selected; call `setSections` with a new section list that still contains an item with id "b" | After reload, the row for id "b" is selected again, with no `onSelect` firing for the transient deselection |
 | topic-list-015 | restore-selection-across-theme-change | A row is selected; the active theme changes | After `applyTheme(_:)` runs, the same row is still selected, with no spurious `onSelect(nil)` |
-| topic-list-016 | stable-row-node-identity | Call `setSections` once, then call `selectItem(withId:)` for an item present since that call | `outlineView.row(forItem:)` resolves to a valid (non -1) row, because the same `TopicListNode` instance is used across the accesses |
+| topic-list-016 | stable-row-node-identity | Call `setSections` once, then call `selectItem(withId:)` for an item present since that call | `outlineView.row(forItem:)` resolves to a valid (non -1) row for that item |
 | topic-list-017 | hide-header-when-title-and-accessory-empty | `setTitle(nil)` and no header accessory view set | `headerView.isHidden == true` |
 | topic-list-018 | hide-footer-when-unset | `setFooterView(nil)` | `footerContainer.isHidden == true` |
 | topic-list-019 | header-accessory-below-title | `setTitle("Panels")` and `setHeaderAccessoryView(searchField)` | The header shows the title label above `searchField`, both spanning the header's width |
 | topic-list-020 | footer-spans-sidebar-width | `setFooterView(actionsBar)` | `actionsBar`'s leading/trailing anchors equal `footerContainer`'s; it visually spans the sidebar |
 | topic-list-021 | content-below-titlebar-safe-area | Host the controller's view in a window whose content extends under the titlebar | `contentStack`'s top sits at the safe-area inset, not the raw top of the view, so the titlebar does not overlap the list |
-| topic-list-022 | compute-preferred-width-from-content | One item titled "A very long item title" and no title/footer/accessory | `preferredWidth()` returns at least `itemChromeWidth + renderedWidth("A very long item title", itemFont) + outlineChromePadding (64)` |
+| topic-list-022 | preferred-width | One item titled "A very long item title" and no title/footer/accessory | `preferredWidth()` returns exactly `itemChromeWidth + renderedWidth("A very long item title", itemFont) + outlineChromePadding (64)` |
 | topic-list-023 | item-accessibility-id-from-title | An item with `id: "row-7"`, `title: "Appearance"` | The row label's accessibility identifier is `"topic-list.item.appearance"`, not `"topic-list.item.row-7"` |
-| topic-list-024 | ax-press-selects-row-with-should-select-gate | Send `accessibilityPerformPress()` to an item row's label; then to a group header's context (not a real label target, but exercise the gate via a disabled `shouldSelectItem` delegate override) | The item row's press selects it and returns `true`; a press gated by a `false` `shouldSelectItem` result returns `false` and does not select |
+| topic-list-024 | ax-press-selection | Send `accessibilityPerformPress()` to an item row's label | The press selects the row and returns `true` |
+| topic-list-024b | ax-press-selection | Install a delegate override where `shouldSelectItem` returns `false`; send `accessibilityPerformPress()` to an item row's label | `accessibilityPerformPress()` returns `false`; the row does not become selected |
 | topic-list-025 | repaint-on-theme-change | Active theme changes from light to dark | Root view, `contentStack`, `headerView`, `footerContainer` backgrounds, title label font/color, and outline/scroll backgrounds all update to the new palette's values |
 | topic-list-026 | single-column-fills-width | Enclosing split view widens the sidebar by 40pt | The outline's single column widens by the same amount on the next layout pass; no row clips its label |
-| topic-list-027 | overlay-autohide-scroller | Content taller than the visible area; user is not scrolling | No scroller is drawn; scrolling briefly reveals an overlay scroller that then autohides |
-| topic-list-028 | automatic-outline-style | Inspect `outlineView.style` after `loadView`, under both light and dark `NSApp.appearance` | `outlineView.style == .automatic` in both cases; the outline's background follows the active theme rather than a forced dark material |
+| topic-list-027 | overlay-autohide-scroller | Inspect `scrollView` after `loadView` | `scrollView.scrollerStyle == .overlay` and `scrollView.autohidesScrollers == true` |
+| topic-list-028 | automatic-outline-style | Inspect `outlineView.style` after `loadView` | `outlineView.style == .automatic` |
 
 ## Edge Cases
 
@@ -309,18 +321,17 @@ inside the outline itself — a third, unrelated use of "header."
   Source imposes no maximum on section or item count; any array size is
   handled uniformly through the same `rootNodesCache`/`NSOutlineView` row
   model.
-- Duplicate item ids (SHOULD): `selectItem(withId:)` resolves via
-  `rootNodesCache.first(where:)`; if two items across sections share an id,
-  only the row for the first match in outline order is ever selected by
-  this method — source performs no uniqueness validation. Callers SHOULD
-  supply unique ids across all sections passed to one `setSections(_:)`
-  call; this is undocumented in source and left to caller discipline. The
-  Design Decisions section explains why no test vector accompanies this
-  SHOULD: the behavior described here is a direct, deterministic
-  consequence of `first(where:)`, already implied by
-  **select-item-by-id**'s vector (topic-list-012), and adding a second,
-  near-identical vector for the duplicate-id case would not exercise any
-  additional code path.
+- Duplicate item ids (SHOULD): `selectItem(withId:)` resolves via a
+  first-match lookup; if two items across sections share an id, only the row
+  for the first match in outline order is ever selected by this method —
+  source performs no uniqueness validation. Callers SHOULD supply unique ids
+  across all sections passed to one `setSections(_:)` call; this is
+  undocumented in source and left to caller discipline. This SHOULD needs no
+  separate test vector: the behavior described here is a direct,
+  deterministic consequence of the same first-match lookup **select-item-by-id**'s
+  vector (topic-list-012) already exercises, and a second, near-identical
+  vector for the duplicate-id case would not exercise any additional code
+  path.
 - Concurrent access: Not applicable — the class is declared `@MainActor`,
   so Swift's concurrency checker confines all reads and writes of
   `sections`, `rootNodesCache`, and `selectionSuppressionDepth` to the main
@@ -441,7 +452,7 @@ logger reference anywhere in this file).
   and a plain, unsectioned `ForEach` when it is nil. Render a disabled row's
   label and `Label` icon with `.foregroundStyle(.tertiary)` while still
   leaving the row tappable/selectable (mirroring
-  **select-disabled-items-like-enabled** — do not use SwiftUI's `.disabled()`
+  **disabled-item-selectability** — do not use SwiftUI's `.disabled()`
   modifier, since that would also block selection, unlike the source
   behavior). Compose the optional title/accessory/footer as sibling views
   above and below the `List` in a `VStack`, collapsing each with
@@ -452,24 +463,29 @@ logger reference anywhere in this file).
   width equivalent to `preferredWidth()` is needed.
 - **Compose**: Build the outline as a `LazyColumn` with `stickyHeader` items
   for each section whose title is non-nil, and plain items otherwise. Style
-  a disabled item's `Text`/`Icon` with a muted `contentColorFor` token while
-  leaving its `Modifier.clickable` active, mirroring
-  **select-disabled-items-like-enabled** (Compose's built-in
-  `enabled = false` on `clickable` would, like SwiftUI's `.disabled()`,
-  block the click entirely — do not use it here). Wrap the whole sidebar
+  a disabled item's `Text`/`Icon` with `MaterialTheme.colorScheme.onSurfaceVariant`
+  (or `LocalContentColor.current.copy(alpha = …)`) while leaving its
+  `Modifier.clickable` active, mirroring **disabled-item-selectability**
+  (Compose's built-in `enabled = false` on `clickable` would, like SwiftUI's
+  `.disabled()`, block the click entirely — do not use it here; `contentColorFor`
+  is also the wrong tool, since it returns the content color paired with a
+  given background, not a muted tone). Wrap the whole sidebar
   column in a `Surface` whose `color` is read from the active
   `MaterialTheme.colorScheme` so it repaints on theme change, mirroring
   **repaint-on-theme-change**. Compose an optional title/accessory header
   and footer as sibling composables that emit nothing (`if (condition) { … }`)
   when unset, rather than an `AnimatedVisibility` that would animate a
   collapse this component never animates.
-- **React/Web**: Render the sidebar as a `<nav>` containing, per section, an
-  optional `<h3>` (title present) or nothing (title absent) followed by a
-  `<ul role="listbox">` of `<li role="option" aria-selected>` rows — one
-  flat `<ul>` per section, never nested `<ul>`s, mirroring
-  **flat-row-hierarchy**. Style a disabled item with a muted text/icon color
+- **React/Web**: Render the sidebar as a `<nav>` containing a single
+  `<ul role="listbox">` for the whole list, mirroring **flat-row-hierarchy**'s
+  single-outline model — never one `listbox` per section, which would split
+  keyboard navigation and single selection across sections. Wrap each titled
+  section's rows in an `<li role="group" aria-labelledby="section-id">`
+  containing an `<h3 id="section-id">` for the title followed by that
+  section's `<li role="option" aria-selected>` rows; an untitled section's
+  rows sit directly in the listbox with no wrapping `group`. Style a disabled item with a muted text/icon color
   class while still attaching its `onClick`/keyboard handlers, mirroring
-  **select-disabled-items-like-enabled** (do not set the native `disabled`
+  **disabled-item-selectability** (do not set the native `disabled`
   attribute, which — like SwiftUI's `.disabled()` — would remove it from the
   tab order and block activation). Give each item's element an `id` or
   `data-testid` derived from a slugified title, mirroring
@@ -497,7 +513,7 @@ logger reference anywhere in this file).
   44pt touch target, since UIKit has no keyboard-first,
   `NSOutlineView`-style default row navigation to fall back on for
   pointer-free selection.
-- **WinUI 3** (the reason this recipe exists): Build the sidebar as a
+- **WinUI 3**: Build the sidebar as a
   `NavigationView` in `Left`/`LeftCompact` display mode, or — if
   `NavigationView`'s chrome (back button, pane toggle) is unwanted — a plain
   `ListView` bound to a flattened collection of `TopicListSection`/
@@ -510,14 +526,14 @@ logger reference anywhere in this file).
   `ListViewItem`'s `IsEnabled` to nothing (leave it `true`) and instead bind
   its `Foreground`/icon `Fill` to a converter that returns a muted
   `SolidColorBrush` when the item's `IsDisabled` is set, mirroring
-  **select-disabled-items-like-enabled** — WinUI's `IsEnabled = false`
+  **disabled-item-selectability** — WinUI's `IsEnabled = false`
   would, like SwiftUI's `.disabled()` and Compose's `enabled = false`,
   also block selection, which source does not do. Use
   `ListView.SelectionMode="Single"` with `SelectedItem`/`SelectionChanged`
   as the analog of `onSelect`, and select an item by identity
   (`ListView.SelectedItem = viewModels.First(vm => vm.Id == id)`) as the
   analog of `selectItem(withId:)`, no-oping when no match is found
-  (mirroring **noop-select-missing-id**). Give the optional title a
+  (mirroring **missing-id-selection**). Give the optional title a
   `TextBlock` and the optional accessory/footer `ContentPresenter`s bound to
   nullable view-model properties, collapsing each to `Visibility.Collapsed`
   (which, like AppKit's `isHidden` on a stack panel child, removes it from
@@ -526,11 +542,13 @@ logger reference anywhere in this file).
   Re-theme the `NavigationView`/`ListView`'s brushes from
   `Application.Current.Resources` `ThemeResource`s (or re-apply them in an
   `ActualThemeChanged` handler) so a theme switch repaints the sidebar,
-  mirroring **repaint-on-theme-change**. Set `AutomationProperties.Name` on
-  each `ListViewItem` from the item's title (mirroring
-  **item-accessibility-id-from-title**), since WinUI's UI Automation tree,
-  like AppKit's, exposes the item's own element rather than a synthesized
-  row wrapper as the natural place to attach a name.
+  mirroring **repaint-on-theme-change**. Set `AutomationProperties.AutomationId`
+  on each `ListViewItem` to the slugified title (mirroring
+  **item-accessibility-id-from-title**) while `AutomationProperties.Name`
+  carries the plain title as the item's accessible name, since WinUI's UI
+  Automation tree, like AppKit's, exposes the item's own element rather than
+  a synthesized row wrapper as the natural place to attach an identifier and
+  a name.
 
 ## Design Decisions
 
@@ -601,42 +619,43 @@ logger reference anywhere in this file).
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [meaningful-labels](agenticdevelopercookbook://compliance/accessibility#meaningful-labels) | passed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
-| [live-region-announcements](agenticdevelopercookbook://compliance/accessibility#live-region-announcements) | failed | accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | failed | accessibility |
-| [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | failed | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
-| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | passed | internationalization |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [theme-driven-typography](agenticdevelopercookbook://compliance/ui-tokens#theme-driven-typography) | passed | ui-tokens |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [dynamic-type-support](agenticdevelopercookbook://compliance/accessibility#dynamic-type-support) | partial | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [platform-theming](agenticdevelopercookbook://compliance/platform-compliance#platform-theming) | passed | Platform Compliance |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | passed | Internationalization |
 
 Keyboard-navigable passes because `NSOutlineView`'s default arrow-key row
 navigation is never disabled or overridden, and `shouldSelectItem` gates
-keyboard-driven selection the same way it gates a click. Meaningful-labels
-passes because every item row's accessible name is its own title text, with
-a stable, title-derived accessibility identifier alongside it.
-Screen-reader-support is partial: labels and an `AXPress` path exist, but no
-announcement is posted when `setSections(_:)` changes the visible row set
-(see live-region-announcements and the open question under Accessibility).
-Differentiate-without-color is failed because a disabled item is
-distinguished from an enabled one by color alone (see the open question
-under Accessibility Options). Touch-target-size is failed because AppKit's
-`.default` row-size style yields a row height well under 44×44pt — expected
-for this pointer/keyboard-driven macOS list, not a defect, but the
-44×44pt/48×48dp threshold does apply to the touch-platform translations in
-Platform Notes. Contrast-ratio is partial because every color comes from
+keyboard-driven selection the same way it gates a click; every item row's
+accessible name is also its own title text, with a stable, title-derived
+accessibility identifier alongside it. Screen-reader-support is partial:
+labels and an `AXPress` path exist, but no announcement is posted when
+`setSections(_:)` changes the visible row set, and a disabled item is
+distinguished from an enabled one by color alone with no secondary cue (see
+the open questions under Accessibility and Accessibility Options).
+Dynamic-type-support is partial because `CellMetrics.itemFont`/`headerFont`/
+`titleFont` all read live palette fonts (`palette.font(.body)` etc.) rather
+than a fixed point size, but this file cannot confirm whether
+`SemanticPalette.font(_:)` itself scales with the system's text-size
+setting. Contrast-ratio is partial because every color comes from
 `SemanticPalette` tokens whose actual contrast values are not stated in this
-file's source. String-externalization passes because this file defines no
-user-facing string literal of its own — every displayed string is
-caller-supplied data. Main-actor-confined passes because the class is
-declared `@MainActor`. Theme-driven-typography passes because
-`CellMetrics.itemFont`/`headerFont`/`titleFont` all read live palette fonts
-rather than fixed point sizes.
+file's source. Platform-theming passes because the root view, `contentStack`,
+`headerView`, `footerContainer`, title label, and outline/scroll backgrounds
+all repaint from `SemanticPalette` on every `ThemePaletteObserver` change
+(see **repaint-on-theme-change**). String-externalization passes because
+this file defines no user-facing string literal of its own — every
+displayed string is caller-supplied data. `touch-target-size` is not listed:
+AppKit's `.default` row-size style yields a row height well under 44×44pt,
+but that check governs touch surfaces and this is a pointer/keyboard-driven
+macOS list — not a defect, and not an applicable check for this control (the
+44×44pt/48×48dp threshold does apply to the touch-platform translations
+described in Platform Notes).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: rewrote requirements and test vectors to remove private AppKit identifiers (`rootNodesCache`, `TopicListNode`, `buildRootNodes(from:)`, `sizeLastColumnToFit()`, `ColumnFillingOutlineView`) in favor of observable behavior, keeping the mechanism under Platform Notes/Design Decisions; renamed five action-phrased requirements to subject-only names (`disabled-item-selectability`, `ax-press-selection`, `preferred-width`, `missing-id-selection`, `user-selection-callback`) and updated every citation; gave the Border and Minimum-tap-target Appearance/Accessibility entries concrete, source-grounded values instead of vague claims; stated the exact `preferred-width` formula and made its test vector assert equality; split the ax-press test vector into a positive and a gated-false case and made the scroller/outline-style vectors deterministic; fixed a false Design-Decisions cross-reference in the duplicate-item-ids edge case; corrected the WinUI `AutomationId`/`Name` mapping, removed an editorializing WinUI aside, fixed the Compose disabled-item color guidance, and restructured the React/Web notes to one listbox with grouped sections; dropped the redundant `macos` tag; rewrote the Compliance table to cite only real catalog checks (dropping fabricated ones and the inapplicable `touch-target-size` row, adding `dynamic-type-support` and `platform-theming`). |

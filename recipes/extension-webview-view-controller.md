@@ -3,7 +3,7 @@ id: 7152ec0d-01a9-433d-b1fd-1ac708400f40
 title: ExtensionWebviewViewController
 domain: agentictoolkit://recipes/extension-webview-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -17,17 +17,18 @@ platforms:
 - swift
 - macos
 tags:
-- macos
 - appkit
 - view-controller
-- pane
 - extensions
 - webview
 - placeholder
-depends-on: []
-related: []
-references:
+depends-on:
+- agentictoolkit://recipes/pane-view-controller
+- agentictoolkit://recipes/composable-tabs-view-registry
+related:
+- agentictoolkit://recipes/webview-panel-view-controller
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -40,9 +41,10 @@ approved-date: ''
 
 ## Behavioral Requirements
 
-- **placeholder-shown-on-load**: The component MUST show a new `ExtensionViewPlaceholderViewController`, built from its `contributedView` and `extensionDisplayName`, as `loadView()`'s content, before the `resolve` closure is ever called.
-- **resolve-called-once-in-viewdidload**: The component MUST call the `resolve` closure supplied at `init` exactly once, in `viewDidLoad()`, passing `contributedView` and a completion closure.
+- **placeholder-shown-on-load**: The component MUST show a new `ExtensionViewPlaceholderViewController`, built from its `contributedView` and `extensionDisplayName`, as its initial on-screen content, before the `resolve` closure is ever called.
+- **resolve-called-once-on-first-display**: The component MUST call the `resolve` closure supplied at `init` exactly once, on first display, passing `contributedView` and a completion closure.
 - **panel-adopted-when-resolved**: The component MUST replace the on-screen placeholder with the `WebviewPanelViewController` that `resolve` returned once the completion closure passed to `resolve` has been called, whether that call happens synchronously (before `resolve` returns) or later.
+- **no-adoption-without-completion**: The component MUST NOT swap the on-screen placeholder for the panel `resolve` returned until that panel's completion closure has been called; a non-nil panel `resolve` returns never appears on screen if its completion closure is never invoked.
 - **panel-swap-is-idempotent**: The component MUST NOT re-show the panel if it is already the on-screen content.
 - **remains-on-placeholder-when-unresolved**: The component MUST remain on the placeholder indefinitely when `resolve` returns `nil`, or when its completion closure is never called; it does not retry and does not time out.
 - **panel-removal-reverts-to-placeholder**: The component MUST show a newly built placeholder, replacing the current content, when the adopted panel's `onRemovalRequested` fires, provided the component is not being discarded and a `WebviewPanelViewController` is the content currently on screen.
@@ -55,7 +57,7 @@ approved-date: ''
 - **pane-title-delegates-to-content**: `paneTitle` MUST return the on-screen content's `paneTitle` when that content conforms to `PaneTitleProviding`, and MUST otherwise return `contributedView.name`.
 - **child-view-fills-container**: `show(_:)` MUST constrain the incoming child's view to the container's leading, trailing, top, and bottom edges, with no offset.
 - **background-tracks-theme-surface**: The container view MUST set its layer's background color from the active theme's `.surface` role immediately on load, and MUST update that color on every subsequent theme change.
-- **coder-init-unsupported**: `init(coder:)` MUST fatalError rather than returning a usable instance.
+- **explicit-construction-only**: The component MUST NOT be constructable without its `contributedView`, `extensionDisplayName`, and `resolve` dependencies explicitly supplied at construction; a serialized-construction path MUST NOT produce a usable instance.
 - **main-actor-confined**: The entire class MUST run isolated to the main actor.
 
 ## Appearance
@@ -94,7 +96,7 @@ approved-date: ''
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
 | ewvc-001 | placeholder-shown-on-load | Construct the component with a `.webview` `ContributedView` and force `loadView()` to run | The view hierarchy shows an `ExtensionViewPlaceholderViewController` displaying the view's `name` and the given `extensionDisplayName`; `resolve` has not been called |
-| ewvc-002 | resolve-called-once-in-viewdidload | Supply a `resolve` closure that records its call count; load the component's view | `resolve` was called exactly once, with the constructor's `contributedView` |
+| ewvc-002 | resolve-called-once-on-first-display | Supply a `resolve` closure that records its call count; load the component's view | `resolve` was called exactly once, with the constructor's `contributedView` |
 | ewvc-003 | panel-adopted-when-resolved | Supply a `resolve` closure that builds a panel and calls its completion closure before returning | After `viewDidLoad()` returns, the panel's view is the on-screen content, not the placeholder |
 | ewvc-004 | panel-swap-is-idempotent | With a panel already adopted, invoke the completion closure a second time | The on-screen content is unchanged — the same view instance, not reparented |
 | ewvc-005 | remains-on-placeholder-when-unresolved | Supply a `resolve` closure that returns `nil` and never calls its completion closure | After `viewDidLoad()` returns and after further run-loop turns, the content is still the initial placeholder |
@@ -108,12 +110,13 @@ approved-date: ''
 | ewvc-013 | pane-title-delegates-to-content | Read `paneTitle` before any panel is adopted; then adopt a panel whose `title` is "Extension Page" and read again | First read equals `contributedView.name`; second read equals "Extension Page" |
 | ewvc-014 | child-view-fills-container | Load the view; inspect the constraints `show(_:)` installed on the current child's view | Exactly four constraints pin leading, trailing, top, and bottom to the container, each with a constant of 0 |
 | ewvc-015 | background-tracks-theme-surface | Load the view under one active theme, read the container layer's background color; then switch the active theme | The color equals the first theme's `.surface` color immediately after load, and equals the second theme's `.surface` color after the switch, with no further action taken |
-| ewvc-016 | coder-init-unsupported | Call `ExtensionWebviewViewController(coder:)` | The process traps (`fatalError`); no instance is returned |
-| ewvc-017 | main-actor-confined | Inspect the class and its members | Every declaration in this file is isolated to `@MainActor`; no member is reachable off the main actor |
+| ewvc-016 | explicit-construction-only | Call `ExtensionWebviewViewController(coder:)` | The process traps (`fatalError`); no instance is returned |
+| ewvc-017 | main-actor-confined | Inspect the class declaration and its stored properties and methods | The class declaration and every one of its stored properties and methods is isolated to `@MainActor`; no member of the class is reachable off the main actor |
+| ewvc-018 | no-adoption-without-completion | Supply a `resolve` closure that builds and returns a non-nil panel but never calls its completion closure | After `viewDidLoad()` returns and after further run-loop turns, the panel's view never appears in the hierarchy; the content is still the initial placeholder |
 
 ## Edge Cases
 
-- **Null/empty input**: `resolve` returning `nil` — no provider is available at all — the component MUST remain showing the placeholder built in `loadView()` indefinitely (see `remains-on-placeholder-when-unresolved`). Likewise, if `resolve` returns a non-nil panel but its completion closure is never called, the component MUST NOT adopt that panel (see `panel-adopted-when-resolved`, which defines adoption entirely in terms of that closure firing).
+- **Null/empty input**: `resolve` returning `nil` — no provider is available at all — the component MUST remain showing the placeholder built in `loadView()` indefinitely (see `remains-on-placeholder-when-unresolved`). Likewise, if `resolve` returns a non-nil panel but its completion closure is never called, the component MUST NOT adopt that panel (see `no-adoption-without-completion`, which defines adoption entirely in terms of that closure firing).
 - **Boundary values**: Not applicable. This component takes no numerically- or size-bounded input; its constructor arguments are a `ContributedView` value, a display-name string, and a resolver closure, none of which carry a minimum or maximum in this file.
 - **Concurrent access**: Not a hazard, by construction: the whole class, and the `ContributedWebviewResolving` closure type it is handed, are declared `@MainActor` (MUST, see `main-actor-confined`), so `panel`, `isResolved`, `content`, `isBeingDiscarded`, and `onTitleChange` are read and written only on the main actor. The source's own note that the completion runs "synchronously if [the extension] is already awake, and a turn or two later if it had to be activated first" describes timing relative to `resolve` returning, not a different execution context.
 - **Error states**: Neither an extension's process crashing nor being force-quit produces a state this file distinguishes — the only signal it reacts to is `onRemovalRequested`, which reverts to the same placeholder shown for a view whose provider never ran (MUST, see `panel-removal-reverts-to-placeholder`); there is no separate "something went wrong" explanation. A panel that disposes itself before `onRemovalRequested` is ever assigned — for example, during `resolve`, before it is returned — replays that disposal synchronously the instant `viewDidLoad()` assigns the callback; because `content` is still the initial placeholder at that point, `panel-removal-reverts-to-placeholder`'s own guard makes this a no-op rather than a double-build.
@@ -137,7 +140,7 @@ Not applicable: no `Text`, `Label`, `NSTextField.stringValue`, `title`, or other
 
 ## Accessibility Options
 
-Document which accessibility display options (Rule 15) this component responds to:
+Document which accessibility display options this component responds to:
 
 | Option | Behavior |
 |--------|----------|
@@ -166,40 +169,43 @@ Not applicable: no `Logger`, `os_log`, or other logging call appears anywhere in
 
 ## Platform Notes
 
-- **SwiftUI**: Model the two states as a small `@Observable` view model exposing `panel: WebviewPanelHandle?`, and build a `Group { if let panel { PanelHost(panel) } else { PlaceholderView(view: contributedView, extensionDisplayName: name) } }`. Since the underlying panel content is still AppKit (`WKWebView`-backed), host it via `NSViewControllerRepresentable` rather than reimplementing it; the title-forwarding callback becomes a `@Binding<String>` or an `onTitleChange` closure passed down into the wrapped representable, mirroring `PaneTitleProviding`.
+- **SwiftUI**: Model the two states as a small `@Observable` view model exposing `panel: WebviewPanelHandle?`, and build a `Group { if let panel { PanelHost(panel) } else { PlaceholderView(view: contributedView, extensionDisplayName: name) } }`. Since the underlying panel content is still AppKit (`WKWebView`-backed), host it via `NSViewControllerRepresentable` rather than reimplementing it; the title-forwarding callback becomes a `Binding<String>` or an `onTitleChange` closure passed down into the wrapped representable, mirroring `PaneTitleProviding`.
 - **Compose**: Represent the states as a sealed `PanelState` (`Unresolved`/`Resolved`/`Reverted`) exposed from a `ViewModel`'s `StateFlow`, and switch between a placeholder `@Composable` and an `AndroidView` wrapping the equivalent `WebView` surface based on its value. Forward title changes through a callback lambda the ViewModel holds, mirroring `onPaneTitleChange` rather than an implicit two-way binding.
 - **React/Web**: A component holding `panel: Panel | null` state, rendering the placeholder markup until the resolver's callback fires and then rendering the iframe or embedded-webview surface in its place. Forward title changes via a prop callback (`onTitleChange`) the parent wires up, matching this source's callback-not-observable convention; drive the background fill from a CSS custom property bound to the theme's surface token.
-- **AppKit/UIKit**: This recipe's own platform and file: `ExtensionWebviewViewController.swift` is macOS/AppKit-only (`import AppKit`; `NSViewController`, `NSView`, `NSLayoutConstraint`), with no iOS counterpart in this feature. It composes `ExtensionViewPlaceholderViewController` and `WebviewPanelViewController` as children via `addChild`/view swapping rather than a `UIViewController`-hosted child, and conforms to this toolkit's `PaneTitleProviding` and `PaneContentTeardown` protocols to participate in the surrounding pane chrome.
-- **WinUI 3**: Recreate this as a `UserControl` ("ExtensionWebviewControl") wrapping a single-cell `Grid`, driven by a two-state `VisualStateGroup` ("Placeholder"/"Panel") switched from code-behind rather than XAML triggers, since the transition is one-way per swap and there is no third visual state. Host the placeholder as its own `UserControl` and the resolved page as a `WebView2`-backed `UserControl` (mirroring `WebviewPanelViewController`); when the extension disposes the panel, tear down and `Close()` the `WebView2` before swapping the placeholder `UserControl` back in — `Close()` matters here the same way releasing the WebKit content process matters in the AppKit source, since neither web engine frees its process on garbage collection alone. Bind the container's `Background` to a `{ThemeResource SurfaceBrush}` so it repaints automatically on `ActualThemeChanged`, which is the one simplification available here: WinUI's theme-resource binding replaces the push-based `observeTheme` callback the AppKit source needs. Expose a `PaneTitle` dependency property with a `PaneTitleChanged` routed event in place of `PaneTitleProviding.onPaneTitleChange`, re-raised whenever the hosted panel's own title changes, mirroring `show(_:)`'s callback rewiring on every swap.
+- **AppKit/UIKit**: This recipe's own platform and file: `ExtensionWebviewViewController.swift` is macOS/AppKit-only (`import AppKit`; `NSViewController`, `NSView`, `NSLayoutConstraint`), with no iOS counterpart in this feature. It composes `ExtensionViewPlaceholderViewController` and `WebviewPanelViewController` as children via `addChild`/view swapping rather than a `UIViewController`-hosted child, and conforms to this toolkit's `PaneTitleProviding` and `PaneContentTeardown` protocols to participate in the surrounding pane chrome. The lifecycle specifics behind the platform-neutral requirements above are AppKit's: the placeholder is installed as `loadView()`'s content, `resolve` is called exactly once from `viewDidLoad()`, and `init(coder:)` is `@available(*, unavailable)` and fatalErrors, since the only supported construction path takes `contributedView`, `extensionDisplayName`, and `resolve` explicitly.
+- **WinUI 3**: Recreate this as a `UserControl` ("ExtensionWebviewControl") wrapping a single-cell `Grid`, driven by a two-state `VisualStateGroup` ("Placeholder"/"Panel") switched from code-behind rather than XAML triggers, since the transition is two-way — placeholder to panel, and back to a freshly built placeholder if the panel is later disposed — and there is no third visual state. Host the placeholder as its own `UserControl` and the resolved page as a `WebView2`-backed `UserControl` (mirroring `WebviewPanelViewController`); when the extension disposes the panel, tear down and `Close()` the `WebView2` before swapping the placeholder `UserControl` back in — `Close()` matters here the same way releasing the WebKit content process matters in the AppKit source, since neither web engine frees its process on garbage collection alone. Bind the container's `Background` to a `{ThemeResource SurfaceBrush}` so it repaints automatically on `ActualThemeChanged`, which is the one simplification available here: WinUI's theme-resource binding replaces the push-based `observeTheme` callback the AppKit source needs. Expose a `PaneTitle` dependency property with a `PaneTitleChanged` routed event in place of `PaneTitleProviding.onPaneTitleChange`, re-raised whenever the hosted panel's own title changes, mirroring `show(_:)`'s callback rewiring on every swap.
 
 ## Design Decisions
 
-Decision: The completion closure passed to `resolve` sets a flag (`isResolved`) that a separate method (`adoptPanelIfResolved()`) re-checks, rather than swapping content directly from inside the completion closure.
-Rationale: `resolve` can call the completion synchronously, while `resolve` is still on the call stack and the returned panel has not yet been assigned to the `panel` property; swapping content immediately from inside the closure would read a still-nil `panel`. The flag defers the actual swap until `adoptPanelIfResolved()` runs again at the end of `viewDidLoad()`, after `panel` is assigned.
-Approved: pending
+**Decision**: The completion closure passed to `resolve` sets a flag (`isResolved`) that a separate method (`adoptPanelIfResolved()`) re-checks, rather than swapping content directly from inside the completion closure.
+**Rationale**: `resolve` can call the completion synchronously, while `resolve` is still on the call stack and the returned panel has not yet been assigned to the `panel` property; swapping content immediately from inside the closure would read a still-nil `panel`. The flag defers the actual swap until `adoptPanelIfResolved()` runs again at the end of `viewDidLoad()`, after `panel` is assigned.
+**Approved**: pending
 
-Decision: `paneContentWillBeDiscarded()` sets its discard flag before forwarding to the panel.
-Rationale: Disposing the panel fires `onRemovalRequested`, which is wired to rebuild a placeholder; without the flag set first, a pane on its way out of the window would have a placeholder rebuilt into it moments before being deallocated.
-Approved: pending
+**Decision**: `paneContentWillBeDiscarded()` sets its discard flag before forwarding to the panel.
+**Rationale**: Disposing the panel fires `onRemovalRequested`, which is wired to rebuild a placeholder; without the flag set first, a pane on its way out of the window would have a placeholder rebuilt into it moments before being deallocated.
+**Approved**: pending
 
-Decision: The resolver is a closure typealias (`ContributedWebviewResolving`) rather than a protocol, assigned late by `ExtensionsCoordinator` after this contribution point already exists.
-Rationale: `WebviewPanelSerializer`'s restore path needs the same late binding for the same reason, and the closure is one verb with one production implementation; a protocol here would exist for a type with a single conformer.
-Approved: pending
+**Decision**: The resolver this component depends on is a closure typealias (`ContributedWebviewResolving`) rather than a protocol.
+**Rationale**: It is one verb with one production implementation, so a protocol would exist for a single conformer; taking it as a closure parameter also lets it be supplied to this component after construction, without needing a stateful lookup type. See `agentictoolkit://recipes/webview-panel-view-controller` for the panel this closure returns.
+**Approved**: pending
 
-Decision: This component wraps the panel rather than being the webview surface itself.
-Rationale: An unloaded `WKWebView` is a blank white rectangle. Wrapping it lets the pane show an explanatory placeholder until an extension actually resolves a provider, and go back to that explanation if the panel is later disposed — without which "installed, but nothing registered yet" would be indistinguishable from "broken." This is also the open question flagged under Accessibility, since the swap between those two readable states carries no assistive-technology announcement.
-Approved: pending
+**Decision**: This component wraps the panel rather than being the webview surface itself.
+**Rationale**: An unloaded `WKWebView` is a blank white rectangle. Wrapping it lets the pane show an explanatory placeholder until an extension actually resolves a provider, and go back to that explanation if the panel is later disposed — without which "installed, but nothing registered yet" would be indistinguishable from "broken." (See the open question under **Accessibility** for the one gap this wrapping does not close: the swap between those two readable states carries no assistive-technology announcement.)
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | Architecture |
-| [theme-token-only-colors](agenticdevelopercookbook://compliance/ui#theme-token-only-colors) | passed | UI |
 | [graceful-degradation](agenticdevelopercookbook://compliance/reliability#graceful-degradation) | passed | Reliability |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | needs-review | Accessibility |
+| [platform-theming](agenticdevelopercookbook://compliance/platform-compliance#platform-theming) | passed | Platform Compliance |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+
+`graceful-degradation` and `platform-theming` are `passed` on the strength of two source-satisfied MUSTs — `remains-on-placeholder-when-unresolved`/`panel-removal-reverts-to-placeholder` for the former, `background-tracks-theme-surface` for the latter; `screen-reader-support` is `partial` because `show(_:)` swaps the entire visible content with no accompanying `NSAccessibility` notification (see the open question under **Accessibility**).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: add no-adoption-without-completion requirement and test vector; trim Design Decisions to this component's own rationale; rename AppKit-lifecycle-tied requirements to platform-neutral names and moved their specifics into the AppKit/UIKit note; fix screen-reader-support status and Compliance table to only cite real catalog checks; fix SwiftUI Binding syntax and WinUI two-way transition note; scope the main-actor-confined test vector to the class; populate related/depends-on and move the misplaced references entry; trim tags to 5; reformat Design Decisions with bold labels; remove dangling Rule 15 citation |

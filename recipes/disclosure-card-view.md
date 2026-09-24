@@ -3,7 +3,7 @@ id: d5aba939-471d-48cd-9a9c-888ac92adf38
 title: DisclosureCardView
 domain: agentictoolkit://recipes/disclosure-card-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -11,8 +11,8 @@ modified: '2026-09-23'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
-summary: An AppKit card with an elevated titlebar, a native disclosure triangle, optional
-  accessories, a right-aligned collapsed summary line, and a top-right status badge.
+summary: Foldable AppKit card with elevated titlebar, native disclosure, collapsed
+  summary line, and corner status badge.
 platforms:
 - swift
 - macos
@@ -23,9 +23,9 @@ tags:
 - macos
 - appkit
 depends-on: []
-related: []
-references:
+related:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -54,61 +54,62 @@ the folded set and rebuilds on toggle).
 
 ## Behavioral Requirements
 
-- **renders-card-as-rounded-bordered-surface**: Component MUST render a
-  `surface` subview pinned to all four edges of the card with a 10pt corner
-  radius (`cornerRadius`), a 1pt border (`borderWidth`), a background of the
+- **renders-card-as-rounded-bordered-surface**: Component MUST render its
+  background as a rounded, bordered surface pinned to all four edges of the
+  card, with a 10pt corner radius, a 1pt border, a background of the
   palette's `surfaceColor`, and a border color of the palette's
   `outlineColor`.
-- **clips-titlebar-to-card-corners**: Component MUST set
-  `surface.layer?.masksToBounds = true`, so the titlebar strip's own square
-  top corners are clipped to the card's rounded ones.
+- **clips-titlebar-to-card-corners**: Component MUST clip the titlebar strip
+  to the card's rounded corners, so the strip's own square top corners never
+  draw past the card's curve.
 - **renders-titlebar-as-elevated-strip**: Component MUST fill the titlebar
   strip with the palette's `elevatedSurfaceColor`, distinct from the card
   body's `surfaceColor`.
-- **draws-titlebar-rule**: Component MUST draw a hairline (`borderWidth`,
-  1pt) along the titlebar's bottom edge, filled with the palette's
-  `dividerColor` and spanning the titlebar's full leading-to-trailing width.
+- **draws-titlebar-rule**: Component MUST draw a 1pt hairline along the
+  titlebar's bottom edge, filled with the palette's `dividerColor` and
+  spanning the titlebar's full leading-to-trailing width.
 - **sizes-titlebar-to-header-plus-inset**: Component MUST size the titlebar
-  strip's height to the header row's (title line plus trailing line) height
-  plus `padTitleY` below it, never to the body's height.
+  strip's height to the header row's (title row plus trailing row) height
+  plus the titlebar's own vertical inset (`padTitleY`, see Appearance) below
+  it, never to the body section's height.
 - **draws-badge-above-surface-border**: Component MUST add the status badge
-  (`statusIcon`) as a sibling subview added after `surface`, so it paints
-  above the surface's own border layer, which a `CALayer` otherwise draws
-  above all of that layer's sublayers.
+  as a sibling view added after the card surface, so it paints above the
+  surface's own border, which a `CALayer` otherwise draws above all of that
+  layer's sublayers.
 - **allows-badge-to-render-outside-frame**: Component MUST set
   `clipsToBounds = false` on itself, so the status badge can be drawn
   partially outside the card's own frame.
 - **displays-title-text**: Component MUST display the exact `title` string
-  passed to `init` in the titlebar via `titleField`.
-- **truncates-title-in-middle**: Component MUST truncate `titleField`'s text
-  in the middle (`lineBreakMode = .byTruncatingMiddle`) when it does not fit
+  passed to `init` as the titlebar's title text.
+- **truncates-title-in-middle**: Component MUST truncate the title text in
+  the middle (line-break mode `.byTruncatingMiddle`) when it does not fit
   the available width.
-- **yields-title-width-first**: Component MUST give `titleField` and
-  `titleLine` `.defaultLow` horizontal compression-resistance and content-
-  hugging priority, the lowest of any element on the header row, so the
-  title is the first thing to shrink when the row is too narrow.
-- **colors-title-by-accent-flag**: Component MUST color `titleField` with
+- **yields-title-width-first**: Component MUST give the title text and its
+  row `.defaultLow` horizontal compression-resistance and content-hugging
+  priority, the lowest of any element on the header row, so the title is
+  the first thing to shrink when the row is too narrow.
+- **colors-title-by-accent-flag**: Component MUST color the title text with
   the palette's `accentColor` when `titleIsAccent == true`, and with
   `primaryTextColor` otherwise.
-- **sets-title-font-semibold-body**: Component MUST set `titleField`'s font
-  to the palette's `.body` typography style with its `weight` overridden to
-  `.semibold`, resolved to an `NSFont` at `scaledSize`.
+- **sets-title-font-semibold-body**: Component MUST set the title text's
+  font to the palette's `.body` typography style with its `weight`
+  overridden to `.semibold`, resolved to a font at `scaledSize`.
 - **places-title-accessory-leading**: When `titleAccessory` is non-nil,
-  Component MUST place it immediately before `titleField` inside
-  `titleLine`, separated by `iconGap` (6pt, unscaled), and MUST give the
-  accessory required horizontal compression resistance so only the title
-  text — never the accessory — yields width.
+  Component MUST place it immediately before the title text inside the
+  title row, separated by the icon gap (`iconGap`, 6pt unscaled), and MUST
+  give the accessory required horizontal compression resistance so only the
+  title text — never the accessory — yields width.
 - **places-titlebar-accessory-before-disclosure**: When `titlebarAccessory`
   is non-nil, Component MUST place it immediately before the disclosure
-  control inside `trailingLine`, separated by `iconGap`.
-- **never-shrinks-trailing-line**: Component MUST give `trailingLine` (the
+  control inside the trailing row, separated by the icon gap.
+- **never-shrinks-trailing-line**: Component MUST give the trailing row (the
   titlebar accessory, if any, plus the disclosure control) required
   horizontal compression-resistance and content-hugging priority, so it
-  never yields width to the title line.
-- **maintains-minimum-header-gap**: Component MUST keep at least
-  `mastheadGap` (8pt) between `titleLine`'s trailing edge and
-  `trailingLine`'s leading edge, and MUST vertically center-align the two
-  lines on the header row (`PinnedEndsLine.make(..., alignment: .centerY)`).
+  never yields width to the title row.
+- **maintains-minimum-header-gap**: Component MUST keep at least the
+  masthead gap (`mastheadGap`, 8pt) between the title row's trailing edge
+  and the trailing row's leading edge, and MUST vertically center-align the
+  two rows on the header row.
 - **renders-native-disclosure-control**: Component MUST render the fold
   control as an `NSButton` with `bezelStyle = .disclosure` and
   `buttonType = .onOff`, rather than a custom-drawn chevron.
@@ -122,40 +123,40 @@ the folded set and rebuilds on toggle).
 - **forwards-toggle-state**: Component MUST invoke `onToggle`, passing
   `true` when the disclosure control's `state` becomes `.off` and `false`
   when it becomes `.on`, whenever the user clicks the disclosure control.
-- **does-not-self-mutate-on-toggle**: Component MUST NOT change
-  `content.isHidden`, `body.isHidden`, subtitle visibility, or the
-  disclosure control's own `toolTip`/accessibility label as a direct result
-  of a disclosure click — `disclosureTapped` only calls `onToggle`. Folding
+- **does-not-self-mutate-on-toggle**: Component MUST NOT change the content
+  area's visibility, the body section's visibility, subtitle visibility, or
+  the disclosure control's own `toolTip`/accessibility label as a direct
+  result of a disclosure click — a click only invokes `onToggle`. Folding
   is applied only by the host reconstructing the view with a new
   `isCollapsed` (see Design Decisions).
-- **hides-content-when-collapsed**: Component MUST set
-  `content.isHidden = true` for the lifetime of an instance constructed
-  with `isCollapsed == true`, and `false` for one constructed with
-  `isCollapsed == false`.
+- **hides-content-when-collapsed**: Component MUST hide the content area for
+  the lifetime of an instance constructed with `isCollapsed == true`, and
+  show it for one constructed with `isCollapsed == false`.
 - **builds-content-regardless-of-fold-state**: Component MUST add every
-  view passed to `addContent(_:)` to `content` regardless of the card's
-  current fold state, so a folded card's content remains measurable.
-- **forces-subtitle-hidden-when-collapsed**: Component MUST hide
-  `subtitleField` when constructed with `isCollapsed == true`, even when a
+  view passed to `addContent(_:)` to the content area regardless of the
+  card's current fold state, so a folded card's content remains measurable.
+- **forces-subtitle-hidden-when-collapsed**: Component MUST hide the
+  subtitle text when constructed with `isCollapsed == true`, even when a
   non-nil `subtitle` was supplied.
-- **hides-subtitle-when-absent**: Component MUST hide `subtitleField` when
+- **hides-subtitle-when-absent**: Component MUST hide the subtitle text when
   `subtitle == nil`.
-- **detaches-empty-body**: Component MUST hide the entire `body` stack
+- **detaches-empty-body**: Component MUST hide the entire body section
   (summary row, subtitle, and content) when constructed with
   `isCollapsed == true` and an empty `summary`, so the card renders as
   exactly its titlebar with no residual empty space beneath it.
-- **matches-bottom-inset-to-empty-body**: Component MUST use `padTitleY`,
-  not the larger `padY`, as its own bottom inset when `body` is hidden, so a
-  titlebar-only card's bottom edge sits `padTitleY` under the header,
-  matching the header's own top inset.
+- **matches-bottom-inset-to-empty-body**: Component MUST use the titlebar's
+  own vertical inset (`padTitleY`), not the larger body inset (`padY`), as
+  its own bottom inset when the body section is hidden, so a titlebar-only
+  card's bottom edge sits `padTitleY` under the header, matching the
+  header's own top inset.
 - **shows-summary-only-when-collapsed-and-present**: Component MUST show
-  `summaryField` only when constructed with `isCollapsed == true` AND a
+  the summary line only when constructed with `isCollapsed == true` AND a
   non-empty `summary`; it MUST be hidden in every other combination of
   those two inputs.
-- **right-aligns-and-clips-summary-text**: Component MUST right-align
-  `summaryField`'s text, give it required horizontal compression
-  resistance, and set `lineBreakMode = .byClipping` (clip rather than
-  truncate-with-ellipsis if the reserved width is ever exceeded).
+- **right-aligns-and-clips-summary-text**: Component MUST right-align the
+  summary line's text, give it required horizontal compression resistance,
+  and clip rather than truncate-with-ellipsis (line-break mode
+  `.byClipping`) if the reserved width is ever exceeded.
 - **formats-summary-parts**: Component MUST render each `SummaryPart` as
   `"<name>: <value>"`, with `name` in the palette's `.caption` style at
   `scaledSize × 0.85` colored `tertiaryTextColor`, and `value` in the
@@ -166,17 +167,18 @@ the folded set and rebuilds on toggle).
   styled like a summary name (caption font, `tertiaryTextColor`), between
   each pair of adjacent `SummaryPart`s, and MUST NOT insert one before the
   first part or after the last.
-- **hides-status-badge-when-absent**: Component MUST hide `statusIcon` when
-  `status == nil`.
+- **hides-status-badge-when-absent**: Component MUST hide the status badge
+  when `status == nil`.
 - **renders-status-as-sf-symbol**: Component MUST render a non-nil `status`
   as `NSImage(systemSymbolName: status.symbolName, accessibilityDescription:
   status.accessibilityLabel)`, with a symbol configuration of `.semibold`
-  weight at a point size equal to `cornerBadgeDiameter(scaledSize:)`.
-- **exposes-status-as-own-accessibility-element**: Component MUST expose a
-  non-nil `statusIcon` as its own accessibility element with role `.image`
-  and accessibility label `status.accessibilityLabel`, and MUST set that
-  same string as its `toolTip`.
-- **colors-status-badge**: Component MUST tint `statusIcon` with
+  weight at a point size equal to the status badge's diameter for the
+  current `scaledSize` (see `sizes-badge-diameter`).
+- **exposes-status-as-own-accessibility-element**: Component MUST expose
+  the status badge as its own accessibility element with role `.image` and
+  accessibility label `status.accessibilityLabel`, and MUST set that same
+  string as its tooltip.
+- **colors-status-badge**: Component MUST tint the status badge with
   `palette.color(named: status?.colorName)`, falling back to
   `secondaryTextColor` whenever that lookup returns `nil` (including when
   `status` itself is `nil` or its `colorName` is `nil`).
@@ -186,7 +188,8 @@ the folded set and rebuilds on toggle).
   the point where the rounded corner's arc actually turns — not on the
   frame's literal square corner.
 - **sizes-badge-diameter**: Component MUST size the status badge to
-  `min(ceil(scaledSize × 1.3), padXFor(scaledSize) × 1.5)` on each axis.
+  `min(ceil(scaledSize × 1.3), padX × 1.5)` on each axis (see Appearance for
+  `padX`).
 - **dims-whole-card-uniformly**: Component MUST set the entire view's
   `alphaValue` to 0.55 when constructed with `isDimmed == true`, and to
   `1.0` otherwise, rather than substituting a separate set of dimmed
@@ -197,16 +200,17 @@ the folded set and rebuilds on toggle).
   rounding each result up (`ceil`), rather than using fixed point values.
 - **floors-width-to-wider-of-open-or-folded-content**: Component MUST
   constrain its own width to be greater than or equal to the wider of (a)
-  `content`'s fitting width and (b) the masthead's folded-state width (the
-  title-plus-trailing-line row, or the summary line, whichever is wider) —
-  plus the masthead's leading and trailing gutters — regardless of whether
-  the card is currently open or folded.
+  the content area's fitting width and (b) the masthead's folded-state
+  width (the title-row-plus-trailing-row line, or the summary line,
+  whichever is wider) — plus the masthead's leading gutter (`padMastheadX`)
+  and trailing gutter (`padX`) — regardless of whether the card is
+  currently open or folded.
 - **keeps-width-floor-just-under-required**: Component MUST set the width-
   floor constraint's priority to `999` (just under `.required`), so a
   container too narrow for the content scrolls rather than making the
   layout unsatisfiable.
 - **remeasures-width-floor-on-layout**: Component MUST recompute its width
-  floor on every `layout()` pass, but MUST only apply the newly computed
+  floor on every layout pass, but MUST only apply the newly computed
   constant when it differs from the current one by more than 0.5pt.
 - **applies-theme-immediately-and-on-change**: Component MUST apply the
   current theme once at construction and again on every subsequent theme
@@ -218,32 +222,38 @@ the folded set and rebuilds on toggle).
   or mutated from the main actor; the class and its public API are
   declared `@MainActor`.
 - **exposes-content-spacing**: Component MUST expose a `contentSpacing`
-  property that reads and writes `content.spacing`, and MUST re-measure the
-  width floor whenever it is set.
-- **prefers-dynamic-summary-colors**: Callers SHOULD build `SummaryPart`
-  values whose `color` closure resolves against the live `SemanticPalette`
-  each time it is called (as the `init(name:value:colorName:)` convenience
-  does) rather than capturing a static `NSColor`, per the type's own doc
-  comment ("a closure rather than a colour name... so a card already on
-  screen recolours with everything else when the theme changes"). This
-  constrains what callers pass in, not an observable behavior Component
-  itself can verify — no test vector applies (see Design Decisions).
+  property that reads and writes the content area's stack spacing, and MUST
+  re-measure the width floor whenever it is set.
 
 ## Appearance
 
 - **Corner radius**: 10pt, fixed (`cornerRadius`); unaffected by
   `scaledSize`.
-- **Padding**: `padX` = `ceil(14 × scaledSize / NSFont.systemFontSize)` from
-  the card edge to body/content rows and to the summary/subtitle's trailing
-  edge; `padMastheadX` = `ceil(7 × scaledSize / NSFont.systemFontSize)` from
-  the card edge to the masthead line's leading edge; `padY` =
-  `ceil(12 × scaledSize / NSFont.systemFontSize)` as the card's own bottom
-  inset when `body` is present; `padTitleY` =
+- **Padding**: `padX` = `ceil(14 × scaledSize / NSFont.systemFontSize)`, the
+  card's trailing gutter — from the card edge to body/content rows and to
+  the summary/subtitle's trailing edge; `padMastheadX` =
+  `ceil(7 × scaledSize / NSFont.systemFontSize)`, the masthead's own
+  leading gutter — from the card edge to the masthead line's leading edge;
+  `padY` = `ceil(12 × scaledSize / NSFont.systemFontSize)` as the card's own
+  bottom inset when the body section is present; `padTitleY` =
   `ceil(6 × scaledSize / NSFont.systemFontSize)` as the titlebar's own
-  top/bottom inset, and as the card's bottom inset when `body` is hidden;
-  `iconGap` = 6pt fixed between an accessory and the text/control beside
-  it; `mastheadGap` = 8pt minimum between the title line and the trailing
-  line.
+  top/bottom inset, and as the card's bottom inset when the body section is
+  hidden; `iconGap` = 6pt fixed between an accessory and the text/control
+  beside it; `mastheadGap` = 8pt minimum between the title row and the
+  trailing row. The masthead's own width floor (below) reserves
+  `padMastheadX` on its leading side and `padX` on its trailing side — the
+  same two gutters the card itself is pinned at.
+- **Corner peak inset**: `cornerPeakInset` = `cornerRadius − cornerRadius/√2`
+  (≈2.93pt at the fixed 10pt `cornerRadius`) — the distance in from the
+  frame's literal corner, on both axes, to the point where the rounded
+  corner's arc actually turns; what the status badge is centered on.
+- **Badge diameter**: `min(ceil(scaledSize × 1.3), padX × 1.5)` — the status
+  badge's width and height at a given `scaledSize`.
+- **Masthead width floor**: when `summary` is non-empty, the wider of (a)
+  the title row's fitting width plus `mastheadGap` plus the trailing row's
+  fitting width, and (b) the summary line's rendered text width; `0` when
+  `summary` is empty. Feeds `floors-width-to-wider-of-open-or-folded-
+  content`.
 - **Font**: title — palette `.body` style, weight forced to `.semibold`, at
   `scaledSize`; subtitle and summary names — palette `.caption` style at
   `scaledSize × 0.85`; summary values — palette `.code` style at
@@ -262,16 +272,16 @@ the folded set and rebuilds on toggle).
 - **Shadow**: none — the source sets no `shadowColor`, `shadowRadius`, or
   `shadowOpacity` on any layer.
 - **Min/Max size**: none declared as fixed constants. The card's only size
-  constraint is the dynamic width floor (`contentWidthFloor`, priority
-  999) described above; no explicit minimum or maximum height, and no
-  upper bound on width.
+  constraint is the dynamic width-floor constraint (priority 999) described
+  above; no explicit minimum or maximum height, and no upper bound on
+  width.
 
 ## States
 
 | State | Appearance change |
 |-------|------------------|
-| Default (expanded, `isCollapsed: false`) | Titlebar strip and full `content` body are drawn; `subtitleField` shown if `subtitle` is non-nil; `summaryField` hidden; disclosure `state = .on`, tooltip/label "Hide details" |
-| Collapsed (`isCollapsed: true`) | `content.isHidden = true`; `subtitleField` forced hidden regardless of `subtitle`; `summaryField` shown, right-aligned, if `summary` is non-empty; if `summary` is also empty, `body` is entirely hidden and the card renders as exactly its titlebar; disclosure `state = .off`, tooltip/label "Show details" |
+| Default (expanded, `isCollapsed: false`) | Titlebar strip and the full content area are drawn; subtitle text shown if `subtitle` is non-nil; summary line hidden; disclosure `state = .on`, tooltip/label "Hide details" |
+| Collapsed (`isCollapsed: true`) | Content area hidden; subtitle text forced hidden regardless of `subtitle`; summary line shown, right-aligned, if `summary` is non-empty; if `summary` is also empty, the body section is entirely hidden and the card renders as exactly its titlebar; disclosure `state = .off`, tooltip/label "Show details" |
 | Dimmed (`isDimmed: true`) | Whole view `alphaValue = 0.55`; no separate dimmed color set is used — every color the card draws is unchanged, only faded uniformly |
 | Pressed | Not applicable beyond the embedded disclosure `NSButton`'s own native pressed bezel: `DisclosureCardView` itself has no target/action or tracking area of its own and draws no custom pressed appearance. |
 | Focused | Not applicable: `DisclosureCardView` never overrides `acceptsFirstResponder` or focus-ring drawing; the only focusable subview is the disclosure `NSButton`, which gets AppKit's own standard focus ring. |
@@ -326,63 +336,63 @@ the folded set and rebuilds on toggle).
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| disclosure-card-001 | renders-card-as-rounded-bordered-surface | Any `init(...)` call | `surface.layer.cornerRadius == 10`; `surface.layer.borderWidth == 1`; `surface.layer.backgroundColor == palette.surfaceColor.cgColor`; `surface.layer.borderColor == palette.outlineColor.cgColor` |
-| disclosure-card-002 | clips-titlebar-to-card-corners | Any `init(...)` call | `surface.layer.masksToBounds == true` |
-| disclosure-card-003 | renders-titlebar-as-elevated-strip | Any `init(...)` call | `titlebar.layer.backgroundColor == palette.elevatedSurfaceColor.cgColor` |
-| disclosure-card-004 | draws-titlebar-rule | Any `init(...)` call | `titlebarRule.layer.backgroundColor == palette.dividerColor.cgColor`; rule height constraint equals 1pt and spans the titlebar's width |
-| disclosure-card-005 | sizes-titlebar-to-header-plus-inset | Card at a given `scaledSize` | `titlebar`'s height equals the header row's fitting height plus `padTitleY` |
-| disclosure-card-006 | draws-badge-above-surface-border | Card constructed with a non-nil `status` | `statusIcon` appears later in `subviews` than `surface`, and renders visually above the surface's border in a snapshot |
+| disclosure-card-001 | renders-card-as-rounded-bordered-surface | Any `init(...)` call | The card surface's layer has `cornerRadius == 10`, `borderWidth == 1`, `backgroundColor == palette.surfaceColor.cgColor`, and `borderColor == palette.outlineColor.cgColor` |
+| disclosure-card-002 | clips-titlebar-to-card-corners | Any `init(...)` call | The card surface's layer has `masksToBounds == true` |
+| disclosure-card-003 | renders-titlebar-as-elevated-strip | Any `init(...)` call | The titlebar strip's layer `backgroundColor == palette.elevatedSurfaceColor.cgColor` |
+| disclosure-card-004 | draws-titlebar-rule | Any `init(...)` call | The titlebar's bottom rule's layer `backgroundColor == palette.dividerColor.cgColor`; its height constraint equals 1pt and it spans the titlebar's width |
+| disclosure-card-005 | sizes-titlebar-to-header-plus-inset | Card at a given `scaledSize` | The titlebar strip's height equals the header row's fitting height plus `padTitleY` |
+| disclosure-card-006 | draws-badge-above-surface-border | Card constructed with a non-nil `status` | The status badge appears later in the card's `subviews` than the card surface, and renders visually above the surface's border in a snapshot |
 | disclosure-card-007 | allows-badge-to-render-outside-frame | Any `init(...)` call | `clipsToBounds == false` on the card |
-| disclosure-card-008 | displays-title-text | `init(title: "mike@example.com", ...)` | `titleField.stringValue == "mike@example.com"` |
-| disclosure-card-009 | truncates-title-in-middle | `titleField.lineBreakMode` inspected on any instance | Equals `.byTruncatingMiddle` |
-| disclosure-card-010 | yields-title-width-first | Any instance | `titleField`/`titleLine` compression-resistance and hugging priorities (horizontal) equal `.defaultLow`, lower than `trailingLine`'s `.required` |
-| disclosure-card-011 | colors-title-by-accent-flag | `init(..., titleIsAccent: true, ...)` vs. `false` | `titleField.textColor == palette.accentColor` when `true`; `== palette.primaryTextColor` when `false` |
-| disclosure-card-012 | sets-title-font-semibold-body | Theme applied at a given `scaledSize` | `titleField.font` matches `.body` style at `scaledSize` with `.semibold` weight |
-| disclosure-card-013 | places-title-accessory-leading | `init(..., titleAccessory: someView, ...)` | `titleLine.arrangedSubviews == [someView, titleField]`; spacing `== 6`; `someView`'s horizontal compression resistance is `.required` |
-| disclosure-card-014 | places-titlebar-accessory-before-disclosure | `init(..., titlebarAccessory: someView, ...)` | `trailingLine.arrangedSubviews == [someView, disclosure]`; spacing `== 6` |
-| disclosure-card-015 | never-shrinks-trailing-line | Any instance | `trailingLine`'s horizontal compression-resistance and hugging priorities both equal `.required` |
-| disclosure-card-016 | maintains-minimum-header-gap | Card narrowed until title and trailing line compete for space | The gap between `titleLine.trailingAnchor` and `trailingLine.leadingAnchor` is never less than 8pt; the two lines share a common center-Y |
-| disclosure-card-017 | renders-native-disclosure-control | Any instance | `disclosure` is an `NSButton` with `bezelStyle == .disclosure` and `buttonType == .onOff` |
-| disclosure-card-018 | sets-disclosure-initial-state | `init(..., isCollapsed: true, ...)` vs. `false` | `disclosure.state == .off` when `true`; `== .on` when `false` |
-| disclosure-card-019 | labels-disclosure-control | `init(..., isCollapsed: true, ...)` vs. `false` | `disclosure.toolTip` and accessibility label equal `"Show details"` when `true`; `"Hide details"` when `false` |
-| disclosure-card-020 | forwards-toggle-state | Click `disclosure` on a card constructed `isCollapsed: false` | `onToggle` is called once with `true` (button's new state is `.off`) |
-| disclosure-card-021 | does-not-self-mutate-on-toggle | Click `disclosure` on any card, inspect the same instance immediately after | `content.isHidden`, `body.isHidden`, `subtitleField.isHidden`, and `disclosure.toolTip` are all unchanged from their pre-click values |
-| disclosure-card-022 | hides-content-when-collapsed | `init(..., isCollapsed: true, ...)` vs. `false` | `content.isHidden == true` when `true`; `== false` when `false` |
-| disclosure-card-023 | builds-content-regardless-of-fold-state | `addContent(someView)` on a card constructed `isCollapsed: true` | `content.arrangedSubviews` includes `someView` even though `content.isHidden == true` |
-| disclosure-card-024 | forces-subtitle-hidden-when-collapsed | `init(..., subtitle: "note", isCollapsed: true, ...)` | `subtitleField.isHidden == true` |
-| disclosure-card-025 | hides-subtitle-when-absent | `init(..., subtitle: nil, isCollapsed: false, ...)` | `subtitleField.isHidden == true` |
-| disclosure-card-026 | detaches-empty-body | `init(..., subtitle: nil, summary: [], isCollapsed: true, ...)` | `body.isHidden == true` |
+| disclosure-card-008 | displays-title-text | `init(title: "mike@example.com", ...)` | The title text's `stringValue == "mike@example.com"` |
+| disclosure-card-009 | truncates-title-in-middle | The title text's line-break mode, inspected on any instance | Equals `.byTruncatingMiddle` |
+| disclosure-card-010 | yields-title-width-first | Any instance | The title text and title row's compression-resistance and hugging priorities (horizontal) equal `.defaultLow`, lower than the trailing row's `.required` |
+| disclosure-card-011 | colors-title-by-accent-flag | `init(..., titleIsAccent: true, ...)` vs. `false` | The title text's color `== palette.accentColor` when `true`; `== palette.primaryTextColor` when `false` |
+| disclosure-card-012 | sets-title-font-semibold-body | Theme applied at a given `scaledSize` | The title text's font matches `.body` style at `scaledSize` with `.semibold` weight |
+| disclosure-card-013 | places-title-accessory-leading | `init(..., titleAccessory: someView, ...)` | The title row's arranged subviews equal `[someView, <title text>]`; spacing `== 6`; `someView`'s horizontal compression resistance is `.required` |
+| disclosure-card-014 | places-titlebar-accessory-before-disclosure | `init(..., titlebarAccessory: someView, ...)` | The trailing row's arranged subviews equal `[someView, <disclosure control>]`; spacing `== 6` |
+| disclosure-card-015 | never-shrinks-trailing-line | Any instance | The trailing row's horizontal compression-resistance and hugging priorities both equal `.required` |
+| disclosure-card-016 | maintains-minimum-header-gap | Card narrowed until the title and trailing rows compete for space | The gap between the title row's trailing edge and the trailing row's leading edge is never less than 8pt; the two rows share a common center-Y |
+| disclosure-card-017 | renders-native-disclosure-control | Any instance | The disclosure control is an `NSButton` with `bezelStyle == .disclosure` and `buttonType == .onOff` |
+| disclosure-card-018 | sets-disclosure-initial-state | `init(..., isCollapsed: true, ...)` vs. `false` | The disclosure control's `state == .off` when `true`; `== .on` when `false` |
+| disclosure-card-019 | labels-disclosure-control | `init(..., isCollapsed: true, ...)` vs. `false` | The disclosure control's `toolTip` and accessibility label equal `"Show details"` when `true`; `"Hide details"` when `false` |
+| disclosure-card-020 | forwards-toggle-state | Click the disclosure control on a card constructed `isCollapsed: false` | `onToggle` is called once with `true` (the control's new state is `.off`) |
+| disclosure-card-021 | does-not-self-mutate-on-toggle | Click the disclosure control on any card, inspect the same instance immediately after | The content area's visibility, the body section's visibility, the subtitle text's visibility, and the disclosure control's `toolTip` are all unchanged from their pre-click values |
+| disclosure-card-022 | hides-content-when-collapsed | `init(..., isCollapsed: true, ...)` vs. `false` | The content area is hidden when `true`; shown when `false` |
+| disclosure-card-023 | builds-content-regardless-of-fold-state | `addContent(someView)` on a card constructed `isCollapsed: true` | The content area's arranged subviews include `someView` even though the content area is hidden |
+| disclosure-card-024 | forces-subtitle-hidden-when-collapsed | `init(..., subtitle: "note", isCollapsed: true, ...)` | The subtitle text is hidden |
+| disclosure-card-025 | hides-subtitle-when-absent | `init(..., subtitle: nil, isCollapsed: false, ...)` | The subtitle text is hidden |
+| disclosure-card-026 | detaches-empty-body | `init(..., subtitle: nil, summary: [], isCollapsed: true, ...)` | The body section is hidden |
 | disclosure-card-027 | matches-bottom-inset-to-empty-body | Same construction as disclosure-card-026 | The card's bottom constraint constant equals `-padTitleY`, not `-padY` |
-| disclosure-card-028 | shows-summary-only-when-collapsed-and-present | Four combinations of `isCollapsed` × `summary.isEmpty` | `summaryField.isHidden == false` only for `(isCollapsed: true, summary: non-empty)`; `true` for the other three combinations |
-| disclosure-card-029 | right-aligns-and-clips-summary-text | Any instance | `summaryField.alignment == .right`; `summaryField.lineBreakMode == .byClipping`; horizontal compression resistance `.required` |
-| disclosure-card-030 | formats-summary-parts | `summary: [SummaryPart(name: "5H", value: "23%", colorName: "red")]` | `summaryField.attributedStringValue` contains `"5H: "` in caption font/`tertiaryTextColor` followed by `"23%"` in code font/`dangerColor` (via `color(named: "red")`) |
-| disclosure-card-031 | separates-summary-parts | `summary` with two `SummaryPart`s | `summaryField.attributedStringValue` contains exactly one `"  |  "` run, positioned between the two parts, styled like a summary name |
-| disclosure-card-032 | hides-status-badge-when-absent | `init(..., status: nil, ...)` | `statusIcon.isHidden == true` |
-| disclosure-card-033 | renders-status-as-sf-symbol | `init(..., status: StatusSymbol(symbolName: "exclamationmark.triangle.fill", colorName: "yellow", accessibilityLabel: "Warning"), ...)` | `statusIcon.image` is a valid SF Symbol image named `"exclamationmark.triangle.fill"`; `statusIcon.symbolConfiguration.weight == .semibold` |
-| disclosure-card-034 | exposes-status-as-own-accessibility-element | Same construction as disclosure-card-033 | `statusIcon.isAccessibilityElement() == true`; `statusIcon.accessibilityRole() == .image`; `statusIcon.accessibilityLabel() == "Warning"`; `statusIcon.toolTip == "Warning"` |
-| disclosure-card-035 | colors-status-badge | `status.colorName: nil` vs. `"blue"` | `statusIcon.contentTintColor == palette.secondaryTextColor` when `nil`; `== palette.accentColor` when `"blue"` (per `color(named:)`'s name→role map) |
-| disclosure-card-036 | positions-badge-on-visible-corner | Any instance with a non-nil `status` | `statusIcon.centerXAnchor == trailingAnchor - cornerPeakInset`; `statusIcon.centerYAnchor == topAnchor + cornerPeakInset`, where `cornerPeakInset ≈ 2.93` |
-| disclosure-card-037 | sizes-badge-diameter | `scaledSize == 13` | `statusIcon` width and height both equal `min(ceil(13 × 1.3), padXFor(13) × 1.5)` |
+| disclosure-card-028 | shows-summary-only-when-collapsed-and-present | Four combinations of `isCollapsed` × `summary.isEmpty` | The summary line is shown only for `(isCollapsed: true, summary: non-empty)`; hidden for the other three combinations |
+| disclosure-card-029 | right-aligns-and-clips-summary-text | Any instance | The summary line's alignment `== .right`; line-break mode `== .byClipping`; horizontal compression resistance `.required` |
+| disclosure-card-030 | formats-summary-parts | `summary: [SummaryPart(name: "5H", value: "23%", colorName: "red")]` | The summary line's rendered text contains `"5H: "` in caption font/`tertiaryTextColor` followed by `"23%"` in code font/`dangerColor` (via `color(named: "red")`, see below) |
+| disclosure-card-031 | separates-summary-parts | `summary` with two `SummaryPart`s | The summary line's rendered text contains exactly one `"  |  "` run, positioned between the two parts, styled like a summary name |
+| disclosure-card-032 | hides-status-badge-when-absent | `init(..., status: nil, ...)` | The status badge is hidden |
+| disclosure-card-033 | renders-status-as-sf-symbol | `init(..., status: StatusSymbol(symbolName: "exclamationmark.triangle.fill", colorName: "yellow", accessibilityLabel: "Warning"), ...)` | The status badge's image is a valid SF Symbol image named `"exclamationmark.triangle.fill"`; its symbol configuration weight `== .semibold` |
+| disclosure-card-034 | exposes-status-as-own-accessibility-element | Same construction as disclosure-card-033 | The status badge is its own accessibility element (`isAccessibilityElement() == true`); `accessibilityRole() == .image`; `accessibilityLabel() == "Warning"`; `toolTip == "Warning"` |
+| disclosure-card-035 | colors-status-badge | `status.colorName: nil` vs. `"blue"` | The status badge's tint `== palette.secondaryTextColor` when `nil`; `== palette.accentColor` when `"blue"` (per `color(named:)`'s name→role map, see below) |
+| disclosure-card-036 | positions-badge-on-visible-corner | Any instance with a non-nil `status` | The status badge's center-X `== trailingAnchor - cornerPeakInset`; its center-Y `== topAnchor + cornerPeakInset`, where `cornerPeakInset ≈ 2.93` |
+| disclosure-card-037 | sizes-badge-diameter | `scaledSize == 13` | The status badge's width and height both equal `min(ceil(13 × 1.3), padX × 1.5)`, with `padX` evaluated at `scaledSize == 13` |
 | disclosure-card-038 | dims-whole-card-uniformly | `init(..., isDimmed: true, ...)` vs. `false` | `view.alphaValue == 0.55` when `true`; `== 1.0` when `false` |
-| disclosure-card-039 | scales-insets-with-text-size | `scaledSize == 26` (2× the 13pt baseline) | `padX == ceil(14 × 26 / 13) == 28`; `padMastheadX == ceil(7 × 26 / 13) == 14`; `padY == ceil(12 × 26 / 13) == 24`; `padTitleY == ceil(6 × 26 / 13) == 12` |
-| disclosure-card-040 | floors-width-to-wider-of-open-or-folded-content | Card with wide `content` and a non-empty `summary`, both open and folded | `contentWidthFloor.constant` is identical whether `isCollapsed` is `true` or `false`, and equals the wider of the two rows plus `padMastheadX + padX` |
-| disclosure-card-041 | keeps-width-floor-just-under-required | Any instance | `contentWidthFloor.priority.rawValue == 999` |
-| disclosure-card-042 | remeasures-width-floor-on-layout | Font/theme change that widens hidden `content` after initial layout, followed by a `layout()` pass | `contentWidthFloor.constant` updates to the new wider value; a follow-up `layout()` pass with no further change does not reassign the constant (change is `<= 0.5pt`) |
+| disclosure-card-039 | scales-insets-with-text-size | `scaledSize == 26` (2× the 13pt baseline), assuming `NSFont.systemFontSize == 13` on the host system | `padX == ceil(14 × 26 / 13) == 28`; `padMastheadX == ceil(7 × 26 / 13) == 14`; `padY == ceil(12 × 26 / 13) == 24`; `padTitleY == ceil(6 × 26 / 13) == 12` |
+| disclosure-card-040 | floors-width-to-wider-of-open-or-folded-content | Card with a wide content area and a non-empty `summary`, both open and folded | The width-floor constraint's constant is identical whether `isCollapsed` is `true` or `false`, and equals the wider of the two rows plus the masthead's leading gutter (`padMastheadX`) and trailing gutter (`padX`) |
+| disclosure-card-041 | keeps-width-floor-just-under-required | Any instance | The width-floor constraint's `priority.rawValue == 999` |
+| disclosure-card-042 | remeasures-width-floor-on-layout | Font/theme change that widens the hidden content area after initial layout, followed by a layout pass | The width-floor constraint's constant updates to the new wider value; a follow-up layout pass with no further change does not reassign the constant (change is `<= 0.5pt`) |
 | disclosure-card-043 | applies-theme-immediately-and-on-change | Construct a card, then trigger a theme change | `applyTheme(_:)` runs once synchronously at construction and again after the theme change, updating colors/fonts both times |
 | disclosure-card-044 | rejects-storyboard-instantiation | `DisclosureCardView(coder:)` invoked (e.g. via nib/storyboard unarchiving) | Process traps with a fatal error |
 | disclosure-card-045 | confines-mutation-to-main-actor | Attempt to call `DisclosureCardView.init`/`addContent`/`contentSpacing` from a non-main-actor context | Code does not compile (Swift concurrency checker rejects the call) |
-| disclosure-card-046 | exposes-content-spacing | `card.contentSpacing = 20` | `content.spacing == 20`; `contentWidthFloor` is re-measured against the new spacing |
+| disclosure-card-046 | exposes-content-spacing | `card.contentSpacing = 20` | The content area's stack spacing `== 20`; the width-floor constraint is re-measured against the new spacing |
 
-`prefers-dynamic-summary-colors` has no test vector: it constrains what
-`SummaryPart.color` closures callers choose to write, not an observable
-behavior of `DisclosureCardView` itself (see Design Decisions).
+`color(named:)`'s name→role map (`"red"` → `dangerColor`, `"blue"` →
+`accentColor`, and so on) is defined outside this file — see the AppKit
+Platform Notes bullet below.
 
 ## Edge Cases
 
-- **Empty `title`** (`""`): renders with no guard against it — `titleField`
-  displays an empty string and the header row lays out with a zero-width
-  title (MUST, per `displays-title-text` — the source has no empty-string
-  check).
+- **Empty `title`** (`""`): Documented limitation — `displays-title-text`
+  requires the exact `title` string to be displayed, and the source performs
+  no empty-string check: the title text renders an empty string and the
+  header row lays out with a zero-width title.
 - **Very long `title` with no accessories**: truncated in the middle rather
   than the tail or head (MUST, per `truncates-title-in-middle`); the
   required minimum header gap and the trailing line's required compression
@@ -391,29 +401,32 @@ behavior of `DisclosureCardView` itself (see Design Decisions).
   `never-shrinks-trailing-line`).
 - **`summary` non-empty while `isCollapsed == false` at construction**: the
   summary row itself stays hidden (per `shows-summary-only-when-collapsed-
-  and-present`), but `mastheadWidthFloor` is still computed from `summary`
-  in `applyTheme(_:)` regardless of `isCollapsed`, so an initially-open
+  and-present`), but the masthead width floor (see Appearance) is still
+  computed from `summary` in `applyTheme(_:)` regardless of `isCollapsed`,
+  so an initially-open
   card's width floor already reserves room for the summary line it would
   show if folded (MUST, per `floors-width-to-wider-of-open-or-folded-
   content`).
 - **`summary` empty and `isCollapsed == true`**: the card renders as
-  exactly its titlebar, with `body` fully detached and the bottom inset
-  switched to `padTitleY` (MUST, per `detaches-empty-body` and
-  `matches-bottom-inset-to-empty-body`).
-- **`status.symbolName` does not resolve to a valid SF Symbol**:
-  `NSImage(systemSymbolName:accessibilityDescription:)` returns `nil` and
-  is assigned to `statusIcon.image` with no fallback or guard — the badge's
-  frame, position, and accessibility label/tooltip are still fully
-  configured, but no image paints (MUST, per `renders-status-as-sf-symbol`
-  — the source performs no validation of `symbolName`).
+  exactly its titlebar, with the body section fully detached and the
+  bottom inset switched to `padTitleY` (MUST, per `detaches-empty-body`
+  and `matches-bottom-inset-to-empty-body`).
+- **`status.symbolName` does not resolve to a valid SF Symbol**: Documented
+  limitation — `renders-status-as-sf-symbol` requires rendering `status` as
+  an SF Symbol image, and the source performs no validation of
+  `symbolName`: `NSImage(systemSymbolName:accessibilityDescription:)`
+  returns `nil` and is assigned to the status badge's image with no
+  fallback or guard, so the badge's frame, position, and accessibility
+  label/tooltip are still fully configured, but no image paints.
 - **Extreme `scaledSize` values** (very small, e.g. approaching 0, or very
   large, e.g. an accessibility "larger text" size well above the 13pt
   baseline): every inset and font scales linearly and is rounded up via
   `ceil`, with no minimum clamp — an extremely small `scaledSize` can drive
   insets toward 0pt. The status badge diameter is the one value with an
-  explicit upper bound (`min(ceil(scaledSize × 1.3), padXFor(scaledSize) ×
-  1.5)`); every other scaled constant is otherwise unbounded above (MUST,
-  per `scales-insets-with-text-size` and `sizes-badge-diameter`).
+  explicit upper bound (`min(ceil(scaledSize × 1.3), padX × 1.5)`, with
+  `padX` evaluated at that `scaledSize` — see Appearance); every other
+  scaled constant is otherwise unbounded above (MUST, per
+  `scales-insets-with-text-size` and `sizes-badge-diameter`).
 - **Concurrent access**: Not applicable — the class and its public API are
   `@MainActor`-isolated; the Swift compiler rejects construction or
   mutation from off the main actor, so there is no concurrent-access
@@ -456,6 +469,15 @@ behavior of `DisclosureCardView` itself (see Design Decisions).
 | `value` | `String` | — (required) | The reading's value, e.g. `"23%"` |
 | `color` | `(SemanticPalette) -> NSColor?` | — (required, or derived from `colorName`) | Resolves the value's color against the live palette each time it is called |
 | `colorName` (convenience `init`) | `String?` | — | Looked up via `palette.color(named:)` in place of a custom `color` closure |
+
+Callers SHOULD supply `color` as a closure that resolves against the live
+`SemanticPalette` each time it is called (or use the `colorName` convenience
+`init`, which does this automatically), rather than capturing a static
+`NSColor` at construction time — a captured static color will not update on
+a theme change. This is caller-side guidance: `DisclosureCardView` has no way
+to enforce it and no observable behavior distinguishes a dynamic `color`
+closure from a static one, so it has no requirement or test vector of its
+own.
 
 `StatusSymbol`:
 
@@ -553,32 +575,47 @@ or `print`).
   content with `SubcomposeLayout` and taking the wider `IntrinsicSize`,
   since a collapsed `AnimatedVisibility` composable does not otherwise keep
   its content measurable. Place the status badge with a `Box` using
-  `Modifier.align(Alignment.TopEnd)` and a small negative offset.
-- **React/Web**: A `<details>`/`<summary>`-style component (or a `<div>`
-  with `aria-expanded`) whose header renders with the elevated background
-  and a rotating disclosure `<button>`; the body toggles via a CSS class
-  rather than `display: none` when the collapsed one-line summary must
-  still show. Reserve the width floor by measuring both the open and
-  collapsed header/body with `ResizeObserver` (or by rendering both
-  off-screen with `visibility: hidden` rather than `display: none`, which
-  is what keeps AppKit's `isHidden` measurable and CSS `display: none`
-  is not). Position the status badge with `position: absolute;
+  `Modifier.align(Alignment.TopEnd)` and an offset of
+  `-(badgeDiameter / 2 − cornerPeakInset)` on both axes, so the badge is
+  centered on the corner's arc rather than its edge.
+- **React/Web**: A `<div>` with `aria-expanded` on its disclosure `<button>`
+  (not `<details>`/`<summary>`, which has no slot for a collapsed one-line
+  summary shown in place of the body and cannot support toggling the body
+  via a CSS class rather than removal from the DOM); the header renders
+  with the elevated background and a rotating disclosure `<button>`, and
+  the body toggles via a CSS class (e.g. `.collapsed`) rather than
+  `display: none`. Reserve the width floor by measuring both the open and
+  collapsed header/body with `ResizeObserver` while both are rendered with
+  `visibility: hidden; position: absolute` rather than `display: none` —
+  `display: none` removes an element from measurement the way AppKit's
+  `isHidden` does not. Position the status badge with `position: absolute;
   top: <peak>px; right: <peak>px; transform: translate(50%, -50%)`.
 - **AppKit / UIKit** (source platform): Source at
   `packages/apple/AgenticToolkit/macOS/UI/Cards/DisclosureCardView.swift`
   (this recipe's source), plus its directory-mates `PinnedEndsLine.swift`
   (the header row's pinned-ends layout), `NSStackView+FullWidth.swift`
-  (`addFullWidthArrangedSubview`, used to make `body`'s rows fill the
-  stack's width), and `CardFoldMemory.swift` (the host-side persistence and
-  rebuild helper most callers wire this view to). This is macOS-only —
+  (`addFullWidthArrangedSubview`, used to make the body section's rows fill
+  the stack's width), and `CardFoldMemory.swift` (the host-side persistence
+  and rebuild helper most callers wire this view to). This is macOS-only —
   `NSView`/`NSButton`/`NSStackView`/`NSTextField`/`NSImageView`; there is no
   UIKit code path in source. A UIKit port would replace those with
   `UIView`/a custom disclosure `UIButton` (UIKit has no built-in disclosure-
-  triangle bezel style)/`UIStackView`/`UILabel`/`UIImageView`, and would
-  need to re-derive the fold-independent width floor manually, since
-  `UIStackView.isHidden` — like `NSStackView.isHidden` — detaches a hidden
-  arranged view from layout but still allows measuring its `intrinsicContentSize`
-  when asked directly.
+  triangle bezel style)/`UIStackView`/`UILabel`/`UIImageView`, and can reuse
+  the same fold-independent width-floor technique directly, since
+  `UIStackView.isHidden` behaves like `NSStackView.isHidden`: it detaches a
+  hidden arranged view from the stack's layout while the view itself
+  remains measurable via `intrinsicContentSize` when asked directly.
+  The recipe's descriptive terms above map to these source private members:
+  the card surface is `surface`; the titlebar strip is `titlebar`; the
+  titlebar's bottom rule is `titlebarRule`; the title text is `titleField`;
+  the title row is `titleLine`; the trailing row is `trailingLine`; the
+  disclosure control is `disclosure`; the content area is `content`; the
+  body section is `body`; the subtitle text is `subtitleField`; the summary
+  line is `summaryField`; the status badge is `statusIcon`; and the
+  width-floor constraint is `contentWidthFloor`. `color(named:)`'s
+  name→role map (`"red"` → `dangerColor`, `"blue"` → `accentColor`, and so
+  on) is defined outside this source, in
+  `external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperToolkit/SourcesUI/macOS/Theme/SemanticPalette+NSColor.swift`.
 - **WinUI 3** (the reason this recipe exists): WinUI 3's `Expander` control
   is the nearest built-in analog — it already pairs a `Header` with
   collapsible `Content` and a built-in chevron that flips on `IsExpanded` —
@@ -603,8 +640,10 @@ or `print`).
   rotating chevron glyph for the disclosure control since WinUI has no
   dedicated disclosure-triangle bezel). Draw the corner badge as a
   `FontIcon`/`SymbolIcon` inside a `Grid` cell placed with `Margin` set to
-  `-cornerPeakInset` on the top and right edges and `HorizontalAlignment /
-  VerticalAlignment="Right"/"Top"`, with `Canvas.ZIndex` (or simple
+  `-(badgeDiameter / 2 − cornerPeakInset)` on the top and right edges (which
+  centers the badge on the corner's arc rather than its edge) and
+  `HorizontalAlignment / VerticalAlignment="Right"/"Top"`, with
+  `Canvas.ZIndex` (or simple
   z-order in the `Grid`'s children) set above the `Border` that draws the
   card's own `BorderBrush`/`BorderThickness`, matching
   `draws-badge-above-surface-border`.
@@ -621,7 +660,7 @@ or `print`).
   rebuilds the card on the next runloop turn, specifically because a
   synchronous rebuild would tear down the very button whose click is still
   dispatching.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: The width floor is computed as the wider of the open
   content's fitting width and the folded masthead's width, and is
   recomputed on every `layout()` pass regardless of the card's current
@@ -630,7 +669,7 @@ or `print`).
   folded as it is open" — a content-hugging window that re-derived its
   width from whichever state happened to be visible would jump sideways on
   every fold, which is what this fold-independent floor prevents.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: The status badge is centered on `cornerPeakInset`
   (`cornerRadius − cornerRadius/√2`), not on the frame's literal corner,
   and is added as a top-level sibling subview after `surface` rather than
@@ -640,13 +679,13 @@ or `print`).
   "slipped off"; and a `CALayer` draws its own border above its sublayers,
   so the badge must live outside `surface`'s layer tree to paint above that
   border.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: Dimming is a single `alphaValue` applied to the whole view,
   not a second set of dimmed theme colors.
   **Rationale**: Per the type's own doc comment, this makes the card
   recede "complete — border, surface, content and all" while every color
   it draws keeps meaning exactly what it means on the live card.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: `titleAccessory` and `titlebarAccessory` are placed and
   measured but never styled, tinted, or given any accessibility
   configuration by `DisclosureCardView`.
@@ -654,7 +693,7 @@ or `print`).
   has already decided its appearance and behavior; recoloring or otherwise
   opinionating on it would fight a caller that, for example, hands in a
   logo that is also a button.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: The disclosure control's `toolTip`/accessibility label
   strings (`"Show details"`, `"Hide details"`) are English literals with no
   localization key.
@@ -662,24 +701,32 @@ or `print`).
   has no string-catalog or `NSLocalizedString` call for these two strings,
   unlike every other piece of text on the card, which is entirely
   caller-supplied.
-  **Approved: pending**
+  **Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | needs-review | accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
-| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [theme-driven-typography](agenticdevelopercookbook://compliance/ui-tokens#theme-driven-typography) | passed | ui-tokens |
-| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | ui-tokens |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
+| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | Platform Compliance |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+
+`keyboard-navigable`, `native-controls-preference`, and
+`platform-design-language` rest on what the source visibly does (the native
+`NSButton`/`NSStackView` controls); `screen-reader-support` and `contrast-ratio`
+are `partial` because the source cannot settle, respectively, the disclosure
+label's staleness between a click and the host's rebuild (see
+`does-not-self-mutate-on-toggle`) and each shipped theme's actual resolved
+contrast ratios; `no-hardcoded-strings` is `failed` because
+`"Show details"`/`"Hide details"` are English literals with no
+localization key (see Localization).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `DisclosureCardView` (AppKit, macOS) source. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: shortened the frontmatter summary and moved the platform-design-languages reference from `references` to `related`; restated Behavioral Requirements, States, Edge Cases, and Conformance Test Vectors in observable terms instead of private Swift member names, with the member-name mapping relocated to AppKit Platform Notes; defined `cornerPeakInset`, badge diameter, and the masthead width floor in Appearance; documented the `color(named:)` name-to-role map; added a precondition to vector 039; moved `prefers-dynamic-summary-colors` into a Configuration usage note; reworded the two no-guard Edge Cases as documented limitations; fixed the UIKit, React/Web, WinUI 3, and Compose Platform Notes bullets; reformatted Design Decisions' `Approved` line; and updated Compliance (`contrast-ratio` and `screen-reader-support` to `partial`, added a failing `no-hardcoded-strings` row, Title Case categories, and a rationale sentence).; removed Compliance rows for checks absent from the cookbook catalog |
