@@ -3,11 +3,11 @@ id: 28fc5136-e1bf-4672-b783-ed2f3a8983f5
 title: ExtensionTreeViewController
 domain: agentictoolkit://recipes/extension-tree-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -175,7 +175,7 @@ The same file also defines `ExtensionTreeOutlineViewController`, the internal `N
 
 - **Role/trait**: The outline is a plain `NSOutlineView` (AppKit's own outline/row accessibility roles) carrying the identifier `"<accessibilityPrefix>.tree"`; the message banner is a plain `NSTextField`-based label carrying `"<accessibilityPrefix>.message"`. Neither identifier is an accessibility role or label — `accessibilityID` only sets `accessibilityIdentifier`, a UI-test hook, and this file overrides no AX role anywhere.
 - **Label requirements**: A row's label (`item.label`) and caption (`item.description`) are plain `NSTextField` `stringValue`s, which AppKit's default accessibility exposes as the row's accessible text. The icon's `NSImage` is given `accessibilityDescription: nil`, relying on the adjacent label text to name the row rather than describing the icon separately. The message banner's accessible text is its `stringValue`.
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source. Behavior undefined. Redrawing a branch, toggling the message banner, and the placeholder-to-tree swap post no explicit `NSAccessibility` notification (e.g. `.layoutChanged` or an announcement) anywhere in this file; a VoiceOver user has no non-visual cue that a branch's children arrived, that the message banner appeared or disappeared, or that the pane swapped from the placeholder to a live tree, beyond whatever `reloadItem`/`reloadData` announces on their own. Resolution requires an accessibility audit deciding which notification(s) belong on these transitions, and sign-off from whoever owns VoiceOver support for this app.
+- **Announce state changes**: Not implemented in source. Redrawing a branch, toggling the message banner, and the placeholder-to-tree swap post no explicit `NSAccessibility` notification (e.g. `.layoutChanged` or an announcement) anywhere in this file; a VoiceOver user gets no non-visual cue, beyond whatever `reloadItem`/`reloadData` announces on their own, that a branch's children arrived, that the message banner appeared or disappeared, or that the pane swapped from the placeholder to a live tree.
 - **Minimum tap target**: Not overridden in this file; row height is a fixed 22pt (`outline-row-height`) with no accessibility-driven exception. macOS's pointer-driven HIG does not carry the 44×44pt minimum that applies to iOS touch targets, and this source sets no explicit minimum of its own.
 
 ## Conformance Test Vectors
@@ -350,7 +350,7 @@ Subsystem: `{{bundle_id}}` | Category: `ExtensionTreeOutlineViewController`
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
 | [no-pii-in-logs](agenticdevelopercookbook://compliance/privacy-and-data#no-pii-in-logs) | passed | Privacy and Data |
 
-`outline-allows-empty-selection`/`return-key-activates-selection`/`insert-newline-activates-selection`, this file's exclusive use of `ThemedOutlineView`/`NSOutlineView`/`ThemedLabel`/`NSTableRowView`, and the absence of any logged `ContributedTreeItem` field or user string in `timeout-logged`'s one log line ground the `passed` rows. The missing state-change announcements are recorded under **Announce state changes**; the catalog has no dedicated check for them.
+`outline-allows-empty-selection`/`return-key-activates-selection`/`insert-newline-activates-selection`, this file's exclusive use of `ThemedOutlineView`/`NSOutlineView`/`ThemedLabel`/`NSTableRowView`, and the absence of any logged `ContributedTreeItem` field or user string in `timeout-logged`'s one log line ground the `passed` rows. The missing state-change announcements described under **Announce state changes** have no dedicated check in the catalog.
 
 ## Change History
 
@@ -358,3 +358,4 @@ Subsystem: `{{bundle_id}}` | Category: `ExtensionTreeOutlineViewController`
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved the cookbook guideline URI from `references` to `related`, trimmed `tags` to 5 by dropping the `platforms`-duplicate, bolded Design Decisions labels, replaced the dangling "(Rule 15)" citation, resolved `live-region-announcements` to `failed` and dropped the inapplicable `reduce-motion-support` row with a grounding sentence, corrected the `resolve`/`onProviderReplaced` Configuration description, restated the at-budget race as undefined, merged etvc-014 into etvc-007, rewrote etvc-036/etvc-056/etvc-061 as observable checks, and added `insert-newline-activates-selection` with etvc-068 for the WinUI note's `insertNewline` reference; removed Compliance rows for checks absent from the cookbook catalog |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

@@ -3,11 +3,11 @@ id: b307116d-3ab8-422a-b031-885710e11e70
 title: File Tree Outline View Controller
 domain: agentictoolkit://recipes/file-tree-outline-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -309,7 +309,7 @@ right-click context menu for opening, revealing, and copying a path.
 | Loading | An empty root manager with `isSyncing == true` shows the placeholder text "Scanning…"; once syncing finishes, the same empty root's placeholder switches to "Empty". |
 | Selected | The selected row is highlighted by `ThemedTableRowView`/AppKit's own selection rendering; if the selection is a root header, that header additionally switches from `.secondaryText` to `.primaryText`. |
 | Expanded / Collapsed | A directory shows AppKit's standard disclosure triangle, open or closed; expanding starts a lazy read of that directory's contents if it has not already been read. |
-| Dirty | A file whose open document is dirty shows a filled-circle marker at the row's trailing edge, tinted `.warning`; the marker is hidden, not removed, when the document is clean. |
+| Dirty | A file whose open document is dirty shows a filled-circle marker at the row's trailing edge, tinted `.warning`; it is hidden, not removed, when the document is clean. |
 | Git status | A node with a non-`nil` `gitStatus` recolors its name label and shows a trailing single-character badge, both in that status's fixed color (orange=modified, green=added/untracked, red=deleted, blue=renamed/copied, purple=conflicted, gray=ignored). |
 
 ## Accessibility
@@ -338,15 +338,11 @@ right-click context menu for opening, revealing, and copying a path.
 - Minimum tap target: Not applicable. This is a pointer-driven macOS control,
   not a touch surface; the 44×44pt guidance for touch targets does not apply.
   The actual row height is 22pt (`outline.rowHeight = 22`).
-- NEEDS REVIEW: Not implemented in source. Behavior undefined. The git-status
-  badge's visible text is the raw status character (`M`, `A`, `D`, `R`, `C`,
-  `?`, `U`, `!`) with no separate accessibility label spelling out what it
-  means (e.g. "Modified"); a screen-reader user would hear the bare character
-  or punctuation mark read aloud, not a descriptive word. This is not resolved
-  anywhere in `FileTreeOutlineViewController.swift` or `GitFileStatus`, and
-  would be settled by adding an explicit accessibility label/description to
-  the badge, or by product/accessibility review confirming the raw character
-  is an acceptable VoiceOver experience.
+- The git-status badge is a plain `ThemedLabel` carrying only the raw status
+  character (`M`, `A`, `D`, `R`, `C`, `?`, `U`, `!`) as its text; unlike the
+  row's icon and unsaved-changes marker, it has no accessibility label or
+  description of its own, so VoiceOver announces the bare character or
+  punctuation mark rather than a descriptive word such as "Modified".
 
 ## Conformance Test Vectors
 
@@ -507,16 +503,13 @@ not an app-URL or route.
 | (none defined in source) | `File` | Icon accessibility description for a file, a literal `String`. |
 | (none defined in source) | `Unsaved changes` | Unsaved-changes marker accessibility description, a literal `String`. |
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined. All ten strings
-above are assigned directly as `String` literals to AppKit properties
-(`NSTextField`/`ThemedLabel` string values, `NSMenuItem.title`,
+All ten strings above are assigned directly as `String` literals to AppKit
+properties (`NSTextField`/`ThemedLabel` string values, `NSMenuItem.title`,
 `accessibilityDescription:`) rather than through any localization key or
 `NSLocalizedString` call — this is an AppKit file, so none of these literals
-gets SwiftUI's automatic `LocalizedStringKey` treatment. What is missing is a
-defined string-key scheme for this component; it would be settled by the
-host app's localization owner choosing keys and wiring them in. File and
-directory names themselves are user data, not chrome text, and are correctly
-excluded from this table.
+gets SwiftUI's automatic `LocalizedStringKey` treatment. No string-key scheme
+exists for this component in source. File and directory names themselves are
+user data, not chrome text, and are correctly excluded from this table.
 
 ## Accessibility Options
 
@@ -726,8 +719,8 @@ guarantees `selection.selectedRoot` is cleared when its root is removed.
 `NSOutlineView`'s default keyboard/type-ahead handling
 (`keyboard-and-typeahead-inherited`). `screen-reader-support` is partial: row
 icons and the unsaved-changes marker carry explicit accessibility
-descriptions, but the git-status badge does not (see the open question in
-Accessibility above). `contrast-ratio` is partial: non-git colors resolve through
+descriptions, but the git-status badge does not (see Accessibility above).
+`contrast-ratio` is partial: non-git colors resolve through
 semantic theme roles whose actual contrast this file cannot show, and the
 fixed git-status colors are not verified against theme backgrounds here.
 `no-hardcoded-strings` and `string-externalization` fail because all ten
@@ -740,3 +733,4 @@ Localization above).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: consolidated duplicated accessibility-options prose, corrected an unsupported rationale for git-status colors and a false WinUI-3 claim, added named requirements and vectors for two previously-unnamed edge-case MUSTs, split two under-tested vectors into full-coverage pairs, tightened vector 018's expected count and vector 015's reload assertion, rewrote vector 037 as a measurable performance bound, corrected the iOS platform note to recommend `UICollectionView`/`UICollectionLayoutListConfiguration`, moved the `testing-hooks-available` MAY out of Behavioral Requirements, renamed four requirements to subject-only names, reformatted Design Decisions to the bold three-line form, moved a misplaced cookbook `related` URL out of `references` and added real Apple doc references, and populated the Compliance table (with a compliance-catalog remap pass).
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

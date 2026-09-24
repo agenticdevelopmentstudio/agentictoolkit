@@ -3,11 +3,11 @@ id: 7152ec0d-01a9-433d-b1fd-1ac708400f40
 title: ExtensionWebviewViewController
 domain: agentictoolkit://recipes/extension-webview-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -88,7 +88,7 @@ approved-date: ''
 
 - **Role/trait**: Not applicable — this component sets no explicit accessibility role of its own; it is a plain container `NSView` with no `setAccessibilityRole` or `accessibilityElement` call anywhere in this file. Whichever child is on screen (`ExtensionViewPlaceholderViewController`'s labeled stack, or the hosted `WebviewPanelViewController`'s web content) carries whatever accessibility role its own view hierarchy provides.
 - **Label requirements**: Not applicable for the same reason — no `accessibilityLabel` or `accessibilityIdentifier` is set on the container or in `show(_:)`; labeling belongs entirely to whichever content is being shown.
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source. Behavior undefined. `show(_:)` swaps the entire visible content — placeholder to webview panel, or back — by adding and removing views, with no accompanying `NSAccessibility` notification (for example `.layoutChanged`) anywhere in this file or in `ExtensionViewPlaceholderViewController`. A VoiceOver user focused on this pane when the extension's page appears, or disappears, has no announcement that the content changed underneath them. Resolution requires an accessibility audit deciding which notification to post and from where, and sign-off from whoever owns VoiceOver support for this app.
+- **Announce state changes**: Not implemented in source: `show(_:)` swaps the entire visible content — placeholder to webview panel, or back — by adding and removing views, with no accompanying `NSAccessibility` notification (for example `.layoutChanged`) anywhere in this file or in `ExtensionViewPlaceholderViewController`. A VoiceOver user focused on this pane when the extension's page appears, or disappears, gets no announcement that the content changed underneath them.
 - **Minimum tap target**: Not applicable — this component places no tappable control of its own. The placeholder it shows has no buttons or links, only three text labels; any interactive element inside a resolved panel's page is the extension's own responsibility, out of this file's scope.
 
 ## Conformance Test Vectors
@@ -190,7 +190,7 @@ Not applicable: no `Logger`, `os_log`, or other logging call appears anywhere in
 **Approved**: pending
 
 **Decision**: This component wraps the panel rather than being the webview surface itself.
-**Rationale**: An unloaded `WKWebView` is a blank white rectangle. Wrapping it lets the pane show an explanatory placeholder until an extension actually resolves a provider, and go back to that explanation if the panel is later disposed — without which "installed, but nothing registered yet" would be indistinguishable from "broken." (See the open question under **Accessibility** for the one gap this wrapping does not close: the swap between those two readable states carries no assistive-technology announcement.)
+**Rationale**: An unloaded `WKWebView` is a blank white rectangle. Wrapping it lets the pane show an explanatory placeholder until an extension actually resolves a provider, and go back to that explanation if the panel is later disposed — without which "installed, but nothing registered yet" would be indistinguishable from "broken." (See **Accessibility**'s Announce state changes for the one gap this wrapping does not close: the swap between those two readable states carries no assistive-technology announcement.)
 **Approved**: pending
 
 ## Compliance
@@ -201,7 +201,7 @@ Not applicable: no `Logger`, `os_log`, or other logging call appears anywhere in
 | [platform-theming](agenticdevelopercookbook://compliance/platform-compliance#platform-theming) | passed | Platform Compliance |
 | [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
 
-`graceful-degradation` and `platform-theming` are `passed` on the strength of two source-satisfied MUSTs — `remains-on-placeholder-when-unresolved`/`panel-removal-reverts-to-placeholder` for the former, `background-tracks-theme-surface` for the latter; `screen-reader-support` is `partial` because `show(_:)` swaps the entire visible content with no accompanying `NSAccessibility` notification (see the open question under **Accessibility**).
+`graceful-degradation` and `platform-theming` are `passed` on the strength of two source-satisfied MUSTs — `remains-on-placeholder-when-unresolved`/`panel-removal-reverts-to-placeholder` for the former, `background-tracks-theme-surface` for the latter; `screen-reader-support` is `partial` because `show(_:)` swaps the entire visible content with no accompanying `NSAccessibility` notification (see **Accessibility**'s Announce state changes).
 
 ## Change History
 
@@ -209,3 +209,4 @@ Not applicable: no `Logger`, `os_log`, or other logging call appears anywhere in
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: add no-adoption-without-completion requirement and test vector; trim Design Decisions to this component's own rationale; rename AppKit-lifecycle-tied requirements to platform-neutral names and moved their specifics into the AppKit/UIKit note; fix screen-reader-support status and Compliance table to only cite real catalog checks; fix SwiftUI Binding syntax and WinUI two-way transition note; scope the main-actor-confined test vector to the class; populate related/depends-on and move the misplaced references entry; trim tags to 5; reformat Design Decisions with bold labels; remove dangling Rule 15 citation |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

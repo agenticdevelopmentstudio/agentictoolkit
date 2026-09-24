@@ -3,11 +3,11 @@ id: ba1406b3-bcf8-4580-9d65-daed2311cccf
 title: FloatingChooserPanelController
 domain: agentictoolkit://recipes/floating-chooser-panel-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -249,15 +249,8 @@ to that subclass's own recipe.
   (**falls-back-to-centering-without-visible-frame**).
 - **Boundary values**: `topInsetFraction` is a fixed constant (0.2), not a
   configurable input, so there is no boundary range to exercise on it
-  directly. NEEDS REVIEW: `position(_:)` performs no clamping to keep the
-  panel within the visible frame — if a subclass's `contentRect` height
-  exceeds `visibleFrame.height * (1 - topInsetFraction)`, the computed
-  `origin.y` can be negative and the panel can render partly below the
-  visible frame, or on a very short screen, off it entirely. This cannot be
-  resolved from this file alone: it depends on every subclass's
-  `contentRect`/`preferredContentSize` and the range of screen sizes the app
-  must support; resolving it requires the app team to decide whether a
-  clamp belongs here or in each subclass's sizing.
+  directly.
+- **position-clamping**: NEEDS REVIEW: Not implemented in source. `position(_:)` computes the panel's origin from a subclass's `contentRect` and the screen's `visibleFrame` with no clamp against either edge — if `contentRect` height exceeds `visibleFrame.height * (1 - topInsetFraction)`, the computed `origin.y` goes negative and the panel renders partly below the visible frame, or off it entirely on a very short screen; resolving it requires the app team to decide whether the clamp belongs here or in each subclass's sizing.
 - **Concurrent access**: The controller is `@MainActor`-isolated, so there is
   no defined behavior for access from another thread — none is needed
   because AppKit window controllers are inherently single-threaded. Within
@@ -436,3 +429,4 @@ internationalization to check.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: name the show() nil-window guard and the no-screen-at-all fallback as requirements with new test vectors 031/032; mark activation vectors 016/017 manual/integration-only (no injected seam for the global activation seam); reformat Design Decisions to bold labels; add the two hosted content-controller recipes to related; loosen test vectors 002/020/029 to concrete, less brittle assertions; clarify the dismissing-interval terminology in the States table and vector 024; clarify resets-dismissing-flag-after-close to describe only the outer close() clearing the flag; rebuild Compliance against the real catalog (accessibility/focus-management only) |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

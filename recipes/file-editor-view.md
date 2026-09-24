@@ -3,11 +3,11 @@ id: 9b1b54d5-e514-479f-b9f9-0a03cf4ebbc9
 title: FileEditorView
 domain: agentictoolkit://recipes/file-editor-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -125,7 +125,7 @@ The debounce window is the injected `TextDocumentSaveScheduler`'s own setting (`
 
 - **Role/trait**: `FileEditorView.swift` sets no explicit accessibility role, trait, or identifier anywhere in this file. The placeholder's `Text` and `Image(systemName: "doc.text")` carry SwiftUI's automatic default behavior (a spoken static-text element, and a label derived from the SF Symbol's name) — neither is overridden or suppressed. The mounted `SourceEditor`'s and `QuickLookPreview`'s own accessibility behavior is out of scope for this recipe.
 - **Label requirements**: No `.accessibilityLabel`, `.accessibilityValue`, or `.accessibilityHint` modifier appears anywhere in `FileEditorView.swift`; the placeholder relies entirely on SwiftUI's automatic labels for its `Text` and `Image`.
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source. Behavior undefined. Switching `display` between empty, loading, text, QuickLook, and unavailable replaces the content shown inside the one always-mounted `FileEditorContentView`, but no explicit accessibility notification (e.g., a layout-changed or screen-changed post) accompanies that switch anywhere in `FileEditorView.swift` or `FileEditorState.swift`. Whether a VoiceOver user already focused in this pane is told the content changed depends entirely on SwiftUI/AppKit's own automatic change detection, which cannot be confirmed from source alone. Settling it needs either a VoiceOver test pass across a selection change, or an explicit accessibility-notification addition to `showSelection()`/`FileEditorState.load(from:)`.
+- **Announce state changes**: Switching `display` between empty, loading, text, QuickLook, and unavailable replaces the content shown inside the one always-mounted `FileEditorContentView`, but neither `FileEditorView.swift` nor `FileEditorState.swift` posts any explicit accessibility notification (e.g., a layout-changed or screen-changed post) when that switch happens; a VoiceOver user is told about the new content only if SwiftUI/AppKit's own automatic change detection picks it up on its own.
 - **Minimum tap target**: Not applicable: `FileEditorView` targets macOS pointer and keyboard input and defines no tappable or clickable control of its own; the mounted editor's and QuickLook's own hit targets are out of scope.
 
 ## Conformance Test Vectors
@@ -200,7 +200,7 @@ Not applicable: `FileEditorView` has no URL scheme, route, or deep-link entry po
 | (none — hardcoded literal, `String`, not `LocalizedStringKey`) | "Select a file to view its contents" | Placeholder shown when nothing openable is selected |
 | (none — hardcoded literal, `String`, not `LocalizedStringKey`) | "Cannot open this file" | Placeholder shown when the selected file could not be read |
 
-NEEDS REVIEW: Localization decision pending. Both placeholder strings are passed as a Swift `String` (`EditorPlaceholderView.message: String`), not a `LocalizedStringKey`, so `Text(message)` renders each verbatim with no bundle lookup, unlike a string literal passed directly to `Text(_:)` at a call site typed to accept a `LocalizedStringKey`. Whether these two strings should be localized is a product decision the source does not make; resolving it needs either an app-team decision to route them through `String(localized:)`/a strings catalog, or an explicit acceptance that this chrome stays English-only.
+Both placeholder strings are passed as a Swift `String` (`EditorPlaceholderView.message: String`), not a `LocalizedStringKey`, so `Text(message)` renders each verbatim with no bundle lookup, unlike a string literal passed directly to `Text(_:)` at a call site typed to accept a `LocalizedStringKey`. Neither string is routed through `String(localized:)` or a strings catalog anywhere in `FileEditorView.swift`.
 
 ## Accessibility Options
 
@@ -278,7 +278,7 @@ An autosave write failure is logged at error level (`Auto-save failed for <uri>:
 | [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
 | [rtl-layout-support](agenticdevelopercookbook://compliance/internationalization#rtl-layout-support) | partial | Internationalization |
 
-`screen-reader-support` is partial because of the open question flagged under Accessibility (Announce state changes): no accessibility notification accompanies a display-state change in this component itself. `dynamic-type-support` is partial because the placeholder message scales with the theme's own text-size preference while the placeholder icon's literal 48pt size does not. `contrast-ratio` is partial because every color is a semantic theme token resolved at render time, so actual contrast depends on the active theme, which this component does not control. `no-hardcoded-strings` failed because both placeholder strings (see Localization) are unlocalized `String` literals. `rtl-layout-support` is partial because every string in this file is plain Unicode text with no directional layout assumptions, but that is no evidence of mirrored-layout or bidi handling, and the editor itself — where either would actually be exercised — is out of scope for this recipe.
+`screen-reader-support` is partial because no accessibility notification accompanies a display-state change in this component itself (see **Announce state changes**). `dynamic-type-support` is partial because the placeholder message scales with the theme's own text-size preference while the placeholder icon's literal 48pt size does not. `contrast-ratio` is partial because every color is a semantic theme token resolved at render time, so actual contrast depends on the active theme, which this component does not control. `no-hardcoded-strings` failed because both placeholder strings (see Localization) are unlocalized `String` literals. `rtl-layout-support` is partial because every string in this file is plain Unicode text with no directional layout assumptions, but that is no evidence of mirrored-layout or bidi handling, and the editor itself — where either would actually be exercised — is out of scope for this recipe.
 
 ## Change History
 
@@ -286,3 +286,4 @@ An autosave write failure is logged at error level (`Auto-save failed for <uri>:
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Claude | Initial creation from source code |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved a cookbook reference from `references` to `related`, trimmed tags to five, fixed an invalid compliance status and bolded Design Decision labels, downgraded an unsupported RTL compliance claim, stated the autosave debounce interval once and repointed its other mentions, reworded a misleading Localization marker, fixed a requirement/state contradiction over editor visibility, removed a duplicate States row, tightened two imprecise test vectors, scoped the autosave-failure requirement and its vector to this component's own behavior, replaced a bare "Rule 15" citation with a full guideline reference, fixed a WinUI 3 typo, and reconciled the Compliance table against the catalog |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

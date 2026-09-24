@@ -3,11 +3,11 @@ id: ab6d7655-9476-4318-8c36-f431686e2d23
 title: File Browser View Controller
 domain: agentictoolkit://recipes/file-browser-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -214,14 +214,13 @@ what hosts it.
   or title, and both are built with `NSImage(systemSymbolName:
   accessibilityDescription: nil)` — the symbol image is explicitly given no
   accessibility description.
-- NEEDS REVIEW: Not implemented in source. Behavior undefined. Because both
-  buttons have an empty `title`, an image with `accessibilityDescription:
-  nil`, and no explicit `setAccessibilityLabel`/`setAccessibilityTitle` call,
-  it cannot be determined from source alone whether VoiceOver announces any
-  name for them (AppKit's fallback behavior for an untitled, undescribed
-  bezel button is not decidable by reading this file). This would be settled
-  by a VoiceOver pass over the running footer, or by adding an explicit
-  accessibility label in source.
+- Neither footer button has an explicit accessibility label or title: both
+  have an empty `title`, an image built with `accessibilityDescription:
+  nil`, and no `setAccessibilityLabel`/`setAccessibilityTitle` call anywhere
+  in source — only `accessibilityID(_:)` is set (see above). VoiceOver
+  therefore has no developer-supplied name to announce for either button,
+  only whatever generic fallback AppKit's default bezel-button accessibility
+  provides.
 - Not applicable: the hosted tree's own accessibility (row roles, disclosure
   state announcements, selection announcements) belongs to
   `FileTreeOutlineViewController`, a separate component with its own recipe;
@@ -350,17 +349,15 @@ closure, not through any app-URL routing.
 | (none defined in source) | `Remove "<name>" from this project` | Remove button tooltip when enabled; `<name>` is the selected root's last path component, interpolated into a literal `String`. |
 | (none defined in source) | `Select an added directory to remove it` | Remove button tooltip when disabled, a literal `String`. |
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined. All five
-user-facing strings above are assigned directly as `String` literals to
-AppKit properties (`NSButton.toolTip`, `NSOpenPanel.prompt`,
+All five user-facing strings above are assigned directly as `String`
+literals to AppKit properties (`NSButton.toolTip`, `NSOpenPanel.prompt`,
 `NSOpenPanel.message`) rather than through any localization key or
 `NSLocalizedString` call — AppKit does not localize `toolTip`/`prompt`/
 `message` the way SwiftUI's `Text` localizes a literal, so these are
-genuinely unlocalized. What is missing is a defined string-key scheme for
-this component; it would be settled by the host app's localization owner
-choosing keys and wiring them in. (The `preconditionFailure` message
-naming the primary root's path is a programmer-error trap surfaced only in
-a crash log, not user-facing text, and is excluded from this table.)
+genuinely unlocalized; no string-key scheme is defined for this component in
+source. (The `preconditionFailure` message naming the primary root's path is
+a programmer-error trap surfaced only in a crash log, not user-facing text,
+and is excluded from this table.)
 
 ## Accessibility Options
 
@@ -549,3 +546,4 @@ automatically for right-to-left locales. `data-minimization` passes because
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed two requirements to subject-only naming; added named requirements and vectors for panel-order preservation and multi-pane consistency; removed private-state coupling from test vectors 004/006 and from the late-added-root requirements; fixed test vectors 025/027/029's assertions; added vectors for `revealNothing()`, the disabled remove-button tooltip, multi-select's last-only selection, and a non-primary symlinked git root; rewrote the WinUI 3 icon glyphs and `FolderPicker` guidance; listed all three watching transitions in States; reformatted Design Decisions to the bold form; populated Compliance; moved the cross-repo guideline reference into `related` and added `depends-on` for the hosted tree |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

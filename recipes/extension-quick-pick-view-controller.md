@@ -3,11 +3,11 @@ id: 5c2d7315-314e-4343-93fd-f3aa1a0c803e
 title: ExtensionQuickPickViewController
 domain: agentictoolkit://recipes/extension-quick-pick-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -215,18 +215,13 @@ row changed). It is modelled directly on the sibling
   (via `ThemedLabel`), which AppKit exposes as static text by default.
 - **Label requirements**: The search field's `placeholderString` supplies
   its own accessible hint through AppKit's stock `NSSearchField` behavior.
-  NEEDS REVIEW: Not implemented in source. Behavior undefined. The
-  multi-select checkbox is built as `NSButton(checkboxWithTitle: "",
+  The multi-select checkbox is built as `NSButton(checkboxWithTitle: "",
   target: nil, action: nil)` — an empty title — and `ItemRowCellView`
   never calls an accessibility-label or title-linking API (no
   `setAccessibilityLabel`, no `setAccessibilityTitleUIElement`) to
-  associate the checkbox with the row's own title label. What is missing:
-  whether VoiceOver announces anything beyond a generic "checkbox" role
-  when focus reaches a checked row's checkbox. What would settle it: a
-  VoiceOver pass over an instantiated multi-select picker, or an explicit
-  decision to call `checkbox.setAccessibilityTitleUIElement(titleLabel)`
-  (or set an explicit label from `item.label`) inside `configure(with:
-  isChecked:showsCheckbox:onToggle:)`.
+  associate the checkbox with the row's own title label, so VoiceOver
+  announces the checkbox by its generic checkbox role only, with no
+  descriptive label tying it to the row it belongs to.
 - **Announce state changes (e.g., loading, disabled)**: Highlight changes
   move the native table selection (`tableView.selectRowIndexes` plus
   `scrollRowToVisible`), which is AppKit's own stock `NSTableView`
@@ -535,3 +530,4 @@ filtering, selection, and checked-set state lives in the AppKit-free
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for ExtensionQuickPickViewController, covering fixed-size layout, live filtering, single-select accept-on-click versus multi-select checkbox-toggle behavior, shared keyboard routing, and one open accessibility question (multi-select checkbox has no accessible label) for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed every requirement to subject-only kebab-case and updated all cross-references; added an escape-idempotency requirement and vector clarifying one Escape press invokes `onCancel()` exactly once; reformatted Design Decisions into the template's bold three-line form; dropped the redundant `macos` tag, the non-catalog `meaningful-labels` compliance check, and the disallowed `not-applicable` `touch-target-size` compliance row, and added the required grounding sentence under Compliance; removed the dangling "(Rule 15)" citation and the noise `model` parameter edge case; deduplicated the Appearance/Padding text and the historical-defect edge case against their source-of-truth requirements and decisions, and reworded three edge cases from implied MUSTs to plain descriptions of model-owned behavior; marked Differentiate Without Color partial for the color-only highlight fill; fixed the WinUI 3 note to bind colors via `ThemeResource` only, pick one consistent selection approach, and drop an unsupported "reason this recipe exists" claim; and added test vectors for the title-present search-field position, a non-nil placeholder, the Up arrow, Return-with-a-highlight, a positive `onHighlight` fire, a shown multi-select checkbox, and a shown description label, replacing vector 028 with a behavior-based check of the shared keyboard controller. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

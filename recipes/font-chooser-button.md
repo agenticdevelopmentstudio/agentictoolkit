@@ -3,11 +3,11 @@ id: 3e548aa3-1103-4b3f-96ff-d2e7ff564810
 title: FontChooserButton
 domain: agentictoolkit://recipes/font-chooser-button
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -300,10 +300,9 @@ or `String(localized:)`/string-catalog mechanism wraps it anywhere in this
 file. Every other title the button ever shows is caller-supplied through
 `show(_:title:)`, so localizing that text is the caller's responsibility,
 not this component's; only the one built-in `"System"` default is this
-component's own literal. NEEDS REVIEW: the built-in `"System"` default is
-unlocalized; whether it should move to a `String(localized:)` key (so a
-caller that never calls `show(_:title:)` still gets localized text) is
-an open question, tracked as a pending Design Decision below.
+component's own literal, and it is not wrapped in `String(localized:)` or
+any string-catalog key — a caller that never calls `show(_:title:)` sees
+this hardcoded English text regardless of the system's locale.
 
 ## Accessibility Options
 
@@ -456,14 +455,13 @@ recipe honest about the edge `viewDidMoveToWindow()` does not cover,
 rather than implying it is a complete guarantee.
 **Approved**: pending
 
-**Decision**: Whether the built-in `"System"` initial title should move to
-a `String(localized:)` key remains open — see the open question noted
-under Localization.
+**Decision**: The built-in `"System"` initial title stays a hardcoded
+literal rather than moving to a `String(localized:)` key.
 **Rationale**: Every title the button shows after construction is
 caller-supplied and therefore the caller's own localization
 responsibility; only the one built-in `"System"` literal set by
-`init(frame:)` is this component's own, and resolving the question changes
-behavior only for a caller that never calls `show(_:title:)`.
+`init(frame:)` is this component's own, and it is the only string in this
+file left unlocalized (see Localization).
 **Approved**: pending
 
 ## Compliance
@@ -502,3 +500,4 @@ localization key (see Localization).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for FontChooserButton, covering the two-initializer setup, the draw-size/store-size split, the NSFontChanging panel lifecycle, and the unlocalized "System" default title. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed all 26 requirements from verb phrases to subject-noun kebab-case and updated every citation; switched in-document cross-references to `#requirements/<name>` fragment form; added `related` entries for sibling ColorPickerView and ButtonView recipes; reworded the zero/negative-width edge case from a MUST to "not validated (current behavior)"; downgraded three Edge Cases MUSTs (empty title, shared-target identity guard, nil-selection panel seed) to descriptive text citing the existing requirements that already cover them; corrected the keyboard-navigation description (Space activates, Return does not, Tab requires Full Keyboard Access); clarified font-change-forwarding's behavior when `show(_:title:)` is called while the panel is still open; sharpened test vectors 015, 019, and 021 to be a static/source assertion, a spied-font-manager assertion, and a concrete font/size setup respectively; dropped the WinUI 3 bullet's editorial aside; broadened the idempotent-operations compliance justification to cover the panel/target path; removed the 26-vs-7 requirement-count Design Decision (folded into this summary) and added pending Design Decisions accepting the dealloc-without-window-removal residual risk and tracking the "System" localization open question; and ran the compliance-catalog fixer, which remapped the `meaningful-labels` Compliance row (and its prose reference) to the catalog's `screen-reader-support` check. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
