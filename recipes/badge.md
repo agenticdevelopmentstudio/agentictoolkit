@@ -368,11 +368,11 @@ or `print`).
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [no-raw-hex](agentictoolkit://compliance/ui-tokens#no-raw-hex) | passed | ui-tokens |
-| [theme-driven-typography](agentictoolkit://compliance/ui-tokens#theme-driven-typography) | passed | ui-tokens |
-| [main-actor-confined](agentictoolkit://compliance/architecture#main-actor-confined) | passed | architecture |
-| [differentiate-without-color](agentictoolkit://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [contrast-ratio](agentictoolkit://compliance/accessibility#contrast-ratio) | needs-review | accessibility |
+| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | ui-tokens |
+| [theme-driven-typography](agenticdevelopercookbook://compliance/ui-tokens#theme-driven-typography) | passed | ui-tokens |
+| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
+| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | needs-review | accessibility |
 
 ## Change History
 

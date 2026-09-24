@@ -468,7 +468,7 @@ logger reference anywhere in this file).
 | [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | failed | accessibility |
 | [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
 | [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
-| [main-actor-confined](agentictoolkit://compliance/architecture#main-actor-confined) | passed | architecture |
+| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
 
 Keyboard navigation is fully wired via `PickerKeyboardController` and the
 search field's `doCommandBy:` delegation, hence passed. Screen-reader support

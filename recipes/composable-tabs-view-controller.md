@@ -810,8 +810,8 @@ or `ComposableTabsPaneHost.swift`).
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agentictoolkit://compliance/architecture#main-actor-confined) | passed | architecture |
-| [binary-split-invariant](agentictoolkit://compliance/architecture#binary-split-invariant) | passed | architecture |
+| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
+| [binary-split-invariant](agenticdevelopercookbook://compliance/architecture#binary-split-invariant) | passed | architecture |
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | failed | accessibility |
 | [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | failed | accessibility |
 | [live-region-announcements](agenticdevelopercookbook://compliance/accessibility#live-region-announcements) | flagged | accessibility |
