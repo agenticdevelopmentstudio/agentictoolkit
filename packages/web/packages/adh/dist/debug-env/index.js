@@ -137,8 +137,12 @@ function FloatingWindow({
           resize: "both",
           minWidth: 520,
           minHeight: 360,
-          maxWidth: "100vw",
-          maxHeight: "100vh"
+          // Capped at the room RIGHT OF and BELOW its own corner, not the whole viewport: the
+          // size is fixed on open, so a window opened at 1600px and a browser then narrowed to
+          // 700 kept its 1400px box running off the right edge — and the HTDV inside fitted
+          // its lists to that off-screen width, so nothing ever covered (item 23's sweep).
+          maxWidth: `calc(100vw - ${Math.max(0, pos.x)}px)`,
+          maxHeight: `calc(100vh - ${Math.max(0, pos.y)}px)`
         },
         children: [
           /* @__PURE__ */ jsxs(
