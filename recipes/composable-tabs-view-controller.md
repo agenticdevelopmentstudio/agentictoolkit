@@ -3,7 +3,7 @@ id: 0640ca96-95c5-4234-925e-386425cc4435
 title: ComposableTabsViewController
 domain: agentictoolkit://recipes/composable-tabs-view-controller
 type: ingredient
-version: 1.1.1
+version: 1.1.2
 status: review
 language: en
 created: '2026-09-23'
@@ -358,7 +358,7 @@ the live `NSSplitViewItem`s.
   edge remains valid.
 - **refresh-pane-controls-notifies-every-leaf**: `refreshPaneControls()` MUST
   re-ask every leaf in the tab to refresh its own control availability.
-- **may-supply-custom-arranger**: Component MAY be configured with a custom
+- **custom-arranger**: Component MAY be configured with a custom
   `PaneArranger` (for example `ProportionalArranger`) in place of the default
   `InheritedSlotArranger`, to redistribute thickness fractions along the
   arrangement axis differently than "leave what a split/remove already
@@ -845,3 +845,4 @@ networking, telemetry, or logging of its own.
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from `ComposableTabsViewController.swift` and `ComposableTabsPaneHost.swift`. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: restated private-symbol requirements/vectors in observable terms; split a garbled move requirement into three and promoted two implicit edge cases to named requirements with vectors; added missing opposite-branch test vectors; fixed an untestable vector; resolved the conflicting SwiftUI platform note; renamed a non-kebab-case requirement; reformatted Design Decisions; fixed the Compliance table's invalid statuses and undefined checks; renumbered a broken test-vector ID sequence; trimmed tags to 5; populated `related`. |
 | 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
+| 1.1.2 | 2026-09-24 | Mike Fullerton | Renamed `may-supply-custom-arranger` to the subject-only `custom-arranger`. |
