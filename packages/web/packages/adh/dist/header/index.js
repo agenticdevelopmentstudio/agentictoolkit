@@ -2133,6 +2133,7 @@ function WorkspaceMenu({
   const openHelp = useHelp2().open;
   const current = menu.workspaces.find((w) => w.current);
   const label = current?.label ?? (menu.loading ? "Loading\u2026" : "Workspaces");
+  const triggerText = current ? `${label} Workspace` : label;
   const workspaceRows = useMemo4(() => {
     if (!menu.workspaces.length) {
       return [
@@ -2192,15 +2193,13 @@ function WorkspaceMenu({
       entries,
       openShortcut: { keys: siteMenuShortcut, label: "Workspace menu" },
       onChoose: navigate,
-      triggerLabel: `Workspace: ${label} \u2014 switch workspace`,
+      triggerLabel: `${triggerText} \u2014 switch workspace`,
       triggerContent: /* @__PURE__ */ jsxs10(Fragment6, { children: [
-        /* @__PURE__ */ jsx18(HubMark3, { className: "adh-nav-popover__mark adh-workspace-trigger__mark" }),
-        /* @__PURE__ */ jsxs10("span", { className: "adh-workspace-trigger__text", children: [
-          /* @__PURE__ */ jsx18("span", { className: "adh-workspace-trigger__caption", "aria-hidden": true, children: "Workspace:" }),
-          /* @__PURE__ */ jsxs10("span", { className: "adh-workspace-trigger__name", children: [
-            /* @__PURE__ */ jsx18("span", { className: "adh-workspace-trigger__label", children: label }),
-            /* @__PURE__ */ jsx18(ChevronDown4, { className: "adh-nav-popover__chevron", "aria-hidden": true })
-          ] })
+        /* @__PURE__ */ jsx18(HubMark3, { className: "adh-nav-popover__mark" }),
+        /* @__PURE__ */ jsxs10("span", { className: "adh-workspace-trigger__name", children: [
+          /* @__PURE__ */ jsx18("span", { className: "adh-workspace-trigger__label", children: label }),
+          current ? /* @__PURE__ */ jsx18("span", { className: "adh-workspace-trigger__suffix", children: "Workspace" }) : null,
+          /* @__PURE__ */ jsx18(ChevronDown4, { className: "adh-nav-popover__chevron", "aria-hidden": true })
         ] })
       ] }),
       triggerClassName,
