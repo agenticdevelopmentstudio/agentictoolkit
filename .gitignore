@@ -47,3 +47,8 @@ graphify-out/
 
 # Claude Code scheduled tasks runtime lock
 .claude/scheduled_tasks.lock
+
+# The themes package left for agenticdevelopertoolkit (ff4e3eda), taking the
+# .gitignore that hid its build output. Checkouts built before the move still
+# hold that output; keep it out of `git status`.
+packages/web/packages/themes/
