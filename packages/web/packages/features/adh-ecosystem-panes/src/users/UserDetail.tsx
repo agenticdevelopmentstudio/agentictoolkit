@@ -33,6 +33,9 @@ export function userValidate(
   if (!EMAIL_RE.test(email)) return "Enter a valid email address.";
   if (takenEmails.some((e) => e.toLowerCase() === email.toLowerCase()))
     return `A user with email "${email}" already exists.`;
+  // The backend has no default for the handle any more — a name is chosen, never minted —
+  // so a create without one is refused. Say so here rather than as a 400 after Save.
+  if (!draft.slug.trim()) return "Handle is required.";
   return null;
 }
 
@@ -85,7 +88,7 @@ export function UserDetail({
           <Field
             id="user-slug"
             label="Handle"
-            hint="Optional — a short handle for the user."
+            hint="A short handle for the user — the last part of their address."
             placeholder="jane"
             value={draft.slug}
             onChange={(v) => set("slug", v)}

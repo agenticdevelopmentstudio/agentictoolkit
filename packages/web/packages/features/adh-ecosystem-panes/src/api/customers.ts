@@ -84,7 +84,9 @@ export const ecosystemUsersApi = {
       email: input.email || undefined,
       displayName: input.displayName || undefined,
       externalId: input.externalId || undefined,
-      slug: input.slug || undefined,
+      // Required: the backend refuses a create with no handle (it has no default to fall
+      // back on), so it is sent as given — `userValidate` has already refused an empty one.
+      slug: input.slug,
       avatarUrl: input.avatarUrl || undefined,
     };
     const row = await authedJson<CustomerRow>(BASE, {

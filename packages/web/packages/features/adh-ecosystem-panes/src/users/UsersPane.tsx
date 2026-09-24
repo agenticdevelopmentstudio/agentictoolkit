@@ -190,6 +190,13 @@ export function UsersPane({
                   onChange={(e) => onChange({ ...draft, displayName: e.target.value })}
                 />
               </Field>
+              <Field label="Handle" hint="A short handle for the user — the last part of their address.">
+                <Input
+                  value={draft.slug}
+                  placeholder="jane"
+                  onChange={(e) => onChange({ ...draft, slug: e.target.value })}
+                />
+              </Field>
               <ErrorText error={error} />
             </>
           )}
