@@ -387,7 +387,7 @@ extension SessionWatcher {
         var breadcrumb: SessionBreadcrumbView { headerView.breadcrumb }
         /// The inset "terminal" the agent's last output is printed into.
         private var terminalView: NSView!
-        private var outputLabel: NSTextField!
+        private(set) var outputLabel: NSTextField!
         private var outputHeight: NSLayoutConstraint!
         private var summaryLabel: NSTextField?
         private var summaryHeight: NSLayoutConstraint?
@@ -497,6 +497,16 @@ extension SessionWatcher {
                   newSummariesEnabled == summariesEnabled,
                   Self.crumbs(for: newSession).hasSameShape(as: Self.crumbs(for: session))
             else { return false }
+
+            // The list re-applies every row whenever any one session changed, which
+            // with a live session is every poll. An unchanged row keeps what it
+            // shows; re-theming it re-parsed its whole last output as markdown —
+            // tens of KB per row, every few seconds, for text that had not moved.
+            // Only the tooltip reads the clock ("2m ago"), so it alone is redone.
+            if newSession == session, newIsSummarizing == isSummarizing, newIsFrontmost == isFrontmost {
+                toolTip = Self.infoText(for: newSession)
+                return true
+            }
 
             session = newSession
             isSummarizing = newIsSummarizing

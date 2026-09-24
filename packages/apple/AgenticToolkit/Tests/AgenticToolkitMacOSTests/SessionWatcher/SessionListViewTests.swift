@@ -274,6 +274,29 @@ final class SessionListViewTests: XCTestCase {
         XCTAssertEqual(row.breadcrumb.nameLabel?.stringValue, "second name")
     }
 
+    /// The list re-applies every row on any change, which with a live session is
+    /// every poll. A row whose session did not move must not re-render its output
+    /// — that re-parsed tens of KB of markdown per row every few seconds — while a
+    /// row whose output did move must still show it.
+    func testAnUnchangedRowKeepsItsOutputAndAChangedOneRedrawsIt() {
+        var session = makeSession(branch: "main", name: "tidy")
+        session.lastOutput = "first **output**"
+        let row = Row(
+            session: session, onTap: nil, isSummarizing: false,
+            onSummarize: nil, isFrontmost: false, summariesEnabled: false
+        )
+        row.outputLabel.stringValue = "untouched"
+        row.toolTip = nil
+
+        XCTAssertTrue(row.update(session: session, isSummarizing: false, isFrontmost: false, summariesEnabled: false))
+        XCTAssertEqual(row.outputLabel.stringValue, "untouched", "an unchanged session re-rendered its output")
+        XCTAssertNotNil(row.toolTip, "the tooltip carries relative time, so it is still refreshed")
+
+        session.lastOutput = "second output"
+        XCTAssertTrue(row.update(session: session, isSummarizing: false, isFrontmost: false, summariesEnabled: false))
+        XCTAssertTrue(row.outputLabel.stringValue.hasSuffix("second output"), row.outputLabel.stringValue)
+    }
+
     /// A segment that appears or vanishes *is* a shape change: the row has no label
     /// to write into, so the caller has to build a new one.
     func testASegmentAppearingForcesARebuild() {
