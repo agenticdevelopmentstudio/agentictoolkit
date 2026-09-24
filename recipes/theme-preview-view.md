@@ -3,11 +3,11 @@ id: 15e66a2e-9ee1-4f5f-aeb0-c804078b4f78
 title: ThemePreviewView
 domain: agentictoolkit://recipes/theme-preview-view
 type: ingredient
-version: 1.1.1
+version: 1.1.2
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -235,20 +235,18 @@ capsule for the status row rather than reusing the shared `Badge` ingredient
   `pill`, `badge`, `row`, the caret, the hairline) has `setAccessibilityRole`,
   `setAccessibilityElement`, or any similar call anywhere in
   `ThemePreviewView.swift`, so none of those containers expose a semantic
-  grouping of their own. NEEDS REVIEW: Not implemented in source. Behavior
-  undefined. Whether the whole preview, or each sample card, should be
-  grouped as a single accessibility element with a summarizing label — versus
-  leaving VoiceOver to read roughly twenty individual demo labels one at a
-  time with no indication they belong to a "theme preview" rather than live
-  application state — is undefined. What would settle it: a VoiceOver pass
-  over an instantiated `ThemePreviewView`, or an explicit grouping decision.
+  grouping of their own. Neither the whole preview nor any sample card is
+  combined into a single accessibility element with a summarizing label;
+  VoiceOver reads roughly twenty individual demo labels one at a time, with
+  no indication they belong to a "theme preview" rather than live
+  application state.
 - **Label requirements**: All visible text is the literal English demo
   strings itemized in Behavioral Requirements (see also Localization); no
   `accessibilityLabel`/`accessibilityValue` override is set anywhere, so
-  VoiceOver reads exactly that literal text. NEEDS REVIEW: Not implemented in
-  source. Behavior undefined. Nothing distinguishes illustrative sample text
-  ("Window Title", "Success", "Documents") from a real value a user could act
-  on; what would settle it is the same grouping/labeling decision named above.
+  VoiceOver reads exactly that literal text. Nothing in source distinguishes
+  illustrative sample text ("Window Title", "Success", "Documents") from a
+  real value a user could act on — VoiceOver has only that literal demo
+  string to read either way.
 - **Announce state changes**: Not applicable — `show(_:)` is the only
   mutating entry point, runs synchronously to completion on the main actor,
   and there is no loading indicator or asynchronous transition to announce
@@ -390,18 +388,12 @@ implemented.
 | `theme_preview.terminal.dir` | Documents | Terminal sample's directory entry |
 | `theme_preview.terminal.file` | README.md | Terminal sample's file entry |
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined. Every string
-above is a literal passed to `NSTextField(labelWithString:)` (an AppKit
-`stringValue` set from a literal, not SwiftUI's `Text`/`LocalizedStringKey`),
-and none of it is routed through `NSLocalizedString` or any localization
-table anywhere in `ThemePreviewView.swift`. Because these strings are
-themselves illustrative demo content rather than data the app produces, it is
-an open question whether they should be localized like real UI text or
-intentionally left as an English-only illustrative sample; either way source
-gives no localization path today. What would settle it: a decision on
-whether the theme-preview demo content is localized, and if so, a pass
-replacing each literal with `NSLocalizedString` and a corresponding
-`.strings`/String Catalog entry per the key above.
+Every string above is a literal passed to `NSTextField(labelWithString:)` (an
+AppKit `stringValue` set from a literal, not SwiftUI's
+`Text`/`LocalizedStringKey`), and none of it is routed through
+`NSLocalizedString` or any localization table anywhere in
+`ThemePreviewView.swift`. Source gives no localization path today for any of
+these illustrative demo strings.
 
 ## Accessibility Options
 
@@ -549,9 +541,10 @@ unmade refactor, since composing `Badge` here is a source change this recipe
 cannot make.
 **Approved**: pending
 
-**Decision**: Leave both Accessibility bullets and the Localization section
-as open questions rather than assuming a specific grouping, labeling, or
-localization strategy.
+**Decision**: State the missing accessibility grouping/labeling and the
+missing localization as plain facts about source, not open questions,
+without assuming a specific grouping, labeling, or localization strategy for
+the eventual fix.
 **Rationale**: `ThemePreviewView.swift` contains zero accessibility API
 calls and zero localization calls of any kind, and there is no comparable
 `ThemePreviewView`-family sibling recipe to pattern-match a grouping,
@@ -594,3 +587,4 @@ literal passed to `NSTextField(labelWithString:)`, never routed through
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for ThemePreviewView, covering the chrome/list/controls/status/terminal sample builders, the embedded SwatchGridView composition, TerminalAppearance resolution, and open questions on accessibility grouping and demo-content localization for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed all 30 requirements to subject-only kebab-case; moved private-implementation citations (`Self.pinToEdges`, `fill(_:with:)`, the arranged-subview teardown call) out of requirements and into AppKit Platform Notes; fixed the Overview's sample-card count and the terminal-font exemption in semantic-palette-derivation; corrected test vectors 028 and 030 and grounded empty-initial-state to cover the background paint for vector 002; reformatted Design Decisions to the bold three-line convention, dropped the requirement-count decision, and reworded the badge decision to record the Badge-ingredient duplication as a known DRY gap; relabeled Localization as proposed keys; rewrote the WinUI 3 and React/Web platform notes to scope theming to the given ColorTheme instead of the app's active theme; moved the misplaced cookbook `references` entry to `related` and deduped `swatch-grid-view`; and reworked Compliance to title-case categories, drop the two inapplicable accessibility checks, and add a sourcing sentence. |
 | 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog, remapped meaningful-labels to screen-reader-support |
+| 1.1.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

@@ -3,11 +3,11 @@ id: da441eaa-795d-4447-99b1-356186855921
 title: TransferOwnershipSection
 domain: agentictoolkit://recipes/transfer-ownership-section
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -197,13 +197,12 @@ confirm gate this follows.
 - Contrast is governed by the `apt-*` semantic color tokens this component consumes (`apt-text`,
   `apt-text-muted`, `apt-gold`); no raw hex value or component-specific contrast override appears
   in source.
-- NEEDS REVIEW: Not implemented in source. The dialog body's transition from "Checking…" to the
-  resolved preview content (or an inline error) carries no `aria-live`/`role="status"` region in
-  this file, so an assistive-technology user who already opened the dialog has no
-  signal that the content changed without re-reading it. What is missing: an explicit live region
-  around the status/preview block. What would settle it: whether the shared `Dialog`/`DialogContent`
-  primitive itself establishes a live region for its body (out of scope for this recipe) — confirm
-  by inspecting `@agenticdevelopertoolkit/ui/components/dialog`.
+- The dialog body's transition from "Checking…" to the resolved preview content (or an inline
+  error) carries no `aria-live`/`role="status"` region: neither this file nor the shared
+  `Dialog`/`DialogContent` primitive it composes (`@agenticdevelopertoolkit/ui/components/dialog`,
+  whose `DialogContent` renders a plain `DialogPrimitive.Popup` with no live-region wrapper)
+  establishes one, so an assistive-technology user who already opened the dialog gets no signal
+  that the content changed without re-reading it.
 
 ## Conformance Test Vectors
 
@@ -438,3 +437,4 @@ default `max-w-md` a mid-length one wraps confusingly inside itself.
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: cited symbols instead of source line numbers, added a Data Model section for `TransferTarget`/`TransferTargetRef`/`TransferPreviewResult`, defined `noun` and noted its locale-sensitive casing, corrected test vectors 014 and 027 to concrete inputs and unit-level reachability, corrected the Differentiate Without Color entry, bolded the Design Decisions labels, removed template residue from Accessibility Options, populated `depends-on`, and replaced the Compliance table's invented checks with the real `screen-reader-support` check. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe extracted from `transfer-ownership-section.tsx`: disclosure-gated destination menu with nested submenu targets, a server preflight race-guarded against stale results, and a type-to-confirm transfer dialog. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

@@ -3,11 +3,11 @@ id: 2cd6ffc0-e9db-425b-99ba-eb826ffff118
 title: Themed Terminal View (Hollow Caret)
 domain: agentictoolkit://recipes/themed-terminal-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -94,7 +94,7 @@ approved-date: ''
 - **Announce state changes**: Not applicable: `ThemedTerminalView` defines no disabled or loading state of its own to announce (see States).
 - **Keyboard navigation**: Not set by `ThemedTerminalView` — no key-handling override appears in source; keyboard input and focus traversal are entirely `LocalProcessTerminalView`'s own, inherited unmodified.
 - **Minimum tap target**: Not applicable — `ThemedTerminalView` defines no tap/click target of its own; it inherits `LocalProcessTerminalView`'s full-bounds hit area unmodified and sets no separate frame or size constraint.
-- **Contrast ratio**: NEEDS REVIEW: `caretAppearance.color` and `caretAppearance.textColor` are caller-supplied `NSColor` values applied verbatim (see #requirements/filled-caret-color, #requirements/hollow-text-color); the source performs no contrast computation or validation of its own. Whether a given theme's caret color meets a minimum contrast ratio against the terminal background cannot be determined from this file — it requires inspecting the theme/palette values actually passed in at the call site, which is outside the given source.
+- **contrast-ratio**: NEEDS REVIEW: Not implemented in source. `caretAppearance.color` and `caretAppearance.textColor` are caller-supplied `NSColor` values applied verbatim (see #requirements/filled-caret-color, #requirements/hollow-text-color) with no contrast computation of its own; whether a given theme's caret color meets a minimum contrast ratio against the terminal background requires inspecting the theme/palette values actually passed in at the call site, outside this source.
 
 ## Conformance Test Vectors
 
@@ -160,7 +160,7 @@ Not applicable: the source contains no string literals passed to any user-facing
 | Option | Behavior |
 |--------|----------|
 | Reduce Motion | Not applicable: the caret's border-width/border-color and `caretColor`/`caretTextColor` changes are instantaneous property assignments with no animation, transition, or movement code in source. |
-| Increase Contrast | Not applicable from within this file: `ThemedTerminalView` performs no color computation of its own — `caretAppearance.color`/`textColor` are applied verbatim from whatever the caller supplies (see **Contrast ratio** under Accessibility for the separate, genuine open question of whether those supplied colors themselves meet a contrast threshold). |
+| Increase Contrast | Not applicable from within this file: `ThemedTerminalView` performs no color computation of its own — `caretAppearance.color`/`textColor` are applied verbatim from whatever the caller supplies (see the open question on contrast-ratio under Accessibility). |
 | Differentiate Without Color | Supported: the active-pane indication conveyed by `marksActivePane` is the caret's *shape* — filled block versus hollow outline — not its color alone, per source: "A full block, which also says which pane the user is working in: filled here, an outline in every other pane." |
 
 ## Feature Flags
@@ -225,10 +225,11 @@ Not applicable: the source contains no logging calls.
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | partial | Accessibility |
 | [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
 
-`platform-theming` fails because `CaretAppearance.color` and `CaretAppearance.textColor` default to the literal `NSColor.white` rather than a semantic, theme-aware color token, so the caret's own defaults do not adapt to the app's theme (see the corresponding Design Decision). `contrast-ratio` is `partial`: the caret's colors are applied verbatim from caller input with no contrast computation in this file, so conformance depends entirely on what the caller supplies — see the **Contrast ratio** entry under Accessibility. `keyboard-navigable` and `screen-reader-support` are `partial`: `ThemedTerminalView` adds no keyboard handling, role, or label of its own and overrides none of `LocalProcessTerminalView`'s, but this file gives no evidence of what `LocalProcessTerminalView` itself provides for either, so full conformance cannot be confirmed from this source alone.
+`platform-theming` fails because `CaretAppearance.color` and `CaretAppearance.textColor` default to the literal `NSColor.white` rather than a semantic, theme-aware color token, so the caret's own defaults do not adapt to the app's theme (see the corresponding Design Decision). `contrast-ratio` is `partial`: the caret's colors are applied verbatim from caller input with no contrast computation in this file, so conformance depends entirely on what the caller supplies — see the open question on contrast-ratio under Accessibility. `keyboard-navigable` and `screen-reader-support` are `partial`: `ThemedTerminalView` adds no keyboard handling, role, or label of its own and overrides none of `LocalProcessTerminalView`'s, but this file gives no evidence of what `LocalProcessTerminalView` itself provides for either, so full conformance cannot be confirmed from this source alone.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only names and fragment-form cross-references, replaced the unfounded HIG reference with cited SwiftTerm sources, softened the unsourced WinUI 3 TermControl claim and dropped its false key-window analogy, folded the composable-tabs edge case and design decision into a single dependency citation, rewrote the Compliance table to real catalog checks (`platform-theming` in place of `no-raw-hex`, dropped `main-actor-confined`/`differentiate-without-color`, `keyboard-navigable`/`screen-reader-support` marked `partial`), reworded the `NSColor.white` design decision as an unexamined default rather than unexplained "technical debt", demoted `caret-subview-cache` to SHOULD, rewrote the private-state test vectors in observable terms, moved the compile-time vector out of the conformance table, and removed trailing "MUST." noise from edge cases |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

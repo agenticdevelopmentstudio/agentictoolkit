@@ -3,11 +3,11 @@ id: ce223be3-818a-4310-b136-9e1e84e9af54
 title: TopicListViewController
 domain: agentictoolkit://recipes/topic-list-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -249,15 +249,11 @@ inside the outline itself — a third, unrelated use of "header."
   own `stringValue` (the item's title) — no separate `accessibilityLabel`
   override is set. Group header, title, and footer/accessory views carry no
   accessibility identifier in this file.
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. When `setSections(_:)` reloads the outline with a
-  different row count, no `NSAccessibility.post(element:notification:)` (or
-  equivalent) call informs VoiceOver that the visible row set changed. What
-  is missing: whether a VoiceOver user is told the list content changed, or
-  hears nothing until navigating back into the outline. What would settle
-  it: a VoiceOver pass over an instantiated sidebar while calling
-  `setSections(_:)` with a materially different row set, or an explicit
-  decision to post a notification from that method.
+- **Announce state changes**: Not implemented. When `setSections(_:)`
+  reloads the outline with a different row count, no
+  `NSAccessibility.post(element:notification:)` (or equivalent) call informs
+  VoiceOver that the visible row set changed; a VoiceOver user hears nothing
+  until navigating back into the outline.
 - **Minimum tap target**: `outlineView.rowSizeStyle = .default` — per
   Apple's documentation, `NSTableView.rowHeight` (whose documented default
   is 16pt) "is used only if the table's `rowSizeStyle` is set to `custom`",
@@ -402,17 +398,12 @@ screen.
   active palette itself adjusts under Increase Contrast is that theme
   system's responsibility, not something this component decides or can
   override.
-- **Differentiate Without Color**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. A disabled item (`isDisabled == true`) is
-  distinguished from an enabled one only by color — `tertiaryTextColor`
-  versus `primaryTextColor`/`accentColor` (see **mute-disabled-item-appearance**)
-  — with no accompanying non-color cue (no icon change, no strikethrough,
-  no opacity reduction, since `alphaValue` is explicitly set to `1.0` for
-  every row). What is missing: a way for a Differentiate Without Color user
-  to tell a disabled row from an enabled one without relying on color
-  contrast. What would settle it: a design decision on a secondary cue (an
-  icon overlay, a trailing "Coming Soon" label, or similar) for
-  `isDisabled` rows, or confirmation that this is an accepted limitation.
+- **Differentiate Without Color**: Not implemented. A disabled item
+  (`isDisabled == true`) is distinguished from an enabled one only by color —
+  `tertiaryTextColor` versus `primaryTextColor`/`accentColor` (see
+  **mute-disabled-item-appearance**) — with no accompanying non-color cue: no
+  icon change, no strikethrough, and no opacity reduction, since `alphaValue`
+  is explicitly set to `1.0` for every row.
 
 ## Feature Flags
 
@@ -634,7 +625,8 @@ accessibility identifier alongside it. Screen-reader-support is partial:
 labels and an `AXPress` path exist, but no announcement is posted when
 `setSections(_:)` changes the visible row set, and a disabled item is
 distinguished from an enabled one by color alone with no secondary cue (see
-the open questions under Accessibility and Accessibility Options).
+**Announce state changes** under Accessibility and **Differentiate Without
+Color** under Accessibility Options).
 Dynamic-type-support is partial because `CellMetrics.itemFont`/`headerFont`/
 `titleFont` all read live palette fonts (`palette.font(.body)` etc.) rather
 than a fixed point size, but this file cannot confirm whether
@@ -659,3 +651,4 @@ described in Platform Notes).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: rewrote requirements and test vectors to remove private AppKit identifiers (`rootNodesCache`, `TopicListNode`, `buildRootNodes(from:)`, `sizeLastColumnToFit()`, `ColumnFillingOutlineView`) in favor of observable behavior, keeping the mechanism under Platform Notes/Design Decisions; renamed five action-phrased requirements to subject-only names (`disabled-item-selectability`, `ax-press-selection`, `preferred-width`, `missing-id-selection`, `user-selection-callback`) and updated every citation; gave the Border and Minimum-tap-target Appearance/Accessibility entries concrete, source-grounded values instead of vague claims; stated the exact `preferred-width` formula and made its test vector assert equality; split the ax-press test vector into a positive and a gated-false case and made the scroller/outline-style vectors deterministic; fixed a false Design-Decisions cross-reference in the duplicate-item-ids edge case; corrected the WinUI `AutomationId`/`Name` mapping, removed an editorializing WinUI aside, fixed the Compose disabled-item color guidance, and restructured the React/Web notes to one listbox with grouped sections; dropped the redundant `macos` tag; rewrote the Compliance table to cite only real catalog checks (dropping fabricated ones and the inapplicable `touch-target-size` row, adding `dynamic-type-support` and `platform-theming`). |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
