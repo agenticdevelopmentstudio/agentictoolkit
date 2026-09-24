@@ -23,9 +23,9 @@ tags:
 - settings
 - transfer
 depends-on:
-- agenticdeveloperhub://recipes/disclosure
-- agenticdeveloperhub://recipes/button
-- agenticdeveloperhub://recipes/dialog
+- agenticdevelopertoolkit://recipes/disclosure
+- agenticdevelopertoolkit://recipes/button
+- agenticdevelopertoolkit://recipes/dialog
 related:
 - agentictoolkit://recipes/delete-entity-section
 references: []
