@@ -11,8 +11,11 @@ import type { ComponentType } from 'react'
 import type { PopoverEntry, PopoverItem } from '@agentic-toolkit/adh/header'
 
 const push = vi.hoisted(() => vi.fn())
+// A workspace route, not `/`: signed in, the header swaps in the workspace switcher ONLY there —
+// the landing `/` keeps the site menu (Mike, 2026-09-24) — and the header tests below are about
+// that switcher. The footer never reads the path.
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/',
+  usePathname: () => '/grace',
   useRouter: () => ({ push }),
 }))
 

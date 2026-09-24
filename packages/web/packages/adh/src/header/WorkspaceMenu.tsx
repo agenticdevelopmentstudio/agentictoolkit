@@ -93,6 +93,9 @@ export function WorkspaceMenu({
   const openHelp = useHelp().open
   const current = menu.workspaces.find((w) => w.current)
   const label = current?.label ?? (menu.loading ? 'Loading…' : 'Workspaces')
+  // "Workspace" follows a real name only: "Loading… Workspace" and "Workspaces Workspace" are
+  // not phrases, and a placeholder is not a workspace you are in.
+  const triggerText = current ? `${label} Workspace` : label
 
   // The rows — or, with none to show, ONE line of text saying why, where the rows would be. Not
   // a row (see PopoverNotice): the "Loading…" / "No workspaces yet" rows this used to push were
@@ -181,27 +184,22 @@ export function WorkspaceMenu({
       entries={entries}
       openShortcut={{ keys: siteMenuShortcut, label: 'Workspace menu' }}
       onChoose={navigate}
-      // The NAME starts with exactly the text on screen — "Workspace: <name>" — because a speech
-      // user says what they see ("click Workspace Acme"), and a name that began "Acme — switch
-      // workspace" did not contain it (WCAG 2.5.3, label in name). The part after the dash says
-      // what the button does, which the visible text leaves to the chevron.
-      triggerLabel={`Workspace: ${label} — switch workspace`}
-      // A lockup rather than icon + text: the mark at twice the site menu's size spans two
-      // lines, and a small "Workspace:" caption takes the line above the name, so the name
-      // says WHAT it is without growing the bar. The caption is aria-hidden because the
-      // trigger's name already carries it: that name is the aria-label above, which replaces
-      // the button's content, so hiding the caption changes nothing a screen reader announces.
+      // The NAME starts with exactly the text on screen — "<name> Workspace" — because a speech
+      // user says what they see ("click Acme Workspace"), and a name that did not contain it
+      // fails WCAG 2.5.3 (label in name). The part after the dash says what the button does,
+      // which the visible text leaves to the chevron.
+      triggerLabel={`${triggerText} — switch workspace`}
+      // One line: the mark, the name, then the word "Workspace", so the name says WHAT it is. It
+      // replaced a small "Workspace:" caption stacked above the name (Mike, 2026-09-24). The word
+      // is on the TRIGGER only — a menu row is already under a "Workspaces" heading. It is its
+      // own span so that a long name clips before it, and the word never does.
       triggerContent={
         <>
-          <HubMark className="adh-nav-popover__mark adh-workspace-trigger__mark" />
-          <span className="adh-workspace-trigger__text">
-            <span className="adh-workspace-trigger__caption" aria-hidden>
-              Workspace:
-            </span>
-            <span className="adh-workspace-trigger__name">
-              <span className="adh-workspace-trigger__label">{label}</span>
-              <ChevronDown className="adh-nav-popover__chevron" aria-hidden />
-            </span>
+          <HubMark className="adh-nav-popover__mark" />
+          <span className="adh-workspace-trigger__name">
+            <span className="adh-workspace-trigger__label">{label}</span>
+            {current ? <span className="adh-workspace-trigger__suffix">Workspace</span> : null}
+            <ChevronDown className="adh-nav-popover__chevron" aria-hidden />
           </span>
         </>
       }

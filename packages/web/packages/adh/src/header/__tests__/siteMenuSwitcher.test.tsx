@@ -45,7 +45,7 @@ describe('SiteMenuSwitcher — signed in on the hub', () => {
         <SiteMenuSwitcher currentSiteId="hub" authenticated userIsAdmin />
       </WorkspacesMenuProvider>,
     )
-    await openMenu('Workspace: Mike Fullerton — switch workspace')
+    await openMenu('Mike Fullerton Workspace — switch workspace')
     expect(screen.getByRole('combobox', { name: 'Search workspaces' })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: 'Mike Fullerton' })).toHaveAttribute(
       'aria-current',
@@ -61,7 +61,7 @@ describe('SiteMenuSwitcher — signed in on the hub', () => {
         <SiteMenuSwitcher currentSiteId="hub" authenticated />
       </WorkspacesMenuProvider>,
     )
-    await openMenu('Workspace: Mike Fullerton — switch workspace')
+    await openMenu('Mike Fullerton Workspace — switch workspace')
     expect(screen.getByRole('menuitem', { name: 'Help' })).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: /^Admin/ })).toBeNull()
   })
@@ -72,7 +72,7 @@ describe('SiteMenuSwitcher — signed in on the hub', () => {
         <SiteMenuSwitcher currentSiteId="hub" authenticated onSettings={vi.fn()} />
       </WorkspacesMenuProvider>,
     )
-    await openMenu('Workspace: Mike Fullerton — switch workspace')
+    await openMenu('Mike Fullerton Workspace — switch workspace')
     expect(screen.getByRole('button', { name: 'User settings' })).toBeInTheDocument()
   })
 
@@ -82,7 +82,7 @@ describe('SiteMenuSwitcher — signed in on the hub', () => {
         <SiteMenuSwitcher currentSiteId="hub" authenticated />
       </WorkspacesMenuProvider>,
     )
-    await openMenu('Workspace: Workspaces — switch workspace')
+    await openMenu('Workspaces — switch workspace')
     expect(screen.getByRole('status')).toHaveTextContent("Couldn't load your workspaces")
     expect(screen.queryByText('No workspaces yet')).toBeNull()
     expect(screen.getAllByRole('menuitem').map((row) => row.textContent)).toEqual(['Help'])

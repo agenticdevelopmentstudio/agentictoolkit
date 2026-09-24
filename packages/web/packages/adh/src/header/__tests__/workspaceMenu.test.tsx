@@ -81,19 +81,18 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('WorkspaceMenu', () => {
-  it('reads as the workspace you are in, captioned "Workspace:" inside the trigger itself', () => {
+  it('reads as the workspace you are in, followed by the word "Workspace", on the trigger only', () => {
     render(<WorkspaceMenu currentSiteId="hub" menu={{ workspaces: WORKSPACES, loading: false }} />)
     const trigger = render(<>{props().triggerContent}</>).container
     expect(trigger.querySelector('.adh-workspace-trigger__label')?.textContent).toBe(
       'Mike Fullerton',
     )
-    // Above the name, in the trigger (so it is part of the click target) — and hidden from
-    // assistive tech, because the trigger's NAME already carries it (below).
-    const caption = trigger.querySelector('.adh-workspace-trigger__caption')
-    expect(caption?.textContent).toBe('Workspace:')
-    expect(caption).toHaveAttribute('aria-hidden')
-    // The name starts with the words on screen, so "click Workspace Mike Fullerton" finds it.
-    expect(props().triggerLabel).toBe('Workspace: Mike Fullerton — switch workspace')
+    expect(trigger.querySelector('.adh-workspace-trigger__suffix')?.textContent).toBe('Workspace')
+    expect(trigger.textContent).toBe('Mike FullertonWorkspace')
+    // The name starts with the words on screen, so "click Mike Fullerton Workspace" finds it.
+    expect(props().triggerLabel).toBe('Mike Fullerton Workspace — switch workspace')
+    // …and the menu's own rows are the bare names.
+    expect(workspaceItems().map((i) => i.label)).toEqual(['Mike Fullerton', 'Temporal'])
   })
 
   it('lists every workspace, marking the current one', () => {
@@ -119,7 +118,8 @@ describe('WorkspaceMenu', () => {
 
     it('says it is loading rather than claiming there are no workspaces', () => {
       render(<WorkspaceMenu currentSiteId="hub" menu={{ workspaces: [], loading: true }} />)
-      expect(props().triggerLabel).toBe('Workspace: Loading… — switch workspace')
+      // No "Workspace" after a placeholder: it names no workspace.
+      expect(props().triggerLabel).toBe('Loading… — switch workspace')
       expect(notices().map((n) => n.text)).toEqual(['Loading…'])
       expect(workspaceItems()).toEqual([])
     })
