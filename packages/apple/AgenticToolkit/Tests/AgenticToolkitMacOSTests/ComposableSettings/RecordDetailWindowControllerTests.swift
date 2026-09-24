@@ -167,6 +167,33 @@ final class RecordDetailWindowControllerTests: XCTestCase {
         XCTAssertTrue(removed.isEmpty)
     }
 
+    func testRemoveIsDisabledOnARecordTheOwnerKeeps() {
+        let controller = makeController()
+        var removed: [String] = []
+        controller.onRemoveRecord = { removed.append($0.id) }
+        controller.canRemoveRecord = { $0.id != "c2" }
+        controller.setRecords([acme, bolt])
+
+        controller.selectRecord(id: "c2")
+        XCTAssertFalse(controller.footer.isRemoveEnabled)
+        controller.footer.onRemove?()
+        XCTAssertTrue(removed.isEmpty, "the veto holds even if the button is bypassed")
+
+        controller.selectRecord(id: "c1")
+        XCTAssertTrue(controller.footer.isRemoveEnabled)
+    }
+
+    func testSettingTheVetoUpdatesTheButtonAtOnce() {
+        let controller = makeController()
+        controller.setRecords([acme, bolt])
+        controller.selectRecord(id: "c1")
+        XCTAssertTrue(controller.footer.isRemoveEnabled)
+
+        controller.canRemoveRecord = { _ in false }
+
+        XCTAssertFalse(controller.footer.isRemoveEnabled)
+    }
+
     // MARK: - Selection reporting
 
     func testSelectingAnotherRecordIsReportedOnce() {

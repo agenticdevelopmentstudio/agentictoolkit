@@ -34,6 +34,14 @@ extension ComposableSettings {
         public var onRemoveRecord: ((Record) -> Void)?
         public var onSelectRecord: ((Record?) -> Void)?
 
+        /// Asked whether the selected record may be removed. `−` is disabled
+        /// when it answers false, and a remove is refused even if the button
+        /// is bypassed. Nil allows every record. Billing's "Unassigned" row
+        /// answers false: it is a place, not a record anyone made.
+        public var canRemoveRecord: ((Record) -> Bool)? {
+            didSet { updateRemoveButton() }
+        }
+
         // MARK: State
 
         public private(set) var records: [Record] = []
@@ -79,7 +87,8 @@ extension ComposableSettings {
             footer.trailingView = emptyLabel
             footer.onAdd = { [weak self] in self?.onAddRecord?() }
             footer.onRemove = { [weak self] in
-                guard let self, let record = self.selectedRecord else { return }
+                guard let self, let record = self.selectedRecord,
+                      self.canRemoveRecord?(record) ?? true else { return }
                 self.onRemoveRecord?(record)
             }
             viewController?.listViewController.setFooterView(footer)
@@ -160,14 +169,21 @@ extension ComposableSettings {
         private func syncSelection() {
             let current = viewController?.selectedPanel
                 .flatMap { recordIDsByPanel[ObjectIdentifier($0 as AnyObject)] }
-            footer.isRemoveEnabled = current != nil
+            let changed = current != selectedRecordID
+            selectedRecordID = current
+            // A reload can change whether the same record may be removed, so
+            // the button is re-asked every time, not only when the selection moves.
+            updateRemoveButton()
             // Every rebuild ends in a navigation notification, so without this
             // guard a window that reloads on a timer tick would re-announce its
             // selection once a second and the detail pane would reload under
             // the reader.
-            guard current != selectedRecordID else { return }
-            selectedRecordID = current
+            guard changed else { return }
             onSelectRecord?(selectedRecord)
+        }
+
+        private func updateRemoveButton() {
+            footer.isRemoveEnabled = selectedRecord.map { canRemoveRecord?($0) ?? true } ?? false
         }
     }
 }
