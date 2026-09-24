@@ -126,6 +126,18 @@ export function useMasterDetailForm<TItem, TInput>(
   const stored: TInput | null = creating ? null : base;
 
   const dirty = Boolean(draft) && Boolean(base) && config.differs(draft!, base!);
+  // What blocks `d` from saving — `config.validate`'s reason, UNLESS the stored record already
+  // fails with that very reason. Then the edit did not cause the problem, and refusing it holds
+  // every other field hostage to a value the BACKEND wrote: the team pane shipped with Save dark on
+  // every provisioned team, and a pane-by-pane exemption (`unchangedFromStored`) fixed only the
+  // panes someone remembered to fix, while ~25 feed a `validate` through here (Mike, 2026-09-24).
+  // The backend stays the authority on what it accepts. Never on create: nothing is stored there,
+  // so a new record is held to every rule.
+  function reasonFor(d: TInput): string | null {
+    const reason = config.validate(d, others, stored);
+    if (reason === null || stored === null) return reason;
+    return config.validate(stored, others, stored) === reason ? null : reason;
+  }
   // Why Save can't fire, as the REASON string `config.validate` already returns rather than the
   // boolean it used to be collapsed into. Every pane built on this hook renders its Save through
   // the shared ButtonBar and shows nothing but `form.error` — which `save()` alone sets, and
@@ -133,7 +145,7 @@ export function useMasterDetailForm<TItem, TInput>(
   // eleven panes greying Save out with no explanation anywhere. Now it rides in `actions` next to
   // `canSave` and ButtonBar renders it beside the button. Not gated on `dirty`: a create opens on
   // a blank draft that is already blocked, and that is exactly when the reason is instruction.
-  const blockedReason = draft ? config.validate(draft, others, stored) : null;
+  const blockedReason = draft ? reasonFor(draft) : null;
   const valid = Boolean(draft) && blockedReason === null;
   // dirty && valid ONLY. The in-flight term is NOT folded in here: `canSave` is a statement about
   // the DRAFT, and every consumer hands it to ButtonBar → SaveCancelButtons, which already renders
@@ -236,7 +248,7 @@ export function useMasterDetailForm<TItem, TInput>(
     // Already in flight — swallow the duplicate. Reporting `false` is right for the exit guard
     // too: nothing has been persisted YET, so leaving now would still lose the edit.
     if (savingRef.current) return false;
-    const problem = config.validate(draft, others, stored);
+    const problem = reasonFor(draft);
     if (problem) {
       setError(problem);
       return false;

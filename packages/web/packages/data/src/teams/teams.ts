@@ -4,7 +4,7 @@
 // The backend column names differ from the UI's vocabulary, so this client maps
 // between them in one place and the components keep using {displayName, identifier}:
 //   UI displayName  <->  backend `name`
-//   UI identifier   <->  backend `slug`   (reverse-domain string; the user-facing key)
+//   UI identifier   <->  backend `slug`   (a lowercase slug; the user-facing key)
 //   UI id           <->  backend `id`     (opaque server-generated UUID)
 //
 // Scoping: a team's `owner_id` is its owning ecosystem, and every request here names the
@@ -20,7 +20,7 @@ import type { TeamRow, TeamCreateBody, TeamPutBody } from "./wire";
 export interface Team {
   id: string;
   displayName: string;
-  /** Reverse-domain identifier, e.g. `com.example.platform`. */
+  /** Lowercase slug, unique within the owning ecosystem, e.g. `participants`. */
   identifier: string;
   createdAt: string;
   updatedAt: string;
@@ -43,11 +43,18 @@ export function toTeam(r: TeamRow): Team {
   };
 }
 
-/** Returns a human-readable error for an invalid reverse-domain id, else null. */
+/** Returns a human-readable error for an invalid identifier, else null.
+ *
+ *  A team identifier is a SLUG: lowercase letters and digits, joined by single dots or hyphens.
+ *  It used to demand reverse-domain form (`com.example.platform`), which nothing behind it
+ *  shares — `team.teams.slug` carries only `UNIQUE (owner_id, slug)`, and every team the backend
+ *  provisions is a plain slug (`participants`, `admins`). Renaming a team to `members` was
+ *  refused with Save dark, for exactly the shape the server itself writes (Mike, 2026-09-24).
+ *  Dotted names stay legal, so no identifier that passed before fails now. */
 export function validateTeamIdentifier(identifier: string): string | null {
   if (!identifier) return "Identifier is required.";
-  if (!/^[a-z0-9]+(\.[a-z0-9-]+)+$/.test(identifier)) {
-    return "Use reverse-domain form, e.g. com.example.platform.";
+  if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(identifier)) {
+    return "Use lowercase letters and digits, joined by dots or hyphens, e.g. platform-team.";
   }
   return null;
 }

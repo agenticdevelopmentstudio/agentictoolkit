@@ -217,21 +217,6 @@ export function ButtonBar({
         </h2>
       )}
       <div className="flex-1" />
-      {/* Why Save is grey, from the FIRST frame — not gated on `dirty`. The detail below shows
-          only `form.error`, which `save()` alone sets and `canSave` keeps unreachable by click,
-          so without this every master/detail create opens on a dead Save with no explanation
-          anywhere on screen. An EDIT opens on a loaded, valid row where `blockedReason` is null,
-          so it stays quiet on its own. Sits left of Cancel/Save; truncates rather than pushing
-          the buttons off the bar. */}
-      {blockedReason && (
-        <span
-          role="status"
-          className="mr-2 max-w-[40%] truncate text-xs text-apt-text-muted"
-          title={blockedReason}
-        >
-          {blockedReason}
-        </span>
-      )}
       <SaveCancelButtons
         canCancel={canCancel}
         canSave={canSave}
@@ -247,6 +232,29 @@ export function ButtonBar({
       )}
     </div>
   );
+  // Why Save is grey, from the FIRST frame — not gated on `dirty`. The detail below shows only
+  // `form.error`, which `save()` alone sets and `canSave` keeps unreachable by click, so without this
+  // every master/detail create opens on a dead Save with no explanation anywhere on screen. An EDIT
+  // opens on a loaded, valid row where `blockedReason` is null, so it stays quiet on its own.
+  //
+  // Its OWN line under the bar, not a span inside it: the bar's title is absolutely centred, so an
+  // in-flow span left of Save painted straight over any title long enough to reach it — the team
+  // pane's "Use reverse-domain form…" sat on top of "Settings (… Participants Team)" and neither
+  // could be read (Mike, 2026-09-24). Right-aligned so it reads as Save's caption; wraps rather
+  // than truncates, because a clipped reason is the one piece of text here the user needs whole.
+  const strip = (
+    <div className="flex w-full min-w-0 flex-col">
+      {bar}
+      {blockedReason && (
+        <p
+          role="status"
+          className="border-b border-apt-border bg-apt-bg px-6 py-1 text-right text-xs text-apt-text-muted"
+        >
+          {blockedReason}
+        </p>
+      )}
+    </div>
+  );
   // The bar hoists to the host's full-width strip above the rails whenever there is a host to
   // hoist into — the hub's workspace chrome and, since the toolbar slot became real there, the
   // standalone rail host too. With no host at all (a legacy route, a test that stubs the registry)
@@ -254,7 +262,7 @@ export function ButtonBar({
   // deliberately — see the prop.
   return (
     <>
-      {hoist ? <ToolbarPortal>{bar}</ToolbarPortal> : bar}
+      {hoist ? <ToolbarPortal>{strip}</ToolbarPortal> : strip}
       {/* Shared confirm modal for delete — replaces the old native confirm(). */}
       <AlertModal
         open={deletePrompt != null}

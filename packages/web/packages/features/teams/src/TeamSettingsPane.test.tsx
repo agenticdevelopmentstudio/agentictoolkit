@@ -31,10 +31,10 @@ describe("TeamSettingsPane", () => {
     await waitFor(() => expect(save).toBeEnabled());
   });
 
-  // The backend provisions every workspace's `participants` and `admins` teams with plain slugs,
-  // which the client's reverse-domain rule rejects. Save must still enable on an edit that does
-  // not touch the identifier — this is the case the pane actually shipped broken on.
-  it("enables Save on a backend-provisioned team whose identifier is not reverse-domain", async () => {
+  // The backend provisions every workspace's `participants` and `admins` teams with plain slugs.
+  // Save must enable on an edit that does not touch the identifier — the case the pane first
+  // shipped broken on.
+  it("enables Save on a backend-provisioned team", async () => {
     const provisioned = { ...TEAM, identifier: "participants" } as Team;
     render(<TeamSettingsPane teamId="t1" items={[provisioned]} refresh={() => {}} />);
     const name = await screen.findByLabelText("Display name");
@@ -43,11 +43,24 @@ describe("TeamSettingsPane", () => {
     await waitFor(() => expect(save).toBeEnabled());
   });
 
-  it("still holds a CHANGED identifier to the reverse-domain form", async () => {
+  // The rename the user was refused: a provisioned team renamed to another plain slug
+  // (Mike, 2026-09-24).
+  it("enables Save when a team is renamed to a plain slug", async () => {
+    const provisioned = { ...TEAM, identifier: "participants" } as Team;
+    render(<TeamSettingsPane teamId="t1" items={[provisioned]} refresh={() => {}} />);
+    const name = await screen.findByLabelText("Display name");
+    const id = screen.getByLabelText("Identifier");
+    const save = screen.getByRole("button", { name: /save/i });
+    fireEvent.change(name, { target: { value: "Members" } });
+    fireEvent.change(id, { target: { value: "members" } });
+    await waitFor(() => expect(save).toBeEnabled());
+  });
+
+  it("still holds a CHANGED identifier to the slug form", async () => {
     render(<TeamSettingsPane teamId="t1" items={[TEAM]} refresh={() => {}} />);
     const id = await screen.findByLabelText("Identifier");
     const save = screen.getByRole("button", { name: /save/i });
-    fireEvent.change(id, { target: { value: "not-reverse-domain" } });
+    fireEvent.change(id, { target: { value: "not a slug" } });
     await waitFor(() => expect(save).toBeDisabled());
   });
 

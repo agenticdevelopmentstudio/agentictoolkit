@@ -182,7 +182,7 @@ export function TeamsFeature({
       rail={{
         title: "All teams",
         help: "Pick a team to manage its settings, members, and permissions.",
-        // No `getSublabel`. It showed the reverse-domain identifier under every name, which is a
+        // No `getSublabel`. It showed the identifier under every name, which is a
         // fact about the team a reader needs exactly twice — when checking a collision before
         // naming a new one, and when reading a URL — and it is on the Settings pane both times.
         // On the list it doubled every row's height to disambiguate names that are almost never

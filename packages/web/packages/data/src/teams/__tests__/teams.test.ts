@@ -24,7 +24,16 @@ describe("validateTeamIdentifier", () => {
     expect(validateTeamIdentifier("")).toMatch(/required/i);
   });
 
-  it("rejects a single-label identifier", () => {
-    expect(validateTeamIdentifier("platform")).toMatch(/reverse-domain/i);
+  // The backend's own teams are plain slugs (`participants`, `admins`), so a single label is the
+  // COMMON shape, not an error.
+  it("accepts a plain slug, hyphenated or not", () => {
+    expect(validateTeamIdentifier("members")).toBeNull();
+    expect(validateTeamIdentifier("platform-team")).toBeNull();
+  });
+
+  it("rejects spaces, capitals and dangling separators", () => {
+    for (const bad of ["core team", "Members", "members.", "-members", "a..b"]) {
+      expect(validateTeamIdentifier(bad), bad).toMatch(/lowercase/i);
+    }
   });
 });

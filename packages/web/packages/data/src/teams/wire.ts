@@ -10,7 +10,7 @@
 export interface TeamRow {
   id: string;
   name: string;
-  /** Reverse-domain identifier, e.g. `com.example.platform`. */
+  /** Lowercase slug, unique within the owning ecosystem, e.g. `participants`. */
   slug: string;
   createdAt: string;
   updatedAt: string;

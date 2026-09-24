@@ -137,3 +137,44 @@ describe("unchangedFromStored", () => {
     expect(unchangedFromStored("", "a@b.co")).toBe(false);
   });
 });
+
+// The hook's own exemption, for validators that grandfather nothing themselves: a reason the STORED
+// record already fails with was not caused by the edit, so it never holds Save (Mike, 2026-09-24).
+describe("useMasterDetailForm — a problem already on record never blocks an edit", () => {
+  const SLUG = "Use a dotted identifier.";
+  /** A strict format rule with no stored-value exemption of its own. */
+  function strictValidate(d: Draft): string | null {
+    if (!d.name.trim()) return NAME_REQUIRED;
+    return d.email.includes(".") ? null : SLUG;
+  }
+  const LEGACY: Row = { id: "legacy", name: "Legacy", email: "participants" };
+
+  it("enables Save on an edit to another field of a record that fails the rule", () => {
+    const { result } = renderHook(() =>
+      useMasterDetailForm(makeConfig({ items: [LEGACY], validate: strictValidate })),
+    );
+    act(() => result.current.select("legacy"));
+    act(() => result.current.onChange({ name: "Renamed", email: "participants" }));
+    expect(result.current.actions.blockedReason).toBeNull();
+    expect(result.current.actions.canSave).toBe(true);
+  });
+
+  it("still blocks a NEW problem the edit introduces", () => {
+    const { result } = renderHook(() =>
+      useMasterDetailForm(makeConfig({ items: [LEGACY], validate: strictValidate })),
+    );
+    act(() => result.current.select("legacy"));
+    act(() => result.current.onChange({ name: "", email: "participants" }));
+    expect(result.current.actions.blockedReason).toBe(NAME_REQUIRED);
+    expect(result.current.actions.canSave).toBe(false);
+  });
+
+  it("grandfathers nothing on create", () => {
+    const { result } = renderHook(() =>
+      useMasterDetailForm(makeConfig({ items: [LEGACY], validate: strictValidate })),
+    );
+    act(() => result.current.actions.onCreate());
+    act(() => result.current.onChange({ name: "New", email: "participants" }));
+    expect(result.current.actions.blockedReason).toBe(SLUG);
+  });
+});

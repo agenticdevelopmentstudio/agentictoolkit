@@ -20,9 +20,9 @@ export function teamToInput(t: Team): TeamInput {
 /** Returns an error message, or null when the draft is valid.
  *
  *  `storedIdentifier` is the identifier already on the record being edited (absent on a create).
- *  It is exempt from the reverse-domain FORMAT rule: the backend provisions teams with plain slugs
- *  (`participants`, `admins`), and requiring the user to rename one before any other field could
- *  be saved left Save permanently disabled on exactly the teams every workspace has. A changed
+ *  It is exempt from the slug FORMAT rule: a row the backend wrote need not satisfy a
+ *  client-side rule, and requiring the user to rename one before any other field could be saved
+ *  is how Save once sat permanently disabled on the teams every workspace has. A changed
  *  identifier is still held to the format. ONLY the format is exempt: an empty identifier is
  *  still required, and an untouched one is still checked for uniqueness. */
 export function teamValidate(
@@ -84,7 +84,7 @@ export function TeamDetail({
           <Label htmlFor={identifierId}>Identifier</Label>
           <Input
             id={identifierId}
-            placeholder="com.example.platform"
+            placeholder="platform-team"
             value={draft.identifier}
             onChange={(e) => set("identifier", e.target.value.toLowerCase())}
             autoCapitalize="none"
@@ -92,7 +92,7 @@ export function TeamDetail({
             spellCheck={false}
           />
           <p className="text-xs text-apt-text-muted">
-            Unique reverse-domain string.
+            Unique within this workspace: lowercase letters and digits, joined by dots or hyphens.
           </p>
         </div>
 
