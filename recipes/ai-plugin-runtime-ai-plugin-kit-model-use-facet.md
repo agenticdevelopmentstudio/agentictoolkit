@@ -3,11 +3,11 @@ id: f628f7f9-9c7b-4820-a4bf-231312a74839
 title: ModelUseFacet
 domain: agentictoolkit://recipes/ai-plugin-runtime-ai-plugin-kit-model-use-facet
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -433,10 +433,10 @@ Not applicable: `ModelUseFacet.swift` contains no `Logger`, `os_log`, or
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [separation-of-concerns](agentictoolkit://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
-| [graceful-degradation](agentictoolkit://compliance/reliability#graceful-degradation) | passed | Reliability |
-| [test-pyramid](agentictoolkit://compliance/best-practices#test-pyramid) | passed | Best Practices |
-| [no-hardcoded-strings](agentictoolkit://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
+| [graceful-degradation](agenticdevelopercookbook://compliance/reliability#graceful-degradation) | passed | Reliability |
+| [test-pyramid](agenticdevelopercookbook://compliance/best-practices#test-pyramid) | passed | Best Practices |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
 
 Notes: separation-of-concerns passes because the source itself distinguishes
 "the pure core" (`facets(text:capabilities:)`) from the `AIModelCatalog`-aware
@@ -453,3 +453,4 @@ no-hardcoded-strings fails because `title` and `detail` return English-only
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Compliance links moved to the agenticdevelopercookbook compliance scheme |
