@@ -3,7 +3,7 @@ id: ec64b22b-8a25-431d-8866-b7a01acd91fe
 title: CrudTable
 domain: agentictoolkit://recipes/crud-table
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: draft
 language: en
 created: '2026-07-03'
@@ -46,29 +46,29 @@ data-fetching or state: the caller supplies `rows`, `loading`, and `error` (from
 
 ## Behavioral Requirements
 
-- **must-render-pk-then-scalar-columns**: The table MUST render the metadata's
+- **render-pk-then-scalar-columns**: The table MUST render the metadata's
   primary-key column(s) first, followed by the remaining scalar columns, and MUST
   omit `object` and `array` columns (they are form-only).
-- **must-cap-columns**: The table MUST render at most six columns.
-- **must-header-columns-by-name**: Each column header MUST show the column's `name`
+- **cap-columns**: The table MUST render at most six columns.
+- **header-columns-by-name**: Each column header MUST show the column's `name`
   exactly as served by the API.
-- **must-format-null-cells**: A cell whose value is `null`/`undefined` MUST render
+- **format-null-cells**: A cell whose value is `null`/`undefined` MUST render
   as an em dash (`—`).
-- **must-stringify-non-string-cells**: A non-string cell value MUST render as its
+- **stringify-non-string-cells**: A non-string cell value MUST render as its
   JSON string form.
-- **must-truncate-long-cells**: A rendered cell longer than 80 characters MUST be
+- **truncate-long-cells**: A rendered cell longer than 80 characters MUST be
   truncated with a trailing ellipsis (`…`).
-- **must-show-loading-state**: While `loading` is true, the table body MUST show a
+- **show-loading-state**: While `loading` is true, the table body MUST show a
   spinner and the count MUST read "Loading…" instead of the row table.
-- **must-show-error**: When `error` is non-null, the table MUST surface the error
+- **show-error**: When `error` is non-null, the table MUST surface the error
   message.
-- **must-show-empty-state**: When there are zero rows and no error (and not
+- **show-empty-state**: When there are zero rows and no error (and not
   loading), the table MUST show a "No rows yet." placeholder instead of a table.
-- **must-offer-new-action**: The header MUST render a New button that invokes
+- **offer-new-action**: The header MUST render a New button that invokes
   `onNew` when activated.
-- **must-offer-per-row-edit-delete**: Every data row MUST render Edit and Delete
+- **offer-per-row-edit-delete**: Every data row MUST render Edit and Delete
   actions that invoke `onEdit(row)` / `onDelete(row)` with that row.
-- **must-show-row-count**: When not loading, the header MUST show the row count,
+- **show-row-count**: When not loading, the header MUST show the row count,
   correctly singularized ("1 row" vs "N rows").
 
 ## Appearance
@@ -122,18 +122,18 @@ data-fetching or state: the caller supplies `rows`, `loading`, and `error` (from
 
 | ID | Requirements | Input | Expected |
 |---|---|---|---|
-| T1 | must-render-pk-then-scalar-columns, must-cap-columns | meta with 2 pk + 8 scalars + 1 object column | Headers = the 2 pk columns then 4 scalars (6 total); the object column absent |
-| T2 | must-header-columns-by-name | column `name: "createdAt"` | Header cell text is "createdAt" |
-| T3 | must-format-null-cells | row `{ status: null }` | That cell renders `—` |
-| T4 | must-stringify-non-string-cells | row `{ count: 3 }` | Cell renders "3" (JSON form) |
-| T5 | must-truncate-long-cells | a 200-char string cell | Cell shows first 80 chars + `…` |
-| T6 | must-show-loading-state | `loading=true` | Spinner in body; count reads "Loading…" |
-| T7 | must-show-error | `error="Boom"` | "Boom" shown via `ErrorText` |
-| T8 | must-show-empty-state | `rows=[]`, `error=null`, `loading=false` | "No rows yet." shown; no table |
-| T9 | must-offer-new-action | Click "New" | `onNew` called |
-| T10 | must-offer-per-row-edit-delete | Click Edit / Delete on a row | `onEdit(row)` / `onDelete(row)` called with that row |
-| T11 | must-show-row-count | `rows.length === 1` | Count reads "1 row" (singular) |
-| T12 | must-show-row-count | `rows.length === 3` | Count reads "3 rows" (plural) |
+| T1 | render-pk-then-scalar-columns, cap-columns | meta with 2 pk + 8 scalars + 1 object column | Headers = the 2 pk columns then 4 scalars (6 total); the object column absent |
+| T2 | header-columns-by-name | column `name: "createdAt"` | Header cell text is "createdAt" |
+| T3 | format-null-cells | row `{ status: null }` | That cell renders `—` |
+| T4 | stringify-non-string-cells | row `{ count: 3 }` | Cell renders "3" (JSON form) |
+| T5 | truncate-long-cells | a 200-char string cell | Cell shows first 80 chars + `…` |
+| T6 | show-loading-state | `loading=true` | Spinner in body; count reads "Loading…" |
+| T7 | show-error | `error="Boom"` | "Boom" shown via `ErrorText` |
+| T8 | show-empty-state | `rows=[]`, `error=null`, `loading=false` | "No rows yet." shown; no table |
+| T9 | offer-new-action | Click "New" | `onNew` called |
+| T10 | offer-per-row-edit-delete | Click Edit / Delete on a row | `onEdit(row)` / `onDelete(row)` called with that row |
+| T11 | show-row-count | `rows.length === 1` | Count reads "1 row" (singular) |
+| T12 | show-row-count | `rows.length === 3` | Count reads "3 rows" (plural) |
 
 ## Edge Cases
 
@@ -222,4 +222,5 @@ handlers (and `useCrudResource`) own any telemetry or error reporting.
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Renamed every requirement to subject-only kebab-case, dropping the old prefix everywhere it is cited. |
 | 1.0.0 | 2026-07-03 | Mike Fullerton | Initial recipe; documents the metadata-driven CrudTable from @adh-shared/crud. |

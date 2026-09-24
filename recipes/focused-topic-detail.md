@@ -3,7 +3,7 @@ id: 7f122a27-5b49-4f03-9439-1152249bc08f
 title: "Focused Topic Detail (FTD) View"
 domain: agentictoolkit://recipes/focused-topic-detail
 type: recipe
-version: 1.0.0
+version: 1.1.0
 status: accepted
 language: en
 created: 2026-06-26
@@ -81,27 +81,27 @@ identifier can change without breaking UUID foreign keys.
 
 ## Integration Requirements
 
-- **must-compose-shared-block**: Every FTD route MUST compose the shared `focused-topic-detail` block and MUST NOT hand-roll the master/detail layout.
-- **must-first-topic-is-entity**: The first topic MUST be the entity itself, labelled with the singular `Entity` name, editing the entity's own attributes plus the Danger section; there MUST be no divider above the first topic.
-- **must-remove-action-bar**: The FTD view MUST NOT render the old full-width `New | Delete` action bar; New moves into the selector popup and Delete into the entity pane's Danger section.
-- **must-editable-identifier**: The Identifier (rdid) MUST be editable for existing entities, renaming via `PATCH /registry/identifiers/{rdid}` with the **old** rdid in the path, leaving the internal UUID and all FK references unchanged.
-- **must-validate-identifier-format**: The Identifier MUST validate the reverse-domain format `^[a-z0-9]+(?:\.[a-z0-9-]+)+$`, lowercased on input.
-- **must-surface-identifier-collision**: A server-side uniqueness collision (HTTP 409) MUST surface as an inline field error.
-- **must-danger-zone-collapsed-neutral**: The Danger Zone MUST be a disclosure that is collapsed by default and styled neutrally while closed, taking the `apt-red` accent (red title + border) only once disclosed; the warning-triangle glyph MUST stay `apt-gold` in both states.
-- **must-two-step-delete**: Deleting an entity MUST require two steps — a warning alert with `[ Cancel ][ Yes ]`, then (only on Yes) a type-to-confirm dialog.
-- **must-typed-confirm-exact**: The `Permanently Delete` button MUST stay disabled until the typed text exactly equals the rdid — case-sensitive, no leading/trailing/internal extra whitespace, no normalization.
-- **must-delete-navigates-to-all**: On a successful delete, the view MUST clear the persisted last-selected entry and navigate to the All view; on error it MUST show inline error text and keep the dialog open.
-- **must-selector-popup-switches-focus**: The selector popup MUST be the single entry point for switching focus; All and each entity MUST be radio items that navigate (`/{basePath}/all` or `/{basePath}/{id}/{topic}`).
-- **must-new-action-in-popup**: The popup MUST place a non-radio `New {Entity}…` action at the bottom after a divider that opens the Create dialog (with its unsaved-changes guard), not a navigation.
-- **must-all-view-filter**: The All view MUST provide a text filter immediately left of the card/list toggle, filtering client-side by name and identifier (case-insensitive substring), with an empty state "No {entities} match \"{query}\".".
-- **must-all-view-toggle**: The All view MUST provide a two-option segmented toggle — cards (`LayoutGrid`) and list (`List`) — defaulting to cards, both linking each entity to `/{basePath}/{id}/{firstTopic}`.
-- **must-persist-view-mode**: The chosen All view mode MUST persist under `adh:ftd:{basePath}:viewMode` so it survives navigation and reload.
-- **must-resume-last-selected**: On entering the bare base path, after the entity list loads the view MUST focus the last-selected entity under `adh:ftd:{basePath}:lastId` when it still matches a live entity, otherwise show the All view.
-- **must-clear-laststate-on-delete**: When an entity is deleted, the view MUST clear `…:lastId` if it pointed at that entity.
-- **must-resolve-after-list-load**: Local-storage resolution MUST occur after the list has loaded (to avoid SSR hydration mismatch), showing the normal loading state until then.
-- **must-keep-shared-pieces-in-the-toolkit**: New shared pieces (Danger zone / delete-confirm dialog, All toolbar, list-mode renderer) MUST go into `@agentic-toolkit`, never forked into a site.
-- **must-handle-loading-empty-error**: Every new surface MUST handle loading, empty, and error states (All list loading, no entities yet, filter-no-match, delete error inline, identifier-collision inline).
-- **must-be-accessible**: Dialogs MUST be `role="dialog"` with focus trap + restore and labelled controls; the type-to-confirm input MUST have a `<label htmlFor>`; the toolbar/toggle MUST carry ARIA roles; full keyboard operability (Esc cancels dialogs) is required.
+- **compose-shared-block**: Every FTD route MUST compose the shared `focused-topic-detail` block and MUST NOT hand-roll the master/detail layout.
+- **first-topic-is-entity**: The first topic MUST be the entity itself, labelled with the singular `Entity` name, editing the entity's own attributes plus the Danger section; there MUST be no divider above the first topic.
+- **remove-action-bar**: The FTD view MUST NOT render the old full-width `New | Delete` action bar; New moves into the selector popup and Delete into the entity pane's Danger section.
+- **editable-identifier**: The Identifier (rdid) MUST be editable for existing entities, renaming via `PATCH /registry/identifiers/{rdid}` with the **old** rdid in the path, leaving the internal UUID and all FK references unchanged.
+- **validate-identifier-format**: The Identifier MUST validate the reverse-domain format `^[a-z0-9]+(?:\.[a-z0-9-]+)+$`, lowercased on input.
+- **surface-identifier-collision**: A server-side uniqueness collision (HTTP 409) MUST surface as an inline field error.
+- **danger-zone-collapsed-neutral**: The Danger Zone MUST be a disclosure that is collapsed by default and styled neutrally while closed, taking the `apt-red` accent (red title + border) only once disclosed; the warning-triangle glyph MUST stay `apt-gold` in both states.
+- **two-step-delete**: Deleting an entity MUST require two steps — a warning alert with `[ Cancel ][ Yes ]`, then (only on Yes) a type-to-confirm dialog.
+- **typed-confirm-exact**: The `Permanently Delete` button MUST stay disabled until the typed text exactly equals the rdid — case-sensitive, no leading/trailing/internal extra whitespace, no normalization.
+- **delete-navigates-to-all**: On a successful delete, the view MUST clear the persisted last-selected entry and navigate to the All view; on error it MUST show inline error text and keep the dialog open.
+- **selector-popup-switches-focus**: The selector popup MUST be the single entry point for switching focus; All and each entity MUST be radio items that navigate (`/{basePath}/all` or `/{basePath}/{id}/{topic}`).
+- **new-action-in-popup**: The popup MUST place a non-radio `New {Entity}…` action at the bottom after a divider that opens the Create dialog (with its unsaved-changes guard), not a navigation.
+- **all-view-filter**: The All view MUST provide a text filter immediately left of the card/list toggle, filtering client-side by name and identifier (case-insensitive substring), with an empty state "No {entities} match \"{query}\".".
+- **all-view-toggle**: The All view MUST provide a two-option segmented toggle — cards (`LayoutGrid`) and list (`List`) — defaulting to cards, both linking each entity to `/{basePath}/{id}/{firstTopic}`.
+- **persist-view-mode**: The chosen All view mode MUST persist under `adh:ftd:{basePath}:viewMode` so it survives navigation and reload.
+- **resume-last-selected**: On entering the bare base path, after the entity list loads the view MUST focus the last-selected entity under `adh:ftd:{basePath}:lastId` when it still matches a live entity, otherwise show the All view.
+- **clear-laststate-on-delete**: When an entity is deleted, the view MUST clear `…:lastId` if it pointed at that entity.
+- **resolve-after-list-load**: Local-storage resolution MUST occur after the list has loaded (to avoid SSR hydration mismatch), showing the normal loading state until then.
+- **keep-shared-pieces-in-the-toolkit**: New shared pieces (Danger zone / delete-confirm dialog, All toolbar, list-mode renderer) MUST go into `@agentic-toolkit`, never forked into a site.
+- **handle-loading-empty-error**: Every new surface MUST handle loading, empty, and error states (All list loading, no entities yet, filter-no-match, delete error inline, identifier-collision inline).
+- **be-accessible**: Dialogs MUST be `role="dialog"` with focus trap + restore and labelled controls; the type-to-confirm input MUST have a `<label htmlFor>`; the toolbar/toggle MUST carry ARIA roles; full keyboard operability (Esc cancels dialogs) is required.
 
 ## Layout
 
@@ -160,14 +160,14 @@ Color only via `apt-*` tokens (`apt-red` destructive, `apt-border`, `apt-text-mu
 
 | ID | Requirements | Input | Expected |
 |---|---|---|---|
-| T1 | must-editable-identifier, must-surface-identifier-collision | rename Identifier to a taken rdid | inline collision (409) error; UUID unchanged |
-| T2 | must-editable-identifier | rename Identifier to a free rdid | `PATCH /registry/identifiers/{oldRdid}` called; route/`lastId` refresh to the new rdid |
-| T3 | must-two-step-delete, must-typed-confirm-exact | Delete → Yes → type partial rdid | `Permanently Delete` disabled until exact, case-sensitive match |
-| T4 | must-delete-navigates-to-all, must-clear-laststate-on-delete | confirm delete | API called; `lastId` cleared; navigates to All |
-| T5 | must-new-action-in-popup | open popup → New {Entity}… | Create dialog opens (not a navigation) |
-| T6 | must-all-view-filter | type a query in All filter | list narrows by name/identifier; no-match shows empty state |
-| T7 | must-all-view-toggle, must-persist-view-mode | switch to list, reload | list mode persists via `…:viewMode` |
-| T8 | must-resume-last-selected | enter bare base path with a live `lastId` | focuses that entity; stale/missing → All |
+| T1 | editable-identifier, surface-identifier-collision | rename Identifier to a taken rdid | inline collision (409) error; UUID unchanged |
+| T2 | editable-identifier | rename Identifier to a free rdid | `PATCH /registry/identifiers/{oldRdid}` called; route/`lastId` refresh to the new rdid |
+| T3 | two-step-delete, typed-confirm-exact | Delete → Yes → type partial rdid | `Permanently Delete` disabled until exact, case-sensitive match |
+| T4 | delete-navigates-to-all, clear-laststate-on-delete | confirm delete | API called; `lastId` cleared; navigates to All |
+| T5 | new-action-in-popup | open popup → New {Entity}… | Create dialog opens (not a navigation) |
+| T6 | all-view-filter | type a query in All filter | list narrows by name/identifier; no-match shows empty state |
+| T7 | all-view-toggle, persist-view-mode | switch to list, reload | list mode persists via `…:viewMode` |
+| T8 | resume-last-selected | enter bare base path with a live `lastId` | focuses that entity; stale/missing → All |
 
 ## Edge Cases
 
@@ -253,4 +253,5 @@ separate, reversible decision and add a redirect.
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Renamed every requirement to subject-only kebab-case, dropping the old prefix everywhere it is cited. |
 | 1.0.0 | 2026-06-26 | Mike Fullerton | Initial conversion from legacy UI spec (carries forward the v0.2 locked decisions A–D). |

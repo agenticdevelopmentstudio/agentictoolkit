@@ -3,7 +3,7 @@ id: 3dc693ab-28e4-4624-9b2d-8dc81f81e037
 title: CrudRecordForm
 domain: agentictoolkit://recipes/crud-record-form
 type: recipe
-version: 1.0.0
+version: 1.1.0
 status: draft
 language: en
 created: '2026-07-03'
@@ -66,32 +66,32 @@ orchestration). The metadata→payload logic (`writableColumns`, `toDraft`,
 
 ## Integration Requirements
 
-- **must-build-fields-from-writable-columns**: The form MUST render one control per
+- **build-fields-from-writable-columns**: The form MUST render one control per
   writable column and MUST NOT render any `serverManaged` column.
-- **must-pick-control-by-type**: The form MUST pick each control from the column
+- **pick-control-by-type**: The form MUST pick each control from the column
   type — enum → `Select`, boolean → `Checkbox`, integer/number → numeric input,
   object/array/unknown → JSON textarea, otherwise text input.
-- **must-wrap-nonboolean-in-field**: The form MUST wrap each non-boolean control in
+- **wrap-nonboolean-in-field**: The form MUST wrap each non-boolean control in
   a `Field` labeled with the column name, and MUST render a boolean inline beside
   its caption.
-- **must-mark-required-and-json**: The form MUST append ` *` to a required column's
+- **mark-required-and-json**: The form MUST append ` *` to a required column's
   label and MUST show a `JSON` hint on object/array/unknown columns.
-- **must-seed-draft-from-initial**: The form MUST seed its draft from `initial` when
+- **seed-draft-from-initial**: The form MUST seed its draft from `initial` when
   editing (booleans as booleans, JSON columns pretty-printed, others as text) and
   MUST start create fields empty (booleans untouched/`undefined`).
-- **must-reject-empty-required**: On submit, the form MUST block submission and show
+- **reject-empty-required**: On submit, the form MUST block submission and show
   a "`<name>` is required" error when a required column is empty.
-- **must-validate-numbers**: On submit, a non-finite number MUST be rejected with
+- **validate-numbers**: On submit, a non-finite number MUST be rejected with
   "`<name>` must be a number", and a non-integer in an integer column with
   "`<name>` must be an integer".
-- **must-validate-json**: On submit, an object/array/unknown column whose text is
+- **validate-json**: On submit, an object/array/unknown column whose text is
   not valid JSON MUST be rejected with "`<name>` must be valid JSON".
-- **must-omit-untouched-optionals-on-create**: On create, an empty/untouched
+- **omit-untouched-optionals-on-create**: On create, an empty/untouched
   optional field MUST be omitted from the payload so the backend column default
   applies; an untouched required boolean MUST send `false`.
-- **must-disable-and-skip-create-only-on-edit**: On edit, a `createOnly` column MUST
+- **disable-and-skip-create-only-on-edit**: On edit, a `createOnly` column MUST
   be rendered disabled and MUST be excluded from the update payload.
-- **must-run-submit-through-useaction**: On submit the form MUST call
+- **run-submit-through-useaction**: On submit the form MUST call
   `onSubmit(payload)` via `useAction`, disabling Cancel/Save and showing "Saving…"
   while the promise is pending, and MUST surface a thrown error inline without
   losing the draft.
@@ -135,18 +135,18 @@ orchestration). The metadata→payload logic (`writableColumns`, `toDraft`,
 
 | ID | Requirements | Input | Expected |
 |---|---|---|---|
-| T1 | must-build-fields-from-writable-columns | meta with a `serverManaged` `id` column | No control for `id`; controls for every writable column |
-| T2 | must-pick-control-by-type | columns of enum / boolean / integer / object type | Select / Checkbox / numeric input / JSON textarea respectively |
-| T3 | must-wrap-nonboolean-in-field, must-mark-required-and-json | required string col + object col | String field labeled "`name` *"; object field wrapped in a `Field` with a `JSON` hint |
-| T4 | must-seed-draft-from-initial | `initial = { name:"Ada", active:true }` (edit) | Name input pre-filled "Ada"; the active checkbox checked |
-| T5 | must-reject-empty-required | submit with a required field blank | Submission blocked; "`<name>` is required" shown inline |
-| T6 | must-validate-numbers | integer column = "1.5" | Blocked; "`<name>` must be an integer" |
-| T7 | must-validate-numbers | number column = "abc" | Blocked; "`<name>` must be a number" |
-| T8 | must-validate-json | object column = "{bad" | Blocked; "`<name>` must be valid JSON" |
-| T9 | must-omit-untouched-optionals-on-create | create; leave an optional string empty | Payload omits that key (DB default applies) |
-| T10 | must-disable-and-skip-create-only-on-edit | edit; a `createOnly` rdid column | Its control is disabled; payload excludes it |
-| T11 | must-run-submit-through-useaction | valid submit; `onSubmit` pending | Cancel/Save disabled; Save shows "Saving…" until resolve |
-| T12 | must-run-submit-through-useaction | `onSubmit` rejects | Error shown via `ErrorText`; draft values retained |
+| T1 | build-fields-from-writable-columns | meta with a `serverManaged` `id` column | No control for `id`; controls for every writable column |
+| T2 | pick-control-by-type | columns of enum / boolean / integer / object type | Select / Checkbox / numeric input / JSON textarea respectively |
+| T3 | wrap-nonboolean-in-field, mark-required-and-json | required string col + object col | String field labeled "`name` *"; object field wrapped in a `Field` with a `JSON` hint |
+| T4 | seed-draft-from-initial | `initial = { name:"Ada", active:true }` (edit) | Name input pre-filled "Ada"; the active checkbox checked |
+| T5 | reject-empty-required | submit with a required field blank | Submission blocked; "`<name>` is required" shown inline |
+| T6 | validate-numbers | integer column = "1.5" | Blocked; "`<name>` must be an integer" |
+| T7 | validate-numbers | number column = "abc" | Blocked; "`<name>` must be a number" |
+| T8 | validate-json | object column = "{bad" | Blocked; "`<name>` must be valid JSON" |
+| T9 | omit-untouched-optionals-on-create | create; leave an optional string empty | Payload omits that key (DB default applies) |
+| T10 | disable-and-skip-create-only-on-edit | edit; a `createOnly` rdid column | Its control is disabled; payload excludes it |
+| T11 | run-submit-through-useaction | valid submit; `onSubmit` pending | Cancel/Save disabled; Save shows "Saving…" until resolve |
+| T12 | run-submit-through-useaction | `onSubmit` rejects | Error shown via `ErrorText`; draft values retained |
 
 ## Edge Cases
 
@@ -215,4 +215,5 @@ orchestration). The metadata→payload logic (`writableColumns`, `toDraft`,
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Renamed every requirement to subject-only kebab-case, dropping the old prefix everywhere it is cited. |
 | 1.0.0 | 2026-07-03 | Mike Fullerton | Initial recipe; documents the metadata-driven CrudRecordForm from @adh-shared/crud. |

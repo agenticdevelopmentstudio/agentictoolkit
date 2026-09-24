@@ -3,7 +3,7 @@ id: 21cbbc1c-38a0-4e7a-8ca0-06e2f29429f5
 title: SiteWordmark
 domain: agentictoolkit://recipes/site-wordmark
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: draft
 language: en
 created: '2026-06-26'
@@ -55,18 +55,18 @@ so a `'use client'` consumer can pull just the wordmark without co-bundling
 
 ## Behavioral Requirements
 
-- **must-render-registry-brand**: The SiteWordmark MUST render the site's full
+- **render-registry-brand**: The SiteWordmark MUST render the site's full
   brand name for the given `siteId`, resolved from the shared site registry.
-- **must-accent-trailing-word**: The SiteWordmark MUST split the brand via
+- **accent-trailing-word**: The SiteWordmark MUST split the brand via
   `splitSiteTitle` and render the trailing accent segment in gold italic
   (`text-apt-gold italic`) and the lead segment in plain `apt-text`.
-- **must-default-identity-to-description**: The SiteWordmark MUST render the site's
+- **default-identity-to-description**: The SiteWordmark MUST render the site's
   registry `description` as the identity line when `tagline` is not provided.
-- **must-honor-explicit-tagline**: The SiteWordmark MUST render a provided
+- **honor-explicit-tagline**: The SiteWordmark MUST render a provided
   `tagline` node as the identity line in place of the description.
-- **must-omit-identity-when-null**: The SiteWordmark MUST render no identity line
+- **omit-identity-when-null**: The SiteWordmark MUST render no identity line
   when `tagline` is `null` (or when neither a tagline nor a description exists).
-- **must-fall-back-on-unknown-site**: The SiteWordmark MUST still render
+- **fall-back-on-unknown-site**: The SiteWordmark MUST still render
   (accenting the whole label) when the `siteId` resolves to no registry entry,
   never throwing.
 
@@ -110,11 +110,11 @@ STORE & REVIEW RESEARCH           <- font-mono, uppercase, tracked, apt-text-dim
 
 | ID | Requirements | Input | Expected |
 |---|---|---|---|
-| T1 | must-render-registry-brand, must-accent-trailing-word | `siteId="research"` | Renders `Agentic Developer` + a gold-italic `Research`; full text reads "Agentic Developer Research" |
-| T2 | must-default-identity-to-description | `siteId="research"` (no `tagline`) | Identity line reads "Store & review research" (the registry description) |
-| T3 | must-honor-explicit-tagline | `siteId="research" tagline="Published research"` | Identity line reads "Published research" |
-| T4 | must-omit-identity-when-null | `siteId="research" tagline={null}` | No identity line is rendered |
-| T5 | must-fall-back-on-unknown-site | `siteId` not in the registry | Component renders the label as the accent without throwing |
+| T1 | render-registry-brand, accent-trailing-word | `siteId="research"` | Renders `Agentic Developer` + a gold-italic `Research`; full text reads "Agentic Developer Research" |
+| T2 | default-identity-to-description | `siteId="research"` (no `tagline`) | Identity line reads "Store & review research" (the registry description) |
+| T3 | honor-explicit-tagline | `siteId="research" tagline="Published research"` | Identity line reads "Published research" |
+| T4 | omit-identity-when-null | `siteId="research" tagline={null}` | No identity line is rendered |
+| T5 | fall-back-on-unknown-site | `siteId` not in the registry | Component renders the label as the accent without throwing |
 
 ## Edge Cases
 
@@ -194,4 +194,5 @@ Presentational and static; emits no log events.
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Renamed every requirement to subject-only kebab-case, dropping the old prefix everywhere it is cited. |
 | 1.0.0 | 2026-06-26 | Mike Fullerton | Initial recipe — shared brand wordmark, first used on the research author index. |

@@ -3,7 +3,7 @@ id: e36ff99d-0ebd-42ca-87f0-2881a8bfedea
 title: Hierarchical Category Browser
 domain: agentictoolkit://recipes/hierarchical-category-browser
 type: recipe
-version: 1.1.0
+version: 1.2.0
 status: draft
 language: en
 created: '2026-08-23'
@@ -77,7 +77,7 @@ about the rail itself differs between them (see Design Decisions).
 
 | Name | Domain | Role | Required | Configuration |
 |---|---|---|---|---|
-| Category Picker | agenticdevelopertoolkit://recipes/category-picker-dialog | The dialog behind BOTH place-picking gear actions — browses the folded forest and returns a place to file the selected category under. | yes | Move: `confirmLabel="Move"`, `allowRoot`, `rootLabel` = "Top level" or "Remove from “<parent>”" (see `must-not-call-an-unfiling-a-rooting`), `disabledIds` = the moved category + its own descendants. Also file: `confirmLabel="File"`, `initialSelectedId={null}`, NO `allowRoot` (a root is a category with no parents, so there is nothing to add), `disabledIds` = the category + its descendants + every parent it is ALREADY filed under. |
+| Category Picker | agenticdevelopertoolkit://recipes/category-picker-dialog | The dialog behind BOTH place-picking gear actions — browses the folded forest and returns a place to file the selected category under. | yes | Move: `confirmLabel="Move"`, `allowRoot`, `rootLabel` = "Top level" or "Remove from “<parent>”" (see `not-call-an-unfiling-a-rooting`), `disabledIds` = the moved category + its own descendants. Also file: `confirmLabel="File"`, `initialSelectedId={null}`, NO `allowRoot` (a root is a category with no parents, so there is nothing to add), `disabledIds` = the category + its descendants + every parent it is ALREADY filed under. |
 
 The other three gear dialogs (Rename, Delete, and the one-field Add) are plain
 compositions of the shared `Dialog`/`Input`/`DialogActions`/`AlertModal`
@@ -89,21 +89,21 @@ all four; this recipe documents the whole.
 
 ### The level-per-depth walk
 
-- **must-mirror-the-hierarchy**: The browser MUST render one rail level per
+- **mirror-the-hierarchy**: The browser MUST render one rail level per
   category depth the user has walked into — depth 0 is the root level; selecting
   a row at depth *n* that has children MUST publish a depth *n+1* level of that
   row's children.
-- **must-not-publish-an-empty-leaf-level**: A selected category with NO children
+- **not-publish-an-empty-leaf-level**: A selected category with NO children
   MUST NOT publish a level below it. An empty level would pin HTDV's frontier at
   that empty list and hide the item pane beneath it, so the walk simply stops one
   level short of a leaf rather than publishing nothing to select.
 
 ### The root level
 
-- **must-lead-the-root-level-with-all-and-uncategorized**: The root level (depth
+- **lead-the-root-level-with-all-and-uncategorized**: The root level (depth
   0) MUST lead with "All", then "Uncategorized", in that exact order, followed by
   the root categories sorted by name.
-- **must-keep-the-backend-order-below-the-root**: Every level BELOW the root MUST
+- **keep-the-backend-order-below-the-root**: Every level BELOW the root MUST
   render its siblings in the order `buildCategoryTree` hands them — the backend's
   own `sortOrder`, then name — and MUST NOT re-sort. The root is the one exception
   (above) because it is the one level with no context to read an order from; deeper,
@@ -111,29 +111,29 @@ all four; this recipe documents the whole.
   it, and the [[category-picker]] browsing the same forest does not sort — so a rail
   that re-sorted would discard a deliberate ordering and disagree with the picker
   about the same subtree in the same session.
-- **must-show-only-the-category-name**: A category row MUST render its name and
+- **show-only-the-category-name**: A category row MUST render its name and
   nothing else — no sublabel, and in particular a subcategory count MUST NOT be
   shown on any row at any depth.
 
 ### The gear
 
-- **must-offer-a-gear-in-every-level-header**: Every level's header MUST offer a
+- **offer-a-gear-in-every-level-header**: Every level's header MUST offer a
   gear menu with exactly five actions, in order: Add, Rename, Move, Also file,
   Delete.
-- **must-target-the-selected-row**: Rename, Move, Also file and Delete MUST act on the
+- **target-the-selected-row**: Rename, Move, Also file and Delete MUST act on the
   level's currently selected row, and MUST be disabled when nothing is selected
   or when the selection is the synthetic "All" or "Uncategorized" row (neither
   names a real category). Add MUST act on the level's OWN category (its parent —
   `null` at the root level, making a new root) regardless of the row selection.
-- **must-say-what-a-delete-keeps**: The delete confirmation MUST state that items
+- **say-what-a-delete-keeps**: The delete confirmation MUST state that items
   filed under the category are not deleted (they become uncategorized), and MUST
   name every subcategory that IS deleted as a side effect — the ones filed
   nowhere else, computed from the same forest the rail draws.
-- **must-leave-other-filings-alone-on-move**: A move MUST rewrite only the
+- **leave-other-filings-alone-on-move**: A move MUST rewrite only the
   filing the user walked in through (add the new parent edge, remove the old
   one); a category filed under other parents besides the one the user is
   currently standing in MUST keep those other filings untouched.
-- **must-file-a-category-in-a-second-place**: The gear MUST offer a verb that ADDS
+- **file-a-category-in-a-second-place**: The gear MUST offer a verb that ADDS
   one filing and changes nothing else — one `addCategoryParent` call, no
   `removeCategoryParent`, and no navigation. The hierarchy is a DAG (a category may
   carry any number of parents), and Move is the wrong shape for saying "this belongs
@@ -144,7 +144,7 @@ all four; this recipe documents the whole.
   missing reads as a place that does not exist, while a greyed one says the filing
   is already there. Filing MUST NOT navigate: the place the user walked in through
   still holds the category, so the route they are standing on is still true.
-- **must-not-call-an-unfiling-a-rooting**: The Move picker's no-parent row MUST say
+- **not-call-an-unfiling-a-rooting**: The Move picker's no-parent row MUST say
   what it will actually do. A category with other filings does NOT become a root by
   losing this one — it stops being HERE — so for such a category the row MUST read
   "Remove from “<parent>”" rather than "Top level", and the route MUST be left alone
@@ -152,13 +152,13 @@ all four; this recipe documents the whole.
   and guessing one sends the user somewhere they did not ask to go). When the filing
   being cut is the category's LAST, the row reads "Top level" and the route follows
   the category there as usual.
-- **must-follow-a-move-to-its-new-place**: A successful move of a category ON the
+- **follow-a-move-to-its-new-place**: A successful move of a category ON the
   current chain MUST re-select it where it now sits: the new parent's own chain,
   then the moved category, then whatever of the old chain hung BELOW it (those
   descendants moved with it). Moving to the top level drops everything above it —
   but only when that removal really roots the category; see
-  `must-not-call-an-unfiling-a-rooting`.
-  This is `must-follow-a-rename-to-the-new-slug`'s sibling and for the same reason —
+  `not-call-an-unfiling-a-rooting`.
+  This is `follow-a-rename-to-the-new-slug`'s sibling and for the same reason —
   a move keeps every slug but re-parents the category, so `resolveCategoryChain`
   stops resolving from that segment down and the user who re-filed a category is
   dropped to "All" on a URL that names nothing. Which segment moved is decided by
@@ -166,33 +166,33 @@ all four; this recipe documents the whole.
   `chain[d]`, which may be far above the deepest selection. A move driven from off
   the chain, and one that FAILS, MUST leave the route alone. The moved category's
   OWN segment MUST be re-derived against its new siblings, never carried over from
-  the old chain: slugs are unique per level (`must-select-by-slug-not-id`), so a
+  the old chain: slugs are unique per level (`select-by-slug-not-id`), so a
   suffix it only carried because of a twin under the parent it is leaving is not its
   slug under the parent it is joining.  Only the segments BELOW it carry over
   unchanged — their scope is the moved category's own children, which a move does
   not reshape.
-- **must-follow-a-rename-to-the-new-slug**: A successful rename of the
+- **follow-a-rename-to-the-new-slug**: A successful rename of the
   CURRENTLY SELECTED category MUST re-select it under its new slug and update the
   route to match — a rename changes the category's name, and by
-  `must-select-by-slug-not-id` that IS its URL identity, so the route the user is
+  `select-by-slug-not-id` that IS its URL identity, so the route the user is
   standing on expires the instant the write lands. Leaving it there drops them to
   "All" on a URL that no longer resolves, with nothing said. Renaming a category
   that is NOT the current selection MUST leave the route alone, and a rename that
   FAILS MUST leave it alone too. Only the renamed segment changes: every
   descendant's slug comes from its own name, so a deeper chain keeps its tail. The
   new segment is the slug the NEXT fold will assign, not `slugFor(newName, id)` on
-  its own — see `must-not-guess-a-contested-slug`.
-- **must-not-guess-a-contested-slug**: A rename or move that lands the category on
+  its own — see `not-guess-a-contested-slug`.
+- **not-guess-a-contested-slug**: A rename or move that lands the category on
   a slug ALREADY claimed by one of its (new) siblings MUST leave the route alone
   rather than navigate. Slugs are de-collided per level and the first claimant keeps
-  the bare slug (`must-select-by-slug-not-id`), so which of two twins keeps it
+  the bare slug (`select-by-slug-not-id`), so which of two twins keeps it
   depends on the level's ORDER — and the write itself can change that order, since
   siblings sort by `sortOrder` then NAME. Navigating on a guess would open the OTHER
   category, which is strictly worse than not moving: the stale chain degrades to the
   deepest ancestor that still resolves, which is the list holding what was just
   renamed or moved. When the slug is uncontested it is exact whatever the order —
   first claimant, no other claimant — so this rule costs nothing in the ordinary case.
-- **must-follow-a-delete-to-the-surviving-level**: A successful delete of a
+- **follow-a-delete-to-the-surviving-level**: A successful delete of a
   category ON the current chain MUST re-select the chain truncated AT that
   category — everything above it, nothing from it down. The third sibling of the
   two rules above, and the one with the sharpest failure: the segments below a
@@ -206,7 +206,7 @@ all four; this recipe documents the whole.
 
 ### Selection and navigation
 
-- **must-select-by-slug-not-id**: Each level's `selectedId` and the ids it hands
+- **select-by-slug-not-id**: Each level's `selectedId` and the ids it hands
   `onSelect` MUST be the category's URL `slug` (`slugFor(name, id)`), not its
   backend id — the same identity the rail's deep links resolve against — with the
   two synthetic rows keeping their own reserved slugs (`-all`, `-none`). Two
@@ -215,7 +215,7 @@ all four; this recipe documents the whole.
   slug, later ones take `-2`, `-3`… — so a chain segment names exactly one row. The
   scope is one parent's children, so cousins on separate branches keep the same bare
   slug; the top level is one scope across the whole root list.
-- **must-clear-to-the-parent-level**: A level's `onClear` (re-click of the
+- **clear-to-the-parent-level**: A level's `onClear` (re-click of the
   selected row, or a breadcrumb-up through HTDV) MUST re-select the chain one
   segment shorter than this level's own ancestors, not the whole chain — it walks
   up one level at a time, the same as the level walk went down.
@@ -260,24 +260,24 @@ Narrow-mode drill-down, disclosure, and the breadcrumb are entirely HTDV's — s
 
 | ID | Requirements | Input | Expected |
 |---|---|---|---|
-| T1 | must-mirror-the-hierarchy | rows with a 2-deep chain, `chainSlugs=["work"]` | two levels publish: root (containing "Work") and "Work"'s children |
-| T2 | must-not-publish-an-empty-leaf-level | select a leaf category (no children) | no level appears below the leaf's own level; the host's pane renders directly |
-| T3 | must-lead-the-root-level-with-all-and-uncategorized, must-keep-the-backend-order-below-the-root | roots and children both arriving in non-alphabetical order | root level's first two items are "All" then "Uncategorized", in that order, ahead of the roots sorted by name; a deeper level's siblings stay in arrival order |
-| T4 | must-show-only-the-category-name | a category with children | its row shows the name only — no count, no second line |
-| T5 | must-offer-a-gear-in-every-level-header, must-target-the-selected-row | no selection at a level | gear opens; Rename/Move/Delete are disabled; Add is enabled and, on confirm, creates a child of that level's own category |
-| T6 | must-target-the-selected-row | "All" or "Uncategorized" selected, gear opened | Rename/Move/Delete disabled (neither names a real category) |
-| T7 | must-say-what-a-delete-keeps | delete a category with one child filed only there and one child also filed elsewhere | confirmation names the first child as also-deleted and not the second; item filed under the deleted category becomes uncategorized (not removed) |
-| T8 | must-leave-other-filings-alone-on-move, must-follow-a-move-to-its-new-place | move a category filed under two parents, walked in via parent A | filing under parent A is rewritten to the new parent; the filing under parent B is untouched; the route becomes the new parent's chain + the moved category + the tail that hung below it |
-| T9 | must-select-by-slug-not-id | select a real category | `onSelectChain` receives the category's slug appended to the ancestor slugs, not its id |
-| T10 | must-clear-to-the-parent-level | at depth 2, call the level's `onClear` | selection becomes the depth-1 chain (one segment shorter), not the root |
-| T11 | must-follow-a-delete-to-the-surviving-level | standing on `work/q3/budget`, delete "Work" from the ROOT level's gear | the route becomes `[]`, not `work/q3`; deleting "Q3" from its own level instead leaves `["work"]`; a delete that rejects leaves the route untouched |
-| T15 | must-follow-a-move-to-its-new-place | the add resolves and the remove rejects | `onChanged` fires exactly once before the rejection surfaces, the dialog stays open showing the reason, and no navigation happens; re-confirming the same move issues only the remove |
-| T13 | must-not-guess-a-contested-slug | standing in `work`, rename Work to a name that slugifies exactly as a sibling root's does | the route is left alone (no navigation); the rail degrades to the level above once the write lands |
-| T14 | must-follow-a-move-to-its-new-place, must-not-guess-a-contested-slug | Work holds twins "Q 3" (`q-3`) and "Q-3" (`q-3-2`); standing in `work/q-3-2`, move that twin under Archive, which holds no `q-3` | the route becomes `archive/q-3` — the bare slug, not the `-2` it carried under Work |
-| T16 | must-file-a-category-in-a-second-place | Q3 is filed under Work; standing in `work/q3`, choose Also file and pick Archive | exactly one `addCategoryParent("q3", "archive")`, zero `removeCategoryParent`, and no `onSelectChain` call — the route stays on `work/q3` |
-| T17 | must-file-a-category-in-a-second-place | open Also file for Q3 (filed under Work and Planning, holding child Budget) | Work, Planning, Q3 itself and Budget are all present but `aria-disabled`; Archive is enabled; Confirm is disabled until a real row is picked |
-| T18 | must-not-call-an-unfiling-a-rooting | Q3 filed under Work AND Planning; standing in `work/q3`, open Move | the no-parent row reads "Remove from “Work”"; confirming it removes only the Work edge, adds nothing, and does NOT navigate. With Q3 filed under Work alone, the same row reads "Top level" and the route becomes `["q3"]` |
-| T12 | must-select-by-slug-not-id | three sibling categories named "Q3 Plans", "Q3: plans" and "q3 plans" | their slugs are `q3-plans`, `q3-plans-2` and `q3-plans-3`; each resolves to its own row, and a cousin under another parent still gets the bare slug |
+| T1 | mirror-the-hierarchy | rows with a 2-deep chain, `chainSlugs=["work"]` | two levels publish: root (containing "Work") and "Work"'s children |
+| T2 | not-publish-an-empty-leaf-level | select a leaf category (no children) | no level appears below the leaf's own level; the host's pane renders directly |
+| T3 | lead-the-root-level-with-all-and-uncategorized, keep-the-backend-order-below-the-root | roots and children both arriving in non-alphabetical order | root level's first two items are "All" then "Uncategorized", in that order, ahead of the roots sorted by name; a deeper level's siblings stay in arrival order |
+| T4 | show-only-the-category-name | a category with children | its row shows the name only — no count, no second line |
+| T5 | offer-a-gear-in-every-level-header, target-the-selected-row | no selection at a level | gear opens; Rename/Move/Delete are disabled; Add is enabled and, on confirm, creates a child of that level's own category |
+| T6 | target-the-selected-row | "All" or "Uncategorized" selected, gear opened | Rename/Move/Delete disabled (neither names a real category) |
+| T7 | say-what-a-delete-keeps | delete a category with one child filed only there and one child also filed elsewhere | confirmation names the first child as also-deleted and not the second; item filed under the deleted category becomes uncategorized (not removed) |
+| T8 | leave-other-filings-alone-on-move, follow-a-move-to-its-new-place | move a category filed under two parents, walked in via parent A | filing under parent A is rewritten to the new parent; the filing under parent B is untouched; the route becomes the new parent's chain + the moved category + the tail that hung below it |
+| T9 | select-by-slug-not-id | select a real category | `onSelectChain` receives the category's slug appended to the ancestor slugs, not its id |
+| T10 | clear-to-the-parent-level | at depth 2, call the level's `onClear` | selection becomes the depth-1 chain (one segment shorter), not the root |
+| T11 | follow-a-delete-to-the-surviving-level | standing on `work/q3/budget`, delete "Work" from the ROOT level's gear | the route becomes `[]`, not `work/q3`; deleting "Q3" from its own level instead leaves `["work"]`; a delete that rejects leaves the route untouched |
+| T15 | follow-a-move-to-its-new-place | the add resolves and the remove rejects | `onChanged` fires exactly once before the rejection surfaces, the dialog stays open showing the reason, and no navigation happens; re-confirming the same move issues only the remove |
+| T13 | not-guess-a-contested-slug | standing in `work`, rename Work to a name that slugifies exactly as a sibling root's does | the route is left alone (no navigation); the rail degrades to the level above once the write lands |
+| T14 | follow-a-move-to-its-new-place, not-guess-a-contested-slug | Work holds twins "Q 3" (`q-3`) and "Q-3" (`q-3-2`); standing in `work/q-3-2`, move that twin under Archive, which holds no `q-3` | the route becomes `archive/q-3` — the bare slug, not the `-2` it carried under Work |
+| T16 | file-a-category-in-a-second-place | Q3 is filed under Work; standing in `work/q3`, choose Also file and pick Archive | exactly one `addCategoryParent("q3", "archive")`, zero `removeCategoryParent`, and no `onSelectChain` call — the route stays on `work/q3` |
+| T17 | file-a-category-in-a-second-place | open Also file for Q3 (filed under Work and Planning, holding child Budget) | Work, Planning, Q3 itself and Budget are all present but `aria-disabled`; Archive is enabled; Confirm is disabled until a real row is picked |
+| T18 | not-call-an-unfiling-a-rooting | Q3 filed under Work AND Planning; standing in `work/q3`, open Move | the no-parent row reads "Remove from “Work”"; confirming it removes only the Work edge, adds nothing, and does NOT navigate. With Q3 filed under Work alone, the same row reads "Top level" and the route becomes `["q3"]` |
+| T12 | select-by-slug-not-id | three sibling categories named "Q3 Plans", "Q3: plans" and "q3 plans" | their slugs are `q3-plans`, `q3-plans-2` and `q3-plans-3`; each resolves to its own row, and a cousin under another parent still gets the bare slug |
 
 ## Edge Cases
 
@@ -294,7 +294,7 @@ Narrow-mode drill-down, disclosure, and the breadcrumb are entirely HTDV's — s
 - **A category filed under two parents.** It appears as a real row under BOTH
   parents' levels — walking in through either shows the same subtree beneath it.
   A rename or delete acts on the category (affects both placements); a move
-  rewrites only the filing walked in through (`must-leave-other-filings-alone-on-move`);
+  rewrites only the filing walked in through (`leave-other-filings-alone-on-move`);
   Also file is what CREATES this state from the rail in the first place.
 - **Unfiling a multi-filed category.** Picking the Move picker's no-parent row is
   two different operations depending on how many filings the category carries, and
@@ -344,14 +344,14 @@ Narrow-mode drill-down, disclosure, and the breadcrumb are entirely HTDV's — s
   SIBLING, and moving a suffixed twin to a level where its bare slug is free
   navigated to a segment naming nothing. Both now go through `freeSlugAmong`, which
   answers exactly when the base slug is free among the other siblings and `null`
-  when it is contested (`must-not-guess-a-contested-slug`).
+  when it is contested (`not-guess-a-contested-slug`).
 - **Moving the currently-open category out from under the URL.** Every slug on the
   chain survives a move — but the chain is resolved by WALKING children, so the
   moment the category stops being a child of the parent the URL walked in through,
   that segment and everything below it resolve to nothing. `chainAfterMove` rebuilds
   the route from the pre-move forest (the new parent's own ancestry is not what the
   move changed, so reading it there is exact) and hands it to `onSelectChain` only
-  after the write lands (`must-follow-a-move-to-its-new-place`).
+  after the write lands (`follow-a-move-to-its-new-place`).
 
 ## Platform Notes
 
@@ -447,3 +447,4 @@ Narrow-mode drill-down, disclosure, and the breadcrumb are entirely HTDV's — s
 |---|---|---|---|
 | 1.0.0 | 2026-08-23 | Mike Fullerton | Initial recipe, documenting `useCategoryLevels` and the notebook/research rail it drives. |
 | 1.1.0 | 2026-08-24 | Mike Fullerton | Added the fifth gear verb, Also file (`must-file-a-category-in-a-second-place`), so the DAG is reachable from the rail; made the Move picker's no-parent row say whether it roots or merely unfiles (`must-not-call-an-unfiling-a-rooting`). |
+| 1.2.0 | 2026-09-23 | Mike Fullerton | Renamed every requirement to subject-only kebab-case, dropping the old prefix everywhere it is cited. |
