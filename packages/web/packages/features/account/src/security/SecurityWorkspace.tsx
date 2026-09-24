@@ -1,26 +1,32 @@
 "use client";
 
-import { useState, type ReactElement } from "react";
+import { useMemo, useState, type ReactElement, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, ShieldCheck, Smartphone } from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@agenticdevelopertoolkit/ui/components/card";
+import { Smartphone } from "lucide-react";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
+import { Card, CardContent } from "@agenticdevelopertoolkit/ui/components/card";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Label } from "@agenticdevelopertoolkit/ui/components/label";
 import { Badge } from "@agenticdevelopertoolkit/ui/components/badge";
-import { List, ListItem } from "@agenticdevelopertoolkit/ui/components/list";
-import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@agenticdevelopertoolkit/ui/components/dialog";
+import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import { Select } from "@agenticdevelopertoolkit/ui/components/select";
 import { Spinner } from "@agenticdevelopertoolkit/ui/components/spinner";
-import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
-import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
-import { RecordApiButton } from "@agentic-toolkit/api-explorer";
+import { DialogErrorText, ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
+import {
+  EditableList,
+  Field,
+  useEditableList,
+  type EditableListColumn,
+} from "@agenticdevelopertoolkit/ui/blocks";
+import { formatDate } from "@agenticdevelopertoolkit/ui/lib/timestamps";
+import { DetailSection, ListBarActions, SettingsBody } from "@agentic-toolkit/resource";
 import {
   confirmTotp,
   enrollTotp,
@@ -33,10 +39,32 @@ import {
   setPreferredMethod,
   type MfaStatus,
   type PreferredMethod,
+  type WebauthnCredential,
 } from "@agentic-toolkit/auth";
 import { extractErrorMessage } from "@agentic-toolkit/auth/client";
 
 const MFA_KEY = ["account", "mfa"] as const;
+const WEBAUTHN_KEY = ["account", "webauthn"] as const;
+
+/** The one line under a section title saying what the section is for. `DetailSection` has no
+ *  description slot, so every section spells it the same way here rather than each its own. */
+function SectionNote({ children }: { children: ReactNode }): ReactElement {
+  return <p className="text-sm text-apt-text-muted">{children}</p>;
+}
+
+/** A non-table section: `DetailSection` title over a `Card`, the shape AccountPanel's Email and
+ *  Password sections take — so Security's forms sit in the same boxes as their siblings'. The
+ *  passkeys table is the exception: an `EditableList` draws its own frame, and a card around it
+ *  would be a box in a box. */
+function FormSection({ title, children }: { title: string; children: ReactNode }): ReactElement {
+  return (
+    <DetailSection title={title}>
+      <Card>
+        <CardContent className="flex flex-col gap-3">{children}</CardContent>
+      </Card>
+    </DetailSection>
+  );
+}
 
 function StatusRow({ on, label }: { on: boolean; label: string }): ReactElement {
   return (
@@ -47,7 +75,7 @@ function StatusRow({ on, label }: { on: boolean; label: string }): ReactElement 
   );
 }
 
-function TotpCard({ status }: { status: MfaStatus }): ReactElement {
+function TotpSection({ status }: { status: MfaStatus }): ReactElement {
   const qc = useQueryClient();
   const [secret, setSecret] = useState<string | null>(null);
   const [code, setCode] = useState("");
@@ -68,147 +96,294 @@ function TotpCard({ status }: { status: MfaStatus }): ReactElement {
   const remove = useMutation({ mutationFn: removeTotp, onSuccess: invalidate });
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <ShieldCheck className="size-4 text-apt-text-muted" /> Authenticator app
-        </CardTitle>
-        <CardDescription>
-          Use a TOTP app (1Password, Google Authenticator…) to generate sign-in codes.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {status.totp ? (
-          <div className="flex items-center gap-3">
-            <Badge variant="success">Enabled</Badge>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => remove.mutate()}
-              disabled={remove.isPending}
-            >
-              Remove
+    <FormSection title="Authenticator app">
+      <SectionNote>
+        Use a TOTP app (1Password, Google Authenticator…) to generate sign-in codes.
+      </SectionNote>
+      {status.totp ? (
+        <div className="flex items-center gap-3">
+          <Badge variant="success">Enabled</Badge>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={() => remove.mutate()}
+            disabled={remove.isPending}
+          >
+            Remove
+          </Button>
+        </div>
+      ) : secret ? (
+        <div className="space-y-3">
+          <p className="text-sm text-apt-text-muted">
+            Add this secret to your authenticator, then enter the 6-digit code it shows.
+          </p>
+          <code className="block rounded-md border border-apt-border bg-apt-surface-2 px-3 py-2 font-mono text-sm tracking-widest text-apt-text">
+            {secret}
+          </code>
+          <div className="flex items-end gap-2">
+            <div className="space-y-1">
+              <Label htmlFor="totp-code" className="text-xs text-apt-text-muted">
+                6-digit code
+              </Label>
+              <Input
+                id="totp-code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="123456"
+                className="w-32 font-mono"
+              />
+            </div>
+            <Button onClick={() => confirm.mutate()} disabled={confirm.isPending || code.trim().length === 0}>
+              {confirm.isPending ? "Verifying…" : "Verify & enable"}
             </Button>
           </div>
-        ) : secret ? (
-          <div className="space-y-3">
-            <p className="text-sm text-apt-text-muted">
-              Add this secret to your authenticator, then enter the 6-digit code it shows.
-            </p>
-            <code className="block rounded-md border border-apt-border bg-apt-surface-2 px-3 py-2 font-mono text-sm tracking-widest text-apt-text">
-              {secret}
-            </code>
-            <div className="flex items-end gap-2">
-              <div className="space-y-1">
-                <Label htmlFor="totp-code" className="text-xs text-apt-text-muted">
-                  6-digit code
-                </Label>
-                <Input
-                  id="totp-code"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  placeholder="123456"
-                  className="w-32 font-mono"
-                />
-              </div>
-              <Button onClick={() => confirm.mutate()} disabled={confirm.isPending || code.trim().length === 0}>
-                {confirm.isPending ? "Verifying…" : "Verify & enable"}
-              </Button>
-            </div>
-            {confirm.isError && (
-              <ErrorText error={extractErrorMessage(confirm.error, "That code didn’t match.")} className="text-xs" />
-            )}
-          </div>
-        ) : (
+          {confirm.isError && (
+            <ErrorText error={extractErrorMessage(confirm.error, "That code didn’t match.")} className="text-xs" />
+          )}
+        </div>
+      ) : (
+        <div>
           <Button onClick={() => enroll.mutate()} disabled={enroll.isPending}>
             {enroll.isPending ? "Starting…" : "Set up authenticator"}
           </Button>
-        )}
-      </CardContent>
-    </Card>
+        </div>
+      )}
+    </FormSection>
   );
 }
 
-function PasskeysCard(): ReactElement {
+const KIND_LABEL: Record<WebauthnCredential["kind"], string> = {
+  passkey: "Passkey",
+  security_key: "Security key",
+};
+
+function credentialName(cred: WebauthnCredential): string {
+  return cred.name || "Unnamed";
+}
+
+function PasskeysSection(): ReactElement {
   const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ["account", "webauthn"], queryFn: listWebauthn });
+  const { data, isLoading, error } = useQuery({ queryKey: WEBAUTHN_KEY, queryFn: listWebauthn });
+  const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
+  // The rows the bar's Remove was pressed for — every ticked credential, not one row's button.
+  const [removeTargets, setRemoveTargets] = useState<WebauthnCredential[] | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  // Both lists move on a credential change: the MFA status's `webauthn` flag (and so the
+  // Two-factor summary and the preferred-method choices) is derived from whether any exist.
   const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["account", "webauthn"] });
+    qc.invalidateQueries({ queryKey: WEBAUTHN_KEY });
     qc.invalidateQueries({ queryKey: MFA_KEY });
   };
   const register = useMutation({
     mutationFn: (kind: "passkey" | "security_key") => registerWebauthn(kind, name.trim() || "My device"),
     onSuccess: () => {
       setName("");
+      setAdding(false);
       invalidate();
     },
   });
-  const remove = useMutation({ mutationFn: removeWebauthn, onSuccess: invalidate });
+  const remove = useMutation({
+    mutationFn: (ids: string[]) => Promise.all(ids.map((id) => removeWebauthn(id))),
+    onSuccess: () => {
+      invalidate();
+      list.clearSelection();
+      setRemoveTargets(null);
+      setRemoveError(null);
+    },
+    onError: (err: unknown) => {
+      // Keep the dialog open so the user sees the failure. Re-read anyway: in a multi-row
+      // removal some credentials may already be gone, and the table must not keep showing them.
+      invalidate();
+      setRemoveError(extractErrorMessage(err, "Could not remove. Try again."));
+    },
+  });
+
+  const columns: EditableListColumn<WebauthnCredential>[] = useMemo(
+    () => [
+      {
+        key: "name",
+        header: "Name",
+        value: credentialName,
+        render: (cred) => (
+          <span className="truncate font-medium text-apt-text">{credentialName(cred)}</span>
+        ),
+      },
+      {
+        key: "kind",
+        header: "Type",
+        width: "9rem",
+        value: (cred) => KIND_LABEL[cred.kind],
+        render: (cred) => <Badge variant="neutral">{KIND_LABEL[cred.kind]}</Badge>,
+      },
+      {
+        key: "createdAt",
+        header: "Added",
+        width: "8rem",
+        searchable: false,
+        value: (cred) => cred.createdAt,
+        render: (cred) => (
+          <span className="text-apt-text-muted">{formatDate(cred.createdAt)}</span>
+        ),
+      },
+      {
+        key: "lastUsedAt",
+        header: "Last used",
+        width: "8rem",
+        searchable: false,
+        value: (cred) => cred.lastUsedAt ?? "",
+        render: (cred) => (
+          <span className="text-apt-text-muted">{formatDate(cred.lastUsedAt, "Never")}</span>
+        ),
+      },
+    ],
+    [],
+  );
+
+  const list = useEditableList<WebauthnCredential>({
+    rows: isLoading ? undefined : (data?.items ?? []),
+    getRowId: (cred) => cred.id,
+    columns,
+  });
+  const selected = list.selectedRows;
+
+  function openAdd() {
+    setName("");
+    register.reset();
+    setAdding(true);
+  }
+
+  function closeAdd() {
+    // The browser's registration ceremony is in flight — closing now would orphan its result.
+    if (register.isPending) return;
+    setAdding(false);
+  }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <KeyRound className="size-4 text-apt-text-muted" /> Passkeys & security keys
-        </CardTitle>
-        <CardDescription>
-          Sign in with a passkey (Face ID, Touch ID, Windows Hello) or a hardware security key.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {data && data.items.length > 0 ? (
-          <List>
-            {data.items.map((cred) => (
-              <ListItem key={cred.id} className="justify-between py-2">
-                <span className="flex items-center gap-2 text-sm text-apt-text">
-                  {cred.name || "Unnamed"}
-                  <Badge variant="neutral">{cred.kind === "security_key" ? "Security key" : "Passkey"}</Badge>
-                </span>
-                <Button
-                  size="sm"
-                  variant="destructive-ghost"
-                  onClick={() => remove.mutate(cred.id)}
-                  disabled={remove.isPending}
-                >
-                  Remove
-                </Button>
-              </ListItem>
-            ))}
-          </List>
-        ) : (
-          /* No action slot: the "Add passkey" / "Add security key" pair is the very
-             next thing in this card, so a button here would point at itself. */
-          <EmptyState
-            title="No passkeys or security keys yet."
-            description="Name a device below and register it to sign in without a password."
+    <DetailSection title="Passkeys & security keys">
+      <SectionNote>
+        Sign in with a passkey (Face ID, Touch ID, Windows Hello) or a hardware security key.
+      </SectionNote>
+      {/* The same table admin's Users page draws, with Add and Remove on the bar. Remove used to
+          sit on every row; a verb repeated per row is a second model beside the ticked selection,
+          and it could only ever take one credential at a time. */}
+      <EditableList
+        list={list}
+        ariaLabel="Passkeys and security keys"
+        loading={isLoading}
+        error={error}
+        errorTitle="Couldn't load passkeys"
+        columnWidthsKey="settings-security-passkeys"
+        describeRow={credentialName}
+        searchPlaceholder="Name or type"
+        emptyLabel="No passkeys or security keys yet. Add one to sign in without a password."
+        emptyFilteredLabel="No passkeys match this search."
+        actions={
+          <ListBarActions
+            noun="passkey"
+            selectedCount={selected.length}
+            onAdd={openAdd}
+            onDelete={() => {
+              setRemoveError(null);
+              setRemoveTargets(selected);
+            }}
+            deleteLabel="Remove"
           />
-        )}
-        <div className="flex flex-wrap items-end gap-2 border-t border-apt-border pt-3">
-          <div className="flex-1 space-y-1">
-            <Label htmlFor="cred-name" className="text-xs text-apt-text-muted">
-              Device name
-            </Label>
-            <Input id="cred-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="MacBook" />
-          </div>
-          <Button onClick={() => register.mutate("passkey")} disabled={register.isPending}>
-            Add passkey
-          </Button>
-          <Button variant="outline" onClick={() => register.mutate("security_key")} disabled={register.isPending}>
-            Add security key
-          </Button>
-        </div>
-        {register.isError && (
-          <ErrorText error={extractErrorMessage(register.error, "Registration was cancelled or failed.")} className="text-xs" />
-        )}
-      </CardContent>
-    </Card>
+        }
+      />
+
+      {/* Add: name the device, then pick which ceremony to run — the kind decides which
+          authenticators the browser offers, so it is the submit, not a field. */}
+      <Dialog open={adding} onOpenChange={(open) => { if (!open) closeAdd(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add a passkey or security key</DialogTitle>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!register.isPending) register.mutate("passkey");
+            }}
+          >
+            <Field label="Device name">
+              <Input
+                id="cred-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="MacBook"
+                autoFocus
+              />
+            </Field>
+            {register.isError && (
+              <ErrorText
+                error={extractErrorMessage(register.error, "Registration was cancelled or failed.")}
+                className="text-xs"
+              />
+            )}
+            <DialogFooter>
+              <Button type="button" variant="ghost" size="sm" onClick={closeAdd} disabled={register.isPending}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => register.mutate("security_key")}
+                disabled={register.isPending}
+              >
+                Add security key
+              </Button>
+              <Button type="submit" size="sm" disabled={register.isPending}>
+                {register.isPending ? "Waiting for device…" : "Add passkey"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remove confirm — for every ticked credential the bar's Remove was pressed with. */}
+      <AlertModal
+        open={removeTargets != null}
+        tone="error"
+        title={
+          removeTargets && removeTargets.length > 1
+            ? `Remove ${removeTargets.length} sign-in methods?`
+            : "Remove sign-in method?"
+        }
+        description={
+          removeTargets ? (
+            <>
+              <span>
+                Remove {removeTargets.map(credentialName).join(", ")}? You won’t be able to sign
+                in with {removeTargets.length > 1 ? "them" : "it"} any more.
+              </span>
+              <DialogErrorText error={removeError} />
+            </>
+          ) : undefined
+        }
+        confirmLabel="Remove"
+        confirmVariant="destructive"
+        cancelLabel="Cancel"
+        busy={remove.isPending}
+        onConfirm={() => {
+          if (removeTargets) {
+            setRemoveError(null);
+            remove.mutate(removeTargets.map((c) => c.id));
+          }
+        }}
+        onCancel={() => {
+          setRemoveTargets(null);
+          setRemoveError(null);
+        }}
+      />
+    </DetailSection>
   );
 }
 
-function RecoveryCard({ status }: { status: MfaStatus }): ReactElement {
+function RecoverySection({ status }: { status: MfaStatus }): ReactElement {
   const qc = useQueryClient();
   const regen = useMutation({
     mutationFn: regenerateRecoveryCodes,
@@ -219,35 +394,32 @@ function RecoveryCard({ status }: { status: MfaStatus }): ReactElement {
   const codes = regen.data?.codes ?? null;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Recovery codes</CardTitle>
-        <CardDescription>
-          One-time codes to sign in if you lose your other factors. {status.recoveryRemaining} unused.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {codes && (
-          <div className="space-y-2 rounded-lg border border-apt-gold/40 bg-apt-gold/10 p-3">
-            <p className="text-sm text-apt-text">
-              Save these now — they won’t be shown again. Each works once.
-            </p>
-            <ul className="grid grid-cols-2 gap-1 font-mono text-sm text-apt-text">
-              {codes.map((c) => (
-                <li key={c}>{c}</li>
-              ))}
-            </ul>
-          </div>
-        )}
+    <FormSection title="Recovery codes">
+      <SectionNote>
+        One-time codes to sign in if you lose your other factors. {status.recoveryRemaining} unused.
+      </SectionNote>
+      {codes && (
+        <div className="space-y-2 rounded-lg border border-apt-gold/40 bg-apt-gold/10 p-3">
+          <p className="text-sm text-apt-text">
+            Save these now — they won’t be shown again. Each works once.
+          </p>
+          <ul className="grid grid-cols-2 gap-1 font-mono text-sm text-apt-text">
+            {codes.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div>
         <Button onClick={() => regen.mutate()} disabled={regen.isPending} variant="outline">
           {status.recoveryRemaining > 0 ? "Regenerate codes" : "Generate codes"}
         </Button>
-      </CardContent>
-    </Card>
+      </div>
+    </FormSection>
   );
 }
 
-function PreferredMethodCard({ status }: { status: MfaStatus }): ReactElement {
+function PreferredMethodSection({ status }: { status: MfaStatus }): ReactElement {
   const qc = useQueryClient();
   const available: PreferredMethod[] = (["totp", "sms", "webauthn"] as const).filter(
     (m) => status[m],
@@ -264,49 +436,38 @@ function PreferredMethodCard({ status }: { status: MfaStatus }): ReactElement {
     webauthn: "Passkey / security key",
   };
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Preferred 2FA method</CardTitle>
-        <CardDescription>Which factor we offer first at sign-in.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Select
-          aria-label="Preferred 2FA method"
-          value={status.preferredMethod ?? ""}
-          onChange={(e) => {
-            if (e.target.value) save.mutate(e.target.value as PreferredMethod);
-          }}
-          className="max-w-xs"
-        >
-          {!status.preferredMethod && <option value="">Choose a method…</option>}
-          {available.map((m) => (
-            <option key={m} value={m}>
-              {labels[m]}
-            </option>
-          ))}
-        </Select>
-      </CardContent>
-    </Card>
+    <FormSection title="Preferred 2FA method">
+      <SectionNote>Which factor we offer first at sign-in.</SectionNote>
+      <Select
+        aria-label="Preferred 2FA method"
+        value={status.preferredMethod ?? ""}
+        onChange={(e) => {
+          if (e.target.value) save.mutate(e.target.value as PreferredMethod);
+        }}
+        className="max-w-xs"
+      >
+        {!status.preferredMethod && <option value="">Choose a method…</option>}
+        {available.map((m) => (
+          <option key={m} value={m}>
+            {labels[m]}
+          </option>
+        ))}
+      </Select>
+    </FormSection>
   );
 }
 
+/**
+ * The Security settings panel. No page title and no API button of its own: the settings registry
+ * draws the topic's `FeatureTitle` (title, `/account/mfa` API link, help) above every panel, and a
+ * second heading here is what used to make Security read as a different site from its siblings.
+ * Form width — the passkeys table has four short columns and fits a form's column comfortably.
+ */
 export function SecurityWorkspace(): ReactElement {
   const { data, isLoading, isError } = useQuery({ queryKey: MFA_KEY, queryFn: getMfaStatus });
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6 p-4 sm:p-6">
-      <SectionHeader
-        title="Security"
-        actions={
-          <RecordApiButton path="/account/mfa" pathValues={{}} title="Security (MFA) API" />
-        }
-        help={
-          <p className="text-sm text-apt-text-muted">
-            Manage two-factor authentication and sign-in methods. Add a second factor to protect
-            your account.
-          </p>
-        }
-      />
+    <SettingsBody>
       {isLoading && (
         <div className="flex items-center gap-2 text-sm text-apt-text-muted">
           <Spinner /> Loading…
@@ -317,16 +478,13 @@ export function SecurityWorkspace(): ReactElement {
       )}
       {data && (
         <>
-          <Card>
-            <CardHeader>
-              <CardTitle>Two-factor authentication</CardTitle>
-              <CardDescription>
-                {data.sms || data.totp || data.webauthn
-                  ? "Two-factor authentication is on."
-                  : "Add a second factor to require more than a password at sign-in."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+          <FormSection title="Two-factor authentication">
+            <SectionNote>
+              {data.sms || data.totp || data.webauthn
+                ? "Two-factor authentication is on."
+                : "Add a second factor to require more than a password at sign-in."}
+            </SectionNote>
+            <div>
               <StatusRow on={data.totp} label="Authenticator app" />
               <StatusRow on={data.sms} label="Text message (SMS)" />
               <StatusRow on={data.webauthn} label="Passkeys / security keys" />
@@ -334,26 +492,26 @@ export function SecurityWorkspace(): ReactElement {
                 <Smartphone className="size-3.5" />
                 Manage phone numbers on the Notifications page.
               </div>
-            </CardContent>
-          </Card>
-          <TotpCard status={data} />
+            </div>
+          </FormSection>
+          <TotpSection status={data} />
         </>
       )}
-      {/* OUTSIDE the `data &&` gate, deliberately: PasskeysCard reads neither `data` nor any
+      {/* OUTSIDE the `data &&` gate, deliberately: PasskeysSection reads neither `data` nor any
           other MFA-status field — it runs its own ["account","webauthn"] query and manages a
           sign-in method that works with no second factor configured at all. Gated on the MFA
           status, a failing (or merely slow) /account/mfa took the entire passkey surface with
           it, so a user whose MFA status 500s could not add, name, or REMOVE a passkey — the
           one recovery path that does not need a password. It sits between the two gated
-          groups so the card order is unchanged whenever the status does load. */}
-      <PasskeysCard />
+          groups so the section order is unchanged whenever the status does load. */}
+      <PasskeysSection />
       {data && (
         <>
           {/* Recovery codes are a fallback for a primary factor — only once one exists. */}
-          {(data.sms || data.totp || data.webauthn) && <RecoveryCard status={data} />}
-          <PreferredMethodCard status={data} />
+          {(data.sms || data.totp || data.webauthn) && <RecoverySection status={data} />}
+          <PreferredMethodSection status={data} />
         </>
       )}
-    </div>
+    </SettingsBody>
   );
 }
