@@ -3,7 +3,7 @@ id: b307116d-3ab8-422a-b031-885710e11e70
 title: File Tree Outline View Controller
 domain: agentictoolkit://recipes/file-tree-outline-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -24,8 +24,10 @@ tags:
 depends-on: []
 related:
 - agentictoolkit://recipes/file-browser-view-controller
-references:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references:
+- https://developer.apple.com/documentation/appkit/nsoutlineview
+- https://developer.apple.com/design/human-interface-guidelines/lists-and-tables
 approved-by: ''
 approved-date: ''
 ---
@@ -54,7 +56,7 @@ right-click context menu for opening, revealing, and copying a path.
 - **child-ordering-directories-first**: Rows for a directory's contents MUST
   list subdirectories before files, each group sorted alphabetically and
   case-insensitively (`FileTreeNode.loadChildren`).
-- **hidden-files-shown-ds-store-excluded**: Rows MUST include hidden
+- **hidden-file-visibility**: Rows MUST include hidden
   (dot-prefixed) files and directories, but MUST NOT include a `.DS_Store`
   entry (`FileTreeNode.loadChildren`).
 - **empty-root-placeholder-text**: A root manager with no children currently
@@ -103,7 +105,7 @@ right-click context menu for opening, revealing, and copying a path.
   unread level deep MUST proceed one additional level per reload triggered by
   that level's children arriving, rather than requiring the whole path to be
   drawn in a single pass.
-- **restore-abandons-missing-selection**: If the directory that should contain
+- **missing-selection-abandonment**: If the directory that should contain
   a pending restored selection is drawn, expanded, and has finished reading
   its contents without that path appearing in them, the pending restoration
   MUST be dropped rather than left standing indefinitely.
@@ -205,7 +207,7 @@ right-click context menu for opening, revealing, and copying a path.
   `.current`, `.newTab`, or `.toTheSide` respectively.
 - **context-menu-reveal-in-finder**: Choosing "Reveal in Finder" MUST call
   `NSWorkspace.shared.activateFileViewerSelecting(_:)` with the row's URL.
-- **context-menu-copy-path-is-posix**: Choosing "Copy Path" MUST place the
+- **copy-path-format**: Choosing "Copy Path" MUST place the
   URL's POSIX path (not a `file://` URL string) on the general pasteboard.
 - **double-click-toggles-root**: Double-clicking a root header row MUST expand
   it if collapsed, or collapse it if expanded.
@@ -227,7 +229,7 @@ right-click context menu for opening, revealing, and copying a path.
   `.claude`, `.accent` for every other directory, `.warning` for `.swift` and
   `.json` files, `.accent` for `.md` and `.markdown` files, and
   `.secondaryText` for any other file extension.
-- **name-truncates-middle-single-line**: A file or directory's name label MUST
+- **name-truncation**: A file or directory's name label MUST
   truncate in the middle when it does not fit, and MUST render on a single
   line.
 - **name-tooltip-is-full-path**: A file or directory row's name label MUST
@@ -246,9 +248,12 @@ right-click context menu for opening, revealing, and copying a path.
   `NSOutlineView` keyboard navigation — arrow-key row movement and
   expand/collapse, and type-ahead row selection — since this file overrides
   none of that behavior.
-- **testing-hooks-available**: The component MAY expose `selectedURLForTesting`,
-  `selectedNodeInModelForTesting`, and `collapseAllForTesting()` as additional,
-  `@testable`-only surface for verifying state in tests.
+- **restore-disclosure-noop-without-pending**: `restoreDisclosure()` MUST do
+  nothing further once the ancestor-expansion pass completes when there is no
+  pending restored selection (`pendingSelectionPath == nil`).
+- **document-event-ignores-unparseable-uri**: A document event whose URI does
+  not parse into a `URL` (`URL(string: uri)` returns `nil`) MUST be silently
+  ignored.
 
 ## Appearance
 
@@ -328,21 +333,8 @@ right-click context menu for opening, revealing, and copying a path.
   code is added or overridden in this file, so whatever AppKit provides by
   default for an outline view with a data source and delegate applies
   unmodified.
-- Differentiate Without Color: git status is never conveyed by color alone —
-  every colored name and badge is paired with the status's own single-letter
-  text (`M`, `A`, `D`, `R`, `C`, `?`, `U`, `!`); the dirty marker is conveyed
-  by the presence or absence of a shape, not by a color distinction alone.
-- Reduce Motion: Not applicable. This file contains no `NSAnimationContext`,
-  transition, or motion effect of any kind; every visual change (reload,
-  expand, collapse, recolor) is an immediate property or layout change.
-- Increase Contrast: Not applicable at this component's level. Every color
-  used through the theme palette (`.primaryText`, `.secondaryText`,
-  `.tertiaryText`, `.accent`, `.info`, `.warning`, `.secondaryText`) is a
-  semantic role resolved by the palette/theme system; this file contains no
-  contrast-specific branching of its own, so any contrast adaptation belongs
-  to that system, not here. Git-status colors are the one exception: they are
-  fixed system colors (`NSColor.systemOrange`, etc.), chosen so every git
-  client's red/orange/green vocabulary stays recognizable regardless of theme.
+- Reduce Motion, Increase Contrast, Differentiate Without Color: see
+  **Accessibility Options** below.
 - Minimum tap target: Not applicable. This is a pointer-driven macOS control,
   not a touch surface; the 44×44pt guidance for touch targets does not apply.
   The actual row height is 22pt (`outline.rowHeight = 22`).
@@ -362,7 +354,7 @@ right-click context menu for opening, revealing, and copying a path.
 |----|-------------|-------|----------|
 | file-tree-outline-001 | top-level-rows-are-managers | Construct with `roots.managers` containing three `FileTreeManager`s. | The outline has exactly 3 top-level rows, in that order. |
 | file-tree-outline-002 | child-ordering-directories-first | Expand a directory containing `zeta.txt`, `Alpha/`, `beta.txt`. | Rows appear as `Alpha/`, `beta.txt`, `zeta.txt`. |
-| file-tree-outline-003 | hidden-files-shown-ds-store-excluded | Expand a directory containing `.env`, `.DS_Store`, `readme.md`. | `.env` and `readme.md` appear as rows; `.DS_Store` does not. |
+| file-tree-outline-003 | hidden-file-visibility | Expand a directory containing `.env`, `.DS_Store`, `readme.md`. | `.env` and `readme.md` appear as rows; `.DS_Store` does not. |
 | file-tree-outline-004 | empty-root-placeholder-text | A root manager with no `rootNode` children, `isSyncing == true`, then set to `false`. | Placeholder row reads "Scanning…", then "Empty" after the change. |
 | file-tree-outline-005 | placeholder-not-selectable | Attempt to click-select a placeholder row. | The outline's selection does not change to the placeholder row. |
 | file-tree-outline-006 | unread-directory-shows-triangle | A directory node with `children == []`. | `isItemExpandable` returns `true` for that node. |
@@ -374,11 +366,11 @@ right-click context menu for opening, revealing, and copying a path.
 | file-tree-outline-012 | collapse-stops-watching-children | Expand then collapse a directory, then publish new `children` on its node. | No reload occurs as a result of that publish. |
 | file-tree-outline-013 | expand-persists-to-restoration | Expand a directory row by clicking its disclosure triangle. | `restoration.isExpanded(path)` becomes `true` for that path. |
 | file-tree-outline-014 | collapse-persists-to-restoration | Collapse a previously expanded directory row. | `restoration.isExpanded(path)` becomes `false` for that path. |
-| file-tree-outline-015 | programmatic-expand-collapse-not-persisted | Call `collapseAllForTesting()`, then reload the outline while `restoration` still marks those paths expanded. | `restoration`'s stored expanded set is unchanged by the collapse-all call itself. |
+| file-tree-outline-015 | programmatic-expand-collapse-not-persisted | Call `collapseAllForTesting()`, then reload the outline while `restoration` still marks those paths expanded. | `restoration`'s stored expanded set is unchanged by the collapse-all call itself; after the reload, those same paths are re-expanded per `restore-expanded-paths-on-reload`, since their entries in `restoration` were never cleared. |
 | file-tree-outline-016 | lone-root-auto-expands-once | Construct with one root manager and an empty `restoration.expandedPaths`; reload; collapse the root; reload again. | The root auto-expands on the first reload only; it stays collapsed after the user closes it and a later reload. |
 | file-tree-outline-017 | restore-expanded-paths-on-reload | Set `restoration` to mark two drawn directory paths expanded, then reload. | Both directories are expanded after the reload. |
-| file-tree-outline-018 | restore-descends-incrementally | Set a pending restored selection three unread levels deep, then reload. | The selection is reached after the corresponding number of triggered reloads, not immediately. |
-| file-tree-outline-019 | restore-abandons-missing-selection | Set a pending restored selection for a file that has since been deleted, with its parent directory drawn, expanded, and fully read. | The pending selection is cleared and no further restoration attempt occurs. |
+| file-tree-outline-018 | restore-descends-incrementally | Set a pending restored selection three unread levels deep, then reload. | The selection is reached only after 3 triggered reloads, one per unread level: after the 1st and 2nd, one further ancestor is expanded and the target row is still not drawn; after the 3rd, the target row is drawn, becomes selected, and `pendingSelectionPath` is cleared. |
+| file-tree-outline-019 | missing-selection-abandonment | Set a pending restored selection for a file that has since been deleted, with its parent directory drawn, expanded, and fully read. | The pending selection is cleared and no further restoration attempt occurs. |
 | file-tree-outline-020 | select-root-sets-target-root | Click a root header row. | `selection.selectedRoot` equals that root's URL. |
 | file-tree-outline-021 | select-node-sets-node-and-target-root | Click a file row under root R. | `selection.selectedNode` is that file's node; `selection.selectedRoot` becomes R. |
 | file-tree-outline-022 | select-persists-path-unless-restore-pending | Click a file row with no pending restoration in progress. | `restoration.selectedPath` equals that file's path. |
@@ -396,7 +388,7 @@ right-click context menu for opening, revealing, and copying a path.
 | file-tree-outline-034 | reload-preserves-selection | Select a file, then trigger a full reload without removing that file. | The same file remains selected afterward. |
 | file-tree-outline-035 | reload-clears-selection-when-row-gone | Select a file, delete its underlying node from the model, then trigger a full reload. | `selection.selectedNode` becomes `nil`. |
 | file-tree-outline-036 | path-lookup-correct-after-structural-change | Expand a directory (adding rows), then immediately look up the row for a path below it. | The lookup returns the row currently showing that path, not a pre-expansion index. |
-| file-tree-outline-037 | row-lookup-avoids-full-scan | Perform two lookups for the same path with no structural change between them. | The second lookup is served without re-scanning every drawn row. |
+| file-tree-outline-037 | row-lookup-avoids-full-scan | Build two outlines that differ only in drawn-row count (e.g. 50 rows vs. 5,000), perform one lookup in each to build its index, then time a second lookup for the same path in each with no structural change between calls. | The second lookup's time does not scale with the number of drawn rows: the 5,000-row outline's second lookup is not measurably slower than the 50-row outline's — an O(1) index hit rather than the O(rows) scan a linear implementation would show. |
 | file-tree-outline-038 | dirty-updates-row-in-place | Mark an open, drawn file's document dirty. | Only that row's marker becomes visible; no reload or reselection occurs. |
 | file-tree-outline-039 | dirty-falls-back-to-item-reload | Mark a drawn file dirty after its row view has been recycled away by the outline. | That one item is reloaded, and the current selection is unchanged afterward. |
 | file-tree-outline-040 | dirty-ignored-when-row-not-drawn | Fire a dirty-state-change event for a file whose row is not currently drawn (its parent is collapsed). | No row update, reload, or crash occurs. |
@@ -413,29 +405,39 @@ right-click context menu for opening, revealing, and copying a path.
 | file-tree-outline-051 | context-menu-item-order | Right-click a file row. | Menu order is Open, Open in a New Tab, Open to the Side, separator, Reveal in Finder, Copy Path. |
 | file-tree-outline-052 | context-menu-open-forwards-destination | Choose "Open to the Side" from a file's context menu. | `onOpenRequest` is called with that file's URL and `.toTheSide`. |
 | file-tree-outline-053 | context-menu-reveal-in-finder | Choose "Reveal in Finder". | `NSWorkspace.shared.activateFileViewerSelecting(_:)` is called with that row's URL. |
-| file-tree-outline-054 | context-menu-copy-path-is-posix | Choose "Copy Path" for a file at `/Users/x/Notes.md`. | The pasteboard's string is `/Users/x/Notes.md`, not a `file://` URL. |
+| file-tree-outline-054 | copy-path-format | Choose "Copy Path" for a file at `/Users/x/Notes.md`. | The pasteboard's string is `/Users/x/Notes.md`, not a `file://` URL. |
 | file-tree-outline-055 | double-click-toggles-root | Double-click a collapsed root header, then double-click it again. | It expands, then collapses. |
 | file-tree-outline-056 | double-click-toggles-loaded-node | Double-click a directory row with `children != nil`. | Its expansion toggles. |
 | file-tree-outline-057 | double-click-opens-otherwise | Double-click a file row (`children == nil`). | `onOpenRequest` is called instead of any expansion change. |
 | file-tree-outline-058 | icon-chosen-by-node-type | Inspect rows for a `.claude` directory, a `Tests` directory, a `.xcodeproj` package, and a `.swift` file. | Icons are `brain`, `folder.fill.badge.questionmark`, `shippingbox.fill`, and the file's extension-resolved icon, respectively. |
 | file-tree-outline-059 | icon-tint-by-role | Inspect icon tints for a package, a `.claude` directory, an ordinary directory, and a `.swift` file. | Tints resolve to `.warning`, `.info`, `.accent`, and `.warning` respectively. |
-| file-tree-outline-060 | name-truncates-middle-single-line | Render a name too long for the row's width. | The label truncates in the middle and stays on one line. |
+| file-tree-outline-060 | name-truncation | Render a name too long for the row's width. | The label truncates in the middle and stays on one line. |
 | file-tree-outline-061 | name-tooltip-is-full-path | Hover a row's name label. | The tooltip shows the node's full filesystem path. |
 | file-tree-outline-062 | git-status-recolors-name | Give a node `gitStatus == .modified`. | The name label's text color equals `NSColor.systemOrange`. |
 | file-tree-outline-063 | git-status-shows-badge | Give a node `gitStatus == .deleted`. | A trailing badge reading "D" appears in `NSColor.systemRed`. |
 | file-tree-outline-064 | tree-carries-accessibility-id | Inspect the outline view's accessibility identifier. | It equals `file-browser.tree`. |
 | file-tree-outline-065 | coder-init-unavailable | Attempt to construct via `NSCoder`-based decoding. | Compilation fails (unavailable), or a runtime `fatalError` occurs if bypassed. |
 | file-tree-outline-066 | keyboard-and-typeahead-inherited | With the outline focused, press the down-arrow key, then type a letter matching a row's first character. | Selection moves to the next row, then jumps to the type-ahead match; no custom key handler intercepts either. |
-| file-tree-outline-067 | testing-hooks-available | Select a node, then read `selectedURLForTesting` and `selectedNodeInModelForTesting`. | Both reflect the current selection. |
+| file-tree-outline-068 | target-root-change-redraws-headers | Set `selection.selectedRoot` to a different root among three roots. | The outline reloads and header emphasis is redrawn to reflect the new target. |
+| file-tree-outline-069 | programmatic-expand-collapse-not-persisted | Restore a stored expanded path via `restoreDisclosure()` (or expand an ancestor via `reveal(_:)`), with no matching entry yet in `restoration`. | `restoration`'s stored expanded set gains no new entry for that path as a result of the programmatic expansion itself. |
+| file-tree-outline-070 | restore-disclosure-noop-without-pending | Call `restoreDisclosure()` when `pendingSelectionPath` is `nil` and no directory in `restoration.expandedPaths` needs expanding. | No selection, expansion, or scroll change occurs, and no crash results. |
+| file-tree-outline-071 | document-event-ignores-unparseable-uri | Fire a document event whose URI string does not parse into a `URL` (`URL(string:)` returns `nil`). | No row lookup, reload, or crash occurs. |
+
+**Testing note**: `selectedURLForTesting`, `selectedNodeInModelForTesting`, and
+`collapseAllForTesting()` are additional `@testable`-only surface used to read
+and drive state directly in tests; they are not behavioral requirements in
+their own right, so no vector above exists solely to prove their presence.
 
 ## Edge Cases
 
 - **Null/empty input**: An empty root (no `rootNode`, or `rootNode.children`
   empty) renders the placeholder row rather than zero rows (see
   `empty-root-placeholder-text`); the placeholder is never selectable and
-  never opens anything. `restoreDisclosure()` MUST do nothing further when
-  `pendingSelectionPath` is `nil`. A document event whose URI does not parse
-  into a `URL` (`URL(string: uri)` returns `nil`) MUST be silently ignored.
+  never opens anything. `restoreDisclosure()` doing nothing further once
+  there is no pending restored selection, and a document event with an
+  unparseable URI being silently ignored, are covered as named requirements
+  above (see **restore-disclosure-noop-without-pending** and
+  **document-event-ignores-unparseable-uri**).
 - **Boundary values**: The one-shot auto-expand
   (`lone-root-auto-expands-once`) only applies when there is exactly one root
   manager and `restoration.expandedPaths` is empty; a browser with two or
@@ -526,7 +528,10 @@ excluded from this table.
   non-git colors are semantic theme roles (`.primaryText`, `.secondaryText`,
   `.tertiaryText`, `.accent`, `.info`, `.warning`); `FileTreeOutlineViewController.swift`
   contains no contrast-specific branching of its own, so any adaptation lives
-  in the theme/palette system, not here.
+  in the theme/palette system, not here. Git-status colors are the one
+  exception: the source comment describes them as "git's own vocabulary, not
+  app chrome," kept as fixed system colors (`NSColor.systemOrange`, etc.)
+  rather than being remapped onto theme roles.
 - **Differentiate Without Color**: Supported. Git status is always shown as a
   status letter (`M`, `A`, `D`, `R`, `C`, `?`, `U`, `!`) in addition to color,
   never by color alone; the dirty marker is a shape whose presence or absence
@@ -597,11 +602,13 @@ Not applicable: `FileTreeOutlineViewController.swift` contains no `os_log`,
   configures a single-column `NSOutlineView` (`ThemedOutlineView`) with
   `rowHeight = 22`, `indentationPerLevel = 14`, `style = .inset`, and a
   hidden header, driving it as both `NSOutlineViewDataSource` and
-  `NSOutlineViewDelegate`. On iOS there is no `NSOutlineView` equivalent;
-  a `UITableView`/`UICollectionView` with manually flattened, indented rows
-  (the same flattening approach as the Compose/React notes above) is the
-  usual substitute, since `UIOutlineView` does not exist.
-- **WinUI 3**: This is the platform this recipe exists to serve. Model the
+  `NSOutlineViewDelegate`. `NSOutlineView` itself has no direct iOS
+  counterpart (`UIOutlineView` does not exist), but a `UICollectionView`
+  configured with `UICollectionLayoutListConfiguration` and driven by an
+  `NSDiffableDataSourceSectionSnapshot` has supported a native, hierarchical,
+  disclosure-triangle outline since iOS 14 — that combination, not a manually
+  flattened/indented `UITableView`, is the platform-idiomatic substitute.
+- **WinUI 3**: Model the
   tree as a `TreeView` bound to a hierarchical `ItemsSource` mirroring
   `FileTreeManager`/`FileTreeNode` (one top-level `TreeViewNode` per root,
   matching `top-level-rows-are-managers`); use `TreeViewNode.HasUnrealizedChildren`
@@ -629,91 +636,107 @@ Not applicable: `FileTreeOutlineViewController.swift` contains no `os_log`,
 
 ## Design Decisions
 
-Decision: Use `NSOutlineView` rather than a SwiftUI `List` for the tree.
-Rationale: the file's own header comment states a SwiftUI list row's tap
+**Decision**: Use `NSOutlineView` rather than a SwiftUI `List` for the tree.
+**Rationale**: the file's own header comment states a SwiftUI list row's tap
 gesture attached to the row's content never fires, and a directory's row,
 being a disclosure-group label, is not something a `List` will select at
 all — half the tree answered a click with nothing. `NSOutlineView` selects on
 mouse-down for every row it draws, which is the behavior this component
 needs.
-Approved: pending.
+**Approved**: pending.
 
-Decision: Use `children == nil` for a leaf, a package, *and* a directory that
+**Decision**: Use `children == nil` for a leaf, a package, *and* a directory that
 was read and found empty — rather than reserving `nil` for leaves only — and
 disambiguate the "was this a directory?" question downstream in
 `openIfFile(_:)` via `!isDirectory || isPackage`, not via the children value
 itself.
-Rationale: `FileTreeNode` deliberately sets `children = nil` (not `[]`) for a
+**Rationale**: `FileTreeNode` deliberately sets `children = nil` (not `[]`) for a
 directory that reads empty, "so the outline reads an empty array as
 'expandable, not yet read'" — keeping `[]` would leave a disclosure triangle
 that opens onto nothing. `openIfFile(_:)`'s own guard is what then stops a
 double-click or single-click on that now-leaf-shaped empty directory from
 being sent to the document viewer as if it were a file.
-Approved: pending.
+**Approved**: pending.
 
-Decision: Cache path→row lookups (`rowIndexByPath`) lazily, and verify a
+**Decision**: Cache path→row lookups (`rowIndexByPath`) lazily, and verify a
 cache hit against the row's actual content before trusting it, rather than
 either always scanning or always trusting the cache.
-Rationale: the source comment explains this controller is a
+**Rationale**: the source comment explains this controller is a
 `TextDocumentStore` observer, so every keystroke in *any* open document, in
 *every* open file browser, used to cost an O(rows) path-string scan; the
 verify-before-trust step exists because a stale hit would otherwise silently
 redraw or reselect the wrong file rather than fail loudly.
-Approved: pending.
+**Approved**: pending.
 
-Decision: Use two independent guard flags, `isSyncingSelection` and
+**Decision**: Use two independent guard flags, `isSyncingSelection` and
 `isSyncingExpansion`, rather than a single "the controller is currently
 driving the outline" flag.
-Rationale: each guards a different feedback loop — `isSyncingSelection`
+**Rationale**: each guards a different feedback loop — `isSyncingSelection`
 stops a model-driven selection change from being reported back through
 `outlineViewSelectionDidChange`, and `isSyncingExpansion` stops a
 restoration- or reveal-driven expand/collapse from being reported back
 through `outlineViewItemDidExpand`/`outlineViewItemDidCollapse` — and the two
 kinds of programmatic change do not always happen together (restoring
 disclosure without touching selection, or vice versa).
-Approved: pending.
+**Approved**: pending.
 
-Decision: `reveal(_:)`/`revealNothing()` write `selection.selectedNode` and
+**Decision**: `reveal(_:)`/`revealNothing()` write `selection.selectedNode` and
 `selection.selectedRoot` directly (`adoptRevealedSelection(_:)`) instead of
 relying on the outline's own selection-changed delegate callback to record
 the change.
-Rationale: the source comment distinguishes "the highlight" from "the
+**Rationale**: the source comment distinguishes "the highlight" from "the
 selection" — `isSyncingSelection` deliberately stops the outline's own report
 from being written back (so a reveal is not echoed to whatever editor pane it
 came from), which would otherwise leave `selection` naming a stale file and
 `selectedRoot` pointing at the wrong project root.
-Approved: pending.
+**Approved**: pending.
 
-Decision: Restore a deeply nested expanded/selected path incrementally,
+**Decision**: Restore a deeply nested expanded/selected path incrementally,
 across as many reloads as the depth requires, rather than requiring the
 whole path to already be drawn.
-Rationale: expanding a directory only *starts* an asynchronous read of its
+**Rationale**: expanding a directory only *starts* an asynchronous read of its
 contents; the source comment explains the loop terminates naturally because
 a pass that expands nothing triggers no further reload, so a fixed-depth
 single pass would leave anything below the first unread level permanently
 unrestored.
-Approved: pending.
+**Approved**: pending.
 
-Decision: Leave `selection.selectedRoot`/orphaned-selection cleanup, when a
+**Decision**: Leave `selection.selectedRoot`/orphaned-selection cleanup, when a
 root disappears entirely, to the hosting `FileBrowserViewController` rather
 than handling it in this file.
-Rationale: `reselect(_:)` only clears `selection.selectedNode` when the
+**Rationale**: `reselect(_:)` only clears `selection.selectedNode` when the
 outgoing selection was a `FileTreeNode`; a selected root *header*
 (`FileTreeManager`) that disappears from a reload is not cleared here. The
 sibling `file-browser-view-controller` recipe's
 `teardown-clears-orphaned-root-selection` requirement is what actually
 guarantees `selection.selectedRoot` is cleared when its root is removed.
-Approved: pending.
+**Approved**: pending.
 
 ## Compliance
 
-No automated compliance checks have been run against this recipe yet. This
-table will be populated by the cookbook's compliance tooling on review.
-
 | Check | Status | Category |
 |-------|--------|----------|
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
+
+`keyboard-navigable` passes because the source overrides none of
+`NSOutlineView`'s default keyboard/type-ahead handling
+(`keyboard-and-typeahead-inherited`). `screen-reader-support` is partial: row
+icons and the unsaved-changes marker carry explicit accessibility
+descriptions, but the git-status badge does not (see the open question in
+Accessibility above). `contrast-ratio` is partial: non-git colors resolve through
+semantic theme roles whose actual contrast this file cannot show, and the
+fixed git-status colors are not verified against theme backgrounds here.
+`no-hardcoded-strings` and `string-externalization` fail because all ten
+user-visible strings are `String` literals with no localization key (see
+Localization above).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: consolidated duplicated accessibility-options prose, corrected an unsupported rationale for git-status colors and a false WinUI-3 claim, added named requirements and vectors for two previously-unnamed edge-case MUSTs, split two under-tested vectors into full-coverage pairs, tightened vector 018's expected count and vector 015's reload assertion, rewrote vector 037 as a measurable performance bound, corrected the iOS platform note to recommend `UICollectionView`/`UICollectionLayoutListConfiguration`, moved the `testing-hooks-available` MAY out of Behavioral Requirements, renamed four requirements to subject-only names, reformatted Design Decisions to the bold three-line form, moved a misplaced cookbook `related` URL out of `references` and added real Apple doc references, and populated the Compliance table (with a compliance-catalog remap pass).

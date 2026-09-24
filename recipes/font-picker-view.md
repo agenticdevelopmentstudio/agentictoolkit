@@ -3,7 +3,7 @@ id: 67a314b9-d324-4d0c-b9c1-86e27c01537d
 title: FontPickerView
 domain: agentictoolkit://recipes/font-picker-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -25,7 +25,11 @@ tags:
 - appkit
 depends-on:
 - agentictoolkit://recipes/font-chooser-button
-related: []
+related:
+- agentictoolkit://recipes/color-picker-view
+- agentictoolkit://recipes/checkbox-view
+- agentictoolkit://recipes/number-field-view
+- agentictoolkit://recipes/popup-menu-choice-view
 references: []
 approved-by: ''
 approved-date: ''
@@ -91,13 +95,20 @@ any other caller of that button cannot drift apart.
   MUST call `button.show(_:title:)`, passing `viewModel.font` as the font
   and the result of the private `describe(_:installed:)` helper as the
   title.
-- **describes-font-name-and-rounded-point-size**: The `describe(_:installed:)`
-  helper MUST format its result as `"<name> - <size> pt"`, where `<name>` is
+- **describes-font-name-and-rounded-point-size**: WHEN `sync()` runs,
+  `button`'s title MUST read `"<name> — <size> pt"`, where `<name>` is
   `font.displayName ?? font.fontName` and `<size>` is `font.pointSize`
-  rounded to the nearest integer.
-- **flags-an-uninstalled-font-in-its-title**: WHEN `describe(_:installed:)`
-  is called with `installed == false`, it MUST append the literal suffix
-  `" (not installed)"` to the formatted name-and-size string.
+  rounded to the nearest integer (see the `AppKit / UIKit` platform note for
+  the private helper that computes this string).
+- **flags-an-uninstalled-font-in-its-title**: WHEN `sync()` runs and
+  `viewModel.isInstalled == false`, `button`'s title MUST end with the
+  literal suffix `" (not installed)"`.
+- **delegates-font-resolution-fallback**: Component MUST NOT perform its own
+  validation, clamping, or fallback substitution on `viewModel.font`'s
+  underlying stored name or size before passing it to `button.show(_:title:)`;
+  resolving an uninstalled font name or an out-of-range stored size to a
+  fallback font is `FontViewModel.font`'s responsibility, one layer below
+  this component.
 - **dims-and-disables-the-row**: WHEN `isEnabled` is set to `false`, the
   component MUST set `button.isEnabled` to `false` and `label.alphaValue` to
   `0.4`. WHEN `isEnabled` is set to `true`, the component MUST set
@@ -188,7 +199,7 @@ any other caller of that button cannot drift apart.
   sets a UI-testing identifier, not an accessible name or label linkage.
   What is missing: whether VoiceOver announces the row's title (e.g.
   "Terminal Font") when focus lands on the button, or only the button's own
-  title text (e.g. "Menlo - 14 pt"). What would settle it: a VoiceOver pass
+  title text (e.g. "Menlo-Regular — 14 pt"). What would settle it: a VoiceOver pass
   over an instantiated row, or an explicit decision to call
   `button.setAccessibilityTitleUIElement(label)` in `init`/`sync()`,
   matching the pattern the other control-with-label rows already use.
@@ -229,20 +240,21 @@ any other caller of that button cannot drift apart.
 | font-picker-view-009 | syncs-once-at-construction | Construct `FontPickerView` | `label.stringValue` and `button`'s displayed title already reflect `viewModel.title`/`viewModel.font` immediately after `init` returns, with no further call needed |
 | font-picker-view-010 | redraws-label-text-on-every-sync | Trigger `sync()` twice (once via construction, once via `button.onChange` or `viewModel.onChange`) | `label.stringValue` is reassigned to `viewModel.title` on both occasions (verifiable via a spy on the label's `stringValue` setter recording at least two invocations) |
 | font-picker-view-011 | updates-button-sample-on-every-sync | Trigger `sync()` | `button.show(_:title:)` is called with `viewModel.font` and `describe(viewModel.font, installed: viewModel.isInstalled)` |
-| font-picker-view-012 | describes-font-name-and-rounded-point-size | `describe(NSFont(name: "Menlo", size: 14.4)!, installed: true)` | Returns `"Menlo - 14 pt"` |
-| font-picker-view-013 | flags-an-uninstalled-font-in-its-title | `describe(font, installed: false)` | Returned string ends with `" (not installed)"` |
+| font-picker-view-012 | describes-font-name-and-rounded-point-size | Construct `FontPickerView` with a `viewModel` whose `font` resolves to `NSFont(name: "Menlo-Regular", size: 14.4)!` and whose `isInstalled == true` | `button.show(_:title:)`'s title equals `"\(font.displayName ?? font.fontName) — 14 pt"` — an em dash separator and the point size rounded to the nearest integer, with no `(not installed)` suffix |
+| font-picker-view-013 | flags-an-uninstalled-font-in-its-title | Construct `FontPickerView` with a `viewModel` whose `isInstalled == false` | `button.show(_:title:)`'s title ends with the literal suffix `" (not installed)"` |
 | font-picker-view-014 | dims-and-disables-the-row | Set `isEnabled = false`, then `isEnabled = true` | After `false`: `button.isEnabled == false`, `label.alphaValue == 0.4`. After `true`: `button.isEnabled == true`, `label.alphaValue == 1.0` |
 | font-picker-view-015 | defaults-to-enabled | Construct `FontPickerView` | `isEnabled == true`, `button.isEnabled == true`, `label.alphaValue == 1.0`, before any explicit assignment |
 | font-picker-view-016 | exposes-constituent-views | Construct the component, then access `.label` and `.button` from outside the type | Both properties are accessible and return the same `NSTextField`/`FontChooserButton` instances built during init (`label` is a `ThemedLabel` instance, declared as `NSTextField`) |
 | font-picker-view-017 | requires-designated-initializer | Attempt `FontPickerView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
 | font-picker-view-018 | rejects-frame-only-initialization | Attempt `FontPickerView(frame: .zero)` | The call traps with a fatal error; no instance is returned |
+| font-picker-view-019 | delegates-font-resolution-fallback | Construct `viewModel` whose stored font name/size combination is invalid (so `FontViewModel.font` falls back to `.monospacedSystemFont(ofSize:weight: .regular)`), then trigger `sync()` | `button.show(_:title:)` is called with exactly the `NSFont` that `viewModel.font` returns (the fallback font); `FontPickerView` performs no validation, clamping, or substitution of its own on this value |
 
 ## Edge Cases
 
 - **Null/empty input**: `viewModel` (`FontViewModel`) is a non-optional,
   non-escaping-typed constructor parameter; Swift's type system rules out
-  `nil`. This is a MUST: the component provides, and needs, no
-  nil-handling path for its one initializer parameter.
+  `nil`. The component provides, and needs, no nil-handling path for its
+  one initializer parameter.
 - **Boundary values**: Neither `FontPickerView.swift` nor `FontViewModel.swift`
   clamps or validates `sizeObserver.value` (a plain `Double` persisted via
   `UserSetting<Double>`) before constructing `NSFont(name:size:)` in
@@ -251,9 +263,11 @@ any other caller of that button cannot drift apart.
   in either file. If `NSFont(name:size:)` returns `nil` for that
   combination, `FontViewModel.font` falls back to
   `.monospacedSystemFont(ofSize:weight: .regular)` - the same fallback path
-  used for an uninstalled font name (see next item). This is a MUST,
-  traceable to `FontViewModel.font`'s nil-coalescing implementation, which
-  `FontPickerView.sync()` reads unconditionally.
+  used for an uninstalled font name (see next item). That fallback is
+  `FontViewModel.font`'s responsibility, not `FontPickerView`'s -
+  `FontPickerView.sync()` reads `viewModel.font` unconditionally and passes
+  it straight to `button.show(_:title:)`. See
+  **delegates-font-resolution-fallback**.
 - **Concurrent access**: Not applicable - the class is `@MainActor`-isolated,
   so Swift's concurrency checker serializes all access to the main actor;
   there is no code path by which two threads can mutate the view
@@ -269,40 +283,34 @@ any other caller of that button cannot drift apart.
   closure property. `FontPickerView`'s initializer unconditionally assigns
   `viewModel.onChange = { [weak self] _ in self?.sync() }`, replacing
   whatever handler (if any) was previously registered on that
-  `FontViewModel` instance. This is a MUST-level, source-traceable
-  consequence of plain closure-property assignment: constructing a second
-  `FontPickerView` (or any other observer) against the same view model
-  silently drops the earlier handler.
+  `FontViewModel` instance (see **overwrites-existing-view-model-observer**).
 - **Repeated sync after a single font pick**: Picking a font that changes
   both the stored name and size fires `sync()` more than once for one user
   action. `button.onChange`'s closure calls `viewModel.setFont(font)` then
-  `self.sync()` synchronously. `FontViewModel.setFont(_:)` (read per this
-  guideline's helper-tracing rule) writes `nameObserver.value` and
-  `sizeObserver.value` only when each differs from its current value; each
-  write that actually occurs independently triggers that observer's
-  `UserSettingObserver.onChange` on the *next main-queue turn* (the
-  `.receive(on: DispatchQueue.main)` hop documented in `UserSetting.swift`),
-  which calls `FontViewModel.onChange?(self.font)`, i.e.
-  `FontPickerView`'s `sync()`-calling closure, again. So picking a font
-  that changes both name and size results in one synchronous `sync()` call
-  plus up to two further asynchronous `sync()` calls; picking the exact
-  font already stored (both guards fail) results in exactly one `sync()`
-  call. This is a MUST, directly traceable to the composition of
-  `FontPickerView.swift` and `FontViewModel.setFont(_:)`/`UserSettingObserver`;
-  the component performs no debouncing or deduplication of these repeated
-  calls, but because `sync()` always re-reads current state rather than
-  accumulating it, the redundant calls are observably idempotent.
+  `self.sync()` synchronously. `FontViewModel.setFont(_:)` writes
+  `nameObserver.value` and `sizeObserver.value` only when each differs from
+  its current value; each write that actually occurs independently triggers
+  that observer's `UserSettingObserver.onChange` on the *next main-queue
+  turn* (the `.receive(on: DispatchQueue.main)` hop documented in
+  `UserSetting.swift`), which calls `FontViewModel.onChange?(self.font)`,
+  i.e. `FontPickerView`'s `sync()`-calling closure, again. So picking a
+  font that changes both name and size results in one synchronous `sync()`
+  call plus up to two further asynchronous `sync()` calls; picking the
+  exact font already stored (both guards fail) results in exactly one
+  `sync()` call. The component performs no debouncing or deduplication of
+  these repeated calls; because `sync()` always re-reads current state
+  rather than accumulating it, the redundant calls are observably
+  idempotent (see **resyncs-synchronously-after-a-pick**).
 - **Reassigning an unchanged label**: `sync()` unconditionally reassigns
   `label.stringValue = viewModel.title` on every call, even though
   `viewModel.title` is a `let` on `AbstractViewModel` and can never change
-  after construction. This is a MUST: the component performs no
-  early-exit/equality check before this reassignment (see
-  **redraws-label-text-on-every-sync**).
+  after construction. The component performs no early-exit/equality check
+  before this reassignment (see **redraws-label-text-on-every-sync**).
 - **Toggling `isEnabled` to its current value**: `isEnabled`'s `didSet`
   reassigns `button.isEnabled` and `label.alphaValue` on every assignment,
   including a reassignment to the value `isEnabled` already holds; Swift's
-  `didSet` carries no built-in equality guard, and source adds none. This
-  is a MUST, traceable to the plain stored-property observer.
+  `didSet` carries no built-in equality guard, and source adds none (see
+  **dims-and-disables-the-row**).
 
 ## Configuration
 
@@ -321,10 +329,10 @@ appears anywhere in `FontPickerView.swift`.
 
 | String Key | Default (en) | Context |
 |-----------|-------------|---------|
-| (none - hardcoded literal fragments) | `" - %@ pt"` / `" (not installed)"` | Built by the private `describe(_:installed:)` helper and passed as `button`'s title on every `sync()` call. |
+| (none - hardcoded literal fragments) | `" — %@ pt"` / `" (not installed)"` | Built by the private `describe(_:installed:)` helper and passed as `button`'s title on every `sync()` call. |
 
 `label`'s text comes from `viewModel.title`, a value the caller provides, so
-there is nothing for this component to localize there. The `" - "`, `" pt"`,
+there is nothing for this component to localize there. The `" — "`, `" pt"`,
 and `" (not installed)"` fragments inside `describe(_:installed:)`,
 however, are hardcoded English string-interpolation literals assigned to
 `button`'s AppKit `title` (a plain `String`, not a `LocalizedStringKey`) -
@@ -408,7 +416,11 @@ Not applicable: `FontPickerView.swift` contains no logging call (no
   `ComposableSettings` namespace, conforming to `SettingsViewProtocol`. It
   composes two subviews - a `ThemedLabel` from
   `ComposableSettings.makeRowLabel` and a `FontChooserButton` - into one row
-  via `ComposableSettings.makeRow` and `pinToEdges`. There is no UIKit code
+  via `ComposableSettings.makeRow` and `pinToEdges`. `button`'s title text is
+  computed by a private static `describe(_:installed:)` helper, which formats
+  `"<name> — <size> pt"` and appends `" (not installed)"` when the font is
+  not installed - see **describes-font-name-and-rounded-point-size** and
+  **flags-an-uninstalled-font-in-its-title**. There is no UIKit code
   path in source; a UIKit port has no `NSFontPanel` equivalent to defer to
   (see `agentictoolkit://recipes/font-chooser-button`'s own AppKit/UIKit
   note for the button's side of that gap) and would need its own
@@ -440,45 +452,33 @@ Not applicable: `FontPickerView.swift` contains no logging call (no
 
 ## Design Decisions
 
-Decision: `viewModel.onChange` is overwritten unconditionally in `init`,
+**Decision**: `viewModel.onChange` is overwritten unconditionally in `init`,
 replacing any handler already registered on that `FontViewModel` instance.
-Rationale: Mirrors the same closure-property-assignment pattern used across
-the ComposableSettingsWindow row family (e.g. `ColorPickerView`); the view
-provides no way to compose with an existing observer.
-Approved: pending
+**Rationale**: Mirrors the same closure-property-assignment pattern
+documented at `agentictoolkit://recipes/color-picker-view#requirements/owns-on-change`;
+the view provides no way to compose with an existing observer.
+**Approved**: pending
 
-Decision: A single font pick can trigger `sync()` up to three times (one
+**Decision**: A single font pick can trigger `sync()` up to three times (one
 synchronous call from `button.onChange`, and up to two further asynchronous
 calls from `FontViewModel`'s `nameObserver`/`sizeObserver`, each hopping to
 the next main-queue turn) with no debouncing or deduplication.
-Rationale: `sync()` always re-reads current state from `viewModel` rather
+**Rationale**: `sync()` always re-reads current state from `viewModel` rather
 than accumulating deltas, so the repeated calls are redundant but
 observably idempotent; the source accepts that redundancy rather than
 adding a guard, consistent with `UserSettingObserver`'s own documented
 choice to hop to the main queue for every mouse-drag-safe update rather than
 coalescing them.
-Approved: pending
+**Approved**: pending
 
-Decision: The disabled-state dimming uses a hardcoded `0.4` alpha on
+**Decision**: The disabled-state dimming uses a hardcoded `0.4` alpha on
 `label`, local to this file, rather than a shared "disabled alpha" token
 used elsewhere in the row family.
-Rationale: No other file under `ComposableSettingsWindow/Views` sets this
+**Rationale**: No other file under `ComposableSettingsWindow/Views` sets this
 exact value or references a shared constant for it; this recipe documents
 the value as-is rather than inventing a token the source does not use (see
 the "Minimum contrast ratio" open question under Accessibility).
-Approved: pending
-
-Decision: This recipe gives `FontPickerView` more behavioral requirements
-(18) than its structurally similar sibling `ColorPickerView` (7).
-Rationale: `FontPickerView` owns genuinely more distinct behavior than a
-title-plus-control row composition: an `isEnabled`-driven dimming path that
-`ColorPickerView` does not have, a `describe(_:installed:)` formatting
-helper, and a two-layer sync (a synchronous call plus the
-`FontViewModel`/`UserSettingObserver` Combine pipeline's own asynchronous
-re-fire) that `ColorPickerView`'s unconditional, single-write
-`colorChanged(_:)` does not have - matching the simpler sibling's
-requirement count would omit behavior the source actually has.
-Approved: pending
+**Approved**: pending
 
 ## Compliance
 
@@ -487,8 +487,8 @@ Approved: pending
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
 | [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [meaningful-labels](agenticdevelopercookbook://compliance/accessibility#meaningful-labels) | partial | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | needs-review | accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
 | [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | reliability |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
 | [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
@@ -496,15 +496,18 @@ Approved: pending
 `native-controls-preference` and `platform-design-language` pass because the
 component defers to `FontChooserButton`'s own use of the system font panel
 rather than building a second font browser. `keyboard-navigable` passes on
-`NSButton`'s inherited Tab/Space/Return handling. `meaningful-labels` is
+`NSButton`'s inherited Tab/Space/Return handling. `screen-reader-support` is
 `partial`: `button`'s own accessible name (its `title`) is meaningful, but
 the row's descriptive `label` is not linked to it (see the open question
-under Accessibility). `contrast-ratio` is `needs-review` per the
-hardcoded-alpha open question under Accessibility. `idempotent-operations`
-passes because repeated `sync()` calls always converge to the same
-observable state (see Edge Cases). `separation-of-concerns` passes because
-the component stores no font of its own beyond its reference to
-`viewModel`. `string-externalization` fails because `describe(_:installed:)`
+under Accessibility). `contrast-ratio` is `partial`: the resolved contrast
+of the 40%-alpha disabled label cannot be determined from this file alone
+(see the "Minimum contrast ratio" open question under Accessibility).
+`idempotent-operations` passes because repeated `sync()` calls always
+converge to the same observable state (see Edge Cases).
+`separation-of-concerns` passes because the component stores no font of its
+own beyond its reference to `viewModel`, and delegates all font-resolution
+fallback to `FontViewModel.font` (see **delegates-font-resolution-fallback**).
+`string-externalization` fails because `describe(_:installed:)`
 builds its output from hardcoded, unlocalized string fragments (see
 Localization).
 
@@ -513,3 +516,4 @@ Localization).
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for FontPickerView, covering the row's view-model binding, the synchronous-plus-asynchronous re-sync path after a font pick, the isEnabled dimming, and two open accessibility/localization questions for review. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: added a delegates-font-resolution-fallback requirement and vector so the boundary-values edge case points at FontViewModel instead of taking on its fallback behavior here; restated describes-font-name-and-rounded-point-size and flags-an-uninstalled-font-in-its-title against button's observable title instead of the private describe(_:installed:) helper, and moved that helper's name into the AppKit/UIKit platform note; fixed vector 012's font/literal and the Localization row to match source's em dash separator exactly; bolded Design Decision labels and cited color-picker-view's owns-on-change requirement in Decision 1's rationale instead of naming it vaguely; dropped the meta decision comparing this recipe's requirement count to ColorPickerView's and the leftover "helper-tracing rule" aside; trimmed Edge Cases so they cite named requirements instead of re-asserting "This is a MUST"; fixed contrast-ratio's status from the disallowed needs-review to partial; populated related with the sibling row recipes it's compared against; and remapped the meaningful-labels compliance check (not in the catalog) to its screen-reader-support synonym. |

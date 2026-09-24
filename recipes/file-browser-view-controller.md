@@ -3,7 +3,7 @@ id: ab6d7655-9476-4318-8c36-f431686e2d23
 title: File Browser View Controller
 domain: agentictoolkit://recipes/file-browser-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -21,10 +21,11 @@ tags:
 - tree-view
 - view-controller
 - macos
-depends-on: []
-related: []
-references:
+depends-on:
+- agentictoolkit://recipes/file-tree-outline-view-controller
+related:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -47,11 +48,11 @@ what hosts it.
 
 ## Behavioral Requirements
 
-- **renders-tree-divider-footer-layout**: The component MUST arrange, top to
+- **tree-divider-footer-layout**: The component MUST arrange, top to
   bottom, the file tree, a one-point separator (`NSBox` with `boxType:
   .separator`), and the add/remove footer, each pinned to the container's
   leading and trailing edges, filling the container's bounds.
-- **windowbackground-container-fill**: The component MUST fill its root
+- **window-background-fill**: The component MUST fill its root
   container with the `.windowBackground` theme role.
 - **footer-surface-fill**: The component MUST fill the footer strip with the
   `.surface` theme role.
@@ -87,6 +88,10 @@ what hosts it.
   directories, if the last chosen directory is a removable root (i.e. it is
   now in `directories.additional`), the component MUST set
   `selection.selectedRoot` to that directory.
+- **add-directory-preserves-panel-order**: When `addDirectory()` adds more
+  than one chosen directory from a single panel response, the component MUST
+  add each one not already present in `directories.all`, in the same order
+  `NSOpenPanel.urls` returns them.
 - **remove-directory-requires-selected-root**: Invoking
   `removeSelectedDirectory()` while `selection.selectedRoot` is `nil` MUST
   call `RefusalFeedback.announce()` and MUST NOT change `directories` or
@@ -117,12 +122,19 @@ what hosts it.
 - **teardown-clears-orphaned-root-selection**: When a root is dropped from
   `directories.all` across a rebuild, the component MUST clear
   `selection.selectedRoot` to `nil` if it equals that root.
+- **multi-pane-consistency**: When multiple browser panes share the same
+  `FileBrowserDirectories`/`FileBrowserSelection`/`FileBrowserRestorationState`
+  and one pane adds or removes a root, every other pane observing those
+  shared objects SHOULD rebuild its own managers and clear any of its own
+  selection state that pointed under the added/removed root (see
+  **teardown-clears-orphaned-node-selection** and
+  **teardown-clears-orphaned-root-selection**).
 - **late-added-root-loads-if-visible**: A manager created for a root added
-  after the browser's own initial load has completed (`hasLoaded == true`)
-  MUST have `loadInitial()` called on it as part of the same rebuild.
+  after the browser's own initial load has completed MUST have
+  `loadInitial()` called on it as part of the same rebuild.
 - **late-added-root-watches-if-visible**: A manager created for a root added
-  while the browser is currently watching (`isWatching == true`) MUST have
-  `startWatching()` called on it as part of the same rebuild.
+  while the browser is currently watching MUST have `startWatching()` called
+  on it as part of the same rebuild.
 - **git-status-provider-reuse**: When constructing a manager for a root, the
   component MUST pass the injected `gitStatusProvider` to that manager only
   when the provider's `repoRoot`, resolved with `resolvingSymlinksInPath()`,
@@ -190,7 +202,7 @@ what hosts it.
 | Disabled | Remove button is disabled (`isEnabled = false`) whenever `selection.selectedRoot` is `nil` or is not a removable (user-added) root; its tooltip reads "Select an added directory to remove it". |
 | Focused | Not applicable: this file sets no custom focus-ring appearance on the tree, the buttons, or the container; whatever focus ring AppKit draws for a standard `NSButton`/hosted `NSOutlineView` is unmodified here. |
 | Loading | Before the view's first `viewWillAppear`, `hasLoaded` is `false` and no manager has been asked to scan (`loadInitial()` not yet called); after the first appearance, `hasLoaded` becomes `true` and every current manager has had `loadInitial()` called once. |
-| Watching | While the view is on screen (between `viewWillAppear`/`paneContentWillBeDiscarded` boundaries), `isWatching` is `true` and every current manager has `startWatching()` active; while off screen, `isWatching` is `false` and every manager has `stopWatching()` called. |
+| Watching | While the view is on screen — started at `viewWillAppear`, stopped at whichever of `viewDidDisappear` or `paneContentWillBeDiscarded` comes first — every current manager has `startWatching()` active; once stopped, every manager has `stopWatching()` called. |
 
 ## Accessibility
 
@@ -225,12 +237,12 @@ what hosts it.
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| file-browser-001 | renders-tree-divider-footer-layout | Load the view. | Tree view, then a 1pt separator, then the footer, stacked top to bottom and each pinned leading/trailing to the container. |
-| file-browser-002 | windowbackground-container-fill | Load the view, inspect the root container's layer background. | Background color equals the current theme's `.windowBackground` role color. |
+| file-browser-001 | tree-divider-footer-layout | Load the view. | Tree view, then a 1pt separator, then the footer, stacked top to bottom and each pinned leading/trailing to the container. |
+| file-browser-002 | window-background-fill | Load the view, inspect the root container's layer background. | Background color equals the current theme's `.windowBackground` role color. |
 | file-browser-003 | footer-surface-fill | Load the view, inspect the footer view's layer background. | Background color equals the current theme's `.surface` role color. |
-| file-browser-004 | one-manager-per-root | Construct with a primary root and two additional directories. | `managersByRoot` contains exactly 3 entries, one per root. |
+| file-browser-004 | one-manager-per-root | Construct with a primary root and two additional directories. | Exactly one manager backs each of the 3 roots (primary and both additional) — each root loads and can be watched independently (see file-browser-006 and file-browser-009), never sharing a manager with another root or going without one. |
 | file-browser-005 | primary-root-always-managed | Read `manager` immediately after construction. | Returns the `FileTreeManager` for `directories.primary`, never `nil` and never a crash. |
-| file-browser-006 | start-watching-on-appear | Call `viewWillAppear()` on a controller not currently watching. | Every manager in `managersByRoot` receives `startWatching()`. |
+| file-browser-006 | start-watching-on-appear | Call `viewWillAppear()` on a controller not currently watching. | Every manager for a current root receives `startWatching()`. |
 | file-browser-007 | stop-watching-on-disappear | Call `viewDidDisappear()` while watching. | Every manager receives `stopWatching()`. |
 | file-browser-008 | stop-watching-on-pane-teardown | Call `paneContentWillBeDiscarded()` while watching, without a prior `viewDidDisappear()`. | Every manager receives `stopWatching()`. |
 | file-browser-009 | load-initial-once | Call `viewWillAppear()` twice in a row. | `loadInitial()` is called on each manager exactly once (only on the first call). |
@@ -250,13 +262,19 @@ what hosts it.
 | file-browser-023 | late-added-root-watches-if-visible | While the browser is actively watching, add a new directory. | The new root's manager has `startWatching()` called on it. |
 | file-browser-024 | git-status-provider-reuse | Inject a `GitStatusProvider` whose `repoRoot` (symlink-resolved) matches the primary root; construct the browser. | The primary root's manager is built with that provider. |
 | file-browser-024b | git-status-provider-reuse | Inject a `GitStatusProvider` whose `repoRoot` does not match any root. | Every manager is built with `nil` for `gitStatusProvider`. |
-| file-browser-025 | open-request-forwarding | Set `controller.onOpenRequest = { _, _ in }`, then read `tree.onOpenRequest`. | The two closures are identical (same underlying storage). |
+| file-browser-025 | open-request-forwarding | Set `controller.onOpenRequest` to a closure that records its arguments, then have the hosted tree fire its own `onOpenRequest` (e.g. by triggering an open from the tree). | The recorded arguments match what the tree fired — `controller.onOpenRequest` reads/writes `tree.onOpenRequest` directly, with no second copy of the closure (see **open-request-forwarding**). |
 | file-browser-026 | reveal-forwarding | Call `controller.reveal(someURL)`. | The hosted tree's `reveal(_:)` is invoked with `someURL`. |
-| file-browser-027 | pane-selection-change-notification | Install `onPaneSelectionChange`, then set `selection.selectedNode` to a new value, then set it again to the same value. | Callback fires once, for the first change only. |
+| file-browser-027 | pane-selection-change-notification | Install `onPaneSelectionChange`, then set `selection.selectedNode` to a new value, then set it again to the same value. | Callback fires once, for the first change only. Because the forwarding hops through `RunLoop.main`, the test must drain the run loop (or await) after each `selectedNode` assignment before asserting, rather than checking synchronously. |
 | file-browser-028 | pane-selection-description | Select a node whose `url` is `/a/b/File.swift`. | `paneSelectionDescription` returns `"File.swift"`, not the full path. |
-| file-browser-029 | coder-init-unavailable | Attempt to build the controller via `NSCoder`-based decoding (e.g. from a storyboard/XIB). | Compilation fails (unavailable), or a runtime `fatalError` occurs if the unavailability is bypassed. |
+| file-browser-029 | coder-init-unavailable | Inspect `init(coder:)`'s declaration (a static/API-surface check, not a runtime-executable test). | It is marked `@available(*, unavailable)`, so any call site invoking it fails to compile; a runtime `fatalError` fires only if that unavailability is bypassed. |
 | file-browser-030 | reuse-managers-across-rebuild | Add a directory, capture the primary root's manager instance, then add a second directory. | The primary root's manager instance after the second add is the same instance as before (identity-equal). |
 | file-browser-031 | single-root-convenience-init | Construct with `init(rootURL:excludedURL:documentStore:)`. | `directories.primary == rootURL` and `directories.additional` is empty. |
+| file-browser-032 | add-directory-preserves-panel-order | Call `addDirectory()`, choose three new directories in a specific order (none yet in `directories.all`). | `directories.additional` gains all three, in the same order `NSOpenPanel.urls` returned them. |
+| file-browser-033 | multi-pane-consistency | Construct two `FileBrowserViewController`s sharing one `FileBrowserDirectories`/`FileBrowserSelection`; select a node under a user-added root in the first, then remove that root from the second. | The first controller's `selection.selectedNode` (and `selection.selectedRoot`, if it equaled the removed root) become `nil`, since both controllers observe the same shared objects. |
+| file-browser-034 | reveal-forwarding | Call `controller.revealNothing()`. | The hosted tree's `revealNothing()` is invoked. |
+| file-browser-035 | remove-button-tooltip | Set `selection.selectedRoot` to `nil`. | Remove button's tooltip reads `Select an added directory to remove it`. |
+| file-browser-036 | add-directory-selects-last-added | Call `addDirectory()`, choose three new directories in a single panel response and confirm. | `selection.selectedRoot` equals only the last of the three chosen directories, not the first two. |
+| file-browser-037 | git-status-provider-reuse | Inject a `GitStatusProvider` whose `repoRoot` (symlink-resolved) matches an *additional* root added via `addDirectory()`, not the primary root. | That additional root's manager is built with that provider, matched through `resolvingSymlinksInPath()` rather than a lexical comparison. |
 
 ## Edge Cases
 
@@ -268,7 +286,8 @@ what hosts it.
   `remove-directory-requires-selected-root`).
 - **Boundary values**: Selecting many directories at once in the open panel
   (`allowsMultipleSelection: true`) MUST add every one not already present,
-  in the order the panel returns them, and MUST select only the last one
+  in the order the panel returns them (per
+  `add-directory-preserves-panel-order`), and MUST select only the last one
   (per `add-directory-selects-last-added`) even when several are added in a
   single call.
 - **Concurrent access**: `directories.$additional` is observed on the main
@@ -280,10 +299,11 @@ what hosts it.
   removes a root, every other pane observing the same objects rebuilds its
   own managers and clears any of its own selection state that pointed under
   the removed root (`teardown-clears-orphaned-node-selection`,
-  `teardown-clears-orphaned-root-selection`). This is a SHOULD-level
-  consistency guarantee for multi-pane hosts, since the source comments
-  describe it as the reason those two clears exist, but no explicit test in
-  the given source exercises two live controllers at once.
+  `teardown-clears-orphaned-root-selection`). This is stated as
+  `multi-pane-consistency`, a SHOULD-level guarantee for multi-pane hosts:
+  the source comments describe it as the reason those two clears exist, but
+  no explicit test in the given source exercises two live controllers at
+  once.
 - **Error states**: The open panel returning anything other than `.OK`
   (Cancel) is treated as a no-op, not an error — no dialog is shown. A
   directory the user already added is likewise treated as a no-op, not an
@@ -424,22 +444,30 @@ Not applicable: `FileBrowserViewController.swift` contains no `os_log`,
   hairline `UIView`; the FSEvents-backed watch/stop lifecycle would need to
   move to `viewWillAppear(_:)`/`viewDidDisappear(_:)` on `UIViewController`,
   matching this file's `viewWillAppear()`/`viewDidDisappear()` exactly.
+  Internally, the source tracks these per-root managers in a private
+  `managersByRoot: [URL: FileTreeManager]` dictionary and gates the
+  once-only load and the watch/stop toggle on private `hasLoaded`/
+  `isWatching` booleans — implementation detail a conforming reimplementation
+  is free to represent differently; the requirements and test vectors above
+  describe only the observable load/watch behavior, never these names.
 - **WinUI 3**: Model the tree as a `TreeView` (or `NavigationView` with a
   `TreeView` in its pane) hosted in a `Grid` with two `RowDefinition`s: the
   tree's row set to `*`, and a fixed-height footer row below a
   `<MenuFlyoutSeparator>`-style `Border` acting as the divider. The footer is
-  a horizontal `StackPanel` with two `Button`s carrying `FontIcon`s (Segoe
-  Fluent `` for add/plus, `` or `` for remove/minus) in
-  place of the SF Symbols; each button's `AutomationProperties.Name` should
-  carry the same text the source puts in `toolTip`, since WinUI has no
-  tooltip-as-accessible-name fallback to rely on the way this recipe's
-  Accessibility section flags as unresolved for AppKit. Directory selection
-  uses `Windows.Storage.Pickers.FolderPicker` in place of `NSOpenPanel`,
-  with `Multiple` not directly supported (WinUI's `FolderPicker` returns one
-  folder per call, so `allowsMultipleSelection` becomes a loop over repeated
-  picker invocations, or `PickMultipleFilesAsync`-style handling is not
-  available for folders — call this out to implementers rather than silently
-  serializing multiple picks). The remove button's enabled/disabled pair
+  a horizontal `StackPanel` with two `Button`s carrying `FontIcon`s — Segoe
+  Fluent glyphs written as escaped code points rather than raw glyph
+  characters, for example `\uE710` for add/plus and `\uE738` for
+  remove/minus — in place of the SF Symbols; each button's
+  `AutomationProperties.Name` should carry the same text the source puts in
+  `toolTip`, since WinUI has no tooltip-as-accessible-name fallback to rely
+  on the way this recipe's Accessibility section flags as unresolved for
+  AppKit. Directory selection uses `Windows.Storage.Pickers.FolderPicker` in
+  place of `NSOpenPanel`; unlike `NSOpenPanel`'s `allowsMultipleSelection`,
+  `FolderPicker` returns exactly one folder per call, so multi-directory
+  selection must be emulated with a loop of repeated
+  `PickSingleFolderAsync()` calls, each shown to the user in turn, and the
+  UI should say so explicitly (e.g. "Add another?") rather than silently
+  serializing multiple picks behind what looks like one dialog. The remove button's enabled/disabled pair
   maps to a `VisualStateManager` state pair (`Enabled`/`Disabled`) toggled
   from the same `selection.selectedRoot` rule, with the `IsEnabled` binding
   driving `Button.IsEnabled` and a `ToolTipService.ToolTip` binding driving
@@ -451,55 +479,73 @@ Not applicable: `FileBrowserViewController.swift` contains no `os_log`,
 
 ## Design Decisions
 
-Decision: Reuse an existing `FileTreeManager` for any root still present
+**Decision**: Reuse an existing `FileTreeManager` for any root still present
 across a `rebuildManagers()` call, rather than discarding and rebuilding
 every manager from scratch.
-Rationale: the source comment on `rebuildManagers()` states a scanned tree
+**Rationale**: the source comment on `rebuildManagers()` states a scanned tree
 should not be rescanned "because a *different* directory appeared" — a full
 rebuild would re-run a filesystem scan and restart FSEvents watching for
 every root, including ones that did not change.
-Approved: pending.
+**Approved**: pending.
 
-Decision: Forward selection changes to `onPaneSelectionChange` through
+**Decision**: Forward selection changes to `onPaneSelectionChange` through
 `removeDuplicates().dropFirst().receive(on: RunLoop.main)` rather than a
 plain synchronous `sink`.
-Rationale: the source comment explains `@Published` publishes from
+**Rationale**: the source comment explains `@Published` publishes from
 `willSet`, so a synchronous `sink` would read the *previous* selected node;
 hopping to the run loop lets the store finish updating first,
 `removeDuplicates` stops a re-click on the same row from re-firing, and
 `dropFirst` discards the value `@Published` replays at subscription time so
 a host is not told about a "change" that happened before it installed the
 callback.
-Approved: pending.
+**Approved**: pending.
 
-Decision: Normalize every root and every `GitStatusProvider.repoRoot`
+**Decision**: Normalize every root and every `GitStatusProvider.repoRoot`
 comparison with `resolvingSymlinksInPath()`, not `standardizedFileURL`.
-Rationale: the source comment (citing `ProjectCheckout.swift:12`) states an
+**Rationale**: the source comment (citing `ProjectCheckout.swift:12`) states an
 injected provider's `repoRoot` is a resolved checkout directory while a root
 handed to this controller may be an unresolved path the user picked; a
 lexical comparison would silently fail whenever a symlink stands between
 them, causing the pane to build a second, uninstrumented `GitStatusProvider`
 without any visible error.
-Approved: pending.
+**Approved**: pending.
 
-Decision: Look up the primary root's manager with a `preconditionFailure` on
+**Decision**: Look up the primary root's manager with a `preconditionFailure` on
 miss, rather than an optional return or a freshly constructed fallback
 manager.
-Rationale: the source comment states `rebuildManagers()` runs in `init` and
+**Rationale**: the source comment states `rebuildManagers()` runs in `init` and
 always inserts the primary root, so a missing entry means an invariant broke
 elsewhere; failing fast surfaces that bug immediately instead of papering
 over it with a manager nothing else expects to exist.
-Approved: pending.
+**Approved**: pending.
 
 ## Compliance
 
-No automated compliance checks have been run against this recipe yet. This
-table will be populated by the cookbook's compliance tooling on review.
-
 | Check | Status | Category |
 |-------|--------|----------|
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+| [rtl-layout-support](agenticdevelopercookbook://compliance/internationalization#rtl-layout-support) | passed | Internationalization |
+| [data-minimization](agenticdevelopercookbook://compliance/privacy-and-data#data-minimization) | passed | Privacy and Data |
+
+`screen-reader-support` is partial because both footer buttons have an empty
+title and an image built with `accessibilityDescription: nil`, with no
+explicit accessibility label set in source (see Accessibility);
+`keyboard-navigable` passes because both are stock `NSButton`s with no
+override disabling AppKit's default keyboard focus/activation.
+`string-externalization` and `no-hardcoded-strings` fail because all five
+user-facing strings are literal `String`s assigned to `toolTip`/`prompt`/
+`message` (see Localization); `rtl-layout-support` passes because the layout
+uses only `leadingAnchor`/`trailingAnchor` constraints, which AppKit mirrors
+automatically for right-to-left locales. `data-minimization` passes because
+`directories`/`selection` change only in response to an explicit user action
+(the open panel, or a click in the tree), never automatically (see Privacy).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed two requirements to subject-only naming; added named requirements and vectors for panel-order preservation and multi-pane consistency; removed private-state coupling from test vectors 004/006 and from the late-added-root requirements; fixed test vectors 025/027/029's assertions; added vectors for `revealNothing()`, the disabled remove-button tooltip, multi-select's last-only selection, and a non-primary symlinked git root; rewrote the WinUI 3 icon glyphs and `FolderPicker` guidance; listed all three watching transitions in States; reformatted Design Decisions to the bold form; populated Compliance; moved the cross-repo guideline reference into `related` and added `depends-on` for the hosted tree |

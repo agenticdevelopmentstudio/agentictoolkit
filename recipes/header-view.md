@@ -3,7 +3,7 @@ id: d908b337-53ba-4a29-8288-4601b12a4bb7
 title: Header View
 domain: agentictoolkit://recipes/header-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -11,8 +11,8 @@ modified: '2026-09-23'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
-summary: A macOS AppKit NSView wrapping a single secondary/caption-styled ThemedLabel,
-  pinned to all four edges, used as the caption above a ComposableSettings group card.
+summary: A macOS AppKit NSView wrapping a caption-styled ThemedLabel, used as the
+  caption above a ComposableSettings group.
 platforms:
 - swift
 - macos
@@ -22,7 +22,8 @@ tags:
 - macos
 - settings
 depends-on: []
-related: []
+related:
+- agentictoolkit://recipes/group-view
 references: []
 approved-by: ''
 approved-date: ''
@@ -42,10 +43,8 @@ approved-date: ''
 - **disables-autoresizing-mask-translation**: The component MUST set `translatesAutoresizingMaskIntoConstraints = false` on itself during initialization.
 - **creates-title-label-with-secondary-caption-style**: The component MUST construct `titleLabel` as a `ThemedLabel` with `role: .secondaryText` and `textRole: .caption`.
 - **sets-title-label-initial-text**: The component MUST initialize `titleLabel`'s displayed text to the caller-supplied `title: String` parameter, unmodified.
-- **disables-title-label-autoresizing-mask-translation**: The component MUST set `titleLabel.translatesAutoresizingMaskIntoConstraints = false` before activating any layout constraint on it.
-- **adds-title-label-as-subview**: The component MUST add `titleLabel` as a subview of itself.
-- **pins-title-label-to-all-four-edges**: The component MUST activate four `NSLayoutConstraint`s pinning `titleLabel`'s top, leading, trailing, and bottom anchors to the matching anchors of the component itself, each with a zero constant, so the component's bounds and the label's bounds coincide exactly.
-- **rejects-frame-initializer**: The designated `init(frame frameRect: NSRect)` initializer MUST fatal-error unconditionally, regardless of the supplied `frameRect`'s value, with the message `init(frame frameRect: NSRect` (verbatim, including the source's unmatched opening parenthesis).
+- **pins-title-label-to-all-four-edges**: The component MUST set `titleLabel.translatesAutoresizingMaskIntoConstraints = false`, add `titleLabel` as a subview of itself, and activate four `NSLayoutConstraint`s pinning `titleLabel`'s top, leading, trailing, and bottom anchors to the matching anchors of the component itself, each with a zero constant, so the component's bounds and the label's bounds coincide exactly.
+- **rejects-frame-initializer**: The designated `init(frame frameRect: NSRect)` initializer MUST fatal-error unconditionally, regardless of the supplied `frameRect`'s value. (The source's diagnostic message text is malformed — see **Design Decisions** — and is not itself part of the contract.)
 - **rejects-coder-initializer**: `required init?(coder: NSCoder)` MUST fatal-error with the message `init(coder:) has not been implemented`.
 
 ## Appearance
@@ -80,17 +79,15 @@ approved-date: ''
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| header-view-001 | confines-to-main-actor | Attempt to construct or mutate a `HeaderView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
+| header-view-001 | confines-to-main-actor | Attempt to construct or mutate a `HeaderView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking (a static/compile-time check — not executable by a runtime conformance test runner; verify by confirming the `@MainActor` annotation on the declaration instead) |
 | header-view-002 | exposes-title-label | Construct `HeaderView(title: "Section")` | `view.titleLabel` is accessible from outside the class and is a `ThemedLabel` instance |
 | header-view-003 | conforms-to-settings-view-protocol | Any initialized `HeaderView` | `view is SettingsViewProtocol` is `true` |
 | header-view-004 | disables-autoresizing-mask-translation | Any initialized `HeaderView` | `view.translatesAutoresizingMaskIntoConstraints == false` |
 | header-view-005 | creates-title-label-with-secondary-caption-style | Construct `HeaderView(title: "Section")` | `view.titleLabel.role == .secondaryText` and `view.titleLabel.textRole == .caption` |
 | header-view-006 | sets-title-label-initial-text | Construct `HeaderView(title: "General")` | `view.titleLabel.stringValue == "General"` |
-| header-view-007 | disables-title-label-autoresizing-mask-translation | Any initialized `HeaderView` | `view.titleLabel.translatesAutoresizingMaskIntoConstraints == false` |
-| header-view-008 | adds-title-label-as-subview | Any initialized `HeaderView` | `view.subviews.contains(view.titleLabel)` is `true` |
-| header-view-009 | pins-title-label-to-all-four-edges | Add `HeaderView` to a window with a known frame and force a layout pass | `view.titleLabel.frame` equals `view.bounds` exactly (top, leading, trailing, and bottom all at zero offset) |
-| header-view-010 | rejects-frame-initializer | Construct via `HeaderView(frame: NSRect(x: 0, y: 0, width: 100, height: 20))` | Execution traps via `fatalError` with message `init(frame frameRect: NSRect` |
-| header-view-011 | rejects-coder-initializer | Construct via `HeaderView(coder:)` with any `NSCoder` | Execution traps via `fatalError` with message `init(coder:) has not been implemented` |
+| header-view-007 | pins-title-label-to-all-four-edges | Construct `HeaderView(title: "Section")`, add it to a window inside a fixed 200×20-point superview frame, and call `view.layoutSubtreeIfNeeded()` | `view.titleLabel.translatesAutoresizingMaskIntoConstraints == false`, `view.subviews.contains(view.titleLabel)` is `true`, and `view.titleLabel.frame` equals `view.bounds` exactly (top, leading, trailing, and bottom all at zero offset) |
+| header-view-008 | rejects-frame-initializer | Construct via `HeaderView(frame: NSRect(x: 0, y: 0, width: 100, height: 20))` | Execution traps via `fatalError`; the diagnostic message is the source's own malformed text (see **Design Decisions**) and is not asserted verbatim here |
+| header-view-009 | rejects-coder-initializer | Construct via `HeaderView(coder:)` with any `NSCoder` | Execution traps via `fatalError` with message `init(coder:) has not been implemented` |
 
 ## Edge Cases
 
@@ -115,8 +112,6 @@ Not applicable: `HeaderView` is a decorative caption label with no navigable ide
 Not applicable: `HeaderView` defines no string key or localization lookup of its own. `title` is an opaque, caller-supplied `String` displayed verbatim via `titleLabel.stringValue`; unlike a SwiftUI `Text` initialized from a string literal, an AppKit `NSTextField`'s `stringValue` performs no automatic localized-key lookup, so producing a localized caption (e.g., via `NSLocalizedString`) is entirely the caller's responsibility before it reaches this initializer.
 
 ## Accessibility Options
-
-Document which accessibility display options (Rule 15) this component responds to:
 
 | Option | Behavior |
 |--------|----------|
@@ -145,7 +140,7 @@ Not applicable: the source contains no logging calls (no `os_log`, `Logger`, or 
 
 ## Platform Notes
 
-- **SwiftUI**: Use `Text(title)` with `.font(.caption)` and `.foregroundStyle(.secondary)` (or the app's own semantic secondary-text color token), stretched to fill its container with `.frame(maxWidth: .infinity, alignment: .leading)` and no padding, reproducing the zero-padding, edge-pinned layout `HeaderView` builds with Auto Layout. SwiftUI's environment-based theming (`@Environment`) replaces this source's manual `ThemedLabel` construction, and `.lineLimit(1)` with the default `.truncationMode` (rather than a bespoke clipping mode) is the closest match to the source's single-line, `.byClipping` label.
+- **SwiftUI**: Use `Text(title)` with `.font(.caption)` and `.foregroundStyle(.secondary)` (or the app's own semantic secondary-text color token), stretched to fill its container with `.frame(maxWidth: .infinity, alignment: .leading)` and no padding, reproducing the zero-padding, edge-pinned layout `HeaderView` builds with Auto Layout. SwiftUI's environment-based theming (`@Environment`) replaces this source's manual `ThemedLabel` construction. `.lineLimit(1)` alone applies SwiftUI's default truncation mode, which adds a tail ellipsis and does not match the source's `.byClipping` behavior; use `.lineLimit(1).fixedSize(horizontal: true, vertical: false)` inside a frame with `.clipped()` to reproduce the source's clip-without-ellipsis behavior instead.
 - **Compose**: Use `Text(title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Clip)` inside a `Box`/`Column` with no padding of its own, reading the type scale and color from a `CompositionLocal`-backed theme so Compose recomposes automatically on theme change, the way this source's `ThemePaletteObserver` (on `ThemedLabel`, not `HeaderView` itself) drives repaint.
 - **React/Web**: A `<span>` or `<div>` styled `font-size: 11px` (or the app's caption-scale CSS variable), `color: var(--secondary-text-color)`, `white-space: nowrap`, and `overflow: hidden` (matching the source's clip-without-ellipsis behavior — omit `text-overflow: ellipsis`), filling its parent with no margin or padding of its own. A CSS custom property already repaints on a theme-class change with no JS callback required, standing in for `ThemedLabel`'s notification-driven repaint.
 - **AppKit / UIKit (source)**: `HeaderView.swift` (`packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/HeaderView.swift`) is macOS-only (`import AppKit`) — there is no iOS/UIKit counterpart in this file. It is a plain `NSView` with no layer or drawing code of its own, wrapping a single `ThemedLabel` pinned to all four edges by Auto Layout, and blocked from both frame-based and `NSCoder` construction. A UIKit port would use `UILabel` with `numberOfLines = 1` and `lineBreakMode = .byClipping`, pinned to its container's edges via `NSLayoutConstraint` or an equivalent Auto Layout API; unlike this AppKit source (which relies on `ThemeTypography`'s own `sizeScale` rather than the OS text-size setting), a `UILabel` would additionally need `adjustsFontForContentSizeCategory` decided explicitly if Dynamic Type support is wanted.
@@ -155,28 +150,27 @@ Not applicable: the source contains no logging calls (no `os_log`, `Logger`, or 
 
 **Decision**: `init(frame frameRect: NSRect)` is overridden to unconditionally `fatalError("init(frame frameRect: NSRect")` instead of accepting the supplied frame.
 **Rationale**: Not explained in source comments. Recorded verbatim as a source quirk: the `fatalError` message string is itself malformed — it reads `init(frame frameRect: NSRect` with no closing parenthesis, unlike the coder initializer's correctly formatted message on the next line. This does not change behavior (the call still traps unconditionally); only the printed diagnostic text is affected.
-**Approved: pending**
+**Approved**: pending
 
 **Decision**: `titleLabel` is created with `role: .secondaryText, textRole: .caption` rather than a heading-weight role.
 **Rationale**: Not explained in source comments. Consistent with `GroupView.swift`'s own description of `HeaderView` as "a caption *outside* and above a rounded card" — a de-emphasized label naming a settings group, not a prominent section title.
-**Approved: pending**
+**Approved**: pending
 
 **Decision**: `titleLabel` is pinned to all four edges of `HeaderView` with a zero constant on every constraint, so `HeaderView`'s bounds are exactly `titleLabel`'s bounds.
 **Rationale**: Not explained in source comments. `HeaderView` contributes no visual chrome of its own — no background, border, or padding — so every pixel a caller sees is the label's, and any spacing around the caption is left entirely to the caller's own layout (e.g., `GroupView`'s `outerStack.spacing`).
-**Approved: pending**
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | Architecture |
-| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | UI Tokens |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | Accessibility |
 | [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
 
-`main-actor-confined` passes because the class is declared `@MainActor` (see **confines-to-main-actor**). `no-raw-hex` passes because the only color `HeaderView` displays comes from `titleLabel`'s `secondaryText` role, never a literal `NSColor` or hex value. `differentiate-without-color` passes because `HeaderView` conveys no state through color at all — it has exactly one presentation. `contrast-ratio` passes because `secondaryText`'s derivation enforces a 3.0 minimum-contrast floor as a single, app-wide semantic token, not an arbitrary value this file computes or could get wrong independently of the palette it draws from.
+`contrast-ratio` is `partial`, not passed: `secondaryText`'s derivation enforces only a 3.0 minimum-contrast floor (`SemanticPalette.derive`, case `.secondaryText`) — below the 4.5:1 WCAG AA figure required for 11pt text — as a single, app-wide semantic token this file draws from rather than a value it computes itself (see the Increase Contrast open question in **Accessibility Options**).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: fold title-label subview/autoresizing requirements into the pinning requirement and give it a concrete test setup; stop asserting the frame-initializer's malformed message text as part of the contract; fix contrast-ratio Compliance status/prose mismatch and drop the inapplicable differentiate-without-color check; fix Design Decisions `**Approved**:` formatting; add a related cross-reference to group-view; shorten the summary; mark the main-actor test vector as a static/compile-time check; correct the SwiftUI clip-without-ellipsis guidance; remove leftover template boilerplate from Accessibility Options |
