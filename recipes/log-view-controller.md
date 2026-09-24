@@ -3,11 +3,11 @@ id: 29b3f716-ad00-4aff-9dd4-fc7c2e5cf17d
 title: Log View Controller
 domain: agentictoolkit://recipes/log-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -190,26 +190,16 @@ renders, lays out, and wires around that hosted view.
 - The status dot (`statusDot`) is a plain, layer-backed `NSView` with no
   accessibility role, label, or identifier of its own; its state is exposed
   through text instead (see **connection-state-in-text**).
-- NEEDS REVIEW: Not implemented in source. A connection-state change
-  rewrites `statusLabel`'s text, but no
+- A connection-state change rewrites `statusLabel`'s text, but no
   `NSAccessibility.post(element:notification:)` call accompanies it, so a
-  VoiceOver user is not told the stream connected, reconnected, or failed;
-  whether the component should post an announcement is an open question.
+  VoiceOver user currently gets no announcement when the stream connects,
+  reconnects, or fails.
 - Not applicable: minimum tap target. This is a pointer-driven macOS
   control, not a touch surface, so the template's 44×44pt touch-target
   guidance does not apply; the toolbar buttons get no explicit
   width/height beyond `ThemedSecondaryButton`'s own title-driven
   `intrinsicContentSize`.
-- NEEDS REVIEW: Not implemented in source. Behavior undefined. The status
-  dot's `.success`/`.warning`/`.danger` fills and `statusLabel`'s
-  `.secondaryText`-on-`.windowBackground` text pairing are resolved from
-  whichever `SemanticPalette` is active at runtime; the component names theme
-  roles, not concrete color values, so whether a given theme's resolved
-  color pair meets a target contrast ratio (e.g. 3:1 for the non-text
-  status dot, 4.5:1 for the caption-sized label text) cannot be determined
-  by inspecting the component alone. This would be settled by
-  auditing each concrete `SemanticPalette`'s resolved colors for these
-  roles against the target platform's contrast guidance.
+- **contrast**: NEEDS REVIEW: Not implemented in source. The status dot's `.success`/`.warning`/`.danger` fills and `statusLabel`'s `.secondaryText`-on-`.windowBackground` text pairing resolve from whichever `SemanticPalette` is active at runtime, so whether a given theme's resolved color pair meets a target contrast ratio (3:1 for the non-text dot, 4.5:1 for the caption-sized label text) can't be determined by inspecting the component alone; auditing each concrete `SemanticPalette`'s resolved colors against the platform's contrast guidance would settle it.
 
 ## Conformance Test Vectors
 
@@ -322,13 +312,11 @@ handling of any kind.
 | (none defined in source) | `Connected` | Status label text/tooltip when `controller.isConnected == true`. |
 | (none defined in source) | `Connecting…` | Status label text/tooltip when `controller.isConnected == false` and `controller.lastError == nil`. |
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined. `Pause`,
-`Resume`, `Clear`, `Connected`, and `Connecting…` are all assigned as
+`Pause`, `Resume`, `Clear`, `Connected`, and `Connecting…` are all assigned as
 `String` literals directly to `NSButton.title` or `NSTextField.stringValue`
-— AppKit properties, not a SwiftUI `Text`/`LocalizedStringKey` — so these
-are genuinely unlocalized as written. What is missing is a defined
-string-key scheme for this component; it would be settled by the host
-app's localization owner choosing keys and wiring them in.
+— AppKit properties, not a SwiftUI `Text`/`LocalizedStringKey` — so the
+component is unlocalized as written: it defines no string-key scheme, and
+wiring one in is the host app's localization owner's responsibility.
 (`controller.lastError`'s string is displayed as-is and is excluded from
 this table: its content and any localization are the injected
 `LogController` implementation's concern, not the component's.)
@@ -478,10 +466,11 @@ its stock 68×22 minimum rather than clipping at a large `sizeScale`.
 | [rtl-layout-support](agenticdevelopercookbook://compliance/internationalization#rtl-layout-support) | passed | Internationalization |
 | [text-expansion-tolerance](agenticdevelopercookbook://compliance/internationalization#text-expansion-tolerance) | passed | Internationalization |
 
-Statuses rest on: Pause/Clear exposing their `NSButton` title as an accessible name and sitting in the standard key-view loop (screen-reader-support, keyboard-navigable); the status dot/label pairing's resolved contrast being undeterminable from `LogViewController.swift` alone, per the open question in Accessibility (contrast-ratio); `Pause`/`Resume`/`Clear`/`Connected`/`Connecting…` being `String` literals with no key scheme, per the open question in Localization (string-externalization, no-hardcoded-strings); and the toolbar's `leadingAnchor`/`trailingAnchor` constraints plus unconstrained button widths accommodating RTL mirroring and translated-text growth (rtl-layout-support, text-expansion-tolerance).
+Statuses rest on: Pause/Clear exposing their `NSButton` title as an accessible name and sitting in the standard key-view loop (screen-reader-support, keyboard-navigable); the status dot/label pairing's resolved contrast being undeterminable from `LogViewController.swift` alone, per the open question on `contrast` (contrast-ratio); `Pause`/`Resume`/`Clear`/`Connected`/`Connecting…` being `String` literals with no key scheme (string-externalization, no-hardcoded-strings); and the toolbar's `leadingAnchor`/`trailingAnchor` constraints plus unconstrained button widths accommodating RTL mirroring and translated-text growth (rtl-layout-support, text-expansion-tolerance).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed verb-phrase requirements to subject nouns; moved connection-state-in-text into Behavioral Requirements with a new vector; documented start()/stop() lifecycle idempotency with a new vector; made toolbar-item-overridable requirements MUST-default/MAY-override; corrected vector precision (003, 013, 014) and named the real ThemeManager/ThemePaletteObserver mechanism; added the 900×600 start-size floor and a LogController contract table to Configuration; reworded the boundary-values edge case away from an RFC 2119 keyword; replaced "this file"/"in source" phrasing with behavior descriptions outside Design Decisions; reformatted Design Decisions to the bold convention; populated the Compliance table; moved the platform-design-languages reference to related and added log-view to depends-on; swapped the redundant macos tag for streaming. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

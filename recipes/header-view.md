@@ -3,11 +3,11 @@ id: d908b337-53ba-4a29-8288-4601b12a4bb7
 title: Header View
 domain: agentictoolkit://recipes/header-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -33,7 +33,7 @@ approved-date: ''
 
 ## Overview
 
-`ComposableSettings.HeaderView`, at `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/HeaderView.swift`, is a minimal AppKit `NSView` nested in the `ComposableSettings` namespace that wraps a single `ThemedLabel` (`titleLabel`) pinned flush to all four of its own edges. It conforms to `SettingsViewProtocol`, the marker protocol every settings-row view in this system adopts (alongside its siblings `DividerView` and `ButtonView`). `GroupView.swift` documents its role directly: `GroupView`'s `convenience init(withTitle:)` builds `HeaderView(title:)` as "a caption *outside* and above a rounded card" — the label naming a settings group, sitting above the group's card rather than inside it as a row. `KeyCommandsSettingsPanelViewController.swift` also constructs it directly to caption a settings subview. `HeaderView` itself draws nothing and holds no theming logic of its own; all appearance (color, font, single-line clipping) comes from the `ThemedLabel` it wraps.
+`ComposableSettings.HeaderView`, at `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/HeaderView.swift`, is a minimal AppKit `NSView` nested in the `ComposableSettings` namespace that wraps a single `ThemedLabel` (`titleLabel`) pinned flush to all four of its own edges. It conforms to `SettingsViewProtocol`, a marker protocol every settings-row view in this system adopts (alongside its siblings `DividerView` and `ButtonView`). `GroupView.swift` documents its role directly: `GroupView`'s `convenience init(withTitle:)` builds `HeaderView(title:)` as "a caption *outside* and above a rounded card" — the label naming a settings group, sitting above the group's card rather than inside it as a row. `KeyCommandsSettingsPanelViewController.swift` also constructs it directly to caption a settings subview. `HeaderView` itself draws nothing and holds no theming logic of its own; all appearance (color, font, single-line clipping) comes from the `ThemedLabel` it wraps.
 
 ## Behavioral Requirements
 
@@ -70,7 +70,7 @@ approved-date: ''
 
 ## Accessibility
 
-- **Role/trait**: Not set explicitly — the source overrides no `accessibilityRole` on either `HeaderView` or `titleLabel`. AppKit's default for a non-editable `NSTextField` (which `ThemedLabel` is, with `isEditable = false`) is a static-text accessibility element, so VoiceOver exposes `titleLabel`'s text as static text without any code in this file. NEEDS REVIEW: the label captions a settings group, yet it is not exposed as a heading, so VoiceOver users cannot jump between groups by heading; whether the component should set a heading role is an open question.
+- **Role/trait**: Not set explicitly — the source overrides no `accessibilityRole` on either `HeaderView` or `titleLabel`. AppKit's default for a non-editable `NSTextField` (which `ThemedLabel` is, with `isEditable = false`) is a static-text accessibility element, so VoiceOver exposes `titleLabel`'s text as static text without any code in this file; the label captions a settings group but is not exposed as a heading, so VoiceOver users cannot jump between groups by heading.
 - **Label requirements**: `titleLabel.stringValue` (set from the caller-supplied `title` parameter) is both the visible text and, via `NSTextField`'s default accessibility behavior, the accessible name — there is no separate `accessibilityLabel` set, and none is needed since the visible text and the accessible content are the same string.
 - **Announce state changes**: Not applicable — `HeaderView` defines no state that changes (see States); there is nothing for VoiceOver to announce.
 - **Minimum tap target**: Not applicable — `HeaderView` is not an interactive control. The source wires no target/action or gesture recognizer to it, so it has no tap target to size.
@@ -116,8 +116,10 @@ Not applicable: `HeaderView` defines no string key or localization lookup of its
 | Option | Behavior |
 |--------|----------|
 | Reduce Motion | Not applicable: `HeaderView` applies no animation, transition, or motion effect of its own — it is built once, at `init`, with no animator proxy or `CATransaction` anywhere in the source. |
-| Increase Contrast | NEEDS REVIEW: `HeaderView` sets no Increase Contrast handling of its own. Its text is 11pt caption type in the `secondaryText` role, whose derivation guarantees only a 3.0 minimum contrast (`SemanticPalette.derive`, case `.secondaryText`) — below the 4.5:1 WCAG AA figure for text this small. Whether the role should raise its floor, or respond to Increase Contrast, is an open question. |
+| Increase Contrast | `HeaderView` sets no Increase Contrast handling of its own. Its text is 11pt caption type in the `secondaryText` role, whose derivation guarantees only a 3.0 minimum contrast (`SemanticPalette.derive`, case `.secondaryText`) — below the 4.5:1 WCAG AA figure for text this small; see the open question on minimum-contrast-ratio. |
 | Differentiate Without Color | Not applicable: `HeaderView` conveys no state or meaning through color — it renders exactly one presentation, a caption-styled label, with no color-coded distinction for an alternate cue to replace. |
+
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. `secondaryText`'s derivation (`SemanticPalette.derive`, case `.secondaryText`) guarantees only a 3.0 minimum contrast, but this 11pt caption text needs 4.5:1 for WCAG AA; whether each shipped theme's resolved `secondaryText`-on-background pair reaches 4.5:1 depends on the concrete theme colors and needs a human audit of the running UI per theme.
 
 ## Feature Flags
 
@@ -166,7 +168,7 @@ Not applicable: the source contains no logging calls (no `os_log`, `Logger`, or 
 |-------|--------|----------|
 | [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
 
-`contrast-ratio` is `partial`, not passed: `secondaryText`'s derivation enforces only a 3.0 minimum-contrast floor (`SemanticPalette.derive`, case `.secondaryText`) — below the 4.5:1 WCAG AA figure required for 11pt text — as a single, app-wide semantic token this file draws from rather than a value it computes itself (see the Increase Contrast open question in **Accessibility Options**).
+`contrast-ratio` is `partial`, not passed: `secondaryText`'s derivation enforces only a 3.0 minimum-contrast floor (`SemanticPalette.derive`, case `.secondaryText`) — below the 4.5:1 WCAG AA figure required for 11pt text — as a single, app-wide semantic token this file draws from rather than a value it computes itself (see Increase Contrast in **Accessibility Options**).
 
 ## Change History
 
@@ -174,3 +176,4 @@ Not applicable: the source contains no logging calls (no `os_log`, `Logger`, or 
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: fold title-label subview/autoresizing requirements into the pinning requirement and give it a concrete test setup; stop asserting the frame-initializer's malformed message text as part of the contract; fix contrast-ratio Compliance status/prose mismatch and drop the inapplicable differentiate-without-color check; fix Design Decisions `**Approved**:` formatting; add a related cross-reference to group-view; shorten the summary; mark the main-actor test vector as a static/compile-time check; correct the SwiftUI clip-without-ellipsis guidance; remove leftover template boilerplate from Accessibility Options |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

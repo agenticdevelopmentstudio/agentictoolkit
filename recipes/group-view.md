@@ -3,11 +3,11 @@ id: 775f1761-f757-41d0-b51b-354a410a11f4
 title: GroupView
 domain: agentictoolkit://recipes/group-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -216,20 +216,14 @@ that reason.
   view's own accessibility behavior belongs to `HeaderView` (a
   `ThemedLabel`-based static-text label); `GroupView.swift` does not further
   style or role it.
-- **Label requirements**: NEEDS REVIEW: `GroupView.swift` never associates
-  the header/caption text with `cardView` or `rowStack` through any
+- **Label requirements**: `GroupView.swift` never associates the
+  header/caption text with `cardView` or `rowStack` through any
   accessibility API — no `setAccessibilityLabel`, no
   `accessibilityLabelledUIElements`, no `NSAccessibilityGroupRole` container
   — anywhere in source. A settings group's entire visual purpose is a named
   card of rows, so a VoiceOver user tabbing into the card's rows has no
   programmatic way to learn which caption group they belong to; only sighted
-  proximity conveys that relationship. What is missing: an explicit
-  accessibility grouping/labelling relationship between the header and
-  `cardView`/`rowStack`. What would settle it: confirmation from the
-  accessibility/HIG owner on whether `GroupView` should wrap `cardView` in
-  `NSAccessibilityGroupRole` with `accessibilityLabel`/
-  `accessibilityLabelledUIElements` pointing at the header, since the source
-  as written establishes only a visual relationship.
+  proximity conveys that relationship.
 - **Announce state changes**: Not applicable beyond AppKit's own default —
   hiding a row's content sets that `CardRow`'s own `isHidden` through
   `syncVisibility`, which removes it (and its content) from the
@@ -426,8 +420,8 @@ Not applicable: `GroupView.swift` contains no logging call (no `print`,
 - **React/Web**: Render a `<fieldset>` or `<section role="group"
   aria-labelledby="...">` whose caption is a `<legend>`/heading with
   `id="..."` matching `aria-labelledby` — the explicit label association
-  that is the open question the Accessibility section raises about the
-  AppKit source — inside a `div` styled with `border-radius: 10px` and the
+  that `GroupView.swift`'s AppKit source never establishes (see Label
+  requirements) — inside a `div` styled with `border-radius: 10px` and the
   elevated-surface background token. Give each `.row` child
   `padding: 9px 14px` and a `border-top: 1px solid var(--divider)` on every
   child except the first visible one, mirroring
@@ -562,3 +556,4 @@ a prior superview (see Design Decisions); and `screen-reader-support` is
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only names and restated the private-internal ones (rowStack/rows/CardRow/line/separatorHeight/oldValue) as observable outcomes; reformatted Design Decisions and added one for the all-rows-hidden open question; reframed the duplicate-add edge case as a caller precondition instead of a required behavior; converted the two fatal-error and one compile-time test vectors to static checks; moved the cookbook guideline URI out of references into related and added real external references; corrected Compliance statuses and category names and dropped invented checks; rewrote the WinUI 3 bullet around one concrete structure. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation, extracted from the Apple GroupView (AppKit, macOS) source. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

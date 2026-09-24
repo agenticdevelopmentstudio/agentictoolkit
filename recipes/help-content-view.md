@@ -3,11 +3,11 @@ id: 93f50554-5ae3-4a43-b8db-539d4d804890
 title: HelpContentView
 domain: agentictoolkit://recipes/help-content-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -160,46 +160,30 @@ chrome and feeds it the active panel's `HelpContent`.
   accessibility role, trait, or heading designation appears anywhere in
   `HelpContentView.swift`. The heading label is `NSTextField(labelWithString:)`,
   which AppKit exposes to assistive technology as static text by default;
-  the topic titles/bodies inherit whatever `GroupView`/`ExplanationView`
-  expose on their own. NEEDS REVIEW: Not implemented in source. `titleLabel`
-  is never given `setAccessibilityRole(.staticText)` with a heading
-  subrole, nor any other heading designation (`HelpContentView.swift:20`,
-  `:31-32`) — AppKit's default static-text role does not by itself announce
-  to VoiceOver's rotor that "Help" is a section heading over the topic
-  list below it. Whether the fixed "Help" label should be exposed as a
-  heading, and through which AppKit API, would need to be decided and then
-  confirmed with VoiceOver's heading rotor.
+  `titleLabel` is never given `setAccessibilityRole(.staticText)` with a
+  heading subrole, nor any other heading designation
+  (`HelpContentView.swift:20`, `:31-32`), so AppKit's default static-text
+  role does not by itself announce to VoiceOver's rotor that "Help" is a
+  section heading over the topic list below it. The topic titles/bodies
+  inherit whatever `GroupView`/`ExplanationView` expose on their own.
 - **Label requirements**: Satisfied for the fixed heading — it always reads
   the literal string `"Help"` (**fixed-help-heading**). Per-topic
   labeling is `GroupView`'s and `ExplanationView`'s responsibility, not this
   file's; `ExplanationView`'s own recipe
   (`agentictoolkit://recipes/explanation-view`) covers its label behavior.
-- **Announce state changes (e.g., loading, disabled)**: NEEDS REVIEW: Not
-  implemented in source. `setHelp(_:)` tears down and rebuilds the entire
-  scrolled panel with no `NSAccessibility.post(element:notification:)` call
-  and no explicit focus move to the new content anywhere in
-  `HelpContentView.swift`, `PanelScrollView.swift`, or `PanelView.swift` —
-  so nothing in source tells a VoiceOver user that the drawer's content just
-  changed (e.g., when the reader switches settings panels and the drawer
-  refreshes behind them). Whether AppKit's default view-hierarchy handling
-  surfaces this automatically would need to be confirmed by driving
-  `setHelp(_:)` under VoiceOver and observing whether it announces the
-  change.
+- **Announce state changes (e.g., loading, disabled)**: `setHelp(_:)` tears
+  down and rebuilds the entire scrolled panel with no
+  `NSAccessibility.post(element:notification:)` call and no explicit focus
+  move to the new content anywhere in `HelpContentView.swift`,
+  `PanelScrollView.swift`, or `PanelView.swift`, so nothing in source
+  announces to a VoiceOver user that the drawer's content just changed
+  (e.g., when the reader switches settings panels and the drawer refreshes
+  behind them).
 - **Minimum tap target**: Not applicable — `HelpContentView` defines no
   button, control, or click handler of its own; it is a non-interactive
   content view. (The scroll view it hosts uses `NSScrollView`'s standard
   hit-testing, which this file does not customize.)
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
-  heading label's color is `palette.primaryTextColor`, which
-  `SemanticPalette` resolves as the theme's raw `foreground` color with no
-  enforced minimum-contrast floor (unlike `.secondaryText`, which is
-  explicitly dimmed toward the background with a `minContrast: 3.0` clamp).
-  Whether `primaryTextColor` reaches WCAG AA's 4.5:1 ratio against
-  `windowBackgroundColor` for every theme this component ships with cannot
-  be determined from `HelpContentView.swift` or `SemanticPalette.swift`
-  alone — it depends on each theme's concrete foreground/background color
-  pair and would be settled by auditing the computed contrast ratio per
-  theme.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. The heading label's color is `palette.primaryTextColor`, which `SemanticPalette` resolves as the theme's raw `foreground` color with no enforced minimum-contrast floor (unlike `.secondaryText`, which is explicitly dimmed toward the background with a `minContrast: 3.0` clamp); whether `primaryTextColor` reaches WCAG AA's 4.5:1 ratio against `windowBackgroundColor` for every theme this component ships with cannot be determined from `HelpContentView.swift` or `SemanticPalette.swift` alone — it depends on each theme's concrete foreground/background color pair and would be settled by auditing the computed contrast ratio per theme.
 
 ## Conformance Test Vectors
 
@@ -310,9 +294,8 @@ an AppKit `stringValue` set this way is not itself localizable, and no
 - Increase Contrast: Not applicable in this file — every color comes from
   the active `SemanticPalette` (`windowBackgroundColor`, `primaryTextColor`);
   if Increase Contrast should raise these colors' contrast, that is the
-  palette's responsibility, not this view's. The open question about
-  whether `primaryTextColor` reaches an adequate ratio against
-  `windowBackgroundColor` is tracked once, under Accessibility above.
+  palette's responsibility, not this view's. The open question on
+  minimum-contrast-ratio is tracked once, under Accessibility above.
 - Differentiate Without Color: Not applicable — the view conveys no state
   through color; it renders a fixed heading and caller-supplied topic text,
   with no color-coded meaning to differentiate.
@@ -500,3 +483,4 @@ and every topic string being rendered as caller-supplied `NSTextField`/
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `HelpContentView` (AppKit, macOS) source. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only kebab-case; strengthened window-background to MUST and merged its duplicate test vector into theme-application's; moved AppKit anchor equations out of requirements into the Platform Notes bullet; cited the SplitViewController call site for the wholesale-rebuild rationale instead of asserting it as fact; fixed the WinUI grid background to the window's own brush; rewrote the coder-init test vector as a compile-time/non-automatable check; corrected invalid `needs-review` compliance statuses to `partial`/`failed`; added group-view, panel-scroll-view, and panel-view to depends-on; flagged the missing heading accessibility role as an open gap; and remapped/removed Compliance rows that cited checks outside the compliance catalog. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

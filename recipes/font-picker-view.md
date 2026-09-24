@@ -3,11 +3,11 @@ id: 67a314b9-d324-4d0c-b9c1-86e27c01537d
 title: FontPickerView
 domain: agentictoolkit://recipes/font-picker-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -186,9 +186,8 @@ any other caller of that button cannot drift apart.
   in `FontPickerView.swift`. `button` carries `NSButton`'s native button
   role (see `agentictoolkit://recipes/font-chooser-button`); `label` is a
   plain static-text control.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source. Behavior
-  undefined. `label` and `button` are laid out as sibling views in the same
-  row, but `FontPickerView.swift` sets no
+- **Label requirements**: `label` and `button` are laid out as sibling views
+  in the same row, but `FontPickerView.swift` sets no
   `accessibilityLabel`/`setAccessibilityTitleUIElement` (or equivalent)
   linking `button` to `label` - confirmed by comparison with sibling row
   views in the same directory: `CheckboxView`, `NumberFieldView`, and
@@ -196,24 +195,11 @@ any other caller of that button cannot drift apart.
   `<control>.setAccessibilityTitleUIElement(self.label)` on their control,
   but `FontPickerView` does not do so for `button`. The `accessibilityID`
   call in source (`button.accessibilityID("settings.font-picker.choose")`)
-  sets a UI-testing identifier, not an accessible name or label linkage.
-  What is missing: whether VoiceOver announces the row's title (e.g.
-  "Terminal Font") when focus lands on the button, or only the button's own
-  title text (e.g. "Menlo-Regular — 14 pt"). What would settle it: a VoiceOver pass
-  over an instantiated row, or an explicit decision to call
-  `button.setAccessibilityTitleUIElement(label)` in `init`/`sync()`,
-  matching the pattern the other control-with-label rows already use.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. `label.alphaValue` is set to a hardcoded `0.4` when
-  the row is disabled (**dims-and-disables-the-row**); this literal is
-  local to `FontPickerView.swift` (no other file in
-  `ComposableSettingsWindow/Views` uses this value or a shared "disabled
-  alpha" constant). Whether `label`'s text at 40% alpha against the active
-  theme's surface color still meets a specific contrast ratio (e.g. WCAG
-  2.1 AA's 4.5:1) cannot be determined from this file alone - it depends on
-  the resolved theme colors, which live outside this source. This would be
-  settled by auditing each shipped theme's resolved `primaryText`/surface
-  pairing at 40% alpha.
+  sets a UI-testing identifier, not an accessible name or label linkage. As
+  a result, VoiceOver announces only the button's own title text (e.g.
+  "Menlo-Regular — 14 pt") when focus lands on it, not the row's title
+  (e.g. "Terminal Font").
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. `label.alphaValue` is set to a hardcoded `0.4` when the row is disabled (**dims-and-disables-the-row**), local to `FontPickerView.swift` (no other file in `ComposableSettingsWindow/Views` uses this value or a shared "disabled alpha" constant); whether `label`'s text at 40% alpha against the active theme's surface color still meets a specific contrast ratio (e.g. WCAG 2.1 AA's 4.5:1) cannot be determined from this file alone since it depends on the resolved theme colors, which live outside this source - settled by auditing each shipped theme's resolved `primaryText`/surface pairing at 40% alpha.
 - **Announce state changes (e.g., loading, disabled)**: `FontPickerView.swift`
   performs no explicit accessibility notification (no `NSAccessibility.post`
   call) when `isEnabled` changes; `button.isEnabled`'s own state is exposed
@@ -337,19 +323,14 @@ and `" (not installed)"` fragments inside `describe(_:installed:)`,
 however, are hardcoded English string-interpolation literals assigned to
 `button`'s AppKit `title` (a plain `String`, not a `LocalizedStringKey`) -
 not wrapped in `String(localized:)` or any string-catalog key anywhere in
-`FontPickerView.swift`. NEEDS REVIEW: Not implemented in source. Behavior
-undefined. What is missing: a localization key (with pluralization/unit
-handling for "pt" and a localizable qualifier for "not installed") for
-these fragments. What would settle it: a design decision to route
-`describe(_:installed:)`'s output through a String Catalog format string
-instead of raw interpolation.
+`FontPickerView.swift`.
 
 ## Accessibility Options
 
 | Option | Behavior |
 |--------|----------|
 | Reduce Motion | Not applicable: source contains no animation, transition, or `NSAnimationContext` call anywhere in `FontPickerView.swift`; the `isEnabled` dimming (`button.isEnabled` / `label.alphaValue`) is an instantaneous property assignment, not an animated transition. |
-| Increase Contrast | Not applicable to this file directly: `FontPickerView.swift` reads no system contrast setting and sets no custom `NSColor`; `label`'s coloring comes from the active theme's `primaryText` role (tracks Increase Contrast automatically) and `button`'s title color is AppKit's own default control rendering. Whether the `0.4`-alpha disabled dimming remains sufficiently contrasted is tracked once under Accessibility above ("Minimum contrast ratio"), not duplicated here. |
+| Increase Contrast | Not applicable to this file directly: `FontPickerView.swift` reads no system contrast setting and sets no custom `NSColor`; `label`'s coloring comes from the active theme's `primaryText` role (tracks Increase Contrast automatically) and `button`'s title color is AppKit's own default control rendering. Whether the `0.4`-alpha disabled dimming remains sufficiently contrasted is tracked once under Accessibility above (the open question on minimum-contrast-ratio), not duplicated here. |
 | Differentiate Without Color | Not applicable: the component conveys no state through color alone; `isEnabled` is communicated through both `button.isEnabled` (which changes the button's interactive/bezel appearance, not merely a color) and `label.alphaValue`, and the font name/installed-status is communicated through text (`describe(_:installed:)`), not color. |
 
 ## Feature Flags
@@ -477,7 +458,7 @@ used elsewhere in the row family.
 **Rationale**: No other file under `ComposableSettingsWindow/Views` sets this
 exact value or references a shared constant for it; this recipe documents
 the value as-is rather than inventing a token the source does not use (see
-the "Minimum contrast ratio" open question under Accessibility).
+the open question on minimum-contrast-ratio under Accessibility).
 **Approved**: pending
 
 ## Compliance
@@ -498,10 +479,13 @@ component defers to `FontChooserButton`'s own use of the system font panel
 rather than building a second font browser. `keyboard-navigable` passes on
 `NSButton`'s inherited Tab/Space/Return handling. `screen-reader-support` is
 `partial`: `button`'s own accessible name (its `title`) is meaningful, but
-the row's descriptive `label` is not linked to it (see the open question
-under Accessibility). `contrast-ratio` is `partial`: the resolved contrast
-of the 40%-alpha disabled label cannot be determined from this file alone
-(see the "Minimum contrast ratio" open question under Accessibility).
+`FontPickerView.swift` sets no `accessibilityLabel`/`setAccessibilityTitleUIElement`
+linking `button` to the row's descriptive `label`, unlike the sibling
+`CheckboxView`/`NumberFieldView`/`PopupMenuChoiceView` rows (see Label
+requirements under Accessibility). `contrast-ratio` is `partial`: the
+resolved contrast of the 40%-alpha disabled label cannot be determined
+from this file alone (see the open question on minimum-contrast-ratio
+under Accessibility).
 `idempotent-operations` passes because repeated `sync()` calls always
 converge to the same observable state (see Edge Cases).
 `separation-of-concerns` passes because the component stores no font of its
@@ -517,3 +501,4 @@ Localization).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for FontPickerView, covering the row's view-model binding, the synchronous-plus-asynchronous re-sync path after a font pick, the isEnabled dimming, and two open accessibility/localization questions for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: added a delegates-font-resolution-fallback requirement and vector so the boundary-values edge case points at FontViewModel instead of taking on its fallback behavior here; restated describes-font-name-and-rounded-point-size and flags-an-uninstalled-font-in-its-title against button's observable title instead of the private describe(_:installed:) helper, and moved that helper's name into the AppKit/UIKit platform note; fixed vector 012's font/literal and the Localization row to match source's em dash separator exactly; bolded Design Decision labels and cited color-picker-view's owns-on-change requirement in Decision 1's rationale instead of naming it vaguely; dropped the meta decision comparing this recipe's requirement count to ColorPickerView's and the leftover "helper-tracing rule" aside; trimmed Edge Cases so they cite named requirements instead of re-asserting "This is a MUST"; fixed contrast-ratio's status from the disallowed needs-review to partial; populated related with the sibling row recipes it's compared against; and remapped the meaningful-labels compliance check (not in the catalog) to its screen-reader-support synonym. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

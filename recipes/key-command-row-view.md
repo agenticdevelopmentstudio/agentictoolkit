@@ -3,11 +3,11 @@ id: 1d2f69b6-1156-4dfa-a390-a240925ba1bd
 title: KeyCommandRowView
 domain: agentictoolkit://recipes/key-command-row-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -244,23 +244,20 @@ live in the view that loses focus — it lives in the row.
   to its component; see `agentictoolkit://recipes/key-command-capture-field`,
   which records the open question.
 - **Label requirements**: The toggle's accessible name comes from the title
-  label via **links-toggle-accessibility-title**. NEEDS REVIEW: the capture
-  field is given only an accessibility *identifier*
+  label via **links-toggle-accessibility-title**. The capture field is given
+  only an accessibility *identifier*
   (`"settings.key-commands.<id>.recorder"`, a UI-test hook) and no
   accessibility *label* or title-element link to the title label; whether a
   screen reader announces it meaningfully depends on AppKit's default
   exposure of its internal, unlabeled text field, which neither this file
-  nor `KeyCommandCaptureField.swift` configures explicitly. Resolving this
-  needs a decision on what the capture field should announce (e.g. "Move
-  Selection Up, shortcut recorder") and where that string should live.
-- **Announce state changes (e.g., loading, disabled)**: NEEDS REVIEW: a
-  refusal or an availability change updates the status label's `stringValue`
-  and `role` (color) synchronously, but no call in
-  `KeyCommandRowView.swift` posts an accessibility announcement (for
-  example, `NSAccessibility.post(element:notification:)`). A sighted user
-  sees the refusal appear immediately next to the switch; whether a
-  VoiceOver user is notified of it at all is undefined by source and would
-  need confirmation from an accessibility audit of the built panel.
+  nor `KeyCommandCaptureField.swift` configures explicitly.
+- **Announce state changes (e.g., loading, disabled)**: A refusal or an
+  availability change updates the status label's `stringValue` and `role`
+  (color) synchronously, but no call in `KeyCommandRowView.swift` posts an
+  accessibility announcement (for example,
+  `NSAccessibility.post(element:notification:)`). A sighted user sees the
+  refusal appear immediately next to the switch; a VoiceOver user gets no
+  announcement of it from this file.
 - **Minimum tap target**: Not applicable — this is a macOS, pointer/
   trackpad-driven `NSView` composition with no touch input path in source;
   the 44×44pt minimum is iOS/touch guidance. `KeyCommandRowView` sets no
@@ -395,7 +392,7 @@ anywhere in `KeyCommandRowView.swift`.
 
 ## Localization
 
-NEEDS REVIEW: none of the user-facing strings this file introduces route
+None of the user-facing strings this file introduces route
 through a localization mechanism (no `NSLocalizedString`, no String Catalog
 key) — each is a Swift string literal or string interpolation written
 directly in `KeyCommandRowView.swift`. `command.title` itself is a
@@ -591,13 +588,13 @@ The `passed` rows rest on source facts that are unconditional: the row is
 controls per platform HIG, sets accessibility identifiers on the capture
 field and toggle, and keeps business logic (edit/commit/toggle state) out
 of its own presentation code, delegating persistence to the registry. The
-`partial` rows rest on the Accessibility section's open questions: the
+`partial` rows rest on the Accessibility section's gaps: the
 toggle is labeled via `setAccessibilityTitleUIElement`, but the capture
 field has only an accessibility identifier and no accessibility label, and
 no state change posts an `NSAccessibility` announcement, so screen-reader
 support, keyboard/focus behavior around the capture field, and label
-completeness cannot be called fully passing without an accessibility
-audit. `no-hardcoded-strings` is `failed` because every user-facing string
+completeness are not fully implemented. `no-hardcoded-strings` is `failed`
+because every user-facing string
 this file introduces is a Swift literal with no localization mechanism, as
 the Localization section states.
 
@@ -606,3 +603,4 @@ the Localization section states.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved AppKit implementation names out of platform-neutral requirements into Platform Notes; reconciled the refusal-clearing edge case with its requirement and test vector; added a named requirement and test vectors for surviving an external bindings change, plus cancel-path test vectors for edit-state clearing and refresh; fixed nested-quote and WinUI-namespace errors in test vectors and Platform Notes; reformatted Design Decisions to the bold convention and dropped the unverifiable sibling-recipe requirement-count decision; relabeled invented Localization keys as proposed and noted the source of the availability labels; added the missing recipe cross-reference to `related`; corrected invalid `needs-review` Compliance statuses and downgraded two overstated accessibility checks; ran the compliance-catalog cleanup. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

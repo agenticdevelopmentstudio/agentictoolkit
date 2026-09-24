@@ -3,11 +3,11 @@ id: 969b7f76-3fff-4a13-9b85-a61df25c70ee
 title: KeyCommandCaptureField
 domain: agentictoolkit://recipes/key-command-capture-field
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -202,45 +202,33 @@ decide that either way.
 
 ## Accessibility
 
-- **Role/trait**: NEEDS REVIEW: Not implemented in source. No
+- **Role/trait**: Not implemented in source. No
   `setAccessibilityRole`, `setAccessibilityLabel`, or accessibility
   title-element link — unlike `KeyCommandRowView`
   (`agentictoolkit://recipes/key-command-row-view`), whose sibling toggle
   control links to its label via `setAccessibilityTitleUIElement` — appears
-  anywhere in `KeyCommandCaptureField.swift`; the view
-  relies entirely on `NSView`'s default accessibility exposure. This is a
-  genuine gap because the view is an interactive, first-responder-accepting
-  control whose whole purpose is recording user input — settling it would
-  require either an explicit accessibility role/label assignment in this
-  file, or confirmation from whoever owns the hosting row that labeling is
-  intentionally delegated entirely to that caller.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source. This file
+  anywhere in `KeyCommandCaptureField.swift`; the view relies entirely on
+  `NSView`'s default accessibility exposure. The view is an interactive,
+  first-responder-accepting control whose whole purpose is recording user
+  input, and this file assigns it no accessibility role or label of its
+  own; any such assignment is left entirely to the caller.
+- **Label requirements**: Not implemented in source. This file
   sets no accessibility label of its own; a caller may assign one externally
   (accessibility identifiers, not labels, are assigned by the hosting row
   outside this file), but nothing in `KeyCommandCaptureField.swift` guarantees
-  VoiceOver announces this control's purpose. Settling this requires the same
-  decision as the Role/trait item above.
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source. No
+  VoiceOver announces this control's purpose. This is the same gap as the
+  Role/trait item above.
+- **Announce state changes**: Not implemented in source. No
   `NSAccessibility.post(element:notification:)` call (or equivalent)
   accompanies the `isRecording` transition or a captured/committed/cancelled
   chord anywhere in source, so a VoiceOver user is not told the control
-  entered or left recording mode. Settling this requires either adding a
-  posted notification when `isRecording` changes, or confirmation that the
-  hosting row's own status readout is considered sufficient.
+  entered or left recording mode.
 - **Minimum tap target**: Not applicable to the 44×44pt touch threshold — this
   is a macOS, pointer/keyboard-driven `NSView`/`NSResponder`, with no touch
   input path in source. Its actual click target is fixed at 22pt tall by a
   minimum of 132pt wide (see Min/Max size), matching this file's own layout
   constants, not a touch guideline.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. Every
-  color this component draws (`controlBackgroundColor`, `accentColor`/
-  `borderColor`, `primaryTextColor`/`placeholderTextColor`) is resolved at
-  runtime from whichever `SemanticPalette` the active theme supplies;
-  `KeyCommandCaptureField.swift` performs no contrast check of its own. Since
-  the actual RGB values are theme-dependent, whether text-on-background or
-  border-on-background contrast meets a specific ratio (e.g. WCAG 4.5:1)
-  cannot be determined from this source file alone — it would require
-  auditing the contrast ratio of each theme's actual token values.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. Every color this component draws (`controlBackgroundColor`, `accentColor`/`borderColor`, `primaryTextColor`/`placeholderTextColor`) is resolved at runtime from whichever `SemanticPalette` the active theme supplies, and `KeyCommandCaptureField.swift` performs no contrast check of its own, so whether text-on-background or border-on-background contrast meets a specific ratio (e.g. WCAG 4.5:1) cannot be determined from this source file alone — it would require auditing the contrast ratio of each theme's actual token values.
 
 ## Conformance Test Vectors
 
@@ -344,24 +332,20 @@ deep-link handler appears anywhere in `KeyCommandCaptureField.swift`.
 | (unassigned) | `Click to record` | Default value of the `placeholder` property, assigned directly to an AppKit `NSTextField.stringValue` when nothing is captured, displayed, or being recorded. |
 | (unassigned) | `Press keys…` | Literal assigned directly to `label.stringValue` in `refreshText()` while recording with nothing pending or displayed. |
 
-NEEDS REVIEW: Not implemented in source. Both strings above are literal
-`String` values assigned to an AppKit `stringValue`, which — unlike a string
-literal passed to a SwiftUI `Text`/`Label` (a `LocalizedStringKey`) — does not
-localize on its own; `KeyCommandCaptureField.swift` contains no
-`NSLocalizedString`, string-catalog key reference, or other localization
-mechanism for either literal. Settling this requires confirming with whoever
-owns this target's build settings whether its String Catalog / build-time
-extraction step captures AppKit `stringValue` literal assignments the way it
-captures SwiftUI text, or whether these two literals need an explicit
-localization key added in source.
+Both strings above are literal `String` values assigned to an AppKit
+`stringValue`, which — unlike a string literal passed to a SwiftUI
+`Text`/`Label` (a `LocalizedStringKey`) — does not localize on its own;
+`KeyCommandCaptureField.swift` contains no `NSLocalizedString`,
+string-catalog key reference, or other localization mechanism for either
+literal.
 
 ## Accessibility Options
 
 | Option | Behavior |
 |--------|----------|
 | Reduce Motion | Not applicable: source contains no animation, transition, movement, scaling, or `CATransaction`/animator-proxy call; every appearance change (`refreshText()`, `applyTheme()`) is an instantaneous property assignment. |
-| Increase Contrast | Not applicable to this component directly: `KeyCommandCaptureField.swift` reads no system contrast setting (e.g. `NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast`), and neither does the `SemanticPalette` color-resolution path it calls into; the open question of whether the resulting colors are contrasty enough is tracked once under Accessibility above (Minimum contrast ratio), not duplicated here. |
-| Differentiate Without Color | NEEDS REVIEW: Not implemented in source for the "prior shortcut still showing" transition. When recording starts on a field that already displays a `displayedShortcut`, the sole indicator that recording has begun is the border color changing from `borderColor` to `accentColor` (see prior-text-retention); no icon, text, or shape change accompanies it until a chord is captured. In every other state, text content itself (a shortcut description, "Press keys…", or the placeholder) also changes, so this gap is specific to that one transition. Settling it requires adding a non-color cue (e.g. a text or icon change) for that transition, or confirming the hosting row's own readout is considered sufficient. |
+| Increase Contrast | Not applicable to this component directly: `KeyCommandCaptureField.swift` reads no system contrast setting (e.g. `NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast`), and neither does the `SemanticPalette` color-resolution path it calls into; whether the resulting colors are contrasty enough is tracked once, under the open question on minimum-contrast-ratio in Accessibility above, not duplicated here. |
+| Differentiate Without Color | During the "prior shortcut still showing" transition, the border color changing from `borderColor` to `accentColor` is the only indicator that recording has begun; no icon, text, or shape change accompanies it until a chord is captured, unlike every other state, where the text itself changes. The component does not respond to Differentiate Without Color. |
 
 ## Feature Flags
 
@@ -429,12 +413,12 @@ Not applicable: `KeyCommandCaptureField.swift` contains no logging call (no
   Tab/Shift-Tab so native focus order is preserved, mirroring
   unmodified-tab-passthrough. Add `role="button"` (or `role="group"` if the
   recorder is treated as a composite control) plus an explicit `aria-label` to
-  close the open question this recipe raises over the source's accessible
-  label (see Accessibility above), and an `aria-live="polite"` region
-  announcing recording start/stop and the captured-chord description to close
-  the announce-state-changes open question alongside it —
-  `role="textbox"` would incorrectly tell assistive tech to expect editable
-  text, which this control is not.
+  supply the accessible label the source itself never assigns (see
+  Accessibility above), and an `aria-live="polite"` region announcing
+  recording start/stop and the captured-chord description to supply the
+  state announcement the source itself never makes (see Announce state
+  changes above) — `role="textbox"` would incorrectly tell assistive tech to
+  expect editable text, which this control is not.
 - **AppKit / UIKit** (source platform): Source file
   `packages/apple/AgenticToolkit/macOS/Features/KeyCommands/KeyCommandCaptureField.swift`.
   A macOS-only (`import AppKit`) `NSView` subclass, `@MainActor`, depending
@@ -527,11 +511,12 @@ in Design Decisions above (a field editor would eat the chords being
 recorded), so the deviation is justified rather than an oversight.
 `screen-reader-support` is failed because the source implements no
 accessibility role, label, or state announcement at all (see Accessibility
-above). `contrast-ratio` is partial because the actual colors are
+above). `contrast-ratio` is partial per the open question on
+minimum-contrast-ratio in Accessibility above: the actual colors are
 theme-resolved at runtime and cannot be checked against a ratio from this
-source file alone (see Accessibility above). No catalog check covers the
-one-color-only transition flagged under Accessibility Options above (see
-that section for the gap); it is not represented in this table.
+source file alone. No catalog check covers the one-color-only transition
+described under Differentiate Without Color in
+Accessibility Options above; it is not represented in this table.
 `no-hardcoded-strings` is failed because of the two unlocalized literals
 recorded under Localization above.
 
@@ -540,3 +525,4 @@ recorded under Localization above.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: trimmed summary; renamed requirements to subject-noun kebab-case and updated every cross-reference; reformatted Design Decisions to bold Decision/Rationale/Approved; fixed the AppKit / UIKit platform-notes label; added the KeyboardShortcuts reference URL and the KeyCommandRowView related link; named KeyCommandRowView in the vague accessibility citation; corrected the pendingShortcut-ownership contradiction (the caller assigns and clears it, never the component); replaced the unrealistic Escape+.function test vector with Escape+Caps Lock, added a Return+Caps Lock vector, and renumbered all vectors sequentially; dropped MUST-level edge-case wording not backed by a named requirement; fixed the WinUI corner-radius mismatch and removed an editorializing aside; moved several implementation-coupled requirements (click-focus, redundant-recording-notification-suppression, theme-change-repaint) to observable phrasing with mechanism notes under AppKit / UIKit; replaced the React role="textbox" recommendation with role="button"/"group" plus aria-label and aria-live; and normalized Compliance statuses/category casing and cleaned up citations against the compliance catalog. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
