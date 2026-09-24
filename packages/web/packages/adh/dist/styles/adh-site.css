@@ -584,6 +584,11 @@ a.adh-footer__brand-link:focus-visible {
   white-space: nowrap;
 }
 
+/* Light gray, so the workspace name stays the loudest thing in the lead (Mike, 2026-09-24). */
+.adh-workspace-trigger__suffix {
+  color: var(--color-text-dim);
+}
+
 .adh-nav-popover__item--current {
   color: var(--color-accent);
   font-weight: 600;
