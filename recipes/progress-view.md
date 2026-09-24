@@ -3,11 +3,11 @@ id: ea2dae31-1020-4930-aa12-15f7d04967a5
 title: ProgressView
 domain: agentictoolkit://recipes/progress-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -140,8 +140,8 @@ bar showing a numeric value and an animating indeterminate bar every time
   accessibility role override appears in source. `progressIndicator` is a
   plain `NSProgressIndicator`, which AppKit exposes to assistive technology
   with its own default progress-indicator role and value reporting.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source. No line
-  in `ProgressView.swift` calls `progressIndicator.setAccessibilityLabel(_:)`
+- **Label requirements**: Not implemented in source — no line in
+  `ProgressView.swift` calls `progressIndicator.setAccessibilityLabel(_:)`
   or `setAccessibilityTitleUIElement(_:)` to connect `progressIndicator` to
   `viewModel.title` (a required `String` on `ProgressViewModel`, inherited
   from `AbstractViewModel`, describing what the progress represents). Every
@@ -150,11 +150,7 @@ bar showing a numeric value and an animating indeterminate bar every time
   `toggle.setAccessibilityTitleUIElement(label)`) links its control to that
   title for VoiceOver; `ProgressView` does not, so VoiceOver announces only
   AppKit's default progress-indicator role and current value, with no
-  indication of what operation the progress belongs to. This would be
-  settled by adding an explicit accessibility-label or title-UI-element call
-  in `ProgressView.swift`, or by confirming with the owning team that the
-  caller composing this view into a row is always responsible for that
-  linkage instead.
+  indication of what operation the progress belongs to.
 - **Announce state changes (e.g., loading, disabled)**: Determinate ↔
   indeterminate transitions are carried entirely by
   `progressIndicator.isIndeterminate`/`doubleValue`/animation state
@@ -442,10 +438,10 @@ own — all rendering is `NSProgressIndicator`'s unmodified system chrome,
 which already tracks platform contrast; the same absence of custom coloring
 means `ProgressView` conveys its determinate/indeterminate state through
 fill proportion and motion rather than a color-only cue (see Accessibility
-Options). `screen-reader-support` is `failed` because of the open question
-tracked under Accessibility above: no accessibility label or title-UI-element
-link connects `progressIndicator` to `viewModel.title`, so `ProgressView`
-plainly does not implement this check today.
+Options). `screen-reader-support` is `failed` because, as recorded under
+Label requirements in Accessibility above, no accessibility label or
+title-UI-element link connects `progressIndicator` to `viewModel.title`, so
+`ProgressView` plainly does not implement this check today.
 
 ## Change History
 
@@ -453,3 +449,4 @@ plainly does not implement this check today.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `ProgressView` (AppKit, macOS) source. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: corrected the SwiftUI and Compose Platform Notes for scale and default style mismatches; restated two implementation-detail requirements as observable behavior and moved their AppKit mechanics into Platform Notes; added references for platform API claims and related links to sibling row recipes; reformatted Design Decisions' Approved line; fixed the concurrent-access wording; annotated the mixed-scale and compile-time-only test vectors; removed an editorial aside from the WinUI 3 bullet; corrected the Compliance status and category casing and pruned non-catalog compliance checks. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

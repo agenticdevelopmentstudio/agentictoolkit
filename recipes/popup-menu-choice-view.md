@@ -3,11 +3,11 @@ id: 3a3e4da0-e900-4281-a19c-e29cbd34cbab
 title: PopupMenuChoiceView
 domain: agentictoolkit://recipes/popup-menu-choice-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -204,12 +204,7 @@ selection back into the view model's `settingObserver`.
   pointer-interface requirement. `PopupMenuChoiceView` sets no
   `controlSize` on `popUpButton`, so it keeps `NSPopUpButton`'s regular
   system click-target metrics.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
-  `label` text color resolves from the active theme's `.primaryText` role against
-  the hosting background at runtime; the component performs no contrast
-  check, so whether a given theme's resolved pair meets 4.5:1 cannot be
-  determined from this file. This would be settled by a theme-level
-  contrast audit of `.primaryText` against the backgrounds it sits on.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. The `label` text color resolves from the active theme's `.primaryText` role against the hosting background at runtime; the component performs no contrast check, so whether a given theme's resolved pair meets 4.5:1 cannot be determined from this file — settled by a theme-level contrast audit of `.primaryText` against the backgrounds it sits on.
 
 ## Conformance Test Vectors
 
@@ -516,3 +511,4 @@ configures nor overrides.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded AppKit-specific requirements to platform-neutral behavior with API mechanics moved to Platform Notes; renamed ignores-non-matching-representedObject to ignores-unresolvable-selection; promoted the empty-choices, unmatched-selection, and onChange-overwrite edge cases to named requirements with test vectors; recorded the onChange overwrite as an approved Design Decision; reformatted Design Decisions to the three-line convention and dropped the doc-authoring-only entry and the unsupported-explanation entry; fixed test vectors 001, 016, and 019 and the arranges-row-layout requirement for the row's spacer and construction-time-only item mutation; corrected the false UIKit initializer-split claim and the SwiftUI empty-symbol-name fallback in Platform Notes; softened the Increase Contrast claim to partial; added checkbox-view to related; added the initial Change History row; cleaned up the Compliance table against the catalog; records the unverified theme-token contrast as an open question. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

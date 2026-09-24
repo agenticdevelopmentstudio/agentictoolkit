@@ -3,11 +3,11 @@ id: 46b9d1b8-8a6e-4b61-98ec-5201be24302f
 title: Pointing Hand Button
 domain: agentictoolkit://recipes/pointing-hand-button
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -65,7 +65,7 @@ approved-date: ''
 |-------|------------------|
 | Default | Cursor is `NSCursor.arrow` (the system default) until the pointer enters `bounds`; `PointingHandButton` applies no other styling of its own outside of cursor management. |
 | Pressed | Not styled by `PointingHandButton`; the source overrides none of `NSButton`'s press-handling, so the native bezel press feedback applies unmodified. |
-| Disabled | NEEDS REVIEW: Not implemented in source. Behavior undefined. None of the five overridden methods read `isEnabled`, so `resetCursorRects()` and the mouse-entered/moved handlers set `NSCursor.pointingHand` unconditionally, even on a disabled button that cannot be clicked. Evidence that would settle this: confirmation from the component owner on whether a disabled `PointingHandButton` should suppress the pointing-hand cursor and fall back to `NSCursor.arrow`. |
+| Disabled | Not implemented: none of the five overridden methods reads `isEnabled`, so `resetCursorRects()` and the mouse-entered/moved handlers set `NSCursor.pointingHand` unconditionally, even on a disabled button that cannot be clicked. |
 | Focused | Not styled by `PointingHandButton`; no focus-ring override appears in source, so `NSButton`'s native focus appearance applies unmodified. |
 | Loading | Not applicable: `PointingHandButton` performs no asynchronous work and defines no loading state. |
 
@@ -156,7 +156,7 @@ Not applicable: the source contains no logging calls.
 **Approved**: pending
 
 **Decision**: The disabled (`isEnabled == false`) case is left unaddressed in this recipe rather than described as suppressing the pointing-hand cursor.
-**Rationale**: None of the source's five overridden methods reads `isEnabled`, so no behavior actually differs between an enabled and a disabled button. This is recorded in States as the open question about disabled-state cursor behavior, rather than silently normalized to the idealized behavior a reader might expect.
+**Rationale**: None of the source's five overridden methods reads `isEnabled`, so no behavior actually differs between an enabled and a disabled button. This is recorded in States as a plain fact about disabled-state cursor behavior, rather than silently normalized to the idealized behavior a reader might expect.
 **Approved**: pending
 
 ## Compliance
@@ -175,3 +175,4 @@ Not applicable: the source contains no logging calls.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only names and folded the unobservable super-call requirement into tracking-area-replacement; softened the unverified SwiftUI/Compose key-window claims and added the macOS 15 `.pointerStyle(.link)` note; added Apple doc references and linked them in Overview; documented the exit-into-a-cursor-owning-sibling edge case; sharpened the tracking-area-replacement test vector's owner/option assertion and dropped the unobservable super-call-order vector; prescribed a single WinUI 3 `ProtectedCursor` approach; cleaned up the Compliance table (removed the not-applicable touch-target-size and string-externalization rows per the compliance catalog). |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

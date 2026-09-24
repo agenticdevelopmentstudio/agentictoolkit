@@ -3,11 +3,11 @@ id: 1727e605-6f83-42d7-960f-45fbdf714d94
 title: Quick Look Preview
 domain: agentictoolkit://recipes/quick-look-preview
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -74,7 +74,7 @@ approved-date: ''
 
 - **Role/trait**: Not customized — the source sets no `accessibilityRole`, `accessibilityLabel`, or `isAccessibilityElement` override anywhere in this file; `QLPreviewView` carries AppKit's own built-in accessibility behavior for a QuickLook preview, unmodified by this wrapper.
 - **Label requirements**: Not customized — the source assigns no accessibility label of its own; whatever label `QLPreviewView` exposes natively (e.g., derived from the previewed file) is unmodified by this file.
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source. Behavior undefined. When `url` changes and `updateNSView` reassigns `previewItem` (see **updates-preview-item-on-url-change**), no explicit accessibility notification (e.g., a layout-changed or screen-changed post) accompanies that change anywhere in this file. Whether a VoiceOver user already focused on this view is told the previewed content changed depends entirely on `QLPreviewView`'s own automatic behavior, which cannot be confirmed from this source file alone. Settling it needs either a VoiceOver test pass across a `url` change, or an explicit accessibility-notification addition to `updateNSView(_:context:)`.
+- **Announce state changes**: Not implemented — when `url` changes and `updateNSView` reassigns `previewItem` (see **updates-preview-item-on-url-change**), no explicit accessibility notification (e.g., a layout-changed or screen-changed post) accompanies that reassignment anywhere in this file; any announcement to VoiceOver of the changed preview content is `QLPreviewView`'s own automatic behavior, not code defined here.
 - **Minimum tap target**: Not applicable — `QuickLookPreview` targets macOS pointer input and wires no target/action, gesture recognizer, or click handling of its own in this file, so it has no tap target of its own to size; any hit-testing inside the preview is `QLPreviewView`'s native, pointer-driven behavior.
 
 ## Conformance Test Vectors
@@ -190,3 +190,4 @@ Not applicable — the source contains no logging call (no `os_log`, `Logger`, o
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: platform-neutralized behavioral requirements (moved AppKit specifics to the SwiftUI Platform Notes bullet), fixed RFC 2119 misuse in edge cases, corrected Design Decisions colon placement, reworded test vectors 005 and 008 to be checkable, narrowed the "no preview available" claim and downgraded graceful-degradation to partial pending verification of the unreadable/missing-file case, removed the unsupported WinUI 3 parenthetical, and cleaned up Compliance (title-cased categories, dropped the invalid main-actor-confined/architecture check) |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
