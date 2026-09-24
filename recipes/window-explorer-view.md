@@ -3,7 +3,7 @@ id: 8aee173a-25e4-443e-a9ab-d629b58817e1
 title: WindowExplorerView
 domain: agentictoolkit://recipes/window-explorer-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -23,7 +23,8 @@ tags:
 - macos
 - swiftui
 depends-on: []
-related: []
+related:
+- agentictoolkit://recipes/badge
 references: []
 approved-by: ''
 approved-date: ''
@@ -46,87 +47,91 @@ binding.
 
 ## Behavioral Requirements
 
-- **renders-header-bar**: The view MUST show a header row containing, in
+- **header-bar**: The view MUST show a header row containing, in
   order, a magnifying-glass icon, the label "Windows", a flexible spacer, and
   a refresh button.
-- **disables-refresh-while-loading**: The refresh button MUST be disabled
+- **refresh-button-loading-state**: The refresh button MUST be disabled
   whenever a window scan is in progress (`isLoading == true`).
-- **refreshes-on-appear**: The view MUST start a window scan the first time
+- **initial-refresh**: The view MUST start a window scan the first time
   it appears (`.onAppear { refreshAsync() }`).
-- **refreshes-on-app-activation-when-permission-missing**: The view MUST
+- **activation-refresh-when-accessibility-missing**: The view MUST
   start a new window scan whenever the app receives
   `NSApplication.didBecomeActiveNotification`, but only if the most recent
   scan left `needsAccessibility == true`.
-- **refreshes-on-external-notification**: When constructed with a non-nil
+- **external-notification-refresh**: When constructed with a non-nil
   `refreshNotification` name, the view MUST start a window scan whenever a
   notification with that name is posted; when `refreshNotification` is nil,
   this path MUST have no effect (`OptionalNotificationModifier`).
-- **shows-accessibility-banner-when-permission-missing**: The view MUST
+- **accessibility-banner-visibility**: The view MUST
   display a banner reading "Accessibility permission needed for window
   titles." with an "Open Settings" action whenever the most recent scan
-  found running windows but could not enrich any of them via Accessibility
-  (`needsAccessibility == true`).
-- **requests-accessibility-permission-from-banner**: Activating the banner's
+  found running windows but no process's Accessibility (AX) window-list
+  query succeeded (`needsAccessibility == true`, set from `axSucceeded ==
+  false`). This depends on AX *query* success per process, not on whether
+  any window's title was actually matched and replaced — a query can
+  succeed for a process without any of its windows matching a CoreGraphics
+  window closely enough to replace its title.
+- **accessibility-banner-action**: Activating the banner's
   "Open Settings" action MUST invoke `SystemAccessibilityPermission.request()`.
-- **shows-loading-state**: While a scan is in progress, the view MUST show an
+- **loading-state**: While a scan is in progress, the view MUST show an
   indeterminate progress indicator and the text "Scanning windows..." in
   place of the window list.
-- **shows-empty-state**: When a completed scan produces no application
+- **empty-state**: When a completed scan produces no application
   groups, the view MUST show a "No windows found" message together with the
   hint "Make sure Accessibility permission is granted."
-- **groups-windows-by-app**: Once loaded, the view MUST present windows as
+- **app-grouping**: Once loaded, the view MUST present windows as
   one section per owning application, with sections ordered
   case-insensitively ascending by application name.
-- **shows-app-section-header**: Each application section header MUST show
+- **app-section-header**: Each application section header MUST show
   that application's running icon (or a fallback `app.fill` icon when no
   running icon is found), the application name, and a count of its windows
   in that section.
-- **provides-select-all-toggle-per-section**: Each application section
+- **section-select-all-toggle**: Each application section
   header MUST include a toggle that, when turned on, adds every selectable
   window in that section to `selectedWindowIDs`, and, when turned off,
   removes every selectable window in that section from `selectedWindowIDs`.
-- **reflects-partial-selection-as-unchecked**: A section's select-all toggle
+- **select-all-toggle-partial-selection-state**: A section's select-all toggle
   MUST show the unchecked state unless the section has at least one
   selectable window and every selectable window in it is currently selected.
-- **disables-select-all-when-nothing-selectable**: A section's select-all
+- **select-all-toggle-availability**: A section's select-all
   toggle MUST be disabled when that section has no selectable windows.
-- **renders-window-row**: Each window row MUST show a toggle bound to that
+- **window-row**: Each window row MUST show a toggle bound to that
   window's membership in `selectedWindowIDs`, the window's title (or
   "(untitled)" when the title is empty) limited to one line with middle
   truncation, and the window's dimensions formatted as
   `"<width>x<height>"` using integer point values.
-- **shows-context-badge-on-owned-window**: A window row MUST show a badge
+- **window-context-badge**: A window row MUST show a badge
   naming its owning context, colored from that context's stored color,
   whenever the window already belongs to a context and either no
   `activeGroupID` is set or that context differs from `activeGroupID`.
-- **disables-unselectable-window-row**: A window row's toggle MUST be
+- **window-row-selectability-state**: A window row's toggle MUST be
   disabled, and its title MUST be drawn in the secondary text color instead
   of the primary text color, whenever the window is not selectable.
-- **determines-selectability-by-ownership**: A window MUST be selectable
+- **window-selectability**: A window MUST be selectable
   when it belongs to no context, or when it belongs to the context
   identified by `activeGroupID`; it MUST NOT be selectable when it belongs
   to any other context (`isSelectable(_:)`).
-- **filters-scanned-windows**: A window scan MUST include only windows that
+- **scan-window-filter**: A window scan MUST include only windows that
   belong to a regular running application (`activationPolicy == .regular`),
   are wider than 50 points, are taller than 50 points, are currently
   on-screen, whose owning application name is not in
   `appState.settings.hiddenApps`, and whose id is not in the view's
   `excludeWindowIDs`.
-- **queries-accessibility-per-process**: A window scan MUST query the
+- **per-process-accessibility-query**: A window scan MUST query the
   Accessibility (AX) window list of every distinct process id among the
   filtered windows (`AXUIElementCopyAttributeValue` with
   `kAXWindowsAttribute`), skipping any process for which that query does not
   succeed.
-- **replaces-title-from-matched-accessibility-window**: A window scan MUST
+- **accessibility-title-match**: A window scan MUST
   replace a window's title with an Accessibility window's title when that
   Accessibility window belongs to the same process and its position and size
   each differ from the CoreGraphics window's frame by less than 3 points on
   x, y, width, and height, and that Accessibility title is non-empty;
   otherwise the window's original title MUST be kept unchanged.
-- **prunes-stale-selection-in-discovery-mode**: When `activeGroupID` is nil,
+- **discovery-mode-stale-selection-pruning**: When `activeGroupID` is nil,
   completing a scan MUST remove from `selectedWindowIDs` any id that is not
   present among the windows the scan produced.
-- **preserves-selection-in-assignment-mode**: When `activeGroupID` is
+- **assignment-mode-selection-preservation**: When `activeGroupID` is
   non-nil, completing a scan MUST NOT remove any id from
   `selectedWindowIDs`, even if the window it identifies is not present among
   the windows the scan produced.
@@ -209,9 +214,10 @@ binding.
   no `.accessibilityLabel` set; it relies on the SF Symbol's implicit
   accessibility description plus `.help("Refresh window list")` (a tooltip
   hint, not a guaranteed VoiceOver label) to convey its purpose. Confirm
-  with a VoiceOver pass on iOS/macOS whether the announced label clearly
-  reads as "Refresh" before treating this as sufficient — resolvable by the
-  toolkit's accessibility reviewer running VoiceOver over this button.**
+  with a VoiceOver pass on macOS (this component is macOS-only) whether the
+  announced label clearly reads as "Refresh" before treating this as
+  sufficient — resolvable by the toolkit's accessibility reviewer running
+  VoiceOver over this button.**
 - Announce state changes: the loading, empty, and populated states are
   distinct view trees that SwiftUI swaps directly (no `Text`/state is kept
   visible across the transition), and no `.accessibilityAddTraits`,
@@ -241,52 +247,54 @@ binding.
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| window-explorer-view-001 | renders-header-bar | Render the view | Header shows magnifying-glass icon, "Windows", spacer, refresh button, in that order. |
-| window-explorer-view-002 | disables-refresh-while-loading | `isLoading == true` | Refresh button `isEnabled == false`. |
-| window-explorer-view-003 | refreshes-on-appear | View appears for the first time | `refreshAsync()` is invoked without user action. |
-| window-explorer-view-004 | refreshes-on-app-activation-when-permission-missing | `needsAccessibility == true`; app posts `didBecomeActiveNotification` | A new scan starts. |
-| window-explorer-view-004b | refreshes-on-app-activation-when-permission-missing | `needsAccessibility == false`; app posts `didBecomeActiveNotification` | No new scan starts. |
-| window-explorer-view-005 | refreshes-on-external-notification | Constructed with `refreshNotification = .foo`; `.foo` is posted | A new scan starts. |
-| window-explorer-view-005b | refreshes-on-external-notification | Constructed with `refreshNotification = nil`; any notification is posted | No scan starts from this path. |
-| window-explorer-view-006 | shows-accessibility-banner-when-permission-missing | Scan completes with `needsAccessibility == true` | Banner "Accessibility permission needed for window titles." with "Open Settings" is visible. |
-| window-explorer-view-007 | requests-accessibility-permission-from-banner | Tap "Open Settings" | `SystemAccessibilityPermission.request()` is called. |
-| window-explorer-view-008 | shows-loading-state | `isLoading == true` | `ProgressView` and "Scanning windows..." are shown; list content is hidden. |
-| window-explorer-view-009 | shows-empty-state | Scan completes with `appGroups.isEmpty == true` | "No windows found" and the Accessibility hint are shown. |
-| window-explorer-view-010 | groups-windows-by-app | Windows from apps "beta" and "Alpha" | Sections render in order "Alpha", "beta". |
-| window-explorer-view-011 | shows-app-section-header | App "Xcode" with 3 windows, running with an icon | Header shows Xcode's running icon, "Xcode", and the count badge "3". |
-| window-explorer-view-011b | shows-app-section-header | App with no matching `NSRunningApplication` icon | Header shows the fallback `app.fill` icon. |
-| window-explorer-view-012 | provides-select-all-toggle-per-section | Section has 2 selectable windows, none selected; toggle select-all on | Both windows are added to `selectedWindowIDs`. |
-| window-explorer-view-012b | provides-select-all-toggle-per-section | Section has 2 selectable windows, both selected; toggle select-all off | Both windows are removed from `selectedWindowIDs`. |
-| window-explorer-view-013 | reflects-partial-selection-as-unchecked | Section has 2 selectable windows, 1 selected | Select-all toggle shows unchecked. |
-| window-explorer-view-014 | disables-select-all-when-nothing-selectable | Section's only windows are all owned by a different context | Select-all toggle `isEnabled == false`. |
-| window-explorer-view-015 | renders-window-row | Window with title `""`, frame 800x600 | Row shows "(untitled)" and "800x600". |
-| window-explorer-view-016 | shows-context-badge-on-owned-window | `activeGroupID == B`; window owned by context `A` | Row shows a badge reading context `A`'s name in `A`'s color. |
-| window-explorer-view-016b | shows-context-badge-on-owned-window | `activeGroupID == A`; window owned by context `A` | No context badge is shown. |
-| window-explorer-view-017 | disables-unselectable-window-row | Window owned by a context other than `activeGroupID` | Row toggle `isEnabled == false`; title color is `theme.secondaryText`. |
-| window-explorer-view-018 | determines-selectability-by-ownership | Window owned by no context | `isSelectable(window) == true`. |
-| window-explorer-view-018b | determines-selectability-by-ownership | Window owned by context `C`; `activeGroupID == nil` | `isSelectable(window) == false`. |
-| window-explorer-view-019 | filters-scanned-windows | One window 40x40 on-screen from a regular app; one window 200x200 from a background-only app | Only neither is excluded solely by size for the second, but the 40x40 window is excluded (fails `> 50` on both axes) and the background-app window is excluded (fails `activationPolicy == .regular`). |
-| window-explorer-view-019b | filters-scanned-windows | Window's app name is in `appState.settings.hiddenApps` | Window is excluded from the scan result. |
-| window-explorer-view-019c | filters-scanned-windows | Window's id is in `excludeWindowIDs` | Window is excluded from the scan result. |
-| window-explorer-view-020 | queries-accessibility-per-process | Two windows share one pid; `AXUIElementCopyAttributeValue` fails for that pid | Both windows are skipped for AX enrichment; scan proceeds using their original titles. |
-| window-explorer-view-021 | replaces-title-from-matched-accessibility-window | CG window frame `(0,0,100,100)`, empty title; AX window frame `(1,1,101,101)`, title "Notes" | Window title becomes "Notes" (each axis differs by < 3pt). |
-| window-explorer-view-021b | replaces-title-from-matched-accessibility-window | CG window frame `(0,0,100,100)`; AX window frame `(4,0,100,100)`, title "Notes" | Window title is unchanged (x differs by exactly 4pt, not < 3pt). |
-| window-explorer-view-022 | prunes-stale-selection-in-discovery-mode | `activeGroupID == nil`; `selectedWindowIDs` contains an id absent from the new scan | That id is removed from `selectedWindowIDs` after the scan completes. |
-| window-explorer-view-023 | preserves-selection-in-assignment-mode | `activeGroupID != nil`; `selectedWindowIDs` contains an id absent from the new scan | That id remains in `selectedWindowIDs` after the scan completes. |
+| window-explorer-view-001 | header-bar | Render the view | Header shows magnifying-glass icon, "Windows", spacer, refresh button, in that order. |
+| window-explorer-view-002 | refresh-button-loading-state | `isLoading == true` | Refresh button `isEnabled == false`. |
+| window-explorer-view-003 | initial-refresh | View appears for the first time | `refreshAsync()` is invoked without user action. |
+| window-explorer-view-004 | activation-refresh-when-accessibility-missing | `needsAccessibility == true`; app posts `didBecomeActiveNotification` | A new scan starts. |
+| window-explorer-view-004b | activation-refresh-when-accessibility-missing | `needsAccessibility == false`; app posts `didBecomeActiveNotification` | No new scan starts. |
+| window-explorer-view-005 | external-notification-refresh | Constructed with `refreshNotification = .foo`; `.foo` is posted | A new scan starts. |
+| window-explorer-view-005b | external-notification-refresh | Constructed with `refreshNotification = nil`; any notification is posted | No scan starts from this path. |
+| window-explorer-view-006 | accessibility-banner-visibility | Scan completes with `needsAccessibility == true` | Banner "Accessibility permission needed for window titles." with "Open Settings" is visible. |
+| window-explorer-view-007 | accessibility-banner-action | Click "Open Settings" | `SystemAccessibilityPermission.request()` is called. |
+| window-explorer-view-008 | loading-state | `isLoading == true` | `ProgressView` and "Scanning windows..." are shown; list content is hidden. |
+| window-explorer-view-009 | empty-state | Scan completes with `appGroups.isEmpty == true` | "No windows found" and the Accessibility hint are shown. |
+| window-explorer-view-010 | app-grouping | Windows from apps "beta" and "Alpha" | Sections render in order "Alpha", "beta". |
+| window-explorer-view-011 | app-section-header | App "Xcode" with 3 windows, running with an icon | Header shows Xcode's running icon, "Xcode", and the count badge "3". |
+| window-explorer-view-011b | app-section-header | App with no matching `NSRunningApplication` icon | Header shows the fallback `app.fill` icon. |
+| window-explorer-view-012 | section-select-all-toggle | Section has 2 selectable windows, none selected; toggle select-all on | Both windows are added to `selectedWindowIDs`. |
+| window-explorer-view-012b | section-select-all-toggle | Section has 2 selectable windows, both selected; toggle select-all off | Both windows are removed from `selectedWindowIDs`. |
+| window-explorer-view-013 | select-all-toggle-partial-selection-state | Section has 2 selectable windows, 1 selected | Select-all toggle shows unchecked. |
+| window-explorer-view-014 | select-all-toggle-availability | Section's only windows are all owned by a different context | Select-all toggle `isEnabled == false`. |
+| window-explorer-view-015 | window-row | Window with title `""`, frame 800x600 | Row shows "(untitled)" and "800x600". |
+| window-explorer-view-016 | window-context-badge | `activeGroupID == B`; window owned by context `A` | Row shows a badge reading context `A`'s name in `A`'s color. |
+| window-explorer-view-016b | window-context-badge | `activeGroupID == A`; window owned by context `A` | No context badge is shown. |
+| window-explorer-view-017 | window-row-selectability-state | Window owned by a context other than `activeGroupID` | Row toggle `isEnabled == false`; title color is `theme.secondaryText`. |
+| window-explorer-view-018 | window-selectability | Window owned by no context | `isSelectable(window) == true`. |
+| window-explorer-view-018b | window-selectability | Window owned by context `C`; `activeGroupID == nil` | `isSelectable(window) == false`. |
+| window-explorer-view-019 | scan-window-filter | One window 40x40 on-screen from a regular app; one window 200x200 from a background-only app | Both windows are excluded: the 40x40 window by size, the background-app window by `activationPolicy`. |
+| window-explorer-view-019b | scan-window-filter | Window's app name is in `appState.settings.hiddenApps` | Window is excluded from the scan result. |
+| window-explorer-view-019c | scan-window-filter | Window's id is in `excludeWindowIDs` | Window is excluded from the scan result. |
+| window-explorer-view-019d | scan-window-filter | Window exactly 50 points wide (and taller than 50 points), on-screen, from a regular app | Window is excluded (`> 50` is a strict boundary; exactly 50 does not qualify). |
+| window-explorer-view-020 | per-process-accessibility-query | Two windows share one pid; `AXUIElementCopyAttributeValue` fails for that pid | Both windows are skipped for AX enrichment; scan proceeds using their original titles. |
+| window-explorer-view-021 | accessibility-title-match | CG window frame `(0,0,100,100)`, empty title; AX window frame `(1,1,101,101)`, title "Notes" | Window title becomes "Notes" (each axis differs by < 3pt). |
+| window-explorer-view-021b | accessibility-title-match | CG window frame `(0,0,100,100)`; AX window frame `(4,0,100,100)`, title "Notes" | Window title is unchanged (x differs by exactly 4pt, not < 3pt). |
+| window-explorer-view-021c | accessibility-title-match | CG window frame `(0,0,100,100)`; AX window frame `(3,0,100,100)`, title "Notes" | Window title is unchanged (x differs by exactly 3pt, which does not satisfy strict `< 3`). |
+| window-explorer-view-022 | discovery-mode-stale-selection-pruning | `activeGroupID == nil`; `selectedWindowIDs` contains an id absent from the new scan | That id is removed from `selectedWindowIDs` after the scan completes. |
+| window-explorer-view-023 | assignment-mode-selection-preservation | `activeGroupID != nil`; `selectedWindowIDs` contains an id absent from the new scan | That id remains in `selectedWindowIDs` after the scan completes. |
 
 ## Edge Cases
 
 - **Null/empty input**: `excludeWindowIDs` defaults to an empty set (no
   windows excluded by id). `selectedWindowIDs` may start empty (no rows
   checked). A window whose `title` is the empty string MUST render
-  "(untitled)" (`renders-window-row`). An `appGroups` result of `[]` MUST
-  show the empty state (`shows-empty-state`).
+  "(untitled)" (`window-row`). An `appGroups` result of `[]` MUST
+  show the empty state (`empty-state`).
 - **Boundary values**: a window exactly 50 points wide or exactly 50 points
   tall MUST be excluded, because the filter uses strict `> 50` on both axes
-  (`filters-scanned-windows`). An AX-to-CG frame difference of exactly 3
+  (`scan-window-filter`). An AX-to-CG frame difference of exactly 3
   points on any one of x, y, width, or height MUST NOT count as a match,
   because the tolerance check uses strict `< 3`
-  (`replaces-title-from-matched-accessibility-window`).
+  (`accessibility-title-match`).
 - **Concurrent access**: `refreshAsync()` has no guard against being invoked
   again while a previous scan is still running — it can be triggered
   independently by `.onAppear`, app activation, an external
@@ -294,8 +302,11 @@ binding.
   spawns its own `Task.detached` and unconditionally overwrites `appGroups`,
   `needsAccessibility`, and `isLoading` on the main actor when it finishes;
   the source neither cancels an in-flight scan nor coalesces overlapping
-  ones, so the last scan to complete determines the final state (MUST, as
-  implemented — no debounce or cancellation exists to change this).
+  ones, so the last scan to complete determines the final state. No
+  debounce or cancellation exists to change this — this is observed
+  behavior of the current implementation, not a documented requirement, and
+  overlapping scans racing to determine the final state is a likely source
+  of surprising results rather than an intended contract.
 - **Error states**: `AXUIElementCopyAttributeValue` failing for a given
   process is handled by silently `continue`-ing past that process (no error
   is surfaced to the caller or user). Whether the Accessibility banner
@@ -303,8 +314,10 @@ binding.
   process's AX query succeeded during the scan — so if some processes
   succeed and others fail, the banner is never shown even though the
   windows belonging to the failed processes keep their unenriched
-  CoreGraphics titles (MUST, as implemented; this is a per-scan flag, not a
-  per-app one).
+  CoreGraphics titles. This is a per-scan flag, not a per-app one, and is
+  the current implementation's behavior rather than a designed requirement:
+  a user with some processes failing AX queries sees no indication that any
+  titles are unenriched.
 - **Offline/disconnected state**: Not applicable — the view performs no
   network requests; window enumeration and Accessibility queries are local
   system calls only.
@@ -350,20 +363,21 @@ values or string interpolations, not localization keys, and correctly are
 not translated as UI strings since they echo system or user data.
 
 The `(untitled)` fallback is the exception among the literals:
-`Text(window.title.isEmpty ? "(untitled)" : window.title)` (line 213) resolves
-the ternary to a `String`, so `Text` takes its verbatim `String` initializer
-and the literal is never looked up as a localization key. NEEDS REVIEW: Not
-implemented in source. Behavior undefined. Whether `(untitled)` should be
+`Text(window.title.isEmpty ? "(untitled)" : window.title)` resolves the
+ternary to a `String`, so `Text` takes its verbatim `String` initializer and
+the literal is never looked up as a localization key — as built, this
+behavior is defined: the fallback always renders in English regardless of
+the user's locale. **NEEDS REVIEW: whether `(untitled)` should instead be
 localized (for example by branching to two `Text` views, or wrapping the
-literal in `String(localized:)`) is unresolved; as built it always renders in
-English.
+literal in `String(localized:)`) is unresolved; nothing in the source
+resolves this open decision.**
 
 ## Accessibility Options
 
 | Option | Behavior |
 |--------|----------|
 | Reduce Motion | Not applicable: no custom animated transition (movement, scaling, sliding, zooming, or pulsing) is implemented anywhere in this file; the only motion is `ProgressView`'s system-rendered indeterminate spinner, which this view does not implement or control. |
-| Increase Contrast | Not applicable at this layer: every color is sourced from the shared theme palette (`theme.<role>`); contrast handling is a design-system-level concern this view does not decide, per `agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages`. |
+| Increase Contrast | Not applicable at this layer for most colors: every color other than the context badge's `.blue` fallback is sourced from the shared theme palette (`theme.<role>`); contrast handling for those is a design-system-level concern this view does not decide, per `agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages`. The context badge's `Color(hex: ctx.color) ?? .blue` fallback (see **window-context-badge**) is the one exception: it is a fixed system color outside the theme, so Increase Contrast has no effect on it. |
 | Differentiate Without Color | Handled: the context badge pairs its color with the context's name as text, not color alone; the Accessibility banner pairs its warning tint with an exclamation-triangle icon and explanatory text; and every selection state is shown by the checkbox glyph itself, not by color. |
 
 ## Feature Flags
@@ -380,7 +394,7 @@ Not applicable: no analytics or event-logging call appears anywhere in
 
 - **Data collected**: the view reads, but does not persist, information
   about currently running windows — application names, window titles
-  (CoreGraphics and, where matched, Accessibility-enriched), pixel frames,
+  (CoreGraphics and, where matched, Accessibility-enriched), point frames,
   process ids, and on-screen/layer state — via `appState.listAllWindows()`
   and direct `AXUIElementCopyAttributeValue`/`NSWorkspace` queries. It also
   reads `appState.settings.hiddenApps` to filter the scan.
@@ -407,13 +421,15 @@ anywhere in `WindowExplorerView.swift`.
   `packages/apple/AgenticToolkit/macOS/SystemWindows/UI/WindowExplorerView.swift`.
   It reads `@EnvironmentObject private var appState: SystemWindowContextsModel`
   and a custom `@Environment(\.theme)` palette, builds its list with
-  `List`/`Section`/`ForEach` and `.toggleStyle(.checkbox)` (a macOS-only
-  `ToggleStyle`), and runs its scan on `Task.detached` with `MainActor.run`
-  hops for both reading app state and writing the result back — none of
-  which has a UIKit/iOS equivalent, since the file also imports `AppKit`
-  directly for `NSRunningApplication`/`NSWorkspace` icon and bundle-id
-  lookups and `ApplicationServices`-level `AXUIElement*` calls for title
-  enrichment.
+  `List`/`Section`/`ForEach` and `.toggleStyle(.checkbox)` — a macOS-only
+  `ToggleStyle` with no UIKit/iOS equivalent — and runs its scan on
+  `Task.detached` with `MainActor.run` hops for both reading app state and
+  writing the result back, a concurrency pattern that itself has direct
+  UIKit/iOS equivalents. The macOS-only surface is the `.checkbox` toggle
+  style, the `ApplicationServices`-level `AXUIElement*` calls used for title
+  enrichment, and the `AppKit`-only `NSRunningApplication`/`NSWorkspace`
+  icon and bundle-id lookups — iOS has no cross-app Accessibility tree or
+  running-application enumeration API to provide these.
 - **Compose (Android/Desktop)**: there is no cross-app window-enumeration
   API on Android (apps are sandboxed from one another), so this recipe has
   no Android analog; on Compose for Desktop, the closest shape is a
@@ -464,40 +480,57 @@ anywhere in `WindowExplorerView.swift`.
 
 ## Design Decisions
 
-Decision: Prune stale ids from `selectedWindowIDs` after a scan only when
+**Decision**: Prune stale ids from `selectedWindowIDs` after a scan only when
 `activeGroupID == nil`; never prune when it is non-nil.
-Rationale: in discovery mode the binding represents "windows currently
+**Rationale**: in discovery mode the binding represents "windows currently
 checked on screen," so an id for a window that vanished (closed, minimized,
 now off-screen) is meaningless and MUST be dropped; in direct-assignment
 mode the same binding instead represents persistent group membership, and a
 member window that is merely not visible in *this* scan (e.g., a different
 space, temporarily hidden) MUST NOT be silently unassigned from the group —
 per the source comment directly above the prune.
-Approved: pending
+**Approved**: pending
 
-Decision: Fall back to the hard-coded `Color.blue` for a context badge when
+**Decision**: Fall back to the hard-coded `Color.blue` for a context badge when
 `Color(hex: ctx.color)` returns `nil`, rather than a theme color.
-Rationale: `Color(hex:)` returns `nil` only when the stored string is not a
+**Rationale**: `Color(hex:)` returns `nil` only when the stored string is not a
 valid 6-digit hex value, which should not occur for a color a context
 stores through the app's own color picker; the fallback is a defensive
 default for malformed data rather than an expected runtime path, which is
 why it is a fixed system color rather than something drawn from the theme
 palette.
-Approved: pending
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [template-conformance](agenticdevelopercookbook://compliance/recipe-quality#template-conformance) | passed | recipe-quality |
-| [behavioral-requirements](agenticdevelopercookbook://compliance/recipe-quality#behavioral-requirements) | passed | recipe-quality |
-| [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | passed | recipe-quality |
-| [cookbook-compliance](agenticdevelopercookbook://compliance/recipe-quality#cookbook-compliance) | passed | recipe-quality |
-| [cross-recipe-consistency](agenticdevelopercookbook://compliance/recipe-quality#cross-recipe-consistency) | passed | recipe-quality |
-| [source-fidelity](agenticdevelopercookbook://compliance/recipe-quality#source-fidelity) | passed | recipe-quality |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [dynamic-type-support](agenticdevelopercookbook://compliance/accessibility#dynamic-type-support) | partial | Accessibility |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | partial | Internationalization |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | partial | Internationalization |
+| [data-minimization](agenticdevelopercookbook://compliance/privacy-and-data#data-minimization) | passed | Privacy & Data |
+
+`screen-reader-support` is partial because the refresh button has no explicit
+`.accessibilityLabel` (see the open question under Accessibility);
+`keyboard-navigable` passes because every interactive element is a standard,
+keyboard-focusable `Toggle`/`Button`. `contrast-ratio` and
+`no-hardcoded-strings`/`string-externalization` are partial for the same two
+source-documented exceptions: the context badge's `Color(hex: ctx.color) ??
+.blue` fallback sits outside the theme palette, and the `(untitled)` fallback
+is routed through `Text`'s verbatim `String` initializer instead of a
+localization key. `dynamic-type-support` is partial because the source
+resolves every font through `theme.font(_:)` and this file cannot tell
+whether that palette scales with the system text-size setting.
+`data-minimization` passes because the Privacy section shows the view reads
+only currently-running window data needed for display, filtered by
+`appState.settings.hiddenApps`, and persists nothing.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only kebab-case; reformatted Design Decisions to the bolded form; linked `badge` under `related`; reworded the AX-banner requirement, boundary/garbled test vectors, and edge cases to match source behavior instead of implying a MUST; rebuilt Compliance against the real catalog; fixed the accessibility, localization, and privacy prose contradictions. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from `WindowExplorerView.swift`. |

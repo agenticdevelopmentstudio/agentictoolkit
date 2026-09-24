@@ -1,9 +1,9 @@
 ---
 id: 2cd6ffc0-e9db-425b-99ba-eb826ffff118
-title: ThemedTerminalView
+title: Themed Terminal View (Hollow Caret)
 domain: agentictoolkit://recipes/themed-terminal-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -27,40 +27,41 @@ depends-on:
 - agentictoolkit://recipes/composable-tabs-active-pane
 related: []
 references:
-- https://developer.apple.com/design/human-interface-guidelines/
+- https://github.com/migueldeicaza/SwiftTerm/blob/8e7a1e154f470e19c709a00a8768df348ba5fc43/Sources/SwiftTerm/TerminalOptions.swift
+- https://github.com/migueldeicaza/SwiftTerm/blob/8e7a1e154f470e19c709a00a8768df348ba5fc43/Sources/SwiftTerm/Mac/MacCaretView.swift
 approved-by: ''
 approved-date: ''
 ---
 
-# ThemedTerminalView
+# Themed Terminal View (Hollow Caret)
 
 ## Overview
 
-`ThemedTerminalView` (`packages/apple/AgenticToolkit/macOS/Features/TerminalSession/ThemedTerminalView.swift`) is an internal, `@MainActor`-confined `NSView` subclass of SwiftTerm's `LocalProcessTerminalView` that decides, on every relevant AppKit and SwiftTerm callback, whether its block-shaped text caret is drawn filled or as a hollow outline. SwiftTerm's own `CursorStyle` has no hollow-block case and its caret view is internal to the package, so `ThemedTerminalView` fakes the outline by drawing a border on the caret subview's own layer rather than substituting a caret of its own — SwiftTerm keeps ownership of the caret's position, size, and blink animation. The class is declared `internal` rather than `public` because a public `NSView` subclass would name `LocalProcessTerminalView` in the framework's generated Objective-C header, and that header cannot resolve the Swift-only `SwiftTerm` module the name depends on. Two independent inputs decide the hollow-versus-filled state: a per-instance `CaretAppearance` value the caller sets directly, and — only when that appearance opts in via `marksActivePane` — whether this view sits inside the pane that `ComposableTabsActivePane` (`agentictoolkit://recipes/composable-tabs-active-pane`) currently treats as active for its window.
+`ThemedTerminalView` (`packages/apple/AgenticToolkit/macOS/Features/TerminalSession/ThemedTerminalView.swift`) is an internal, `@MainActor`-confined `NSView` subclass of SwiftTerm's `LocalProcessTerminalView` that decides, on every relevant AppKit and SwiftTerm callback, whether its block-shaped text caret is drawn filled or as a hollow outline. SwiftTerm's own `CursorStyle` enum (`SwiftTerm/TerminalOptions.swift`) has no hollow-block case among its six styles, and its caret view (`SwiftTerm/Mac/MacCaretView.swift`'s `CaretView` class) is internal to the package, so `ThemedTerminalView` fakes the outline by drawing a border on the caret subview's own layer rather than substituting a caret of its own — SwiftTerm keeps ownership of the caret's position, size, and blink animation. The class is declared `internal` rather than `public` because a public `NSView` subclass would name `LocalProcessTerminalView` in the framework's generated Objective-C header, and that header cannot resolve the Swift-only `SwiftTerm` module the name depends on. Two independent inputs decide the hollow-versus-filled state: a per-instance `CaretAppearance` value the caller sets directly, and — only when that appearance opts in via `marksActivePane` — whether this view sits inside the pane that `ComposableTabsActivePane` (`agentictoolkit://recipes/composable-tabs-active-pane`) currently treats as active for its window.
 
 ## Behavioral Requirements
 
-- **confines-to-main-actor**: The component MUST be usable only on the main actor; the class is declared `@MainActor`.
-- **rejects-coder-initializer**: The component MUST fatal-error if constructed through `init?(coder:)`.
-- **exposes-caret-appearance**: The component MUST expose a public `caretAppearance` property of type `CaretAppearance` (with fields `color: NSColor`, `textColor: NSColor`, `isAlwaysHollow: Bool`, `marksActivePane: Bool`), defaulting to `CaretAppearance()` when the caller sets no value.
-- **recomputes-caret-on-appearance-change**: WHEN `caretAppearance` is set to a new value, the component MUST re-evaluate whether the caret is hollow and re-apply the caret's color, text color, and border accordingly.
-- **recomputes-caret-on-window-attach**: WHEN `viewDidMoveToWindow` runs, the component MUST re-evaluate whether the caret is hollow and re-apply the caret's color, text color, and border accordingly.
-- **observes-active-pane-changes**: The component MUST subscribe, at initialization, to `ComposableTabsActivePane.didChangeNotification` for the lifetime of the instance.
-- **filters-active-pane-notifications-by-window**: WHEN a `ComposableTabsActivePane.didChangeNotification` is received, the component MUST re-evaluate and re-apply the caret's appearance only if the notification's `object` is an `NSWindow` identical to the view's own `window`; otherwise it MUST take no action.
-- **reapplies-outline-on-cursor-shown**: WHEN SwiftTerm invokes `showCursor(source:)`, the component MUST re-apply the caret's border using its already-computed hollow/filled state, without recomputing that state.
-- **reapplies-outline-on-cursor-style-change**: WHEN SwiftTerm invokes `cursorStyleChanged(source:newStyle:)`, the component MUST re-apply the caret's border using its already-computed hollow/filled state, without recomputing that state.
-- **computes-hollow-from-always-hollow-flag**: The component MUST treat the caret as hollow whenever `caretAppearance.isAlwaysHollow` is `true`, regardless of `marksActivePane` or the active-pane state.
-- **computes-hollow-from-active-pane-when-marking**: WHEN `caretAppearance.isAlwaysHollow` is `false` AND `caretAppearance.marksActivePane` is `true`, the component MUST treat the caret as hollow if and only if `ComposableTabsActivePane.shared.isInActivePane(self)` returns `false`.
-- **fills-caret-by-default**: WHEN `caretAppearance.isAlwaysHollow` is `false` AND `caretAppearance.marksActivePane` is `false`, the component MUST treat the caret as filled, independent of the active-pane state.
-- **applies-clear-caret-color-when-hollow**: WHEN the caret is hollow, the component MUST set the inherited `caretColor` property to `.clear`.
-- **applies-appearance-color-when-filled**: WHEN the caret is filled, the component MUST set the inherited `caretColor` property to `caretAppearance.color`.
-- **applies-text-color-when-hollow**: WHEN the caret is hollow, the component MUST set the inherited `caretTextColor` property to `caretAppearance.textColor`.
-- **clears-text-color-override-when-filled**: WHEN the caret is filled, the component MUST set the inherited `caretTextColor` property to `nil`.
-- **draws-hollow-border**: WHEN the caret is hollow AND SwiftTerm's caret subview can be located, the component MUST set that subview layer's border width to `1` point and its border color to `caretAppearance.color`.
-- **removes-border-when-filled**: WHEN the caret is filled AND SwiftTerm's caret subview can be located, the component MUST set that subview layer's border width to `0` and its border color to `nil`.
-- **tolerates-missing-caret-subview**: WHEN SwiftTerm's caret subview cannot be located, the component MUST take no action on the border and MUST NOT raise an error or crash.
-- **identifies-caret-subview-by-type-name-suffix**: The component MUST locate SwiftTerm's caret subview by finding the first direct subview whose runtime type name (via `String(describing: type(of:))`) ends with the suffix `"CaretView"`.
-- **caches-caret-subview-reference**: The component MUST cache the located caret subview through a weak reference, and MUST re-search its subviews for a replacement whenever the cached reference's `superview` is no longer the component itself.
+- **main-actor-isolation**: The component MUST be usable only on the main actor; the class is declared `@MainActor`.
+- **coder-initializer**: The component MUST fatal-error if constructed through `init?(coder:)`.
+- **caret-appearance-property**: The component MUST expose a public `caretAppearance` property of type `CaretAppearance` (with fields `color: NSColor`, `textColor: NSColor`, `isAlwaysHollow: Bool`, `marksActivePane: Bool`), defaulting to `CaretAppearance()` when the caller sets no value.
+- **appearance-change-recompute**: WHEN `caretAppearance` is set to a new value, the component MUST re-evaluate whether the caret is hollow and re-apply the caret's color, text color, and border accordingly.
+- **window-attach-recompute**: WHEN `viewDidMoveToWindow` runs, the component MUST re-evaluate whether the caret is hollow and re-apply the caret's color, text color, and border accordingly.
+- **active-pane-subscription**: The component MUST subscribe, at initialization, to `ComposableTabsActivePane.didChangeNotification` for the lifetime of the instance.
+- **active-pane-notification-window-filter**: WHEN a `ComposableTabsActivePane.didChangeNotification` is received, the component MUST re-evaluate and re-apply the caret's appearance only if the notification's `object` is an `NSWindow` identical to the view's own `window`; otherwise it MUST take no action.
+- **cursor-shown-outline-reapply**: WHEN SwiftTerm invokes `showCursor(source:)`, the component MUST re-apply the caret's border using its already-computed hollow/filled state, without recomputing that state.
+- **cursor-style-change-outline-reapply**: WHEN SwiftTerm invokes `cursorStyleChanged(source:newStyle:)`, the component MUST re-apply the caret's border using its already-computed hollow/filled state, without recomputing that state.
+- **always-hollow-flag**: The component MUST treat the caret as hollow whenever `caretAppearance.isAlwaysHollow` is `true`, regardless of `marksActivePane` or the active-pane state.
+- **active-pane-marking**: WHEN `caretAppearance.isAlwaysHollow` is `false` AND `caretAppearance.marksActivePane` is `true`, the component MUST treat the caret as hollow if and only if `ComposableTabsActivePane.shared.isInActivePane(self)` returns `false`.
+- **default-fill**: WHEN `caretAppearance.isAlwaysHollow` is `false` AND `caretAppearance.marksActivePane` is `false`, the component MUST treat the caret as filled, independent of the active-pane state.
+- **hollow-caret-color**: WHEN the caret is hollow, the component MUST set the inherited `caretColor` property to `.clear`.
+- **filled-caret-color**: WHEN the caret is filled, the component MUST set the inherited `caretColor` property to `caretAppearance.color`.
+- **hollow-text-color**: WHEN the caret is hollow, the component MUST set the inherited `caretTextColor` property to `caretAppearance.textColor`.
+- **filled-text-color**: WHEN the caret is filled, the component MUST set the inherited `caretTextColor` property to `nil`.
+- **hollow-border**: WHEN the caret is hollow AND SwiftTerm's caret subview can be located, the component MUST set that subview layer's border width to `1` point and its border color to `caretAppearance.color`.
+- **filled-border**: WHEN the caret is filled AND SwiftTerm's caret subview can be located, the component MUST set that subview layer's border width to `0` and its border color to `nil`.
+- **missing-caret-subview-tolerance**: WHEN SwiftTerm's caret subview cannot be located, the component MUST take no action on the border and MUST NOT raise an error or crash.
+- **caret-subview-type-name-match**: The component MUST locate SwiftTerm's caret subview by finding the first direct subview whose runtime type name (via `String(describing: type(of:))`) ends with the suffix `"CaretView"`.
+- **caret-subview-cache**: The component SHOULD cache the located caret subview through a weak reference, and SHOULD re-search its subviews for a replacement whenever the cached reference's `superview` is no longer the component itself.
 
 ## Appearance
 
@@ -93,47 +94,48 @@ approved-date: ''
 - **Announce state changes**: Not applicable: `ThemedTerminalView` defines no disabled or loading state of its own to announce (see States).
 - **Keyboard navigation**: Not set by `ThemedTerminalView` — no key-handling override appears in source; keyboard input and focus traversal are entirely `LocalProcessTerminalView`'s own, inherited unmodified.
 - **Minimum tap target**: Not applicable — `ThemedTerminalView` defines no tap/click target of its own; it inherits `LocalProcessTerminalView`'s full-bounds hit area unmodified and sets no separate frame or size constraint.
-- **Contrast ratio**: NEEDS REVIEW: `caretAppearance.color` and `caretAppearance.textColor` are caller-supplied `NSColor` values applied verbatim (see **applies-appearance-color-when-filled**, **applies-text-color-when-hollow**); the source performs no contrast computation or validation of its own. Whether a given theme's caret color meets a minimum contrast ratio against the terminal background cannot be determined from this file — it requires inspecting the theme/palette values actually passed in at the call site, which is outside the given source.
+- **Contrast ratio**: NEEDS REVIEW: `caretAppearance.color` and `caretAppearance.textColor` are caller-supplied `NSColor` values applied verbatim (see #requirements/filled-caret-color, #requirements/hollow-text-color); the source performs no contrast computation or validation of its own. Whether a given theme's caret color meets a minimum contrast ratio against the terminal background cannot be determined from this file — it requires inspecting the theme/palette values actually passed in at the call site, which is outside the given source.
 
 ## Conformance Test Vectors
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| themed-terminal-view-001 | confines-to-main-actor | Attempt to construct or mutate `ThemedTerminalView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
-| themed-terminal-view-002 | rejects-coder-initializer | Construct via `ThemedTerminalView(coder:)` with any `NSCoder` | Execution traps via `fatalError` |
-| themed-terminal-view-003 | exposes-caret-appearance | Construct `ThemedTerminalView` and read `caretAppearance` before setting it | `caretAppearance.color == .white`, `caretAppearance.textColor == .white`, `caretAppearance.isAlwaysHollow == false`, `caretAppearance.marksActivePane == false` |
-| themed-terminal-view-004 | recomputes-caret-on-appearance-change | View with default `caretAppearance`; set `caretAppearance.isAlwaysHollow = true` | `caretColor` becomes `.clear` and the caret subview's layer border width becomes `1` without any other call |
-| themed-terminal-view-005 | recomputes-caret-on-window-attach | View constructed with `caretAppearance.isAlwaysHollow == true`, not yet in a window; add it to a window | After `viewDidMoveToWindow` runs, `caretColor == .clear` and the caret subview's border width is `1` |
-| themed-terminal-view-006 | observes-active-pane-changes | Construct a `ThemedTerminalView` | A `Cancellable` for `ComposableTabsActivePane.didChangeNotification` is present in the instance's `cancellables` set |
-| themed-terminal-view-007 | filters-active-pane-notifications-by-window | View is in window A; post `ComposableTabsActivePane.didChangeNotification` with `object` set to window B | The view's caret color/border are unchanged |
-| themed-terminal-view-008 | filters-active-pane-notifications-by-window | View is in window A; post `ComposableTabsActivePane.didChangeNotification` with `object` set to window A | `updateCaret()` runs and the caret's color/border reflect the current `caretAppearance`/active-pane state |
-| themed-terminal-view-009 | reapplies-outline-on-cursor-shown | `isHollow` already computed as `true`; invoke `showCursor(source:)` | The caret subview's border width is (re)set to `1` in `caretAppearance.color` without `caretColor`/`caretTextColor` being recomputed from `caretAppearance` |
-| themed-terminal-view-010 | reapplies-outline-on-cursor-style-change | `isHollow` already computed as `false`; invoke `cursorStyleChanged(source:newStyle:)` with any `CursorStyle` | The caret subview's border width is (re)set to `0` regardless of `newStyle`'s value |
-| themed-terminal-view-011 | computes-hollow-from-always-hollow-flag | `caretAppearance.isAlwaysHollow = true`, `caretAppearance.marksActivePane = true`, view is in the active pane | Caret is hollow |
-| themed-terminal-view-012 | computes-hollow-from-active-pane-when-marking | `caretAppearance.isAlwaysHollow = false`, `caretAppearance.marksActivePane = true`, `ComposableTabsActivePane.shared.isInActivePane(view) == false` | Caret is hollow |
-| themed-terminal-view-013 | computes-hollow-from-active-pane-when-marking | `caretAppearance.isAlwaysHollow = false`, `caretAppearance.marksActivePane = true`, `ComposableTabsActivePane.shared.isInActivePane(view) == true` | Caret is filled |
-| themed-terminal-view-014 | fills-caret-by-default | `caretAppearance.isAlwaysHollow = false`, `caretAppearance.marksActivePane = false`, view not inside any composable-tabs pane | Caret is filled |
-| themed-terminal-view-015 | applies-clear-caret-color-when-hollow | Caret computed as hollow | `caretColor == .clear` |
-| themed-terminal-view-016 | applies-appearance-color-when-filled | Caret computed as filled, `caretAppearance.color == .systemBlue` | `caretColor == .systemBlue` |
-| themed-terminal-view-017 | applies-text-color-when-hollow | Caret computed as hollow, `caretAppearance.textColor == .black` | `caretTextColor == .black` |
-| themed-terminal-view-018 | clears-text-color-override-when-filled | Caret computed as filled | `caretTextColor == nil` |
-| themed-terminal-view-019 | draws-hollow-border | Caret computed as hollow, caret subview present, `caretAppearance.color == .systemBlue` | Caret subview layer `borderWidth == 1`, `borderColor == NSColor.systemBlue.cgColor` |
-| themed-terminal-view-020 | removes-border-when-filled | Caret computed as filled, caret subview present | Caret subview layer `borderWidth == 0`, `borderColor == nil` |
-| themed-terminal-view-021 | tolerates-missing-caret-subview | No subview whose type name ends in `"CaretView"` exists (e.g. `applyOutline()` called before SwiftTerm adds its caret) | No exception is thrown; no layer property is modified |
-| themed-terminal-view-022 | identifies-caret-subview-by-type-name-suffix | Add a subview whose dynamic type name is `"XTermCaretView"` | `caretView` resolves to that subview |
-| themed-terminal-view-023 | caches-caret-subview-reference | `caretView` resolved once; the resolved subview is removed and replaced by a new subview of a matching type name | A subsequent `caretView` access re-searches and returns the new subview rather than the stale (now-detached) one |
+| themed-terminal-view-002 | coder-initializer | Construct via `ThemedTerminalView(coder:)` with any `NSCoder` | Execution traps via `fatalError` |
+| themed-terminal-view-003 | caret-appearance-property | Construct `ThemedTerminalView` and read `caretAppearance` before setting it | `caretAppearance.color == .white`, `caretAppearance.textColor == .white`, `caretAppearance.isAlwaysHollow == false`, `caretAppearance.marksActivePane == false` |
+| themed-terminal-view-004 | appearance-change-recompute | View with default `caretAppearance`; set `caretAppearance.isAlwaysHollow = true` | `caretColor` becomes `.clear` and the caret subview's layer border width becomes `1` without any other call |
+| themed-terminal-view-005 | window-attach-recompute | View constructed with `caretAppearance.isAlwaysHollow == true`, not yet in a window; add it to a window | After `viewDidMoveToWindow` runs, `caretColor == .clear` and the caret subview's border width is `1` |
+| themed-terminal-view-006 | active-pane-subscription | Construct a `ThemedTerminalView`, add it to a window, then immediately post `ComposableTabsActivePane.didChangeNotification` with `object` set to that window, with no other intervening call | The caret's color/border are recomputed in response, showing the subscription was already active right after construction |
+| themed-terminal-view-007 | active-pane-notification-window-filter | View is in window A; post `ComposableTabsActivePane.didChangeNotification` with `object` set to window B | The view's caret color/border are unchanged |
+| themed-terminal-view-008 | active-pane-notification-window-filter | View is in window A; post `ComposableTabsActivePane.didChangeNotification` with `object` set to window A | `updateCaret()` runs and the caret's color/border reflect the current `caretAppearance`/active-pane state |
+| themed-terminal-view-009 | cursor-shown-outline-reapply | `caretAppearance.marksActivePane = true`, `isAlwaysHollow = false`, view currently the active pane (filled: border width `0`); without changing `caretAppearance`, another pane in the same window becomes active (so `isInActivePane(view)` would now return `false`), but no `didChangeNotification` reaches this view's window; then invoke `showCursor(source:)` | The caret subview's border width stays `0` and `caretColor` stays `caretAppearance.color` — the stale computed state from before the pane change, not a freshly recomputed one |
+| themed-terminal-view-010 | cursor-style-change-outline-reapply | `caretAppearance.marksActivePane = true`, `isAlwaysHollow = false`, view currently NOT the active pane (hollow: border width `1`); without changing `caretAppearance`, this view's pane becomes active (so `isInActivePane(view)` would now return `true`), but no `didChangeNotification` reaches this view; then invoke `cursorStyleChanged(source:newStyle:)` with any `CursorStyle` | The caret subview's border width stays `1` in `caretAppearance.color` regardless of `newStyle` — the stale hollow state persists |
+| themed-terminal-view-011 | always-hollow-flag | `caretAppearance.isAlwaysHollow = true`, `caretAppearance.marksActivePane = true`, view is in the active pane | Caret is hollow |
+| themed-terminal-view-012 | active-pane-marking | `caretAppearance.isAlwaysHollow = false`, `caretAppearance.marksActivePane = true`, `ComposableTabsActivePane.shared.isInActivePane(view) == false` | Caret is hollow |
+| themed-terminal-view-013 | active-pane-marking | `caretAppearance.isAlwaysHollow = false`, `caretAppearance.marksActivePane = true`, `ComposableTabsActivePane.shared.isInActivePane(view) == true` | Caret is filled |
+| themed-terminal-view-014 | default-fill | `caretAppearance.isAlwaysHollow = false`, `caretAppearance.marksActivePane = false`, view not inside any composable-tabs pane | Caret is filled |
+| themed-terminal-view-015 | hollow-caret-color | Caret computed as hollow | `caretColor == .clear` |
+| themed-terminal-view-016 | filled-caret-color | Caret computed as filled, `caretAppearance.color == .systemBlue` | `caretColor == .systemBlue` |
+| themed-terminal-view-017 | hollow-text-color | Caret computed as hollow, `caretAppearance.textColor == .black` | `caretTextColor == .black` |
+| themed-terminal-view-018 | filled-text-color | Caret computed as filled | `caretTextColor == nil` |
+| themed-terminal-view-019 | hollow-border | Caret computed as hollow, caret subview present, `caretAppearance.color == .systemBlue` | Caret subview layer `borderWidth == 1`, `borderColor == NSColor.systemBlue.cgColor` |
+| themed-terminal-view-020 | filled-border | Caret computed as filled, caret subview present | Caret subview layer `borderWidth == 0`, `borderColor == nil` |
+| themed-terminal-view-021 | missing-caret-subview-tolerance | No subview whose type name ends in `"CaretView"` exists (e.g. `applyOutline()` called before SwiftTerm adds its caret) | No exception is thrown; no layer property is modified |
+| themed-terminal-view-022 | caret-subview-type-name-match | Add a subview whose dynamic type name is `"XTermCaretView"` | `caretView` resolves to that subview |
+| themed-terminal-view-023 | caret-subview-cache | `caretView` resolved once; the resolved subview is removed and replaced by a new subview of a matching type name | A subsequent `caretView` access re-searches and returns the new subview rather than the stale (now-detached) one |
+
+`main-actor-isolation` has no row here: it is a compile-time guarantee, verified by the Swift compiler's `@MainActor` isolation checking, not by a runtime conformance vector (see Design Decisions).
 
 ## Edge Cases
 
-- **Null/empty input**: `caretAppearance` defaults to `CaretAppearance()` when the caller never sets it, resolving to a filled caret in `.white`/`.white` (see **fills-caret-by-default**). This is the well-defined default, not an error condition. MUST.
+- **Null/empty input**: `caretAppearance` defaults to `CaretAppearance()` when the caller never sets it, resolving to a filled caret in `.white`/`.white` (see #requirements/default-fill). This is the well-defined default, not an error condition.
 - **Boundary values**: Not applicable — the only caller-supplied inputs are two `NSColor` values and two `Bool` flags, none of which have a numeric range; the one numeric constant in the file, `outlineWidth: CGFloat = 1`, is fixed and not caller-configurable.
-- **Concurrent access**: Not applicable — the class is `@MainActor`, so every mutation path (the `caretAppearance` `didSet`, the notification `sink`, and the `showCursor`/`cursorStyleChanged` overrides) is confined to the main actor by the compiler (see **confines-to-main-actor**).
+- **Concurrent access**: Not applicable — the class is `@MainActor`, so every mutation path (the `caretAppearance` `didSet`, the notification `sink`, and the `showCursor`/`cursorStyleChanged` overrides) is confined to the main actor by the compiler (see #requirements/main-actor-isolation).
 - **Error states**: WHEN the `ComposableTabsActivePane.didChangeNotification`'s `object` is not an `NSWindow` (including `nil`), the component MUST silently ignore the notification and take no action, per the `guard ... as? NSWindow` in the subscription closure. There is no other error-producing dependency (no network, database, or file-system access) in this file, so Cookbook Compliance's networking/error-handling requirements are Not applicable here.
 - **Offline/disconnected state**: Not applicable — the component performs no networking; its only external interaction is a local `NotificationCenter` publisher and AppKit view-hierarchy calls.
-- **Caret subview not yet present**: `applyOutline()`'s `guard let caret = caretView else { return }` MUST make border application a silent no-op rather than crash (see **tolerates-missing-caret-subview**). MUST.
-- **Caret subview rebuilt by SwiftTerm**: WHEN the cached weak `cachedCaret` reference's `superview` is no longer `self`, the component MUST re-search rather than reuse the stale reference (see **caches-caret-subview-reference**). MUST.
-- **View not yet embedded in any composable-tabs pane while `marksActivePane == true`**: `ComposableTabsActivePane.isInActivePane` treats a view with no `ComposableTabsPaneBackgroundView` ancestor as always "in the active pane," so `marksActivePane` alone cannot force the caret hollow outside composable-tabs context — only `isAlwaysHollow` can (traced to `ComposableTabsActivePane.isInActivePane`'s superview-walk returning `true` when no ancestor pane is found). MUST.
-- **Multiple `ThemedTerminalView` instances across different windows**: each instance MUST ignore a `didChangeNotification` whose `object` window does not match its own `window`, so a pane-activation change in one window never repaints a caret in another (see **filters-active-pane-notifications-by-window**). MUST.
+- **Caret subview not yet present**: `applyOutline()`'s `guard let caret = caretView else { return }` makes border application a silent no-op rather than a crash (see #requirements/missing-caret-subview-tolerance).
+- **Caret subview rebuilt by SwiftTerm**: WHEN the cached weak `cachedCaret` reference's `superview` is no longer `self`, the component re-searches rather than reuses the stale reference (see #requirements/caret-subview-cache).
+- **View not yet embedded in any composable-tabs pane while `marksActivePane == true`**: the caret stays filled regardless of `marksActivePane` — only `isAlwaysHollow` can force it hollow outside composable-tabs context — because `agentictoolkit://recipes/composable-tabs-active-pane#requirements/view-outside-any-pane-counts-as-active` treats such a view as always "in the active pane."
+- **Multiple `ThemedTerminalView` instances across different windows**: each instance ignores a `didChangeNotification` whose `object` window does not match its own `window`, so a pane-activation change in one window never repaints a caret in another (see #requirements/active-pane-notification-window-filter).
 
 ## Configuration
 
@@ -186,45 +188,47 @@ Not applicable: the source contains no logging calls.
 - **Compose**: Wrap an Android terminal-emulation view (there is no Jetpack Compose-native equivalent) in an `AndroidView`, and reproduce the caret decision as a small `Drawable`/custom `View` overlay whose stroke is toggled on/off the same way this file toggles `layer.borderWidth`; drive it from a `mutableStateOf<CaretAppearance>` the same way `caretAppearance`'s `didSet` drives `updateCaret()`.
 - **React/Web**: xterm.js exposes `cursorStyle: 'block' | 'underline' | 'bar'` and theme colors (`cursor`, `cursorAccent`) but no built-in hollow-block style either; reproduce the outline by setting the cursor cell's CSS to a transparent background with a `1px solid` outline/border color, toggled by the same `isAlwaysHollow`/`marksActivePane`-equivalent booleans, and drive `cursorAccent` the way this file drives `caretTextColor`.
 - **AppKit / UIKit (source)**: `ThemedTerminalView.swift` is macOS-only (`import AppKit`); there is no UIKit counterpart in this file. It subclasses SwiftTerm's `LocalProcessTerminalView`, is declared `internal` specifically to avoid an Objective-C header conflict with the Swift-only `SwiftTerm` module, locates SwiftTerm's private caret subview by matching its runtime type name's `"CaretView"` suffix (with a weak, superview-validated cache), and separates "recompute the hollow/filled decision" (`updateCaret()`, run on appearance/window/notification changes) from "just repaint the border" (`applyOutline()`, run on every SwiftTerm cursor callback) to avoid rewriting SwiftTerm's caret color properties on every cursor movement.
-- **WinUI 3**: If hosting a real terminal buffer, `Microsoft.Terminal.Control.TermControl` (from the Windows Terminal control package) exposes cursor styling via its settings but, like SwiftTerm, has no built-in hollow-outline cursor style — reproduce the same border-overlay technique used here: track the active cell's caret with a `Border` element layered over the terminal surface, and toggle between a filled state (`Border.Background` set to the caret color, `BorderThickness="0"`) and a hollow state (`Border.Background` set to `Transparent`, `BorderThickness="1"`, `BorderBrush` set to the caret color) through a `VisualStateManager` `VisualState`, mirroring this file's `borderWidth`/`borderColor` toggle exactly. Use the app's `Window.Activated`/`Deactivated` events as the WinUI analog of `NSWindow.didBecomeKey`/`didResignKey` for tracking which pane is active per window, and a shared static event (or `WeakEventManager`) as the analog of `NotificationCenter.default.publisher(for: ComposableTabsActivePane.didChangeNotification)` for broadcasting an active-pane change to every terminal control that needs to repaint its caret.
+- **WinUI 3**: If hosting a real terminal buffer, `Microsoft.Terminal.Control.TermControl` (from the Windows Terminal control package) is understood to expose some cursor-styling options through its settings, but this recipe has no cited source confirming whether it offers anything like a hollow-outline style, so treat that specific claim as unverified. Independent of what `TermControl` offers natively, the same border-overlay technique used here can be reproduced generically: track the active cell's caret with a `Border` element layered over the terminal surface, and toggle between a filled state (`Border.Background` set to the caret color, `BorderThickness="0"`) and a hollow state (`Border.Background` set to `Transparent`, `BorderThickness="1"`, `BorderBrush` set to the caret color) through a `VisualStateManager` `VisualState`, mirroring this file's `borderWidth`/`borderColor` toggle. Use a shared static event (or `WeakEventManager`) as the WinUI analog of `NotificationCenter.default.publisher(for: ComposableTabsActivePane.didChangeNotification)` for broadcasting an active-pane change to every terminal control that needs to repaint its caret — this class has no key-window handling of its own to draw an analogy from.
 
 ## Design Decisions
 
 **Decision**: The class is declared `internal` rather than `public` or `open`.
 **Rationale**: Per source: "a *public* NSView subclass would name `LocalProcessTerminalView` in the framework's generated Objective-C header, which then cannot find the Swift-only `SwiftTerm` module."
-**Approved: pending**
+**Approved**: pending
 
 **Decision**: `showCursor(source:)` and `cursorStyleChanged(source:newStyle:)` call only `applyOutline()`, reusing the last-computed `isHollow`, rather than calling `updateCaret()` (which would recompute `isHollow` and rewrite `caretColor`/`caretTextColor`).
 **Rationale**: Per source: "Deliberately *not* on the `showCursor` path, which runs on every cursor movement: the two colours below are properties SwiftTerm holds on to, so they want writing when the answer changes rather than once a frame."
-**Approved: pending**
+**Approved**: pending
 
 **Decision**: SwiftTerm's caret subview is located by matching a runtime type-name suffix (`"CaretView"`) rather than a typed accessor, and the match is weakly cached.
 **Rationale**: Per source: "SwiftTerm adds its caret as a direct subview but exposes no accessor for it, so it is recognized by class name... Cached, because the search is not free and the caller is not rare... a per-keystroke cost for an answer that changes when SwiftTerm rebuilds its subviews and at no other time."
-**Approved: pending**
+**Approved**: pending
 
-**Decision**: A view with no `ComposableTabsPaneBackgroundView` ancestor — or a window with no active pane recorded yet — is treated by `ComposableTabsActivePane.isInActivePane` as "in the active pane," so `marksActivePane` never hollows such a caret.
-**Rationale**: Per `ComposableTabsActivePane.swift`: "A view in no pane at all — the standalone terminal window, the quick note panel — counts as active: 'not the active pane' has to mean *another* pane holds the user, not that there are no panes to hold them."
-**Approved: pending**
+**Decision**: `main-actor-isolation` has no runtime conformance vector; it is verified by the Swift compiler's `@MainActor` isolation checking at compile time.
+**Rationale**: A MUST requirement enforced entirely by the type system needs no runtime test to demonstrate — violating it is a compile error, not an outcome a test vector could observe.
+**Approved**: pending
 
-**Decision**: `CaretAppearance.color` and `CaretAppearance.textColor` default to the literal `NSColor.white` rather than a semantic theme token.
-**Rationale**: No rationale is given in source comments for this specific choice; it is recorded here as a technical-debt observation because it affects the `no-raw-hex` compliance check below — see Compliance.
-**Approved: pending**
+**Decision**: `ThemedTerminalView` relies on `ComposableTabsActivePane.isInActivePane` treating a view with no `ComposableTabsPaneBackgroundView` ancestor as "in the active pane" (see `agentictoolkit://recipes/composable-tabs-active-pane#requirements/view-outside-any-pane-counts-as-active`), so `marksActivePane` never hollows such a caret.
+**Rationale**: The consequence for this file: a `ThemedTerminalView` used outside any composable-tabs pane with `marksActivePane == true` stays filled rather than hollow, because it is never "not in" an active pane by that dependency's own rule. The rule itself, and why it treats an unclaimed view as active, belongs to `composable-tabs-active-pane` and is not restated here.
+**Approved**: pending
+
+**Decision**: `CaretAppearance.color` and `CaretAppearance.textColor` default to the literal `NSColor.white` rather than a semantic theme-color token.
+**Rationale**: No rationale is given in source for this specific choice, and no call site in this codebase overrides it with a semantic token — nothing marks it deliberate, and nothing records a plan to pay it down. It should become whichever semantic accent/foreground color token the app's theme system exposes for this purpose once one exists; see the `platform-theming` compliance status below.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | Architecture |
-| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | failed | UI Tokens |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | Accessibility |
+| [platform-theming](agenticdevelopercookbook://compliance/platform-compliance#platform-theming) | failed | Platform Compliance |
 | [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | partial | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
 
-`main-actor-confined` passes because the class is declared `@MainActor` (see **confines-to-main-actor**). `no-raw-hex` fails because `CaretAppearance.color` and `CaretAppearance.textColor` default to the literal `NSColor.white` rather than a semantic palette token (see the corresponding Design Decision). `differentiate-without-color` passes because the active-pane state `marksActivePane` conveys is carried by the caret's shape (filled versus hollow), not by color alone. `contrast-ratio` is `partial`: the caret's colors are applied verbatim from caller input with no contrast computation in this file, so conformance depends entirely on what the caller supplies — see the **Contrast ratio** entry under Accessibility. `keyboard-navigable` and `screen-reader-support` pass because `ThemedTerminalView` adds no keyboard handling, role, or label of its own, leaving `LocalProcessTerminalView`'s own behavior unmodified.
+`platform-theming` fails because `CaretAppearance.color` and `CaretAppearance.textColor` default to the literal `NSColor.white` rather than a semantic, theme-aware color token, so the caret's own defaults do not adapt to the app's theme (see the corresponding Design Decision). `contrast-ratio` is `partial`: the caret's colors are applied verbatim from caller input with no contrast computation in this file, so conformance depends entirely on what the caller supplies — see the **Contrast ratio** entry under Accessibility. `keyboard-navigable` and `screen-reader-support` are `partial`: `ThemedTerminalView` adds no keyboard handling, role, or label of its own and overrides none of `LocalProcessTerminalView`'s, but this file gives no evidence of what `LocalProcessTerminalView` itself provides for either, so full conformance cannot be confirmed from this source alone.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only names and fragment-form cross-references, replaced the unfounded HIG reference with cited SwiftTerm sources, softened the unsourced WinUI 3 TermControl claim and dropped its false key-window analogy, folded the composable-tabs edge case and design decision into a single dependency citation, rewrote the Compliance table to real catalog checks (`platform-theming` in place of `no-raw-hex`, dropped `main-actor-confined`/`differentiate-without-color`, `keyboard-navigable`/`screen-reader-support` marked `partial`), reworded the `NSColor.white` design decision as an unexamined default rather than unexplained "technical debt", demoted `caret-subview-cache` to SHOULD, rewrote the private-state test vectors in observable terms, moved the compile-time vector out of the conformance table, and removed trailing "MUST." noise from edge cases |

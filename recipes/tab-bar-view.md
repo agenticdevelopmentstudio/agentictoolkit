@@ -3,7 +3,7 @@ id: 5c0cc9f5-bc89-4e06-8d24-3db6424ff075
 title: TabBarView
 domain: agentictoolkit://recipes/tab-bar-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -11,7 +11,7 @@ modified: '2026-09-23'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
-summary: "AppKit NSView rendering an edge-docked NSStackView of pill tab buttons for MultiTabbedViewController, with selection restyling and vertical-edge card stacking."
+summary: "AppKit NSView for MultiTabbedViewController's edge-docked pill tab bar, with selection restyling and card stacking."
 platforms:
 - swift
 - macos
@@ -50,19 +50,24 @@ renders a `.title` item with its own close icon.
 ## Behavioral Requirements
 
 - **thickness-floor-by-edge**: `TabBarView.preferredThickness(for:)` MUST
-  return `28pt` for `.top`/`.bottom` and `140pt` for `.left`/`.right`.
-- **orientation-follows-edge**: The component MUST set its stack's
-  `orientation` to `.horizontal` for a `.top`/`.bottom` bar and to `.vertical`
-  for a `.left`/`.right` bar.
-- **alignment-favors-workspace-side**: The component MUST set its stack's
-  `alignment` to the side of the bar adjacent to the workspace/content area
-  it frames: `.bottom` for `.top`, `.top` for `.bottom`, `.trailing` for
-  `.left`, and `.leading` for `.right`.
-- **item-spacing-by-orientation**: The component MUST set its stack's
-  `spacing` to `4pt` (`itemSpacing`) when the bar is horizontal and to
-  `-16pt` (`cardOverlap`, a negative gap) when it is vertical.
+  return `28pt` for `.top`/`.bottom` and `140pt` for `.left`/`.right`. These
+  are fixed constants with no stated rationale in source beyond a sensible
+  default; a port SHOULD treat them as theme-tunable rather than hardcoding
+  them verbatim.
+- **orientation-follows-edge**: The component MUST lay out its arranged
+  content horizontally for a `.top`/`.bottom` bar and vertically for a
+  `.left`/`.right` bar.
+- **alignment-favors-workspace-side**: The component MUST align its arranged
+  content to the side of the bar adjacent to the workspace/content area it
+  frames: the bottom for `.top`, the top for `.bottom`, the trailing edge for
+  `.left`, and the leading edge for `.right`.
+- **item-spacing-by-orientation**: The component MUST set the gap between
+  arranged items to `4pt` (`itemSpacing`) when the bar is horizontal and to
+  `-16pt` (`cardOverlap`, a negative gap) when it is vertical; the vertical
+  overlap makes the column read as a deck being turned rather than a list,
+  while a horizontal bar has room along its length and does not need it.
 - **start-inset-defaults-to-end-padding**: `startInset` MUST default to
-  `8pt` (`endPadding`) and MUST re-apply the stack's edge insets whenever it
+  `8pt` (`endPadding`) and MUST re-apply the bar's edge insets whenever it
   is changed.
 - **host-may-override-start-inset**: A host MAY set `startInset` to a value
   other than the default, to line a bar's first item up with chrome outside
@@ -72,75 +77,75 @@ renders a `.title` item with its own close icon.
   workspace side, with `startInset` at the bar's start (along its length) and
   `8pt` (`endPadding`) at its end.
 - **bar-fills-perpendicular-and-pins-length**: For a `.top`/`.bottom` bar, the
-  component MUST pin the stack's top, leading, trailing, and bottom edges to
-  its own corresponding edges and install a height constraint; for a
-  `.left`/`.right` bar, MUST pin the stack's top, leading, and trailing edges
-  to its own, install a width constraint, and constrain the stack's bottom
-  edge only `lessThanOrEqualTo` its own bottom.
+  component MUST pin its arranged content's top, leading, trailing, and
+  bottom edges to its own corresponding edges and install a height
+  constraint; for a `.left`/`.right` bar, MUST pin its arranged content's top,
+  leading, and trailing edges to its own, install a width constraint, and
+  constrain its arranged content's bottom edge only `lessThanOrEqualTo` its
+  own bottom.
 - **vertical-bar-packs-from-top**: On a `.left`/`.right` bar, unused column
-  height below the stack's content MUST remain empty rather than stretching
+  height below the arranged content MUST remain empty rather than stretching
   the arranged items, as a direct consequence of the `lessThanOrEqualTo`
   bottom constraint in **bar-fills-perpendicular-and-pins-length**.
 - **bar-fills-window-background**: The component MUST paint its own layer
   background with the `.windowBackground` palette role and MUST repaint it
   whenever the resolved theme palette changes.
 - **set-items-triggers-rebuild**: `setItems(_:selectedID:)` MUST store the
-  given items and selected id on the component and MUST call
-  `rebuildButtons()` to reconstruct the bar's arranged subviews from them.
+  given items and selected id on the component and MUST rebuild the bar's
+  arranged subviews to match them.
 - **set-selected-restyles-and-reorders**: `setSelected(_:)` MUST update
   `selectedID`, MUST set `isHighlighted` to `true` on exactly the `TabButton`
   and any `TabBarHostedItem`-conforming hosted controller whose id equals the
-  new selection and to `false` on every other one, and MUST call
-  `applyStackOrder()` afterward.
-- **stack-depth-by-distance-from-selection**: `applyStackOrder()` MUST
+  new selection and to `false` on every other one, and MUST update every
+  hosted item's reported stack depth and, on a vertical bar, its front-to-back
+  order to match (see **stack-depth-by-distance-from-selection** and
+  **vertical-edge-cards-overlap-and-order-by-distance**).
+- **stack-depth-by-distance-from-selection**: A selection change MUST
   compute each item's depth as the absolute difference between its index and
   the selected item's index, or `1` for every item when nothing is selected,
   and MUST report that depth to any hosted controller conforming to
   `TabBarStackedItem`.
 - **vertical-edge-cards-overlap-and-order-by-distance**: On a `.left`/`.right`
-  bar, `applyStackOrder()` MUST re-insert each `.viewController` item's
-  wrapper view, deepest-first, via `addSubview(_:positioned: .above,
-  relativeTo: nil)`, so the item nearest the selection ends up frontmost in
+  bar, a selection change MUST reorder each `.viewController` item's wrapper
+  view, deepest-first, so the item nearest the selection ends up frontmost in
   both z-order and hit-testing; ties in depth MUST be broken by descending
   index.
 - **rename-title-item**: `renameItem(id:title:)` MUST set the matching
   item's payload to `.title(title)` and MUST update that id's `TabButton`
   title when an item with the given id exists in `items`, and MUST be a
   silent no-op when no item has that id.
-- **rebuild-clears-and-repopulates**: `rebuildButtons()` MUST remove every
-  current arranged subview from the stack and MUST clear the `buttons` and
-  `hostViews` dictionaries before repopulating them from `items`.
+- **rebuild-clears-and-repopulates**: `setItems(_:selectedID:)` MUST discard
+  every previously rendered item's view and any per-item state associated
+  with the old items before repopulating the bar from the new `items`.
 - **cross-edge-move-preserves-foreign-controller**: When reconciling hosted
-  controllers, `rebuildButtons()` MUST remove a superseded controller's view
-  from its superview and remove the controller from its parent only when
-  that view's current superview is still this bar's own (now-stale) host
-  wrapper; it MUST leave the view and parent relationship untouched when the
-  view has already been reparented onto a different bar.
-- **rebuild-drops-stale-hosted-controllers**: `rebuildButtons()` MUST clear
-  an id's entry from `hostedControllers` whenever that id's current
-  `.viewController` payload differs by identity from the previously hosted
-  controller (including when the id is no longer present in `items` at all),
-  independent of whether **cross-edge-move-preserves-foreign-controller**
-  also tore down its view.
-- **title-item-becomes-button**: For each `.title(title)` item,
-  `rebuildButtons()` MUST create a `TabButton`, set its `isHighlighted` to
-  match `selectedID`, wire its `onSelect`/`onClose` to the bar's own
-  `onSelect`/`onClose`, add it as an arranged subview, and MUST additionally
-  pin its cross-axis edges (via `pinCrossAxis(_:)`) only when the stack's
-  orientation is `.vertical`.
+  controllers, the component MUST remove a superseded controller's view from
+  its superview and remove the controller from its parent only when that
+  view is still sitting in a wrapper this bar itself created; it MUST leave
+  the view and parent relationship untouched when the view has already been
+  reparented onto a different bar.
+- **rebuild-drops-stale-hosted-controllers**: Setting new items MUST stop
+  tracking a `.viewController` item's hosted controller whenever that id's
+  current payload differs by identity from the previously hosted controller
+  (including when the id is no longer present in `items` at all), independent
+  of whether **cross-edge-move-preserves-foreign-controller** also tore down
+  its view.
+- **title-item-becomes-button**: For each `.title(title)` item, the
+  component MUST create a `TabButton`, set its `isHighlighted` to match
+  `selectedID`, wire its `onSelect`/`onClose` to the bar's own
+  `onSelect`/`onClose`, add it as an arranged item, and MUST additionally
+  pin its cross-axis edges only when the bar's orientation is `.vertical`.
 - **viewcontroller-item-becomes-hosted-view**: For each `.viewController`
-  item, `rebuildButtons()` MUST add the controller as a child of
-  `hostController` when it is not already its parent, set `isHighlighted` and
-  `onClose` on it when it conforms to `TabBarHostedItem`, wrap its view in a
+  item, the component MUST add the controller as a child of `hostController`
+  when it is not already its parent, set `isHighlighted` and `onClose` on it
+  when it conforms to `TabBarHostedItem`, wrap its view in a
   `TabItemHostView` wired to the bar's `onSelect`, add that wrapper as an
-  arranged subview, and MUST pin the wrapper's cross-axis edges unconditionally
-  (regardless of the stack's orientation).
-- **thickness-grows-with-hosted-content**: `updateThickness()` MUST set the
-  thickness constraint's constant to the greater of
-  `preferredThickness(for: edge)` and (the largest hosted controller's
-  `preferredContentSize` on the bar's thickness axis, plus `6pt`/
-  `outerPadding`), and MUST be recomputed at the end of every
-  `rebuildButtons()` call.
+  arranged item, and MUST pin the wrapper's cross-axis edges unconditionally
+  (regardless of the bar's orientation).
+- **thickness-grows-with-hosted-content**: The component MUST set the bar's
+  thickness to the greater of `preferredThickness(for: edge)` and (the
+  largest hosted controller's `preferredContentSize` on the bar's thickness
+  axis, plus `6pt`/`outerPadding`), and MUST recompute it whenever `items`
+  changes.
 - **host-view-fills-hosted-content**: `TabItemHostView` MUST pin its wrapped
   content view's top, leading, trailing, and bottom edges to its own
   corresponding edges.
@@ -149,11 +154,10 @@ renders a `.title` item with its own close icon.
   intercepting a click an interior subview (such as a hosted item's own close
   control) already handles as the frontmost hit-tested view.
 - **close-icon-hit-routes-to-close**: `TabButton.mouseDown(with:)` MUST route
-  a mouse-down whose location, converted into `backgroundView`'s coordinate
-  space, falls inside `closeButton.frame` to `closeButton`'s own native
-  handling (via `super.mouseDown(with:)`) and MUST NOT call `onSelect` in
-  that case; it MUST call `onSelect(id)` for a mouse-down anywhere else in
-  the view.
+  a mouse-down that lands within the close icon's own bounds to that icon's
+  own native handling (via `super.mouseDown(with:)`) and MUST NOT call
+  `onSelect` in that case; it MUST call `onSelect(id)` for a mouse-down
+  anywhere else in the view.
 - **accessibility-press-always-selects**: `TabButton.accessibilityPerformPress()`
   MUST always call `onSelect(id)` and return `true`, regardless of where an
   assistive-technology press targets the element — unlike a physical click,
@@ -163,11 +167,12 @@ renders a `.title` item with its own close icon.
   `.button`, and MUST set the view's initial `accessibilityTitle` and
   `accessibilityValue` from the constructor's `title` and `isHighlighted`.
 - **tab-button-title-updates-accessibility**: Setting `TabButton.title` MUST
-  update both `titleLabel.stringValue` and the view's `accessibilityTitle` to
+  update both the visible title text and the view's `accessibilityTitle` to
   the new value.
 - **tab-button-highlight-updates-accessibility-value**: Setting
   `TabButton.isHighlighted` MUST update the view's `accessibilityValue` to
-  the new value and MUST call `updateAppearance()`.
+  the new value and MUST restyle the button to match (see
+  **selecting-a-tab-restyles-its-button**).
 - **close-button-republished-as-sole-child**: `TabButton.accessibilityChildren()`
   MUST return exactly `[closeButton]`, so the close control stays reachable
   in the accessibility tree once `TabButton` becomes a single accessibility
@@ -176,12 +181,11 @@ renders a `.title` item with its own close icon.
   `closeButton` the accessibility identifier `tab-bar.close.<id>` and MUST
   give the tab button itself `tab-bar.select.<id>`, both keyed by the tab's
   own UUID.
-- **selecting-a-tab-restyles-its-button**: `TabButton.updateAppearance()`
-  MUST fill `backgroundView` with the `.selection` palette role, set
-  `titleLabel.role` to `.selectionText`, and set `closeButton.contentTintColor`
-  to `.selectionText` when `isHighlighted` is `true`; it MUST use
-  `NSColor.clear`, `.secondaryText`, and `.tertiaryText` respectively when it
-  is `false`.
+- **selecting-a-tab-restyles-its-button**: Selecting a tab MUST fill its
+  background with the `.selection` palette role, set its title's color role
+  to `.selectionText`, and set its close icon's tint to `.selectionText` when
+  `isHighlighted` is `true`; it MUST use `NSColor.clear`, `.secondaryText`,
+  and `.tertiaryText` respectively when it is `false`.
 - **declares-reorder-callback**: The component MUST expose a public
   `onReorder: ((UUID, Int) -> Void)?` property, in addition to `onSelect` and
   `onClose`, for a caller to observe tab reordering.
@@ -255,7 +259,7 @@ future, not-yet-built feature and the callback exists ahead of it).
 |-------|------------------|
 | Default (unselected) | `TabButton` background transparent; label role `.secondaryText`; close icon tint `.tertiaryText`. |
 | Selected | `TabButton` background fills with `.selection`; label role `.selectionText`; close icon tint `.selectionText`; `accessibilityValue` reports `true`; a hosted `TabBarHostedItem`'s `isHighlighted` is set `true`. |
-| Stacked (vertical bar, `.viewController` items only) | An item recedes behind items nearer the selection: its `stackDepth` (index distance from the selected item) is reported to any hosted `TabBarStackedItem`, and its `-16pt`-overlapping wrapper view is drawn and hit-tested beneath nearer items (see the Design Decisions entry on `.title` tabs, which receive the overlap but not this reordering). |
+| Stacked (vertical bar, `.viewController` items only) | An item recedes behind items nearer the selection: its `stackDepth` (index distance from the selected item) is reported to any hosted `TabBarStackedItem`, and its `-16pt`-overlapping wrapper view is drawn and hit-tested beneath nearer items (see the Edge Cases entry on title tabs not being depth-reordered). |
 | Pressed | Not applicable: a mouse-down resolves directly to selection or to the close action inside the same `mouseDown` handler; there is no separate, visually distinct pressed appearance before that resolution. |
 | Disabled | Not applicable: no tab, button, or bar exposes a disabled appearance in `TabBarView.swift`; any item present in `items` is always selectable. |
 | Focused | Not applicable: `TabButton` and `TabItemHostView` are plain `NSView` subclasses with no first-responder or focus-ring appearance defined in source (see the Accessibility keyboard-navigation gap). |
@@ -316,45 +320,46 @@ future, not-yet-built feature and the callback exists ahead of it).
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
 | tab-bar-view-001 | thickness-floor-by-edge | `TabBarView.preferredThickness(for: .top)` / `.left` | Returns `28`; `.left` returns `140` |
-| tab-bar-view-002 | orientation-follows-edge | `TabBarView(edge: .right)` constructed | `stack.orientation == .vertical` |
-| tab-bar-view-003 | alignment-favors-workspace-side | `TabBarView(edge: .top)` constructed | `stack.alignment == .bottom` |
-| tab-bar-view-004 | item-spacing-by-orientation | `TabBarView(edge: .left)` constructed | `stack.spacing == -16` |
-| tab-bar-view-005 | start-inset-defaults-to-end-padding | New `TabBarView` | `startInset == 8`; `stack.edgeInsets`'s main-axis start constant equals `8` |
-| tab-bar-view-006 | host-may-override-start-inset | `bar.startInset = 20` | `stack.edgeInsets`'s main-axis start constant becomes `20` |
-| tab-bar-view-007 | outer-padding-on-window-side-only | `TabBarView(edge: .bottom)` | `stack.edgeInsets == NSEdgeInsets(top: 0, left: 8, bottom: 6, right: 8)` |
-| tab-bar-view-008 | bar-fills-perpendicular-and-pins-length | `TabBarView(edge: .top)` laid out in a 300pt-wide superview | `stack`'s leading/trailing equal the bar's leading/trailing; bar's height constraint constant `== 28` at rest |
-| tab-bar-view-009 | vertical-bar-packs-from-top | `TabBarView(edge: .left)` with 2 short items in a tall superview | `stack`'s frame height is less than the bar's own height; the gap below is empty, not stretched |
+| tab-bar-view-002 | orientation-follows-edge | `TabBarView(edge: .right)` constructed | Its arranged content lays out vertically (top-to-bottom) |
+| tab-bar-view-003 | alignment-favors-workspace-side | `TabBarView(edge: .top)` constructed | Items align to the bar's bottom edge |
+| tab-bar-view-004 | item-spacing-by-orientation | `TabBarView(edge: .left)` constructed | The gap between adjacent items is `-16pt` (items overlap) |
+| tab-bar-view-005 | start-inset-defaults-to-end-padding | New `TabBarView` | `startInset == 8`; the first item begins `8pt` from the bar's start |
+| tab-bar-view-006 | host-may-override-start-inset | `bar.startInset = 20` | The first item now begins `20pt` from the bar's start |
+| tab-bar-view-007 | outer-padding-on-window-side-only | `TabBarView(edge: .bottom)` | Items sit `6pt` from the bar's outer (window) edge, flush (`0pt`) against the workspace edge, and `8pt` from each end along the bar's length |
+| tab-bar-view-008 | bar-fills-perpendicular-and-pins-length | `TabBarView(edge: .top)` laid out in a 300pt-wide superview | The bar's arranged content spans the bar's own leading/trailing edges; the bar's height constraint constant `== 28` at rest |
+| tab-bar-view-009 | vertical-bar-packs-from-top | `TabBarView(edge: .left)` with 2 short items in a tall superview | The bar's arranged content is shorter than the bar's own height; the gap below is empty, not stretched |
 | tab-bar-view-010 | bar-fills-window-background | Palette changes from theme A to theme B | `layer?.backgroundColor` updates to theme B's `.windowBackground` color |
-| tab-bar-view-011 | set-items-triggers-rebuild | `setItems([item], selectedID: item.id)` | `stack.arrangedSubviews.count == 1`; the new item's button/host view is present |
-| tab-bar-view-012 | set-selected-restyles-and-reorders | Two `.title` items; call `setSelected(itemB.id)` | `buttons[itemB.id]?.isHighlighted == true`; `buttons[itemA.id]?.isHighlighted == false` |
+| tab-bar-view-011 | set-items-triggers-rebuild | `setItems([item], selectedID: item.id)` | The bar renders exactly one item, matching the new item |
+| tab-bar-view-012 | set-selected-restyles-and-reorders | Two `.title` items; call `setSelected(itemB.id)` | The tab for `itemB` is highlighted; the tab for `itemA` is not |
 | tab-bar-view-013 | stack-depth-by-distance-from-selection | 3 `.viewController` items at indices 0,1,2; select index 0 | Depths reported to `TabBarStackedItem` are `0, 1, 2` |
 | tab-bar-view-014 | stack-depth-by-distance-from-selection | Same 3 items; `selectedID == nil` | Every item's reported depth is `1` |
 | tab-bar-view-015 | vertical-edge-cards-overlap-and-order-by-distance | `.left` bar, 3 hosted items, middle one selected | The middle item's wrapper view is above both neighbors in `subviews` (frontmost, topmost hit-tested) |
 | tab-bar-view-016 | rename-title-item | `renameItem(id: tab.id, title: "New")` on an existing `.title` tab | `items` entry's payload is `.title("New")`; `buttons[tab.id]?.title == "New"` |
 | tab-bar-view-017 | rename-title-item | `renameItem(id: unknownID, title: "X")` | No crash; `items` and `buttons` are unchanged |
-| tab-bar-view-018 | rebuild-clears-and-repopulates | `setItems([a, b], ...)` then `setItems([c], ...)` | `stack.arrangedSubviews.count == 1`; `buttons`/`hostViews` no longer reference `a` or `b` |
-| tab-bar-view-019 | cross-edge-move-preserves-foreign-controller | A hosted controller's view is reparented onto a different bar's wrapper, then this bar's `rebuildButtons()` runs | The controller's `parent` and view are unaffected by this bar's reconciliation |
-| tab-bar-view-020 | rebuild-drops-stale-hosted-controllers | A `.viewController` item is removed from `items` and `rebuildButtons()` runs | `hostedControllers` no longer has an entry for that id |
-| tab-bar-view-021 | title-item-becomes-button | `.title` item on a `.left` bar | The created `TabButton` has active leading/trailing constraints pinning it to the stack |
-| tab-bar-view-022 | title-item-becomes-button | `.title` item on a `.top` bar | The created `TabButton` has no cross-axis pin installed by `TabBarView` (relies on stack alignment) |
-| tab-bar-view-023 | viewcontroller-item-becomes-hosted-view | `.viewController` item on a `.top` bar | The wrapping `TabItemHostView` has active top/bottom constraints pinning it to the stack |
-| tab-bar-view-024 | thickness-grows-with-hosted-content | `.left` bar hosts an item with `preferredContentSize.width == 200` | `thicknessConstraint?.constant == 206` (`200 + 6`, above the `140` floor) |
-| tab-bar-view-025 | thickness-grows-with-hosted-content | `.left` bar with no hosted items | `thicknessConstraint?.constant == 140` (the floor) |
+| tab-bar-view-018 | rebuild-clears-and-repopulates | `setItems([a, b], ...)` then `setItems([c], ...)` | The bar renders exactly one item, `c`'s; no rendered element for `a` or `b` remains |
+| tab-bar-view-019 | cross-edge-move-preserves-foreign-controller | A hosted controller's view is reparented onto a different bar's wrapper, then this bar is given new items | The controller's `parent` and view are unaffected by this bar's reconciliation |
+| tab-bar-view-020 | rebuild-drops-stale-hosted-controllers | A `.viewController` item is removed from `items` and the bar re-renders | The removed item's controller no longer receives highlight or stack-depth updates from the bar |
+| tab-bar-view-021 | title-item-becomes-button | `.title` item on a `.left` bar | The created `TabButton` has active constraints pinning its leading/trailing edges to the bar's interior |
+| tab-bar-view-022 | title-item-becomes-button | `.title` item on a `.top` bar | The created `TabButton` has no cross-axis pin installed by `TabBarView` (relies on the bar's own alignment) |
+| tab-bar-view-023 | viewcontroller-item-becomes-hosted-view | `.viewController` item on a `.top` bar | The wrapping `TabItemHostView` has active top/bottom constraints pinning it to the bar's interior |
+| tab-bar-view-024 | thickness-grows-with-hosted-content | `.left` bar hosts an item with `preferredContentSize.width == 200` | The bar's thickness (width) is `206` (`200 + 6`, above the `140` floor) |
+| tab-bar-view-025 | thickness-grows-with-hosted-content | `.left` bar with no hosted items | The bar's thickness (width) is `140` (the floor) |
 | tab-bar-view-026 | host-view-fills-hosted-content | `TabItemHostView(id:, content:)` constructed | `content`'s top/leading/trailing/bottom equal the wrapper's own edges |
 | tab-bar-view-027 | host-view-click-selects | `mouseDown` on a point inside the wrapper but outside any interior control | `onSelect(id)` is invoked |
-| tab-bar-view-028 | close-icon-hit-routes-to-close | `mouseDown` at a point inside `closeButton.frame` | `closeAction`/`onClose` fires via the close button; `onSelect` is not called directly by `TabButton.mouseDown` |
+| tab-bar-view-028 | close-icon-hit-routes-to-close | `mouseDown` at a point inside `closeButton.frame` | `onClose(id)` fires; `onSelect` is not invoked by this `mouseDown` |
 | tab-bar-view-029 | close-icon-hit-routes-to-close | `mouseDown` at a point outside `closeButton.frame` | `onSelect(id)` is invoked; close is not triggered |
 | tab-bar-view-030 | accessibility-press-always-selects | `accessibilityPerformPress()` invoked while a VoiceOver cursor is conceptually "over" the close child | `onSelect(id)` is invoked (never the close action); returns `true` |
 | tab-bar-view-031 | tab-button-is-accessible-element | `TabButton(id:, title: "Notes")` constructed, `isHighlighted` left at its default `false` | `accessibilityElement == true`; `accessibilityRole == .button`; `accessibilityTitle == "Notes"`; `accessibilityValue == false` |
 | tab-bar-view-032 | tab-button-title-updates-accessibility | `button.title = "Renamed"` | `titleLabel.stringValue == "Renamed"`; `accessibilityTitle == "Renamed"` |
-| tab-bar-view-033 | tab-button-highlight-updates-accessibility-value | `button.isHighlighted = true` | `accessibilityValue == true`; `updateAppearance()`'s effects are visible (see vector 035) |
+| tab-bar-view-033 | tab-button-highlight-updates-accessibility-value | `button.isHighlighted = true` | `accessibilityValue == true`; the tab restyles to its selected appearance (see vectors 036-037) |
 | tab-bar-view-034 | close-button-republished-as-sole-child | `button.accessibilityChildren()` called | Returns an array containing exactly `closeButton` |
 | tab-bar-view-035 | close-button-carries-per-tab-identifier | `TabButton(id: uuid, title:)` constructed | `button.accessibilityIdentifier() == "tab-bar.select.\(uuid)"`; `closeButton.accessibilityIdentifier() == "tab-bar.close.\(uuid)"` |
-| tab-bar-view-036 | selecting-a-tab-restyles-its-button | `button.isHighlighted = true` | `backgroundView.layer?.backgroundColor` equals the `.selection` color; `titleLabel.role == .selectionText`; `closeButton.contentTintColor` equals `.selectionText` |
-| tab-bar-view-037 | selecting-a-tab-restyles-its-button | `button.isHighlighted = false` | `backgroundView.layer?.backgroundColor` equals clear; `titleLabel.role == .secondaryText`; `closeButton.contentTintColor` equals `.tertiaryText` |
+| tab-bar-view-036 | selecting-a-tab-restyles-its-button | `button.isHighlighted = true` | The tab's background fills with the `.selection` color; its title's color role becomes `.selectionText`; its close icon's tint becomes `.selectionText` |
+| tab-bar-view-037 | selecting-a-tab-restyles-its-button | `button.isHighlighted = false` | The tab's background becomes clear; its title's color role becomes `.secondaryText`; its close icon's tint becomes `.tertiaryText` |
 | tab-bar-view-038 | declares-reorder-callback | `let bar = TabBarView(edge: .top)` | `bar.onReorder` is a settable, externally accessible property (compiles and assigns) |
 | tab-bar-view-039 | rejects-coder-initializer | Construct `TabBarView(coder:)` with any `NSCoder` | Execution traps via `fatalError` with message `init(coder:) has not been implemented` |
 | tab-bar-view-040 | confines-to-main-actor | Attempt to construct or mutate a `TabBarView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
+| tab-bar-view-041 | vertical-edge-cards-overlap-and-order-by-distance | `.left` bar, 3 hosted items at indices 0,1,2; index 1 selected | Between the tied depth-1 neighbors (indices 0 and 2), index 0's wrapper view ends up more frontmost than index 2's, per the descending-index tie-break; index 1 (depth 0, selected) is frontmost of all three |
 
 ## Edge Cases
 
@@ -385,16 +390,29 @@ future, not-yet-built feature and the callback exists ahead of it).
   wrapped in a `TabItemHostView` and added to the stack regardless, so the
   tab still renders and is still clickable; only parent-based lifecycle
   callbacks (e.g. `viewWillAppear`) are missing.
-- Renaming a `.viewController` tab (documented quirk, not a marker — see
-  Design Decisions): `renameItem(id:title:)` performs no check on the
-  existing item's payload type. Calling it for an id whose current item is
-  `.viewController` overwrites that entry with `.title(title)` in `items`
-  while `buttons[id]` is `nil` (no button was ever created for a
-  `.viewController` item), so `buttons[id]?.title = title` is a no-op — the
-  model now disagrees with what is rendered until the next `rebuildButtons()`.
-  `TabBarView.swift`'s own comment states this is safe only because the
-  caller (`MultiTabbedViewController.renameTab`) already refuses to call it
-  for a `.viewController` item.
+- Renaming a `.viewController` tab (documented quirk, not a deliberate design
+  choice): `renameItem(id:title:)` performs no check on the existing item's
+  payload type. Calling it for an id whose current item is `.viewController`
+  overwrites that entry with `.title(title)` in `items` while `buttons[id]`
+  is `nil` (no button was ever created for a `.viewController` item), so
+  `buttons[id]?.title = title` is a no-op — the model now disagrees with what
+  is rendered until the next `rebuildButtons()`. `TabBarView.swift`'s own
+  comment states this is safe only because the caller
+  (`MultiTabbedViewController.renameTab`) already refuses to call it for a
+  `.viewController` item, so there is nothing left to guard against here; the
+  invariant is enforced entirely by the caller, not by `TabBarView` itself.
+  This is recorded as technical debt rather than a supported code path.
+- Title tabs on a vertical bar are not depth-reordered (documented quirk, not
+  a deliberate design choice): a `.title` `TabButton` on a `.left`/`.right`
+  bar receives the same `-16pt` overlapping spacing as a hosted
+  `.viewController` item (see **item-spacing-by-orientation**), but
+  **vertical-edge-cards-overlap-and-order-by-distance**'s front-to-back
+  reordering only ever touches hosted `.viewController` items — a title
+  tab's z-order (and so which overlapping title tab draws and hit-tests on
+  top) is whatever order it was originally added in, regardless of
+  selection. Nothing in source suggests this was a deliberate choice for the
+  title-tab case rather than an oversight; it is recorded here, per source
+  fidelity, rather than smoothed over.
 
 ## Configuration
 
@@ -491,8 +509,8 @@ Not applicable: source contains no logging call (no `print`, `os_log`, or
   struct plus an external `selectedID`, both owned by the caller (mirroring
   `items`/`selectedID` being handed in rather than owned). Render one edge's
   bar as an `HStack` (top/bottom) or `VStack` (left/right) of pill `Button`s,
-  each with a `.background(Capsule().fill(...))` that swaps between the
-  `.selection` and clear fills and a text-color swap between
+  each with a `.background(RoundedRectangle(cornerRadius: 4).fill(...))` that
+  swaps between the `.selection` and clear fills and a text-color swap between
   `.selectionText`/`.secondaryText`, matching `updateAppearance()`; overlay a
   trailing close `Button` sized `14×14` the way `closeButton` sits inside
   `backgroundView`, giving it its own tap target so a tap there does not also
@@ -536,7 +554,12 @@ Not applicable: source contains no logging call (no `print`, `os_log`, or
   `mouseDown`-based frame-containment hit test with a `UITapGestureRecognizer`
   on the wrapper plus the close button's own `.touchUpInside`, ordered (or
   `cancelsTouchesInView`-configured) so the close button's own target fires
-  instead of the wrapper's when both would otherwise match.
+  instead of the wrapper's when both would otherwise match. Internally,
+  `TabBarView` tracks its items through a private `NSStackView`, per-id
+  `TabButton`/`TabItemHostView` dictionaries, a hosted-controller map, and a
+  thickness constraint; the Behavioral Requirements above describe the
+  resulting observable behavior rather than these private names directly, so
+  a refactor that keeps the behavior intact does not break conformance.
 - **WinUI 3** (the reason this recipe exists): No built-in WinUI 3 control is
   shaped like this — `TabView` supports only a single top-docked strip, not
   a per-edge bar with vertical overlap. Build the bar as a `StackPanel`
@@ -547,7 +570,7 @@ Not applicable: source contains no logging call (no `print`, `os_log`, or
   `TextBlock` bound to the tab title (`FontSize`/`FontWeight` from the
   theme's caption-equivalent resource, mirroring the `.caption` text role)
   and a small close `Button` templated to the Segoe Fluent Icons "Cancel"
-  glyph (``), sized to `14×14` `Width`/`Height` to mirror `closeButton`'s
+  glyph (``), sized to `14×14` `Width`/`Height` to mirror `closeButton`'s
   fixed hit area. Drive the selected/unselected swap with a
   `VisualStateManager` `Selected`/`Unselected` state group that swaps
   `Background`/`Foreground` brush resources — matching
@@ -599,33 +622,6 @@ id is gone from its own items," so tearing it down unconditionally there too
 `preferredContentSizeDidChange` routing."
 **Approved**: pending
 
-**Decision (documented quirk, not a deliberate design choice)**: The
-front-to-back z-reordering in `applyStackOrder()` only ever touches
-`hostViews`, which is populated solely by `.viewController` items. A `.title`
-`TabButton` on a vertical bar still receives the same `-16pt` overlapping
-`stack.spacing` as a hosted item, but is never reordered by distance from the
-selected item — its z-order (and so which overlapping title tab draws and
-hit-tests on top) is whatever order `addArrangedSubview` produced, regardless
-of selection.
-**Rationale**: `hostViews`/`hostedControllers` are populated only for
-`.viewController` items, so `applyStackOrder()`'s reordering loop has nothing
-to reorder for title tabs. Nothing in source suggests this was a deliberate
-choice for the title-tab case rather than an oversight; it is recorded here,
-per source fidelity, rather than smoothed over.
-**Approved**: pending
-
-**Decision (documented quirk, not a deliberate design choice)**:
-`renameItem(id:title:)` performs no check on the existing item's payload
-type before overwriting it with `.title(title)`.
-**Rationale**: The method's own comment states "the caller
-(`MultiTabbedViewController.renameTab`) already refuses to call this for a
-`.viewController` item, so there is nothing left to guard against here" —
-the invariant is enforced entirely by the caller, not by `TabBarView` itself.
-Calling it directly on a `.viewController` item (see Edge Cases) would desync
-the model from the rendered bar until the next `rebuildButtons()`; this is
-recorded as technical debt rather than a supported code path.
-**Approved**: pending
-
 **Decision**: `TabButton.accessibilityPerformPress()` always selects the
 tab, even though a physical click can instead route to the close action.
 **Rationale**: The source's own comment reads "`AXPress` selects the tab, the
@@ -640,33 +636,31 @@ separately, as its own republished accessibility child.
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | failed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | accessibility |
-| [live-region-announcements](agenticdevelopercookbook://compliance/accessibility#live-region-announcements) | flagged | accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | failed | accessibility |
-| [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | not-applicable | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | not-applicable | accessibility |
-| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | failed | Accessibility |
+| [dynamic-type-support](agenticdevelopercookbook://compliance/accessibility#dynamic-type-support) | partial | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
 
-Main-actor-confined passes because `TabBarView`, `TabItemHostView`, and
-`TabButton` are all declared `@MainActor`. Keyboard-navigable is failed
-because neither `TabButton` nor `TabItemHostView` has any key-view-loop or
-`keyDown` wiring (see Accessibility). Screen-reader-support passes for
-`.title` tabs: `TabButton` sets a real accessibility role, title, value, and
-a republished close-button child. Live-region-announcements is flagged
-because no accessibility notification beyond `accessibilityValue`'s own
-setter is posted for a programmatic selection change (see Accessibility).
-Differentiate-without-color is failed because a `.title` tab's selected
-state is conveyed by color alone, with no non-color cue (see Accessibility
-Options). Touch-target-size and contrast-ratio are not-applicable because
-this is a pointer-driven macOS desktop control, not a touch surface, and its
-colors are palette tokens whose resolution and contrast are defined entirely
-outside `TabBarView.swift`, in the theme/palette system it defers to.
-String-externalization is failed because the close button's "Close Tab"
-accessibility description is a hardcoded English literal (see Localization).
+Screen-reader-support is partial: `.title` tabs get a real accessibility
+role, title, value, and republished close-button child from `TabButton`, but
+a `.viewController` tab's `TabItemHostView` exposes no role or label of its
+own beyond whatever its hosted content provides. Keyboard-navigable is
+failed because neither `TabButton` nor `TabItemHostView` has any
+key-view-loop or `keyDown` wiring (see Accessibility). Dynamic-type-support
+is partial because `TabButton`'s title uses a `.caption`-style role, but the
+actual point-size scaling for that role is resolved by `ThemeTypography`
+outside this file. Contrast-ratio is partial for the same reason: colors are
+semantic palette tokens (`.selection`, `.selectionText`, `.secondaryText`,
+`.tertiaryText`, `.windowBackground`) whose resolution and contrast are
+defined entirely outside `TabBarView.swift`, in the theme/palette system it
+defers to. String-externalization is failed because the close button's
+"Close Tab" accessibility description is a hardcoded English literal (see
+Localization).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: state requirements and test vectors as observable behavior instead of private internals, rebuild the Compliance table to only the checks that apply with corrected statuses and categories, move documented quirks from Design Decisions to Edge Cases, correct the WinUI glyph and SwiftUI shape, sharpen test vector precision, add a stack-order tie-break vector, and shorten the summary. |

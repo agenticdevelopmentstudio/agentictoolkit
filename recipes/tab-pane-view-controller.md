@@ -3,7 +3,7 @@ id: a30725ca-fa2f-4a04-8cb0-8beddf264a0a
 title: TabPaneViewController
 domain: agentictoolkit://recipes/tab-pane-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -27,8 +27,10 @@ tags:
 depends-on: []
 related:
 - agentictoolkit://recipes/multi-tabbed-view-controller
-references:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references:
+- https://developer.apple.com/design/human-interface-guidelines
+- https://www.w3.org/WAI/WCAG22/Understanding/target-size-minimum.html
 approved-by: ''
 approved-date: ''
 ---
@@ -43,18 +45,16 @@ Its `paneView` (a `TabPaneView`) is a self-contained card showing the agent's na
 
 ## Behavioral Requirements
 
-- **reload-fills-header-from-agent-and-model**: On `reload()`, the component MUST set the agent label to `"\(agent) · \(model)"` when the data source's model name is non-nil, and to the agent name alone when it is nil.
-- **reload-fills-session-name**: On `reload()`, the component MUST set the session label's text to the data source's session name.
-- **reload-fills-abbreviated-working-directory**: On `reload()`, the component MUST set the directory label's text to the data source's working directory with the current user's home directory prefix replaced by `~`, and MUST leave a path outside the home directory unabbreviated.
-- **reload-fills-and-hides-branch**: On `reload()`, the component MUST set the branch label's text to the data source's branch when non-nil and MUST hide the branch label when the branch is nil.
-- **reload-fills-and-hides-summary**: On `reload()`, the component MUST set the summary label's text to the data source's summary when non-nil and MUST hide the summary label when the summary is nil.
+- **header-text**: On `reload()`, the component MUST set the agent label to `"\(agent) · \(model)"` when the data source's model name is non-nil, and to the agent name alone when it is nil.
+- **session-text**: On `reload()`, the component MUST set the session label's text to the data source's session name.
+- **directory-text**: On `reload()`, the component MUST set the directory label's text to the data source's working directory with the current user's home directory prefix replaced by `~`, and MUST leave a path outside the home directory unabbreviated.
+- **branch-visibility**: On `reload()`, the component MUST set the branch label's text to the data source's branch when non-nil and MUST hide the branch label when the branch is nil.
+- **summary-visibility**: On `reload()`, the component MUST set the summary label's text to the data source's summary when non-nil and MUST hide the summary label when the summary is nil.
 - **summary-hidden-by-default**: Before any `reload()` runs, the summary label MUST start hidden.
-- **reload-replaces-status-symbols-without-accumulating**: On `reload()` (and on every call to `setStatusSymbols(_:)`), the component MUST remove any previously shown status glyphs before adding the new ones, so repeated calls MUST NOT accumulate views.
-- **reload-updates-title-and-preferred-content-size**: On `reload()`, the component MUST set its `title` to the session label's text and MUST set `preferredContentSize` to the card's current measured content size.
-- **reload-requires-a-data-source**: `reload()` MUST take no action beyond ensuring the view is loaded when `dataSource` is nil.
-- **selection-and-depth-are-reconciled**: The component MUST NOT draw the card as the front card unless `isHighlighted` is `true`, regardless of the `stackDepth` value most recently reported by the hosting bar, including the initial value of `0` before any bar has reported anything.
-- **highlighted-card-is-always-depth-zero**: When `isHighlighted` is `true`, the component MUST draw the card at depth `0`.
-- **unhighlighted-card-is-never-depth-zero**: When `isHighlighted` is `false`, the component MUST draw the card at a depth of at least `1`, even if `stackDepth` is `0`.
+- **status-symbol-replacement**: On `reload()` (and on every call to `setStatusSymbols(_:)`), the component MUST remove any previously shown status glyphs before adding the new ones, so repeated calls MUST NOT accumulate views.
+- **title-and-preferred-content-size**: On `reload()`, the component MUST set its `title` to the session label's text and MUST set `preferredContentSize` to the card's current measured content size.
+- **nil-data-source**: `reload()` MUST take no action beyond ensuring the view is loaded when `dataSource` is nil.
+- **selection-and-depth-are-reconciled**: The component MUST NOT draw the card as the front card unless `isHighlighted` is `true`, regardless of the `stackDepth` value most recently reported by the hosting bar, including the initial value of `0` before any bar has reported anything. When `isHighlighted` is `true` the card draws at depth `0`; when it is `false` the card draws at a depth of at least `1`, even if `stackDepth` is `0`.
 - **front-card-overhangs-the-workspace-edge**: The card at depth `0` MUST have its painted background stand `1` point past the card's own bounds on the side facing the workspace.
 - **behind-card-recedes-from-the-workspace-edge**: A card at a depth greater than `0` MUST have its painted background and its text pulled in from the card's bounds on every side, including the side facing the workspace, by an amount proportional to its depth.
 - **vertical-edge-recession-accumulates-with-depth**: On a vertical edge (`left` or `right`), the recession at depth *n* (`1` ≤ *n* ≤ `3`) MUST equal `n × 4` points.
@@ -66,10 +66,18 @@ Its `paneView` (a `TabPaneView`) is a self-contained card showing the agent's na
 - **redundant-depth-set-is-a-no-op**: Setting `stackDepth` to its current value MUST NOT re-run the depth-change logic or start an animation.
 - **card-width-is-bounded**: The card's measured width MUST be no less than `240` points and no more than `340` points, regardless of which edge hosts it.
 - **card-height-has-a-floor-and-grows-with-content**: The card's measured height MUST be no less than `136` points and MUST grow to fit its content when the content needs more room.
-- **front-and-behind-cards-differ-in-role-and-color**: The component MUST give the agent label the accent text role and the session/directory/branch/summary labels their front-card roles when the card is at depth `0`, and MUST give the agent label the primary text role and the other labels their dimmer, behind-card roles otherwise.
+- **front-and-behind-cards-differ-in-role-and-color**: The component MUST set each label's semantic text role according to whether the card is at depth `0` (front) or a depth greater than `0` (behind):
+
+  | Label | Front role | Behind role |
+  |-------|-----------|-------------|
+  | Agent | `.accent` | `.primaryText` |
+  | Session | `.primaryText` | `.secondaryText` |
+  | Directory | `.secondaryText` | `.tertiaryText` |
+  | Branch | `.secondaryText` | `.tertiaryText` |
+  | Summary | `.secondaryText` | `.tertiaryText` |
 - **front-and-behind-cards-use-distinct-backgrounds**: The component MUST paint the front card's background and border in the workspace's own backdrop and outline colors, and MUST paint a behind card's background and border in the bar's own window-background and border colors.
 - **close-button-sits-on-the-outward-end**: On the `left` edge, the close button MUST appear as the first (leading) element of the card's header; on every other edge, it MUST appear as the last (trailing) element.
-- **close-button-invokes-on-close**: Clicking the close button MUST invoke the `onClose` closure, when one is set.
+- **close-button-callback**: Clicking the close button MUST invoke the `onClose` closure, when one is set.
 - **labels-do-not-intercept-clicks**: The agent, session, directory, branch, and summary labels MUST NOT be selectable, so that a click anywhere over them is left for the enclosing tab item's own click handling rather than starting a text selection.
 - **status-glyph-has-an-accessible-label**: Each status glyph the component displays MUST carry the accessibility label supplied with it, independent of its symbol name.
 - **subviews-carry-tab-scoped-accessibility-identifiers**: The card and each of its agent, session, directory, branch, summary, and close-button subviews MUST expose an accessibility identifier of the form `tab-pane.<part>.<tabID>`, scoped to the pane's own `tabID`.
@@ -117,18 +125,18 @@ Its `paneView` (a `TabPaneView`) is a self-contained card showing the agent's na
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| tab-pane-001 | reload-fills-header-from-agent-and-model | `dataSource` returns agent `"Claude"`, model `"Fable 5.1"`; call `reload()` | `agentLabel.stringValue == "Claude · Fable 5.1"` (per `testReloadFillsTheLabelsFromTheDataSource`) |
-| tab-pane-002 | reload-fills-header-from-agent-and-model | `dataSource` returns agent `"Claude"`, model `nil`; call `reload()` | `agentLabel.stringValue == "Claude"` (per `testAModelOfNilShowsOnlyTheAgent`) |
-| tab-pane-003 | reload-fills-abbreviated-working-directory | Working directory is under the current user's home, e.g. `~/Projects/worktrees/tabs`; call `reload()` | `directoryLabel.stringValue == "~/Projects/worktrees/tabs"` (per `testWorkingDirectoryUnderHomeIsAbbreviatedWithATilde`) |
-| tab-pane-004 | reload-fills-and-hides-branch | `dataSource.tabPaneBranch` returns non-nil, then a later `reload()` with the same data source returning `nil` | `branchLabel.isHidden` is `false` after the first `reload()` and `true` after the second (per `testReloadTwiceHidesTheBranchLabelWhenBranchGoesNil`) |
-| tab-pane-005 | reload-fills-and-hides-summary; summary-hidden-by-default | Pane constructed and never reloaded | `summaryLabel.isHidden == true` before any `reload()` (per `testReloadFillsTheLabelsFromTheDataSource`) |
-| tab-pane-006 | reload-replaces-status-symbols-without-accumulating | Call `setStatusSymbols([one symbol])`, then `setStatusSymbols([one symbol])` again | `statusStack.arrangedSubviews.count == 1` after the second call, not `2` (per `testSetStatusSymbolsTwiceDoesNotAccumulateViews`) |
+| tab-pane-001 | header-text | `dataSource` returns agent `"Claude"`, model `"Fable 5.1"`; call `reload()` | `agentLabel.stringValue == "Claude · Fable 5.1"` (per `testReloadFillsTheLabelsFromTheDataSource`) |
+| tab-pane-002 | header-text | `dataSource` returns agent `"Claude"`, model `nil`; call `reload()` | `agentLabel.stringValue == "Claude"` (per `testAModelOfNilShowsOnlyTheAgent`) |
+| tab-pane-003 | directory-text | Working directory is under the current user's home, e.g. `~/Projects/worktrees/tabs`; call `reload()` | `directoryLabel.stringValue == "~/Projects/worktrees/tabs"` (per `testWorkingDirectoryUnderHomeIsAbbreviatedWithATilde`) |
+| tab-pane-004 | branch-visibility | `dataSource.tabPaneBranch` returns non-nil, then a later `reload()` with the same data source returning `nil` | `branchLabel.isHidden` is `false` after the first `reload()` and `true` after the second (per `testReloadTwiceHidesTheBranchLabelWhenBranchGoesNil`) |
+| tab-pane-005 | summary-hidden-by-default | Pane constructed and never reloaded | `summaryLabel.isHidden == true` before any `reload()` (per `testReloadFillsTheLabelsFromTheDataSource`) |
+| tab-pane-006 | status-symbol-replacement | Call `setStatusSymbols([one symbol])`, then `setStatusSymbols([one symbol])` again | `statusStack.arrangedSubviews.count == 1` after the second call, not `2` (per `testSetStatusSymbolsTwiceDoesNotAccumulateViews`) |
 | tab-pane-007 | card-width-is-bounded | Content short enough that `fittingSize.width + slack` is below `240` pt | `preferredContentSize.width == 240` (per `testShortContentStillMeasuresTheMinimumWidth`) |
 | tab-pane-008 | card-width-is-bounded | Content long enough that `fittingSize.width + slack` exceeds `340` pt | `preferredContentSize.width == 340` (per `testPaneWidthIsCappedAtMaxWidth`) |
 | tab-pane-009 | card-height-has-a-floor-and-grows-with-content | Content taller than `minHeight` on the `top` edge | `preferredContentSize.height > 136` and matches `paneView.fittingSize.height` within `0.5` pt (per `testTopPaneHeightGrowsToFitOversizedContent`) |
-| tab-pane-010 | card-width-is-bounded | Same content measured on each of the four edges | All four edges report the same `preferredContentSize` (per `testEveryEdgeMeasuresTheSameCard`) |
-| tab-pane-011 | selection-and-depth-are-reconciled; unhighlighted-card-is-never-depth-zero | Pane never highlighted; `stackDepth` never explicitly set | `agentLabel.role == .primaryText` (behind role) before any highlight (per `testSelectionPromotesTheTextInsteadOfHighlightingIt`) |
-| tab-pane-012 | highlighted-card-is-always-depth-zero | Set `isHighlighted = true` | `agentLabel.role == .accent` (per `testSelectionPromotesTheTextInsteadOfHighlightingIt`) |
+| tab-pane-010 | card-width-is-bounded; card-height-has-a-floor-and-grows-with-content | Content short enough to floor width and height on every edge (the slack that differs by edge is masked once content is at the floor) | All four edges report the same floored `preferredContentSize` (per `testEveryEdgeMeasuresTheSameCard`) |
+| tab-pane-011 | selection-and-depth-are-reconciled | Pane never highlighted; `stackDepth` never explicitly set | `agentLabel.role == .primaryText` (behind role) before any highlight (per `testSelectionPromotesTheTextInsteadOfHighlightingIt`) |
+| tab-pane-012 | selection-and-depth-are-reconciled | Set `isHighlighted = true` | `agentLabel.role == .accent` (per `testSelectionPromotesTheTextInsteadOfHighlightingIt`) |
 | tab-pane-013 | front-and-behind-cards-use-distinct-backgrounds | Card not highlighted vs. highlighted | `cardFillColor`/`cardBorderColor` equal `.windowBackground`/`.border` when behind, and `projectPaneBackdrop`/`projectPaneOutline` when front (per `testAnInactiveCardSitsOnTheBarsPlaneAndTheActiveOneOnTheWorkspaces`) |
 | tab-pane-014 | front-card-overhangs-the-workspace-edge; behind-card-recedes-from-the-workspace-edge | Card highlighted vs. not, on every edge | `workspaceOverhang == workspaceOverlap (1)` when front, and `== -inactiveInset (-4)` when behind at depth 1 on every edge (per `testOnlyTheActiveCardReachesOverTheWorkspacesOutline`) |
 | tab-pane-015 | behind-card-recedes-from-the-workspace-edge | Highlighted card vs. a card at depth 1 | Behind card's painted frame equals `bounds.insetBy(dx: 4, dy: 4)`, and is smaller than the front card's frame on both axes (per `testACardBehindIsPaintedSmallerThanTheCardInFront`) |
@@ -139,16 +147,27 @@ Its `paneView` (a `TabPaneView`) is a self-contained card showing the agent's na
 | tab-pane-020 | depth-change-is-immediate-when-detached | Card not attached to a window; set `stackDepth = 2` | `animatesDepthChanges == false` and `workspaceOverhang` reflects the new depth immediately, with no animation (per `testACardOffScreenTakesItsNewDepthImmediately`) |
 | tab-pane-021 | depth-change-animates-when-attached-to-a-window | Card attached to a window; change `stackDepth` | `animatesDepthChanges == true` and `runningMoveAnimationKeys` is non-empty during the transition (per `testACardInAWindowMovesToItsNewDepth`) |
 | tab-pane-022 | selection-and-depth-are-reconciled | `isHighlighted` toggled `true` → `false` → `true` with varying `stackDepth` values, including `0` | `workspaceOverhang` never reads as "front" while `isHighlighted == false`, whatever `stackDepth` was last told (per `testADeselectedCardIsNeverTheCardInFrontWhateverDepthItWasTold`) |
-| tab-pane-023 | front-and-behind-cards-differ-in-role-and-color | Card receded to any depth | No label's role becomes `.placeholderText`; text stays at a readable role even while the card recedes (per `testAnInactiveCardsTextStaysAtReadableRoles`) |
-| tab-pane-024 | close-button-invokes-on-close | `onClose` set; close button clicked | The closure fires exactly once (per `testClosePressedFiresOnClose`) |
+| tab-pane-023 | front-and-behind-cards-differ-in-role-and-color | Card constructed (behind, depth ≥ 1) vs. `isHighlighted = true` (front) | `agentLabel.role` is `.primaryText` behind and `.accent` front; `sessionLabel`/`directoryLabel`/`branchLabel` never fall to `.placeholderText` at any depth, holding the dimmer-but-readable behind roles from the front/behind role table (per `testAnInactiveCardsTextStaysAtReadableRoles`, `testSelectionPromotesTheTextInsteadOfHighlightingIt`) |
+| tab-pane-024 | close-button-callback | `onClose` set; close button clicked | The closure fires exactly once (per `testClosePressedFiresOnClose`) |
 | tab-pane-025 | context-menu-is-delegated | `delegate` set, returns a specific `NSMenu` for a given event | `paneView.menu(for:)` returns that exact menu instance, and the delegate is asked exactly once (per `testContextMenuComesFromTheDelegate`) |
 | tab-pane-026 | close-button-sits-on-the-outward-end | Pane constructed on each of the four edges | On `left`, the close button is the header's first view; on `top`/`right`/`bottom`, it is the last (per `testCloseButtonSitsOnTheEndFacingAwayFromTheWorkspace`) |
 | tab-pane-027 | subviews-carry-tab-scoped-accessibility-identifiers | Pane constructed with a known `tabID` | Root view and each labeled subview expose `tab-pane.<part>.<tabID>` (per `testAccessibilityIdentifiersCarryTheTabID`) |
 | tab-pane-028 | view-controller-does-not-support-storyboard-instantiation | Call `TabPaneViewController(coder:)` | Returns `nil` |
+| tab-pane-029 | session-text | `dataSource` returns session name `"tabs"`; call `reload()` | `sessionLabel.stringValue == "tabs"` (per `testReloadFillsTheLabelsFromTheDataSource`) |
+| tab-pane-030 | title-and-preferred-content-size | `dataSource` returns session name `"tabs"`; call `reload()` | `title == "tabs"` (`== sessionLabel.stringValue`) and `preferredContentSize == paneView.contentSize`; grounded directly in `reload()`'s `title = paneView.sessionLabel.stringValue; preferredContentSize = paneView.contentSize` (`TabPaneViewController.swift:72-73`) - `preferredContentSize`'s bound/growth behavior is covered separately by tab-pane-007/008/009/010, but no dedicated unit test asserts `title` itself |
+| tab-pane-031 | nil-data-source | `dataSource` is `nil`; call `reload()` | `loadViewIfNeeded()` runs but no label, `title`, or `preferredContentSize` is touched - the method returns at `guard let dataSource else { return }` (`TabPaneViewController.swift:59`); no dedicated unit test, since `TabPaneViewControllerTests`/`TabCardStackTests` always assign a `StubSource` |
+| tab-pane-032 | redundant-depth-set-is-a-no-op | Card attached to a window; set `stackDepth` to its own current value | `runningMoveAnimationKeys` stays empty and `workspaceOverhang` is unchanged, because `TabPaneView.stackDepth`'s `guard stackDepth != oldValue else { return }` (`TabPaneView.swift:85`) never calls `applyDepth(animated:)`; no dedicated unit test - `testACardInAWindowMovesToItsNewDepth` only exercises an actual change |
+| tab-pane-033 | recession-does-not-increase-past-depth-three | Vertical edge; `stackDepth = TabPaneView.maxStackDepth + 4` | `workspaceOverhang == -3 × inactiveInset`, the same as depth `3`, not any larger (per `testEachCardBehindStandsAStepFurtherBackOnAVerticalBar`'s past-the-cap assertion) |
+| tab-pane-034 | labels-do-not-intercept-clicks | Card constructed on any edge | `agentLabel.isSelectable`, `sessionLabel.isSelectable`, `directoryLabel.isSelectable`, `branchLabel.isSelectable`, and `summaryLabel.isSelectable` are all `false`, grounded in the `label.isSelectable = false` loop in `TabPaneView.setUp()` (`TabPaneView.swift:210`); no dedicated unit test |
+| tab-pane-035 | status-glyph-has-an-accessible-label | `setStatusSymbols([TabPaneStatusSymbol(symbolName: "bolt.fill", accessibilityLabel: "Busy")])` | The resulting `NSImageView`'s accessibility label reads `"Busy"`, independent of `symbolName`, per `image.setAccessibilityLabel(symbol.accessibilityLabel)` (`TabPaneView.swift:136`); no dedicated unit test - `testSetStatusSymbolsTwiceDoesNotAccumulateViews` only counts views, not their labels |
+| tab-pane-036 | component-does-not-poll-its-data-source | `dataSource`'s answers change after construction, with no call to `reload()` | No label, `title`, or `preferredContentSize` changes on its own; content changes only appear after an explicit `reload()` call, since `reload()` is the sole call site that reads `dataSource` and no observation/polling path exists in `TabPaneViewController.swift`/`TabPaneView.swift`; confirmed by inspection, no dedicated unit test |
+| tab-pane-037 | directory-text | `dataSource` returns a working directory outside the current user's home, e.g. `/tmp/repo/.claude/worktrees/tabs`; call `reload()` | `directoryLabel.stringValue == "/tmp/repo/.claude/worktrees/tabs"`, left unabbreviated (per `testReloadFillsTheLabelsFromTheDataSource`'s `directoryLabel.stringValue.hasSuffix("worktrees/tabs")` assertion against the default outside-home stub path) |
+| tab-pane-038 | context-menu-is-delegated | `delegate` is `nil` (or set but returns `nil` for the event); a menu-triggering event fires | `paneView.menu(for:)` falls back to `super.menu(for: event)`, AppKit's standard `NSView` menu, per `contextMenuProvider?(event) ?? super.menu(for: event)` (`TabPaneView.swift:197`); no dedicated unit test - `testContextMenuComesFromTheDelegate` only covers the non-nil path |
+| tab-pane-039 | header-text; session-text; branch-visibility; summary-visibility; title-and-preferred-content-size | `reload()` called once with short content (agent `"C"`, no model, session `"s"`, branch `"b"`, no summary), then again after every field changes and grows past `maxWidth` | `agentLabel.stringValue` and `sessionLabel.stringValue`/`branchLabel.stringValue` follow the new values; `summaryLabel.isHidden` flips from `true` to `false` once a summary appears; `preferredContentSize.width` moves from `minWidth` to `maxWidth` between the two calls (per `testReloadTwiceFollowsChangedDataSourceValues`) |
 
 ## Edge Cases
 
-- **Null/empty input - model absent**: `tabPaneModelName` returns `nil` → the agent label MUST show the agent name alone, with no separator (SHOULD-adjacent MUST; per `testAModelOfNilShowsOnlyTheAgent`).
+- **Null/empty input - model absent**: `tabPaneModelName` returns `nil` → the agent label MUST show the agent name alone, with no separator (per `testAModelOfNilShowsOnlyTheAgent`).
 - **Null/empty input - branch/summary absent**: `tabPaneBranch`/`tabPaneSummary` return `nil` → the corresponding label MUST be hidden rather than shown empty.
 - **Null/empty input - data source absent**: `dataSource` is `nil` when `reload()` is called → the component MUST take no action beyond `loadViewIfNeeded()`, leaving whatever was last displayed unchanged (`guard let dataSource else { return }`). This is the source's only handling of a missing dependency; no error, placeholder, or logged diagnostic is produced.
 - **Boundary values - depth at the recession ceiling**: `stackDepth` at `3` (`maxStackDepth`) or any larger value MUST recede the card by the same amount as depth `3` - recession does not keep growing past that ceiling (`recession(atDepth:)` clamps with `min(depth, maxStackDepth)`).
@@ -159,6 +178,7 @@ Its `paneView` (a `TabPaneView`) is a self-contained card showing the agent's na
 - **Offline/disconnected state**: Not applicable - the component performs no networking of its own; all content arrives synchronously from `dataSource` calls.
 - **Repeated `reload()` with changing values**: Calling `reload()` twice with a data source that has changed its answers between calls MUST update every label, the title, and `preferredContentSize` to the new values on the second call, including newly appearing/disappearing branch or summary text (`testReloadTwiceFollowsChangedDataSourceValues`).
 - **View never attached to a window**: A depth change on a pane whose view has never been added to a window's view hierarchy MUST apply immediately with no animation, since there is nothing on screen to animate and an animated constraint would read a stale value if measured right after (`animatesDepthChanges`, `testACardOffScreenTakesItsNewDepthImmediately`).
+- **Edge-dependent measurement slack (documented quirk, not a guaranteed invariant)**: `contentSize`'s slack term (`2 × deepestRecession`) is edge-dependent - `24` pt on a vertical edge (`3` steps × `4` pt × `2`) versus `8` pt on a horizontal edge (`1` step × `4` pt × `2`) - so, in principle, the same content could measure a different `preferredContentSize` depending solely on which edge hosts the pane. `deepestRecession` reuses `recession(atDepth: maxStackDepth)`, whose body answers a different question for a vertical edge (how far the deepest of several stacked cards recedes) than for a horizontal edge (a constant single-step recession) - the two questions happen to share one implementation. Every existing call site and test happens to mask this: short content is floored to `minWidth`/`minHeight` and long content is capped at `maxWidth`, regardless of which slack value applied (see tab-pane-010), so the difference has never been observed to change a real layout, but the formula itself is not edge-independent when content sits strictly between the floor and the cap.
 
 ## Configuration
 
@@ -181,8 +201,6 @@ NEEDS REVIEW: Not implemented in source. The `Close` description is an AppKit
 only.
 
 ## Accessibility Options
-
-Document which accessibility display options (Rule 15) this component responds to:
 
 | Option | Behavior |
 |--------|----------|
@@ -212,34 +230,28 @@ Not applicable: no logging call (`os_log`, `Logger`, `print`, or `NSLog`) appear
 ## Platform Notes
 
 - **SwiftUI**: Model each pane as a small view value exposing agent/model/session/directory/branch/summary/status plus `isFront: Bool` and `depth: Int`. Render the header as an `HStack` (agent `Text`, status `HStack` of small `Image(systemName:)`, `Spacer()`, close `Button`), reversing element order for the left edge with a conditional array rather than a mirrored layout direction, since only the close button's position changes, not the whole reading order. Drive fill/border/text color from `isFront` via `.foregroundStyle`/`.background`, and express recession as `.padding(edgeSet, CGFloat(min(depth, 3)) * 4)` on a vertical edge or a flat `4` on a horizontal one, wrapped in `withAnimation(.easeOut(duration: 0.16))` gated on whether the view is already inserted into the hierarchy (mirroring `animatesDepthChanges`'s `window != nil` check - an unattached view should set its position with no animation transaction at all). There is no direct SwiftUI equivalent of the one-point workspace overhang; approximate it with a `.padding(edge, -1)` applied to the card's background shape alone, not the whole view, so the overhang does not also push the text.
-- **Compose**: Represent the pane as a `@Composable` taking the same data plus `isFront`/`depth` state. Build the header as a `Row` with `Arrangement.SpaceBetween`, and reorder for a left-edge-equivalent layout via `LayoutDirection.Rtl` or by swapping element order explicitly. Animate recession with `animateDpAsState(targetValue = ..., animationSpec = tween(160, easing = FastOutSlowInEasing))` applied to a `Modifier.padding` or `Modifier.offset`. Because Compose's `border` modifier always strokes all four sides, reproduce the open-sided outline with a custom `Modifier.drawWithContent` that strokes only the three non-workspace-facing sides via a hand-built `Path`, exactly as `TabCardBackgroundView.cardPath()` traces three sides and skips the fourth.
-- **React/Web**: Render the card as a `<div>` with CSS custom properties for background/border color toggled by a `data-front` attribute, and a header using `display: flex; justify-content: space-between`, reversing the close button's position for a left-edge-equivalent layout with `flex-direction: row-reverse` rather than reordering DOM nodes. Animate the recession with a `transition: inset 160ms cubic-bezier(0, 0, 0.58, 1)` (ease-out) on `inset`/`transform: translate(...)`, applied only once the element is mounted (a freshly mounted card sets its initial inset with no transition class, mirroring the no-animation-when-detached case). Reproduce the three-sided open outline with individual `border-top`/`border-right`/`border-bottom`/`border-left` declarations instead of the `border` shorthand, omitting the workspace-facing side.
+- **Compose**: Represent the pane as a `@Composable` taking the same data plus `isFront`/`depth` state. Build the header as a `Row` with `Arrangement.SpaceBetween`, reversing only the close button's position for a left-edge-equivalent layout with a conditional element order, not a mirrored `LayoutDirection.Rtl`, since only the close button's position changes, not the whole reading order. Animate recession with `animateDpAsState(targetValue = ..., animationSpec = tween(160, easing = LinearOutSlowInEasing))` applied to a `Modifier.padding` or `Modifier.offset`, mirroring `CAMediaTimingFunction(name: .easeOut)`. Because Compose's `border` modifier always strokes all four sides, reproduce the open-sided outline with a custom `Modifier.drawWithContent` that strokes only the three non-workspace-facing sides via a hand-built `Path`, exactly as `TabCardBackgroundView.cardPath()` traces three sides and skips the fourth.
+- **React/Web**: Render the card as a `<div>` with CSS custom properties for background/border color toggled by a `data-front` attribute, and a header using `display: flex; justify-content: space-between`, reversing only the close button's position for a left-edge-equivalent layout with a conditional DOM order, not `flex-direction: row-reverse` on the whole header, since only the close button's position changes, not the whole reading order. Animate the recession with a `transition: inset 160ms cubic-bezier(0, 0, 0.58, 1)` (ease-out) on `inset`/`transform: translate(...)`, applied only once the element is mounted (a freshly mounted card sets its initial inset with no transition class, mirroring the no-animation-when-detached case). Reproduce the three-sided open outline with individual `border-top`/`border-right`/`border-bottom`/`border-left` declarations instead of the `border` shorthand, omitting the workspace-facing side.
 - **AppKit / UIKit** (source platform): Source lives in `TabPaneViewController.swift` (controller: identity, data-source-driven `reload()`, `TabBarStackedItem` conformance, `applyDepth()` reconciling selection with depth) and `TabPaneView.swift` (the visual card: geometry constants, `CardSides`/`InsetBox` inset math, `TabCardBackgroundView`'s open-path fill/stroke, and the `NSAnimationContext`-driven move). This is AppKit/macOS-only; no UIKit code path exists. A UIKit port would replace `NSBezierPath`/`draw(_:)` with `UIBezierPath`/`CAShapeLayer`, and would drive the recession move through `UIView.animate` or an explicit `CABasicAnimation` on the constraint's owning view, since UIKit has no `NSAnimationContext`/`allowsImplicitAnimation` equivalent for constraint changes.
 - **WinUI 3**: Build the card as a `UserControl` whose visual is a `Microsoft.UI.Xaml.Shapes.Path` with a hand-built `PathGeometry`/`PathFigure` running through the same three corner points `TabCardBackgroundView.corners(of:)` computes - a XAML `Border` always strokes all four sides and cannot leave the workspace-facing side open, so it cannot express this shape directly. Bind the path's `Fill`/`Stroke` brushes to "Front"/"Behind" resource keys switched through a `VisualStateManager` state group. Animate the recession/overhang move with a `Storyboard` containing a `DoubleAnimation` (`Duration="0:0:0.16"`, `EasingFunction` a `QuadraticEase` with `EasingMode="EaseOut"`, mirroring `CAMediaTimingFunction(name: .easeOut)`) targeting a `TranslateTransform` or `Margin`, gated on whether the control is currently in the visual tree - an unloaded control should call `Storyboard.SkipToFill()` to jump rather than animate, mirroring `animatesDepthChanges`'s `window != nil` check. Lay out the header in a `Grid` with the close `Button` placed via `Grid.Column`/`HorizontalAlignment` depending on edge, its `Width`/`Height` fixed at `14` (not `Padding`) to match the fixed hit area, and size each status glyph's `FontIcon` at `11`px to mirror the SF Symbol's `pointSize`. Bind `AutomationProperties.AutomationId` to `"tab-pane." + tabId` (and `.agent.`/`.session.`/`.directory.`/`.branch.`/`.summary.`/`.close.` per sub-control) through a converter, matching the `accessibilityID` scheme.
 
 ## Design Decisions
 
-Record any decisions made during implementation that affect visual or behavioral outcome. Each decision should be approved by the user.
+**Decision**: An unhighlighted card's drawn depth is clamped to at least `1` (`max(1, stackDepth)`) rather than trusting `stackDepth` directly, including its own default value of `0`.
+**Rationale**: Per `applyDepth()`'s own doc comment, the `max` "is what keeps [selection and depth] from contradicting each other: a card that is not the selected one is never the card in front, whatever depth it was last told - including the initial zero, before any bar has said anything," because the hosting bar communicates selection and depth as two independent signals that can arrive in either order.
+**Approved**: pending
 
-Decision: An unhighlighted card's drawn depth is clamped to at least `1` (`max(1, stackDepth)`) rather than trusting `stackDepth` directly, including its own default value of `0`.
-Rationale: Per `applyDepth()`'s own doc comment, the `max` "is what keeps [selection and depth] from contradicting each other: a card that is not the selected one is never the card in front, whatever depth it was last told - including the initial zero, before any bar has said anything," because the hosting bar communicates selection and depth as two independent signals that can arrive in either order.
-Approved: pending
+**Decision**: A card with no window takes a new depth immediately and without animation, while a card in a window animates the move.
+**Rationale**: Per `animatesDepthChanges`'s doc comment, "a card with no window is not on screen: there is nothing to watch move, and an animated constraint reads its old value until the animation ends," so measuring an off-screen card immediately after a depth change would read a stale, mid-animation value instead of the settled one.
+**Approved**: pending
 
-Decision: A card with no window takes a new depth immediately and without animation, while a card in a window animates the move.
-Rationale: Per `animatesDepthChanges`'s doc comment, "a card with no window is not on screen: there is nothing to watch move, and an animated constraint reads its old value until the animation ends," so measuring an off-screen card immediately after a depth change would read a stale, mid-animation value instead of the settled one.
-Approved: pending
+**Decision**: On a horizontal edge every card behind the front one recedes by exactly one step, while on a vertical edge the recession accumulates per depth up to `maxStackDepth`.
+**Rationale**: Per `recession(atDepth:)`'s doc comment, a horizontal bar "lays its cards out along their long side" with no column to fan them down, so there is nothing for a deeper card to recede further into, whereas a vertical bar's cards overlap down a column and can visually "fan away" like a deck.
+**Approved**: pending
 
-Decision: On a horizontal edge every card behind the front one recedes by exactly one step, while on a vertical edge the recession accumulates per depth up to `maxStackDepth`.
-Rationale: Per `recession(atDepth:)`'s doc comment, a horizontal bar "lays its cards out along their long side" with no column to fan them down, so there is nothing for a deeper card to recede further into, whereas a vertical bar's cards overlap down a column and can visually "fan away" like a deck.
-Approved: pending
-
-Decision (documented quirk, not a deliberate design choice): `contentSize`'s slack term (`2 × deepestRecession`) is edge-dependent - `24` pt on a vertical edge (`3` steps × `4` pt × `2`) versus `8` pt on a horizontal edge (`1` step × `4` pt × `2`) - so, in principle, the same content could measure a different `preferredContentSize` depending solely on which edge hosts the pane. Every existing call site and test happens to mask this: short content is floored to `minWidth`/`minHeight` and long content is capped at `maxWidth`, regardless of which slack value applied, so the difference has never been observed to change a real layout, but the formula itself is not edge-independent.
-Rationale: `deepestRecession` reuses `recession(atDepth: maxStackDepth)`, whose body answers a different question for a vertical edge (how far the deepest of several stacked cards recedes) than for a horizontal edge (a constant single-step recession) - the two questions happen to share one implementation. Recorded here per source fidelity rather than smoothed over into "the same measurement on every edge," which the doc comment on `contentSize` itself claims but which is only true when content is far from the min/max bounds.
-Approved: pending
-
-Decision: The card's open-sided background stroke insets its three drawn sides by `0.5` pt but gives the workspace-facing side its half-point back while the card is in front.
-Rationale: Per `strokeBounds()`'s doc comment, a `1` pt line otherwise straddles the view's own edge; while the front card's paint reaches out over the workspace's outline, "the fill and the two side strokes have to run all the way out through the overhang," or a visible seam would appear where the two surfaces are meant to read as one.
-Approved: pending
+**Decision**: The card's open-sided background stroke insets its three drawn sides by `0.5` pt but gives the workspace-facing side its half-point back while the card is in front.
+**Rationale**: Per `strokeBounds()`'s doc comment, a `1` pt line otherwise straddles the view's own edge; while the front card's paint reaches out over the workspace's outline, "the fill and the two side strokes have to run all the way out through the overhang," or a visible seam would appear where the two surfaces are meant to read as one.
+**Approved**: pending
 
 ## Compliance
 
@@ -248,15 +260,18 @@ Approved: pending
 | [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | Architecture |
 | [accessibility-identifiers](agenticdevelopercookbook://compliance/ui#accessibility-identifiers) | passed | UI |
 | [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | UI Tokens |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | Accessibility |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | partial | Accessibility |
 | [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | Accessibility |
 | [reduce-motion-support](agenticdevelopercookbook://compliance/accessibility#reduce-motion-support) | failed | Accessibility |
 | [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | failed | Accessibility |
 | [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
+
+`screen-reader-support` and `keyboard-navigable` are `partial` because the card has no focus behavior or accessibility role of its own, no combined accessibility label across its fields, and the close button's `accessibilityDescription` is an unlocalized literal (see **close-button-callback** and the open question in Localization above); `differentiate-without-color` is `passed` on the size/position cues in `recession`/`workspaceOverhang`; `reduce-motion-support` and `touch-target-size` are `failed` on the confirmed absence of a Reduce Motion check and a fixed `14`pt close-button hit area below the 44pt minimum; `string-externalization` is `failed` on the hardcoded `Close` literal.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only names, merged the duplicate selection/depth requirements, added an explicit per-label role/color table, fixed frontmatter references and moved the misplaced cookbook link to `related`, added missing test vectors and corrected several test-vector-to-requirement mappings, moved the edge-dependent measurement quirk from Design Decisions to Edge Cases, reformatted Design Decisions to the bold three-line form, deleted leftover template instructions, corrected Platform Notes for Compose/React header reordering and Compose's easing curve, and marked two Compliance checks `partial` with a supporting sentence |

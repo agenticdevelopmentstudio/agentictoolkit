@@ -3,7 +3,7 @@ id: 15e66a2e-9ee1-4f5f-aeb0-c804078b4f78
 title: ThemePreviewView
 domain: agentictoolkit://recipes/theme-preview-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -25,10 +25,9 @@ tags:
 depends-on:
 - agentictoolkit://recipes/swatch-grid-view
 related:
-- agentictoolkit://recipes/swatch-grid-view
 - agentictoolkit://recipes/badge
-references:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -52,8 +51,8 @@ rounded selection fill under `selectionText`, a badge really is
 parallel, idealized set of demo colors.
 
 The view starts empty; calling `show(_:)` with a `ColorTheme` resolves a
-`SemanticPalette(theme:)` and fully rebuilds five sample cards (chrome, list,
-sidebar tabs, controls, status badges, terminal) plus an embedded
+`SemanticPalette(theme:)` and fully rebuilds five sample cards (chrome, list
+with its tab strip, controls, status badges, terminal) plus an embedded
 `ComposableSettings.SwatchGridView` of the theme's 16 ANSI colors. It composes
 the sibling `SwatchGridView` ingredient directly rather than re-implementing a
 swatch grid, but implements its own private, structurally similar "badge"
@@ -62,123 +61,123 @@ capsule for the status row rather than reusing the shared `Badge` ingredient
 
 ## Behavioral Requirements
 
-- **pins-container-to-self**: Component MUST maintain a single vertical
+- **container-pinning**: Component MUST maintain a single vertical
   `NSStackView` (`container`, leading-aligned, 10pt spacing) as its only direct
-  subview, pinned to all four edges of `self` with no additional constant, via
-  `Self.pinToEdges`.
-- **starts-empty-without-theme**: Component MUST NOT add any content to
-  `container` when constructed via `init(theme:)` with the default `nil`
-  argument; content appears only once `show(_:)` is called.
-- **traps-on-coder-init**: Component MUST NOT support construction via
+  subview, pinned to all four edges of `self` with no additional constant.
+- **empty-initial-state**: Component MUST NOT add any content to
+  `container`, and MUST NOT paint `self`'s background, when constructed via
+  `init(theme:)` with the default `nil` argument; content and the background
+  paint appear only once `show(_:)` is called.
+- **coder-init-trap**: Component MUST NOT support construction via
   `init(coder:)`; that initializer MUST trigger a fatal error.
-- **clears-and-rebuilds-on-each-show**: On every call to `show(_:)`, the
+- **show-teardown-and-rebuild**: On every call to `show(_:)`, the
   component MUST remove every existing arranged subview from `container`
-  (`arrangedSubviews.forEach { $0.removeFromSuperview() }`) before adding the
-  new set of sample cards, rather than diffing or reusing any existing card.
-- **paints-self-with-window-background**: On every call to `show(_:)`, the
+  before adding the new set of sample cards, rather than diffing or reusing
+  any existing card.
+- **self-background-paint**: On every call to `show(_:)`, the
   component MUST set its own `wantsLayer`-backed background color to the
   resolved `SemanticPalette`'s `windowBackground` role color.
-- **renders-cards-in-fixed-order**: `show(_:)` MUST append exactly six items to
+- **card-order**: `show(_:)` MUST append exactly six items to
   `container`, in this fixed order: the chrome sample, the list sample, the
   controls sample, the status sample, the terminal sample, then the ANSI
   swatch grid.
-- **stretches-sample-cards-to-container-width**: The component MUST activate a
+- **card-width-stretch**: The component MUST activate a
   width constraint equal to `container`'s width on each of the five sample
   cards (chrome, list, controls, status, terminal), so that the
   leading-aligned, content-sized stack view does not let them collapse to
   their intrinsic content width.
-- **constrains-cards-to-minimum-width**: Each of the four cards built through
-  the shared `fill(_:with:)` helper (chrome, list, controls, status) and the
+- **card-minimum-width**: Each of the four cards whose content stack follows
+  `card-content-insets` (chrome, list, controls, status) and the
   terminal sample's box MUST each carry an activated
   `widthAnchor >= 280` constraint, independent of their content.
-- **insets-card-content-consistently**: The `fill(_:with:)` helper used by the
-  chrome, list, controls and status cards MUST inset its vertical content
-  stack from the card by exactly 10pt from the top, 12pt from the leading
-  edge, and 10pt from the bottom, and MUST constrain the trailing edge to at
-  most 12pt from the card's trailing edge (the content may be narrower, never
-  wider).
-- **renders-chrome-title**: The chrome sample MUST include a label reading
+- **card-content-insets**: The vertical content stack shared by the
+  chrome, list, controls and status cards MUST be inset from the card by
+  exactly 10pt from the top, 12pt from the leading edge, and 10pt from the
+  bottom, and MUST constrain the trailing edge to at most 12pt from the
+  card's trailing edge (the content may be narrower, never wider).
+- **chrome-title**: The chrome sample MUST include a label reading
   "Window Title" in the `primaryText` color and the `title` text style.
-- **renders-chrome-body-and-caption**: The chrome sample MUST include a body
+- **chrome-body-and-caption**: The chrome sample MUST include a body
   label reading "Body text in the body font." in `primaryText`/`body` style,
   and a caption label reading "Secondary caption text" in
   `secondaryText`/`caption` style.
-- **renders-chrome-controls-row**: The chrome sample MUST include a horizontal
+- **chrome-controls-row**: The chrome sample MUST include a horizontal
   row (8pt spacing) of two pill-shaped controls, both set in the `button` text
   style: a "Button" pill filled with `accent` and text colored
   `onAccentText`, and a "Selected" pill filled with `selection` and text
   colored `selectionText`.
-- **renders-chrome-divider**: The chrome sample MUST include a 1pt-tall
+- **chrome-divider**: The chrome sample MUST include a 1pt-tall
   hairline view filled with the `divider` role color, constrained to the
   card's width minus 24pt.
-- **renders-chrome-outlined-panel**: The chrome sample MUST include an inner
+- **chrome-outlined-panel**: The chrome sample MUST include an inner
   rounded (8pt corner radius) panel filled with `elevatedSurface`, with a 1pt
   border in the `outline` role color, containing a caption-styled label
   reading "Panel · outline" in `tertiaryText`, constrained to the card's width
   minus 24pt.
-- **renders-tab-strip**: The list sample MUST render a horizontal row (4pt
+- **list-tab-strip**: The list sample MUST render a horizontal row (4pt
   spacing) of three pills in the `button` text style: "Notes" filled with
   `elevatedSurface` and text in `primaryText`, and "Chat" and "Terminal" each
   filled with `surface` and text in `secondaryText`.
-- **renders-three-list-rows**: The list sample MUST render exactly three rows,
+- **list-row-set**: The list sample MUST render exactly three rows,
   in this order: ("Release notes", "Yesterday", unselected), ("Design
   review", "2 days ago", selected), ("Scratch", "Last week", unselected).
-- **styles-selected-list-row**: A selected list row MUST fill its background
+- **selected-list-row-style**: A selected list row MUST fill its background
   with the `selection` role color (5pt corner radius) and render both its
   title and detail text in `selectionText`.
-- **styles-unselected-list-row**: An unselected list row MUST leave its
+- **unselected-list-row-style**: An unselected list row MUST leave its
   background transparent and render its title in `primaryText` and its detail
   text in `tertiaryText`.
-- **lays-out-list-row-content**: Each list row MUST place its title label
+- **list-row-content-layout**: Each list row MUST place its title label
   leading-aligned with an 8pt inset and its detail label trailing-aligned with
   an 8pt inset, both vertically centered, with the detail label's leading edge
   held at least 8pt from the title label's trailing edge.
-- **renders-two-equal-width-text-fields**: The controls sample MUST render two
+- **controls-text-field-pair**: The controls sample MUST render two
   side-by-side, equal-width (`fillEqually`, 8pt spacing) simulated text
   fields, each a 5pt-corner-radius box filled with `controlBackground` and
   outlined with a 1pt `border`-colored stroke: one showing "Typed text" in
   `primaryText`, the other showing "Placeholder" in `placeholderText`.
-- **renders-checkbox-sample-line**: The controls sample MUST render a single
+- **controls-checkbox-line**: The controls sample MUST render a single
   line of text reading "☑︎ Enabled    ☐ Disabled" in `secondaryText`/`body`
   style, as a static representation of a checkbox's checked and unchecked
   appearance.
-- **renders-four-status-badges**: The status sample MUST render exactly four
+- **status-badge-set**: The status sample MUST render exactly four
   badges, in this order and color: "Success" (`success`), "Warning"
   (`warning`), "Error" (`danger`), "Info" (`info`), in a horizontal row with
   6pt spacing.
-- **styles-status-badge**: Each status badge MUST be a 5pt-corner-radius
+- **status-badge-style**: Each status badge MUST be a 5pt-corner-radius
   capsule whose background is its status color at 22% alpha, whose border is
   the same status color at 55% alpha (1pt), and whose text is the same status
   color at full opacity in the `caption` text style.
-- **renders-terminal-box-on-window-background**: The terminal sample's box
+- **terminal-box-background**: The terminal sample's box
   MUST be filled with the `windowBackground` role color (unlike the other four
   cards, which use `surface`) and outlined with a 1pt `border`-colored stroke.
-- **resolves-terminal-appearance-from-theme**: The terminal sample MUST
+- **terminal-appearance-resolution**: The terminal sample MUST
   resolve its font, padding and cursor shape by calling
   `TerminalAppearance.resolvedFont(theme:)`, `resolvedPadding(theme:)` and
   `resolvedCursor(theme:)` — the same resolution a live terminal session
   uses — rather than hardcoding any of the three.
-- **renders-terminal-sample-content**: Using the resolved terminal font, the
+- **terminal-sample-content**: Using the resolved terminal font, the
   terminal sample MUST render a prompt line reading "user@mac ~ % ls" in
   `primaryText` followed immediately by the caret, and a second line (2pt
   below the first) of "Documents" in `accent` and "README.md" in
   `secondaryText`, 10pt apart.
-- **insets-terminal-content-by-resolved-padding**: The terminal sample MUST
+- **terminal-content-insets**: The terminal sample MUST
   inset its content stack from the box's top, leading and bottom edges by
   exactly the theme's resolved terminal padding on that side, and MUST
   constrain the trailing edge to at most the box's trailing edge minus the
   resolved trailing padding.
-- **draws-cursor-shape**: The terminal sample MUST render a one-cell caret,
+- **cursor-shape**: The terminal sample MUST render a one-cell caret,
   sized off the resolved font (width = `max(font.pointSize * 0.6, 5)`, height
   = `font.pointSize + 3`, except height 2 for `.underline` and width 2 for
   `.bar`), filled or outlined with the `cursor` role color, in the shape given
   by the resolved `TerminalCursorShape` (`.block` filled, `.hollowBlock`
   1pt-bordered, `.underline` a 2pt-tall bar, `.bar` a 2pt-wide bar).
-- **renders-swatch-grid-of-ansi-colors**: `show(_:)` MUST construct and append
+- **ansi-swatch-grid**: `show(_:)` MUST construct and append
   a `ComposableSettings.SwatchGridView` populated with the resolved palette's
   16 `ansiColors`, at 8 columns, as the final item in `container`.
-- **derives-appearance-entirely-from-semantic-palette**: Every color and font
-  value the five sample cards use MUST come from a single
+- **semantic-palette-derivation**: Every color value, and every font value
+  except the terminal sample's (which instead resolves via
+  `terminal-appearance-resolution`), MUST come from a single
   `SemanticPalette(theme:)` constructed once at the top of `show(_:)`, read
   through its role-based `color(_:)`/`nsColor(_:)`/`font(_:)` API — never a
   raw, theme-independent color or font literal.
@@ -190,7 +189,7 @@ capsule for the status row rather than reusing the shared `Badge` ingredient
   override this to 5pt. List rows and status badges use 5pt. ANSI swatches
   (in the embedded `SwatchGridView`) use 3pt — see that recipe.
 - **Padding**: Card content is inset 10pt top / 12pt leading / ≤12pt trailing
-  (may be narrower) / 10pt bottom, per `insets-card-content-consistently`. The
+  (may be narrower) / 10pt bottom, per `card-content-insets`. The
   terminal sample instead insets by the theme's resolved terminal padding
   (default 10pt on all four sides, per `TerminalAppearance`/`UserSettings`
   defaults) rather than the fixed 10/12/12/10 shape.
@@ -200,7 +199,7 @@ capsule for the status row rather than reusing the shared `Badge` ingredient
   (`TerminalAppearance.resolvedFont(theme:)`) instead of any `TextRole`.
 - **Background**: `self` — the theme's `windowBackground`. Chrome, list,
   controls and status cards — `surface`. The terminal card —
-  `windowBackground` (see `renders-terminal-box-on-window-background`). The
+  `windowBackground` (see `terminal-box-background`). The
   chrome sample's inner panel — `elevatedSurface`. Text field simulations —
   `controlBackground`. Status badges — their status color at 22% alpha.
 - **Foreground/Text**: Role-specific per element — `primaryText`,
@@ -213,7 +212,7 @@ capsule for the status row rather than reusing the shared `Badge` ingredient
   No border on `self`, `container`, any card's outer box, or list rows/pills.
 - **Shadow**: Not applicable — no `NSShadow`, `shadowOpacity`, or similar
   layer-shadow property is set anywhere in `ThemePreviewView.swift`.
-- **Min/Max size**: Every card box (via `fill(_:with:)`) and the terminal
+- **Min/Max size**: Every card box and the terminal
   box each carry a `widthAnchor >= 280` constraint; `self` and `container`
   have no explicit min/max size of their own — the view's overall size is
   driven by its arranged content plus whatever constraints a host applies to
@@ -223,7 +222,7 @@ capsule for the status row rather than reusing the shared `Badge` ingredient
 
 | State | Appearance change |
 |-------|------------------|
-| Default | Before `show(_:)` is called, `container` is empty and `self` has no background paint (`starts-empty-without-theme`). After `show(_:)`, the view fully repaints as described in Overview/Behavioral Requirements; calling `show(_:)` again with a different (or the same) theme tears down and rebuilds every card from that theme. |
+| Default | Before `show(_:)` is called, `container` is empty and `self` has no background paint (`empty-initial-state`). After `show(_:)`, the view fully repaints as described in Overview/Behavioral Requirements; calling `show(_:)` again with a different (or the same) theme tears down and rebuilds every card from that theme. |
 | Pressed | Not applicable: no `NSControl`, target-action, or click-handling code exists anywhere in `ThemePreviewView.swift`; every element (boxes, pills, rows, badges, the caret) is a plain, non-interactive `NSView`/`NSStackView`/`NSTextField(labelWithString:)`. |
 | Disabled | Not applicable: `isEnabled` is never referenced in source; the component has no notion of an enabled/disabled state. |
 | Focused | Not applicable: the component overrides no focus-related property and contains no `NSControl`, so it never becomes first responder or shows a focus ring. |
@@ -264,63 +263,57 @@ capsule for the status row rather than reusing the shared `Badge` ingredient
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| theme-preview-view-001 | pins-container-to-self | Construct the view and inspect its subviews/constraints | `self` has exactly one direct subview, `container`, whose top/leading/trailing/bottom anchors equal `self`'s with no constant |
-| theme-preview-view-002 | starts-empty-without-theme | `ThemePreviewView()` (no `theme` argument) | `container.arrangedSubviews` is empty and `self.layer?.backgroundColor` is unset |
-| theme-preview-view-003 | traps-on-coder-init | Attempt `ThemePreviewView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
-| theme-preview-view-004 | clears-and-rebuilds-on-each-show | Call `show(themeA)`, note the 6 arranged subviews, then call `show(themeB)` | None of the original 6 subview instances remain in `container`; a fresh 6 are present |
-| theme-preview-view-005 | paints-self-with-window-background | Call `show(theme)` | `self.layer?.backgroundColor == SemanticPalette(theme: theme).nsColor(.windowBackground).cgColor` |
-| theme-preview-view-006 | renders-cards-in-fixed-order | Call `show(theme)` and inspect `container.arrangedSubviews` | Exactly 6 items, in order: chrome, list, controls, status, terminal, swatch grid |
-| theme-preview-view-007 | stretches-sample-cards-to-container-width | Call `show(theme)` inside a wide host and inspect constraints | Each of the first 5 arranged subviews has an active `widthAnchor == container.widthAnchor` constraint |
-| theme-preview-view-008 | constrains-cards-to-minimum-width | Call `show(theme)` and inspect constraints on each of the 5 sample-card boxes | Each has an active `widthAnchor >= 280` constraint |
-| theme-preview-view-009 | insets-card-content-consistently | Inspect the chrome card's content-stack constraints after `show(theme)` | Top offset 10, leading offset 12, bottom offset -10, trailing constrained `lessThanOrEqualTo` -12 |
-| theme-preview-view-010 | renders-chrome-title | Call `show(theme)` and read the chrome card's first label | Text is "Window Title", color equals `palette.nsColor(.primaryText)`, font equals `palette.font(.title)` |
-| theme-preview-view-011 | renders-chrome-body-and-caption | Read the chrome card's second and third labels | "Body text in the body font." in `primaryText`/`body`; "Secondary caption text" in `secondaryText`/`caption` |
-| theme-preview-view-012 | renders-chrome-controls-row | Read the chrome card's controls row | Two pills, "Button" (fill `accent`, text `onAccentText`) and "Selected" (fill `selection`, text `selectionText`), both `button` font, row spacing 8 |
-| theme-preview-view-013 | renders-chrome-divider | Inspect the chrome card's hairline view | Height constraint == 1, background color == `palette.nsColor(.divider)`, width == card width - 24 |
-| theme-preview-view-014 | renders-chrome-outlined-panel | Inspect the chrome card's inner panel | 8pt corner radius, fill `elevatedSurface`, 1pt border `outline`, containing a "Panel · outline" label in `tertiaryText`/`caption` |
-| theme-preview-view-015 | renders-tab-strip | Read the list card's tab row | Three pills "Notes"/"Chat"/"Terminal"; "Notes" fill `elevatedSurface` text `primaryText`, the other two fill `surface` text `secondaryText`; 4pt spacing |
-| theme-preview-view-016 | renders-three-list-rows | Read the list card's rows in order | ("Release notes","Yesterday",unselected), ("Design review","2 days ago",selected), ("Scratch","Last week",unselected) |
-| theme-preview-view-017 | styles-selected-list-row | Inspect the "Design review" row | Background `selection`, 5pt corner radius, both labels colored `selectionText` |
-| theme-preview-view-018 | styles-unselected-list-row | Inspect the "Release notes" row | Background transparent, title `primaryText`, detail `tertiaryText` |
-| theme-preview-view-019 | lays-out-list-row-content | Inspect any row's label constraints | Title leading offset 8, detail trailing offset -8, both centered vertically, detail's leading >= title's trailing + 8 |
-| theme-preview-view-020 | renders-two-equal-width-text-fields | Read the controls card's two fields | "Typed text" in `primaryText`, "Placeholder" in `placeholderText`; both `controlBackground` fill, 5pt corner radius, 1pt `border` outline, equal width, 8pt spacing |
-| theme-preview-view-021 | renders-checkbox-sample-line | Read the controls card's third element | Text "☑︎ Enabled    ☐ Disabled", color `secondaryText`, font `body` |
-| theme-preview-view-022 | renders-four-status-badges | Read the status card's badges in order | "Success"(`success`), "Warning"(`warning`), "Error"(`danger`), "Info"(`info`); row spacing 6 |
-| theme-preview-view-023 | styles-status-badge | Inspect the "Success" badge's layer | 5pt corner radius, background = `success` at 22% alpha, border 1pt = `success` at 55% alpha, text = `success` at full opacity, `caption` font |
-| theme-preview-view-024 | renders-terminal-box-on-window-background | Inspect the terminal card's box | Fill = `palette.nsColor(.windowBackground)`, 1pt border = `palette.nsColor(.border)` |
-| theme-preview-view-025 | resolves-terminal-appearance-from-theme | Call `show(theme)` where `theme.terminal` overrides font/padding/cursor | The terminal sample's font, insets, and caret shape match `TerminalAppearance.resolvedFont/resolvedPadding/resolvedCursor(theme:)`, not the `UserSettings` defaults |
-| theme-preview-view-026 | renders-terminal-sample-content | Read the terminal card's content | Line 1: "user@mac ~ % ls" (`primaryText`) + caret; line 2: "Documents" (`accent`) and "README.md" (`secondaryText`), 10pt apart, 2pt below line 1 |
-| theme-preview-view-027 | insets-terminal-content-by-resolved-padding | Set a theme with `terminal.paddingLeading = 40` and call `show(theme)` | The terminal content stack's leading offset from the box is 40, not the 10pt default |
-| theme-preview-view-028 | draws-cursor-shape | Set `theme.terminal.cursorShape = .bar` and call `show(theme)` | The caret view is 2pt wide, full cell height, filled with `palette.nsColor(.cursor)` |
-| theme-preview-view-029 | renders-swatch-grid-of-ansi-colors | Call `show(theme)` and inspect the 6th arranged subview | It is a `ComposableSettings.SwatchGridView` constructed with `palette.ansiColors` (16 colors) and `columns: 8` |
-| theme-preview-view-030 | derives-appearance-entirely-from-semantic-palette | Call `show(themeA)` then `show(themeB)` with two themes differing only in `roleOverrides` | Every sample-card color changes to match `themeB`'s resolved `SemanticPalette`; no color remains fixed across the two calls |
+| theme-preview-view-001 | container-pinning | Construct the view and inspect its subviews/constraints | `self` has exactly one direct subview, `container`, whose top/leading/trailing/bottom anchors equal `self`'s with no constant |
+| theme-preview-view-002 | empty-initial-state | `ThemePreviewView()` (no `theme` argument) | `container.arrangedSubviews` is empty and `self.layer?.backgroundColor` is unset |
+| theme-preview-view-003 | coder-init-trap | Attempt `ThemePreviewView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
+| theme-preview-view-004 | show-teardown-and-rebuild | Call `show(themeA)`, note the 6 arranged subviews, then call `show(themeB)` | None of the original 6 subview instances remain in `container`; a fresh 6 are present |
+| theme-preview-view-005 | self-background-paint | Call `show(theme)` | `self.layer?.backgroundColor == SemanticPalette(theme: theme).nsColor(.windowBackground).cgColor` |
+| theme-preview-view-006 | card-order | Call `show(theme)` and inspect `container.arrangedSubviews` | Exactly 6 items, in order: chrome, list, controls, status, terminal, swatch grid |
+| theme-preview-view-007 | card-width-stretch | Call `show(theme)` inside a wide host and inspect constraints | Each of the first 5 arranged subviews has an active `widthAnchor == container.widthAnchor` constraint |
+| theme-preview-view-008 | card-minimum-width | Call `show(theme)` and inspect constraints on each of the 5 sample-card boxes | Each has an active `widthAnchor >= 280` constraint |
+| theme-preview-view-009 | card-content-insets | Inspect the chrome card's content-stack constraints after `show(theme)` | Top offset 10, leading offset 12, bottom offset -10, trailing constrained `lessThanOrEqualTo` -12 |
+| theme-preview-view-010 | chrome-title | Call `show(theme)` and read the chrome card's first label | Text is "Window Title", color equals `palette.nsColor(.primaryText)`, font equals `palette.font(.title)` |
+| theme-preview-view-011 | chrome-body-and-caption | Read the chrome card's second and third labels | "Body text in the body font." in `primaryText`/`body`; "Secondary caption text" in `secondaryText`/`caption` |
+| theme-preview-view-012 | chrome-controls-row | Read the chrome card's controls row | Two pills, "Button" (fill `accent`, text `onAccentText`) and "Selected" (fill `selection`, text `selectionText`), both `button` font, row spacing 8 |
+| theme-preview-view-013 | chrome-divider | Inspect the chrome card's hairline view | Height constraint == 1, background color == `palette.nsColor(.divider)`, width == card width - 24 |
+| theme-preview-view-014 | chrome-outlined-panel | Inspect the chrome card's inner panel | 8pt corner radius, fill `elevatedSurface`, 1pt border `outline`, containing a "Panel · outline" label in `tertiaryText`/`caption` |
+| theme-preview-view-015 | list-tab-strip | Read the list card's tab row | Three pills "Notes"/"Chat"/"Terminal"; "Notes" fill `elevatedSurface` text `primaryText`, the other two fill `surface` text `secondaryText`; 4pt spacing |
+| theme-preview-view-016 | list-row-set | Read the list card's rows in order | ("Release notes","Yesterday",unselected), ("Design review","2 days ago",selected), ("Scratch","Last week",unselected) |
+| theme-preview-view-017 | selected-list-row-style | Inspect the "Design review" row | Background `selection`, 5pt corner radius, both labels colored `selectionText` |
+| theme-preview-view-018 | unselected-list-row-style | Inspect the "Release notes" row | Background transparent, title `primaryText`, detail `tertiaryText` |
+| theme-preview-view-019 | list-row-content-layout | Inspect any row's label constraints | Title leading offset 8, detail trailing offset -8, both centered vertically, detail's leading >= title's trailing + 8 |
+| theme-preview-view-020 | controls-text-field-pair | Read the controls card's two fields | "Typed text" in `primaryText`, "Placeholder" in `placeholderText`; both `controlBackground` fill, 5pt corner radius, 1pt `border` outline, equal width, 8pt spacing |
+| theme-preview-view-021 | controls-checkbox-line | Read the controls card's third element | Text "☑︎ Enabled    ☐ Disabled", color `secondaryText`, font `body` |
+| theme-preview-view-022 | status-badge-set | Read the status card's badges in order | "Success"(`success`), "Warning"(`warning`), "Error"(`danger`), "Info"(`info`); row spacing 6 |
+| theme-preview-view-023 | status-badge-style | Inspect the "Success" badge's layer | 5pt corner radius, background = `success` at 22% alpha, border 1pt = `success` at 55% alpha, text = `success` at full opacity, `caption` font |
+| theme-preview-view-024 | terminal-box-background | Inspect the terminal card's box | Fill = `palette.nsColor(.windowBackground)`, 1pt border = `palette.nsColor(.border)` |
+| theme-preview-view-025 | terminal-appearance-resolution | Call `show(theme)` where `theme.terminal` overrides font/padding/cursor | The terminal sample's font, insets, and caret shape match `TerminalAppearance.resolvedFont/resolvedPadding/resolvedCursor(theme:)`, not the `UserSettings` defaults |
+| theme-preview-view-026 | terminal-sample-content | Read the terminal card's content | Line 1: "user@mac ~ % ls" (`primaryText`) + caret; line 2: "Documents" (`accent`) and "README.md" (`secondaryText`), 10pt apart, 2pt below line 1 |
+| theme-preview-view-027 | terminal-content-insets | Set a theme with `terminal.paddingLeading = 40` and call `show(theme)` | The terminal content stack's leading offset from the box is 40, not the 10pt default |
+| theme-preview-view-028 | cursor-shape | Set `theme.terminal.cursorShape = .bar` and call `show(theme)` | The caret view is 2pt wide, `font.pointSize + 3` pt tall (the resolved terminal font's cell height, unchanged by `.bar`), filled with `palette.nsColor(.cursor)` |
+| theme-preview-view-029 | ansi-swatch-grid | Call `show(theme)` and inspect the 6th arranged subview | It is a `ComposableSettings.SwatchGridView` constructed with `palette.ansiColors` (16 colors) and `columns: 8` |
+| theme-preview-view-030 | semantic-palette-derivation | Call `show(themeA)` then `show(themeB)` with two themes differing only in `roleOverrides` | Every sample-card color equals what `SemanticPalette(theme: themeB)` resolves for its role (roles neither theme overrides may equal the `themeA` value; only an override-driven mismatch fails the vector) |
 
 ## Edge Cases
 
 - Null/empty input: `theme` defaults to `nil` in `init(theme:)`. When `nil`,
   `container` remains empty and `self`'s background is never painted until
   `show(_:)` is called explicitly with a concrete `ColorTheme` — this is a
-  MUST (`starts-empty-without-theme`), not a crash or a placeholder theme.
+  MUST (`empty-initial-state`), not a crash or a placeholder theme.
 - Boundary values — repeated/idempotent `show(_:)`: calling `show(_:)`
   multiple times, including twice with the same theme, produces the same
   visual result each time because every call tears down all existing
-  arranged subviews before rebuilding (`clears-and-rebuilds-on-each-show`).
+  arranged subviews before rebuilding (`show-teardown-and-rebuild`).
   This is a MUST, traceable to the unconditional
   `arrangedSubviews.forEach { $0.removeFromSuperview() }` at the top of
   `show(_:)`.
 - Boundary values — long or narrow content: cards are forced to exactly
-  `container`'s width (`stretches-sample-cards-to-container-width`), but no
-  label anywhere in `ThemePreviewView.swift` sets `lineBreakMode`,
-  `maximumNumberOfLines`, or `usesSingleLineMode` — every label is a plain
-  `NSTextField(labelWithString:)` left at its AppKit default. In a very
-  narrow host, or with a theme whose typography scale enlarges text
-  substantially, list-row detail labels, badge text, or the chrome sample's
-  content (whose stack is only `lessThanOrEqualTo`-constrained on its
-  trailing edge, per `insets-card-content-consistently`) can be clipped or
-  compressed rather than reflowed; this is a SHOULD-level design gap the
-  source does not otherwise handle, and is captured for completeness though
-  it does not rise to an open question because the label defaults themselves
-  are unambiguous AppKit behavior, not an unresolved question.
+  `container`'s width (`card-width-stretch`), but no label anywhere in
+  `ThemePreviewView.swift` sets `lineBreakMode`, `maximumNumberOfLines`, or
+  `usesSingleLineMode`, so in a very narrow host or with an enlarged
+  typography scale, list-row detail labels, badge text, or the chrome
+  sample's content can be clipped or compressed rather than reflowed, per
+  each plain `NSTextField(labelWithString:)`'s AppKit default.
 - Concurrent access: Not applicable — the class is `@MainActor`-isolated, so
   Swift's concurrency checker serializes every call to `show(_:)` and every
   private `make*Sample` helper; there is no code path by which two threads
@@ -355,7 +348,7 @@ capsule for the status row rather than reusing the shared `Badge` ingredient
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `theme` | `ColorTheme?` | `nil` | Passed to `init(theme:)`; when non-nil, `show(_:)` is called immediately during initialization. When `nil`, the view starts empty (`starts-empty-without-theme`). |
+| `theme` | `ColorTheme?` | `nil` | Passed to `init(theme:)`; when non-nil, `show(_:)` is called immediately during initialization. When `nil`, the view starts empty (`empty-initial-state`). |
 
 The only other entry point is the public method `show(_ theme: ColorTheme)`,
 which fully tears down and rebuilds the preview for a new theme (see
@@ -370,7 +363,12 @@ appears anywhere in `ThemePreviewView.swift`.
 
 ## Localization
 
-| String Key | Default (en) | Context |
+None of the keys below exist in source — `ThemePreviewView.swift` makes no
+localization call of any kind. They are proposed keys for the localization
+pass named in the open question below, not an inventory of what is
+implemented.
+
+| Proposed Key | Default (en) | Context |
 |-----------|-------------|---------|
 | `theme_preview.chrome.title` | Window Title | Chrome sample's title label |
 | `theme_preview.chrome.body` | Body text in the body font. | Chrome sample's body label |
@@ -415,7 +413,7 @@ replacing each literal with `NSLocalizedString` and a corresponding
   substitute for.
 - **Increase Contrast**: Not applicable at this component's own level — every
   color is read through `SemanticPalette`'s role API
-  (`derives-appearance-entirely-from-semantic-palette`); `ThemePreviewView`
+  (`semantic-palette-derivation`); `ThemePreviewView`
   itself contains no separate Increase Contrast branch, so it inherits
   whatever contrast behavior the active `SemanticPalette`/theme provides
   without any code of its own to adjust.
@@ -473,12 +471,16 @@ Not applicable: `ThemePreviewView.swift` contains no logging call (no
   ANSI swatches (see the `SwatchGridView` recipe's own Compose note).
 - **React/Web**: A flex column of five `<div class="card">` blocks (
   `border-radius: 8px`, `min-width: 280px`, `width: 100%`, background from a
-  `--surface`/`--window-background` CSS custom property) each laid out with
+  `--surface`/`--window-background` custom property) each laid out with
   `padding: 10px 12px`, followed by a CSS Grid of ANSI swatches (`gap` and
   `grid-template-columns: repeat(8, ...)`, mirroring the `SwatchGridView`
-  recipe). All colors and fonts bind to the same theme custom properties the
-  rest of the web app's theme system exposes, so the preview updates
-  reactively on a theme change exactly as `show(_:)` does imperatively here.
+  recipe). Because the preview must show the given `theme` prop rather than
+  whichever theme is currently active app-wide, every custom property is set
+  inline on the preview's own root element (`style={{ '--surface':
+  theme.surface, ... }}`) from that prop, not read from the document-level
+  theme class/attribute the rest of the app uses — so passing a different
+  `theme` repaints only the preview, exactly as `show(_:)` does imperatively
+  here.
 - **AppKit/UIKit** (source platform): Source file
   `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/ThemePreviewView.swift`.
   A macOS-only (`import AppKit`), `@MainActor` `NSView` subclass in the
@@ -492,92 +494,107 @@ Not applicable: `ThemePreviewView.swift` contains no logging call (no
   would instead compose a vertical `UIStackView` of card `UIView`s (each
   `layer.cornerRadius`/`backgroundColor` styled the same way), with
   `UILabel`s in place of `NSTextField(labelWithString:)` and the same
-  `SwatchGridView`-equivalent grid embedded at the end.
-- **WinUI 3** (the reason this recipe exists): Compose a vertical
-  `StackPanel` (`Spacing="10"`) of five `Border` "card" elements
-  (`CornerRadius="8"`, `MinWidth="280"`, `HorizontalAlignment="Stretch"`,
-  `Background` bound to a `{ThemeResource}` brush that mirrors the
-  corresponding semantic role — e.g. `CardBackgroundFillColorDefaultBrush`
-  for `surface`, `LayerFillColorDefaultBrush` for `elevatedSurface`), each
-  containing a `StackPanel` of `TextBlock`/`Border` children styled per the
-  requirements above (a "pill" is a `Border` with `CornerRadius="5"` around a
-  `TextBlock`; a status badge is the same shape with its `Background`/
-  `BorderBrush` bound through a converter to the status color at 22%/55%
-  opacity). Terminal padding maps to the `Border`'s `Padding` property bound
-  directly to the four resolved padding values; the caret maps to a small
-  `Border`/`Rectangle` whose `Width`/`Height`/`CornerRadius`/fill-vs-outline
-  are chosen from a `VisualStateManager` group with one state per
-  `TerminalCursorShape` case (Block/HollowBlock/Underline/Bar), each setter
-  matching the width/height math in `draws-cursor-shape`. The ANSI swatch
+  `SwatchGridView`-equivalent grid embedded at the end. Implementation detail:
+  `container` is pinned to `self` via the shared `Self.pinToEdges` helper;
+  each card's content stack is built by the private `fill(_:with:)` helper;
+  and `show(_:)` tears down the prior cards with
+  `container.arrangedSubviews.forEach { $0.removeFromSuperview() }` before
+  rebuilding.
+- **WinUI 3**: Compose a vertical `StackPanel` (`Spacing="10"`) of five
+  `Border` "card" elements (`CornerRadius="8"`, `MinWidth="280"`,
+  `HorizontalAlignment="Stretch"`), each containing a `StackPanel` of
+  `TextBlock`/`Border` children styled per the requirements above (a "pill" is
+  a `Border` with `CornerRadius="5"` around a `TextBlock`; a status badge is
+  the same shape with its `Background`/`BorderBrush` bound through a converter
+  to the status color at 22%/55% opacity). Because the preview must render the
+  `ColorTheme` it is given rather than the app's currently active theme, every
+  `Background`/`Foreground`/`BorderBrush` binds to a `ResourceDictionary` built
+  at preview-construction time from that `ColorTheme` and merged only into the
+  preview's own subtree (for example via `FrameworkElement.Resources` on the
+  container) — never to the app-wide `{ThemeResource}` brushes (such as
+  `CardBackgroundFillColorDefaultBrush`) that repaint with whichever theme is
+  currently active. Terminal padding maps to the `Border`'s `Padding` property
+  bound directly to the four resolved padding values; the caret maps to a
+  small `Border`/`Rectangle` whose `Width`/`Height`/`CornerRadius`/
+  fill-vs-outline are chosen from a `VisualStateManager` group with one state
+  per `TerminalCursorShape` case (Block/HollowBlock/Underline/Bar), each
+  setter matching the width/height math in `cursor-shape`. The ANSI swatch
   grid maps to an `ItemsRepeater` with a `UniformGridLayout`, exactly as in
-  the `SwatchGridView` recipe's own WinUI 3 note. Because every brush is a
-  `{ThemeResource}` rather than a literal `Color`, swapping the app's active
-  `ResourceDictionary` (WinUI's analogue of calling `show(_:)` with a new
-  `ColorTheme`) repaints the whole preview automatically through XAML's own
-  theme-resource resolution, without an explicit rebuild pass.
+  the `SwatchGridView` recipe's own WinUI 3 note. Rebuilding that scoped
+  `ResourceDictionary` from a new `ColorTheme` (WinUI's analogue of calling
+  `show(_:)` with a new theme) repaints the whole preview without touching the
+  app's own active theme resources.
 
 ## Design Decisions
 
-- Decision: Document `ThemePreviewView` with 30 behavioral requirements,
-  well above sibling ingredients such as `SwatchGridView` (12) or `Badge`
-  (7).
-  Rationale: `ThemePreviewView` genuinely composes five distinct
-  sample-card builders plus an embedded `SwatchGridView` and a live
-  `TerminalAppearance` resolution, each with its own layout, color and font
-  rules traceable to source — matching a sibling's requirement count here
-  would either omit real, independently testable behavior or artificially
-  merge unrelated behaviors into compound requirements.
-  Approved: pending
-- Decision: Treat the `SwatchGridView` being excluded from the
-  `cards.map { widthAnchor... }` width stretch as a documented source
-  quirk, not a defect this recipe silently corrects.
-  Rationale: `show(_:)` builds the width-stretch constraints only from the
-  `cards` array of five sample boxes; the `SwatchGridView` appended
-  afterward is never included in that array or its `.map`. The recipe
-  describes this exactly as source does, in Edge Cases, rather than
-  assuming the intended behavior was to stretch every appended view.
-  Approved: pending
-- Decision: Document that the status sample's badge capsule is a private,
-  structurally similar re-implementation, not a reuse of the shared `Badge`
-  ingredient, without treating that as a defect.
-  Rationale: `ThemePreviewView.swift` defines its own `private static func
-  badge(_:_:_:)` building a tinted capsule inline; it never references
-  `AgenticToolkit`'s `Badge` type. The recipe records this exactly as source
-  does — the two happen to look alike, but that is not evidence they are the
-  same component, and unifying them is outside this file's actual behavior.
-  Approved: pending
-- Decision: Leave both Accessibility bullets and the Localization section as
-  open questions rather than assuming a specific grouping,
-  labeling, or localization strategy.
-  Rationale: `ThemePreviewView.swift` contains zero accessibility API calls
-  and zero localization calls of any kind, and there is no comparable
-  `ThemePreviewView`-family sibling recipe to pattern-match a grouping,
-  labeling, or localization decision against — only `SwatchGridView`, whose
-  own gaps (per-swatch color labels) are a different question already
-  documented in its own recipe, and are cross-referenced rather than
-  repeated here.
-  Approved: pending
+**Decision**: Treat the `SwatchGridView` being excluded from the
+`cards.map { widthAnchor... }` width stretch as a documented source quirk,
+not a defect this recipe silently corrects.
+**Rationale**: `show(_:)` builds the width-stretch constraints only from the
+`cards` array of five sample boxes; the `SwatchGridView` appended afterward
+is never included in that array or its `.map`. The recipe describes this
+exactly as source does, in Edge Cases, rather than assuming the intended
+behavior was to stretch every appended view.
+**Approved**: pending
+
+**Decision**: Document that the status sample's badge capsule is a private,
+structurally similar re-implementation of the shared `Badge` ingredient — a
+known DRY gap, recorded as built rather than corrected.
+**Rationale**: `ThemePreviewView.swift` defines its own `private static func
+badge(_:_:_:)` building a tinted capsule inline; it never references
+`AgenticToolkit`'s `Badge` type. The two happen to look alike, which is
+exactly the duplication a shared-components policy exists to prevent; this
+recipe records that duplication as source built it rather than assuming an
+unmade refactor, since composing `Badge` here is a source change this recipe
+cannot make.
+**Approved**: pending
+
+**Decision**: Leave both Accessibility bullets and the Localization section
+as open questions rather than assuming a specific grouping, labeling, or
+localization strategy.
+**Rationale**: `ThemePreviewView.swift` contains zero accessibility API
+calls and zero localization calls of any kind, and there is no comparable
+`ThemePreviewView`-family sibling recipe to pattern-match a grouping,
+labeling, or localization decision against — only `SwatchGridView`, whose
+own gaps (per-swatch color labels) are a different question already
+documented in its own recipe, and are cross-referenced rather than repeated
+here.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
-| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
-| [platform-theming](agenticdevelopercookbook://compliance/platform-compliance#platform-theming) | passed | platform-compliance |
-| [theme-token-only-colors](agenticdevelopercookbook://compliance/ui#theme-token-only-colors) | passed | ui |
-| [no-raw-hex-tokens-only](agenticdevelopercookbook://compliance/ui#no-raw-hex-tokens-only) | passed | ui |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [meaningful-labels](agenticdevelopercookbook://compliance/accessibility#meaningful-labels) | partial | accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [reduced-motion](agenticdevelopercookbook://compliance/accessibility#reduced-motion) | passed | accessibility |
-| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | internationalization |
-| [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | reliability |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
+| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
+| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | Platform Compliance |
+| [platform-theming](agenticdevelopercookbook://compliance/platform-compliance#platform-theming) | passed | Platform Compliance |
+| [theme-token-only-colors](agenticdevelopercookbook://compliance/ui#theme-token-only-colors) | passed | UI |
+| [no-raw-hex-tokens-only](agenticdevelopercookbook://compliance/ui#no-raw-hex-tokens-only) | passed | UI |
+| [meaningful-labels](agenticdevelopercookbook://compliance/accessibility#meaningful-labels) | partial | Accessibility |
+| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | Accessibility |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+| [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | Reliability |
+| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | Architecture |
+| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
+
+`keyboard-navigable` and `reduced-motion` are omitted: `ThemePreviewView.swift`
+has no `NSControl`, target-action, or interactive element of any kind (see
+States/Pressed) and no `NSAnimationContext`/animator proxy or transition of
+any kind (see Accessibility Options/Reduce Motion), so neither check applies.
+The remaining statuses rest on `ThemePreviewView.swift` itself: every color
+and role-styled font is read through `SemanticPalette`/`TerminalAppearance`
+role lookups, never a raw literal (the passed checks above); no
+`setAccessibilityRole`/`setAccessibilityElement`/label override is set on any
+container view, leaving VoiceOver labeling only partially met by AppKit's
+default static-text role on each label (`meaningful-labels`, partial); the
+four status badges pair color with an explicit text label
+(`differentiate-without-color`, passed); and every visible string is a
+literal passed to `NSTextField(labelWithString:)`, never routed through
+`NSLocalizedString` (`no-hardcoded-strings`, failed).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for ThemePreviewView, covering the chrome/list/controls/status/terminal sample builders, the embedded SwatchGridView composition, TerminalAppearance resolution, and open questions on accessibility grouping and demo-content localization for review. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed all 30 requirements to subject-only kebab-case; moved private-implementation citations (`Self.pinToEdges`, `fill(_:with:)`, the arranged-subview teardown call) out of requirements and into AppKit Platform Notes; fixed the Overview's sample-card count and the terminal-font exemption in semantic-palette-derivation; corrected test vectors 028 and 030 and grounded empty-initial-state to cover the background paint for vector 002; reformatted Design Decisions to the bold three-line convention, dropped the requirement-count decision, and reworded the badge decision to record the Badge-ingredient duplication as a known DRY gap; relabeled Localization as proposed keys; rewrote the WinUI 3 and React/Web platform notes to scope theming to the given ColorTheme instead of the app's active theme; moved the misplaced cookbook `references` entry to `related` and deduped `swatch-grid-view`; and reworked Compliance to title-case categories, drop the two inapplicable accessibility checks, and add a sourcing sentence. |

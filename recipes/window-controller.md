@@ -3,7 +3,7 @@ id: 8ed694b4-e238-48c5-9589-81ce6aaebb32
 title: WindowController
 domain: agentictoolkit://recipes/window-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -94,56 +94,57 @@ entirely.
   view of its own; `contentView`'s appearance is entirely the caller's.
 - **Padding**: Not applicable — same reason.
 - **Font**: Not applicable — same reason.
-- **Background**: Not applicable — `WindowController.swift` sets no
-  background; the window's own background is `SingleWindowController`'s
-  concern (already documented there).
-- **Foreground/Text**: Not applicable — no text is rendered by this file.
-- **Border**: Not applicable — no border is drawn by this file.
-- **Shadow**: Not applicable — no shadow is applied by this file.
+- **Background**: Not applicable — neither type sets a background of its own;
+  the window's own background is `SingleWindowController`'s concern (already
+  documented there).
+- **Foreground/Text**: Not applicable — the component renders no text of its
+  own.
+- **Border**: Not applicable — the component draws no border of its own.
+- **Shadow**: Not applicable — the component applies no shadow of its own.
 - **Min/Max size**: Not applicable — window sizing is `SingleWindowController`'s
-  concern; this file adds no size constraint of its own.
+  concern; neither type adds a size constraint of its own.
 
 ## States
 
-| State | Appearance change |
+| State | Behavior |
 |-------|------------------|
 | Default (matching content type) | `viewController` returns `contentViewController` downcast to `ViewControllerType` |
 | Mismatched or absent content view controller | `viewController` returns `nil` |
 | `WindowContentViewController` constructed, view not yet loaded | `contentView` already exists (set at `init`); `view` has not been created yet — AppKit's normal lazy `NSViewController.loadView()` timing applies |
 | `WindowContentViewController` view loaded | `self.view === contentView` |
-| Pressed | Not applicable — neither class is an interactive control; `WindowController.swift` renders nothing and has no press-state code. |
-| Disabled | Not applicable — neither class has an enabled/disabled state of its own in this file. |
+| Pressed | Not applicable — neither type is an interactive control; the component renders nothing and has no press-state code. |
+| Disabled | Not applicable — neither type has an enabled/disabled state of its own. |
 | Focused | Not applicable — neither class overrides key-view or first-responder handling. |
 | Loading | Not applicable — `viewController`'s cast and `loadView()`'s view assignment are both synchronous; there is no asynchronous loading state. |
 
 ## Accessibility
 
-- Role/trait: Not applicable — `WindowController.swift` sets no
-  `NSAccessibility` role, trait, or identifier of its own. The window's
-  accessibility identifier is already `SingleWindowController`'s concern (see
+- Role/trait: Not applicable — the component sets no `NSAccessibility` role,
+  trait, or identifier of its own. The window's accessibility identifier is
+  already `SingleWindowController`'s concern (see
   `agentictoolkit://recipes/single-window-controller`); any content-level role
   belongs to whatever `ViewControllerType`/`ViewType` the caller supplies —
   a child component with its own recipe, not this one.
-- Label requirements: Not applicable — no label is set by this file for the
+- Label requirements: Not applicable — the component sets no label, for the
   same reason.
-- Announce state changes: Not applicable — this file makes no
+- Announce state changes: Not applicable — the component makes no
   `NSAccessibility.post(element:notification:)` call.
-- Minimum tap target: Not applicable — this file defines no interactive
+- Minimum tap target: Not applicable — the component defines no interactive
   control of its own; `contentView`'s target sizing is the caller-supplied
   view's concern.
 
 ## Conformance Test Vectors
 
-| ID | Requirements | Input | Expected |
-|----|-------------|-------|----------|
+| ID | Requirements | Input | Action | Expected |
+|----|-------------|-------|--------|----------|
 | window-controller-001 | inherits-single-window-controller-lifecycle | a `WindowController<SomeVC>` subclass instance | `showWindow()` is called | the window builds, shows, and persists frame/visibility exactly as `SingleWindowController` specifies |
 | window-controller-002 | exposes-typed-view-controller-accessor | a `WindowController<SomeVC>` whose `contentViewController` is a `SomeVC` instance | `viewController` is read | the same instance is returned, typed as `SomeVC` |
 | window-controller-003 | returns-nil-for-non-matching-content-view-controller | a `WindowController<SomeVC>` whose `contentViewController` is `nil` or a different `NSViewController` subclass | `viewController` is read | `nil` is returned |
-| window-controller-004 | declares-no-additional-initializer | any `WindowController<T>` subclass | source is inspected | no initializer is declared in `WindowController`; only the inherited `init(windowID:contentViewController:)` and unavailable `init?(coder:)` are callable |
+| window-controller-004 | declares-no-additional-initializer | any `WindowController<T>` subclass | attempt to call `init(windowID:contentViewController:)`, and separately attempt to call `init?(coder:)` | the `init(windowID:contentViewController:)` call compiles and constructs the instance; the `init?(coder:)` call does not compile, since `WindowController` declares no initializer of its own and inherits `SingleWindowController`'s `@available(*, unavailable)` `init?(coder:)` |
 | window-controller-005 | exposes-typed-content-view-property | a `WindowContentViewController<NSView>` built with `init(contentView:)` | `contentView` is read | it returns the exact instance passed to `init` |
 | window-controller-006 | initializes-view-controller-with-supplied-content-view | a view instance `v` | `WindowContentViewController(contentView: v)` is constructed | `contentView === v` and the instance is a fully initialized `NSViewController` |
 | window-controller-007 | provides-parameterless-convenience-initializer | a `ViewType` with a working parameterless initializer | `WindowContentViewController<ViewType>()` is constructed | `contentView` is a freshly constructed `ViewType()` instance |
-| window-controller-008 | fails-at-runtime-on-coder-initialization | any | `init?(coder:)` is invoked | the process traps with `fatalError("init(coder:) has not been implemented")` |
+| window-controller-008 | fails-at-runtime-on-coder-initialization | a `WindowContentViewController<ViewType>` type | `init?(coder:)` is invoked from a death test run in a separate process (an in-process `XCTest` cannot assert a process trap; treat as review-only where a death-test harness is unavailable) | the process traps with `fatalError("init(coder:) has not been implemented")` |
 | window-controller-009 | installs-content-view-directly-in-load-view | a constructed `WindowContentViewController` | `loadView()` runs (triggered by first access to `view`) | `self.view === contentView`, with no nib loaded |
 
 ## Edge Cases
@@ -158,13 +159,13 @@ entirely.
   `@MainActor`-isolated by inheritance from `SingleWindowController`'s
   explicit `@MainActor` (Swift's global-actor inheritance rule).
   `WindowContentViewController<ViewType>` declares no explicit `@MainActor`
-  of its own in this file; its isolation is whatever AppKit's `NSViewController`
-  overlay provides. This file adds no additional concurrency guard of its
-  own in either case.
+  of its own, but `NSViewController` itself is `@MainActor`-isolated in the
+  AppKit overlay, so the subclass inherits that isolation the same way.
+  Neither type adds an additional concurrency guard of its own.
 - **Error states**: Not applicable beyond the deliberate `fatalError` in
-  `init?(coder:)` — no throwing or failable API exists in this file.
-- **Offline/disconnected state**: Not applicable — this file has no network
-  dependency.
+  `init?(coder:)` — no throwing or failable API exists in the component.
+- **Offline/disconnected state**: Not applicable — the component has no
+  network dependency.
 
 ## Configuration
 
@@ -175,52 +176,46 @@ entirely.
 
 ## Deep Linking
 
-Not applicable: `WindowController.swift` defines no URL-scheme or deep-link
-handling of its own.
+Not applicable: the component defines no URL-scheme or deep-link handling of
+its own.
 
 ## Localization
 
-Not applicable: `WindowController.swift` introduces no string literal at
-all — no `Text`, `Label`, `stringValue`, or `title` assignment anywhere in
-the file.
+Not applicable: the component introduces no string literal at all — no
+`Text`, `Label`, `stringValue`, or `title` assignment anywhere in its source.
 
 ## Accessibility Options
 
-Document which accessibility display options (Rule 15) this component
-responds to:
-
 | Option | Behavior |
 |--------|----------|
-| Reduce Motion | Not applicable — the file performs no animation or motion of any kind. |
-| Increase Contrast | Not applicable — the file sets no color values. |
-| Differentiate Without Color | Not applicable — no state in this file is conveyed by color. |
+| Reduce Motion | Not applicable — the component performs no animation or motion of any kind. |
+| Increase Contrast | Not applicable — the component sets no color values. |
+| Differentiate Without Color | Not applicable — no state in the component is conveyed by color. |
 
 ## Feature Flags
 
-Not applicable: `WindowController.swift` reads no feature-flag system of its
-own.
+Not applicable: the component reads no feature-flag system of its own.
 
 ## Analytics
 
-Not applicable: `WindowController.swift` emits no analytics events of its
-own. Window-interaction tracking is `SingleWindowController`'s concern
+Not applicable: the component emits no analytics events of its own.
+Window-interaction tracking is `SingleWindowController`'s concern
 (already documented as delegated to `WindowManager.windowDidInteract(_:kind:)`
 in `agentictoolkit://recipes/single-window-controller`).
 
 ## Privacy
 
 - **Data collected**: None.
-- **Storage**: None — this file persists nothing of its own; whatever
+- **Storage**: None — the component persists nothing of its own; whatever
   frame/visibility persistence occurs on a `WindowController` instance is
   `SingleWindowController`'s behavior, already documented in
   `agentictoolkit://recipes/single-window-controller`.
-- **Transmission**: Not applicable — no network code in this file.
-- **Retention**: Not applicable — no data is retained by this file.
+- **Transmission**: Not applicable — the component contains no network code.
+- **Retention**: Not applicable — the component retains no data.
 
 ## Logging
 
-Not applicable: `WindowController.swift` contains no logging calls of its
-own.
+Not applicable: the component contains no logging calls of its own.
 
 ## Platform Notes
 
@@ -238,13 +233,17 @@ own.
   the closest analog to a typed accessor is a typed `ref` on a child
   component (e.g. `useRef<ContentHandle>()`), used only when a parent needs
   imperative access to a specific child's instance methods.
-- **AppKit (source platform)**: `WindowController.swift` defines both types.
+- **AppKit / UIKit**: `WindowController.swift` defines both types for AppKit.
   `WindowController<ViewControllerType>` is specific to this file for its
   `as?`-based typed accessor over `NSWindowController.contentViewController`
   and for adding no initializer of its own. `WindowContentViewController<ViewType>`
   is specific to this file for overriding `loadView()` to skip nib loading
   and for the coder initializer's runtime-only failure (see Design
-  Decisions).
+  Decisions). UIKit has no `NSWindowController` equivalent, so
+  `WindowController`'s typed accessor has no direct UIKit counterpart; but
+  `WindowContentViewController`'s pattern maps directly, since
+  `UIViewController` also declares `loadView()` for installing a view
+  without a nib, exactly as this class overrides it here.
 - **WinUI 3**: There is no `NSViewController`-equivalent generic content
   controller sitting inside a WinUI `Window` — content is set directly via
   `Window.Content` (a `UIElement`), and navigation/lifecycle parity is
@@ -262,42 +261,47 @@ own.
 
 ## Design Decisions
 
-Decision: Document only what `WindowController.swift` itself adds — the
+**Decision**: Document only what `WindowController.swift` itself adds — the
 typed `viewController` accessor and `WindowContentViewController` — and treat
 all window lifecycle, frame-persistence, visibility-persistence, and HUD
 behavior as inherited unchanged from `SingleWindowController`, cited through
 `depends-on` rather than restated.
-Rationale: `SingleWindowController` already has its own canonical recipe
+**Rationale**: `SingleWindowController` already has its own canonical recipe
 (`agentictoolkit://recipes/single-window-controller`); restating its
 requirements here would duplicate content that has its own source of truth
 and risks drift when that recipe changes, and would misrepresent this file's
 actual (much smaller) scope.
-Approved: pending
+**Approved**: pending
 
-Decision: Document `WindowContentViewController.init?(coder:)`'s
+**Decision**: Document `WindowContentViewController.init?(coder:)`'s
 runtime-only `fatalError` as a quirk rather than describing it as matching
 `SingleWindowController`'s coder-rejection pattern.
-Rationale: source fidelity forbids smoothing over an inconsistency —
+**Rationale**: source fidelity forbids smoothing over an inconsistency —
 `SingleWindowController.init?(coder:)` is marked `@available(*, unavailable)`
 (a compile-time failure), while `WindowContentViewController.init?(coder:)`
 carries no such attribute and remains a normally callable initializer that
 only fails at runtime when actually invoked.
-Approved: pending
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | `WindowController` is `@MainActor`-isolated by inheritance from `SingleWindowController`; `WindowContentViewController` carries no explicit annotation in this file and relies on AppKit's own `NSViewController` isolation. |
-| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | Neither class sets any color value; there is no appearance code in this file at all. |
-| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Built entirely from `NSWindowController`/`NSViewController` plumbing, with no custom-drawn chrome. |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | No state in this file is conveyed by color; it conveys no state of its own beyond the typed/`nil` accessor result. |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | This file adds no accessibility identifier or label of its own and does not obstruct whatever the caller-supplied `ViewControllerType`/`ViewType` provides. |
-| [localizable-strings](agenticdevelopercookbook://compliance/i18n#localizable-strings) | passed | The file contains no string literal of any kind. |
-| [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | `viewController` is a pure computed read with no side effect; repeated reads return the same result for an unchanged `contentViewController`. |
+| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | Architecture |
+| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | Accessibility |
+
+Statuses rest on `WindowController` inheriting `@MainActor` isolation from
+`SingleWindowController` and `WindowContentViewController` inheriting it from
+`NSViewController`, which the AppKit overlay marks `@MainActor` in the SDK;
+on both types being built entirely from stock `NSWindowController`/
+`NSViewController` plumbing with no custom-drawn chrome; and on the file
+adding no accessibility identifier or label of its own while not obstructing
+whatever the caller-supplied `ViewControllerType`/`ViewType` provides.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from the Apple `WindowController.swift` source (`WindowController<ViewControllerType>` and `WindowContentViewController<ViewType>`). |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reformat Design Decisions to bold three-line form; fix the Compliance table's Category column and drop inapplicable checks (no-raw-hex, differentiate-without-color, localizable-strings, idempotent-operations); rename the AppKit Platform Notes bullet to AppKit / UIKit and add the UIKit equivalent; remove Accessibility Options template residue; state `NSViewController`'s inherited `@MainActor` isolation outright instead of hedging; add a Conformance Test Vectors Action column and rework vectors 004 and 008 into a compile-time check and a death-test check; rename the States column to Behavior; and rewrite file-coupled "Not applicable" justifications to describe the component's behavior. |
