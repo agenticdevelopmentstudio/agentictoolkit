@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Settings, Table2, Trash2 } from "lucide-react";
@@ -9,12 +9,21 @@ import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
 import { Field } from "@agenticdevelopertoolkit/ui/blocks";
 import type { TopicLevel } from "@agenticdevelopertoolkit/ui/blocks";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@agenticdevelopertoolkit/ui/components/dialog";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Select } from "@agenticdevelopertoolkit/ui/components/select";
 import { Textarea } from "@agenticdevelopertoolkit/ui/components/textarea";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { CreateResourceDialog, StackLevels } from "@agentic-toolkit/resource";
-import { CRUD_TABLES, CrudDataView } from "@agentic-toolkit/crud";
+import { CRUD_TABLES, CrudDataView, useExitGuardChannel } from "@agentic-toolkit/crud";
+import { UnsavedChangesAlert } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-alert";
+import { useExitGate } from "@agenticdevelopertoolkit/ui/hooks/useExitGate";
+import { useRailExitGuard } from "@agentic-toolkit/resource";
 import { schemasApi } from "@agentic-toolkit/data/markdown";
 import { bucketsCacheKey, newSchemaTable, slugifyTableName } from "./schema-model";
 import type { SchemaDefinition, SchemaDefinitionInput, SchemaTable } from "./schema-model";
@@ -31,10 +40,8 @@ import {
   tableNameValidate,
 } from "./SchemaDefinitionDetail";
 import { nameForType, TypeOptions } from "./type-options";
+import { isMarkdownType, MarkdownRowsView } from "./MarkdownRowsView";
 import type { RenderTransferSection } from "../transfer-seam";
-
-/** The bucket rail's first row — the bucket's own Settings, above the divider and its tables. */
-const SETTINGS = "settings";
 
 // Settings edits the bucket's name and description only; its tables are added and removed one at
 // a time from the bucket's rail, each a save of its own. So neither the dirty check nor the save
@@ -67,11 +74,16 @@ interface NewTableDraft {
 
 export function SchemasPane({
   ecosystemId,
+  workspaceSlug,
   help,
   leaf,
   renderTransfer,
 }: {
   ecosystemId?: string;
+  /** The workspace whose documents a markdown-backed table (docs, notes, papers) lists — those
+   *  rows are owned by the workspace's principal, not scoped by ecosystem. Undefined lists the
+   *  caller's own, the same degrade every `?workspace=` reader makes. */
+  workspaceSlug?: string;
   /** Unused: the breadcrumb names the pane now (kept for the ScopedPane prop shape). */
   title?: ReactNode;
   help?: ReactNode;
@@ -148,52 +160,82 @@ export function SchemasPane({
     publish: false,
   });
 
-  // What the open bucket's rail has selected: its Settings, one of its tables, or nothing (Back).
-  // Held WITH the bucket it belongs to, so opening another bucket starts on its Settings instead
-  // of carrying a table id that is not one of its tables.
+  // Which of the open bucket's tables is showing, or none (Back). Held WITH the bucket it belongs
+  // to, so opening another bucket starts on its first table instead of carrying a table id that is
+  // not one of its tables.
   const bucket = form.selected;
   const [subState, setSubState] = useState<{ bucketId: string; id: string | null } | null>(null);
-  const sub = subState && bucket && subState.bucketId === bucket.id ? subState.id : SETTINGS;
-  const openTable: SchemaTable | undefined =
-    bucket && sub !== SETTINGS ? bucket.tables.find((t) => t.id === sub) : undefined;
+  const sub =
+    subState && bucket && subState.bucketId === bucket.id
+      ? subState.id
+      : (bucket?.tables[0]?.id ?? null);
+  const openTable: SchemaTable | undefined = bucket?.tables.find((t) => t.id === sub);
   const selectSub = (id: string | null) => bucket && setSubState({ bucketId: bucket.id, id });
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // The bucket's own rail (Mike, 2026-09-24): Settings, a divider, then one row per table, with
-  // the `+` in its header adding a table.
+  // Unsaved work goes through the shared exit-guard system, as in every other pane — "navigating away with an unsaved bucket didn't stop me with a warning … there's a whole system for this we built" (Mike, 2026-09-24).
+  // Three ways to lose it here: (1) the open table's unsaved rows, published to the rail so Back,
+  // breadcrumbs and leaving the bucket prompt; (2) a click on a SIBLING table, a forward selection
+  // the rail does not guard, so it is gated here; (3) closing Settings with an edited name or
+  // description. (The bucket form's own guard is already published by useMasterDetailLevel.)
+  const { exitGuard: rowsGuard, registerGuard } = useExitGuardChannel();
+  useRailExitGuard(rowsGuard);
+  const rowsGate = useExitGate(rowsGuard);
+  // Read through a ref: the rail republishes a level only when its ids, selection or row count
+  // change, so an `onSelect` closing over `rowsGate` would still hold the CLEAN gate after a row
+  // was staged — and switch tables without asking.
+  const rowsGateRef = useRef(rowsGate);
+  rowsGateRef.current = rowsGate;
+  const settingsGate = useExitGate(form.dirty ? form.guard : null);
+  const closeSettings = () =>
+    settingsGate.attemptExit(() => {
+      // Discard = re-hydrate the draft from the saved bucket, keeping it selected.
+      if (form.dirty && bucket) form.select(bucket.id);
+      setSettingsOpen(false);
+    });
+
+  // The bucket's own rail is its tables and nothing else; the bucket's Settings sit behind the
+  // gear in its header and open in a dialog (Mike, 2026-09-24: "add a gear icon … show the
+  // settings in a dialog, remove settings from the tables list"). The `+` beside it adds a table.
   const bucketLevel: TopicLevel | null = bucket
     ? {
         id: "bucket-contents",
         title: bucket.name,
-        items: [
-          {
-            id: SETTINGS,
-            label: "Settings",
-            icon: <Settings size={16} aria-hidden />,
-            dividerAfter: true,
-            dividerLabel: "Tables",
-          },
-          ...bucket.tables.map((t) => ({
-            id: t.id,
-            label: t.name,
-            sublabel: t.type,
-            icon: <Table2 size={16} aria-hidden />,
-          })),
-        ],
-        // A table that has just been removed is no longer a row; fall back to Settings.
-        selectedId: sub === SETTINGS || openTable ? sub : SETTINGS,
-        onSelect: (id) => selectSub(id),
+        items: bucket.tables.map((t) => ({
+          id: t.id,
+          label: t.name,
+          sublabel: t.type,
+          icon: <Table2 size={16} aria-hidden />,
+        })),
+        // A table that has just been removed is no longer a row.
+        selectedId: openTable ? sub : null,
+        onSelect: (id) => rowsGateRef.current.attemptExit(() => selectSub(id)),
+        // Back/deselect is a level CLEAR, which the rail host already runs through the guard.
         onClear: () => selectSub(null),
-        defaultSelectedId: SETTINGS,
+        defaultSelectedId: bucket.tables[0]?.id,
         onNew: () => setAddTableOpen(true),
         newLabel: "Add table",
+        titleActions: (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => setSettingsOpen(true)}
+            title="Bucket settings"
+            aria-label="Bucket settings"
+          >
+            <Settings />
+          </Button>
+        ),
         itemNoun: "table",
+        emptyLabel: "No tables yet.",
       }
     : null;
 
   async function removeTable(t: SchemaTable) {
     if (!bucket) return;
     await schemasApi.update(bucket.id, { tables: bucket.tables.filter((x) => x.id !== t.id) });
-    selectSub(SETTINGS);
+    selectSub(null);
     await refresh();
   }
 
@@ -224,12 +266,19 @@ export function SchemasPane({
                 <Trash2 />
               </Button>
             </div>
-            {meta ? (
+            {isMarkdownType(openTable.type) ? (
+              <MarkdownRowsView
+                key={`${bucket.id}/${openTable.id}`}
+                type={openTable.type}
+                workspace={workspaceSlug}
+              />
+            ) : meta ? (
               <CrudDataView
                 key={`${bucket.id}/${openTable.id}`}
                 meta={meta}
                 filter={{ ecosystemId: bucket.ecosystemId }}
                 createDefaults={{ ecosystemId: bucket.ecosystemId }}
+                onGuardChange={registerGuard}
               />
             ) : (
               <EmptyState
@@ -239,12 +288,33 @@ export function SchemasPane({
             )}
           </>
         ) : (
-          <>
+          <EmptyState
+            title={
+              schemas === null
+                ? "Loading…"
+                : bucket
+                  ? bucket.tables.length
+                    ? "Select a table to see its rows."
+                    : "No tables yet — add one with +."
+                  : "Select a bucket, or create a new one."
+            }
+          />
+        )}
+
+        {/* The bucket's Settings, from the gear in its rail header. */}
+        <Dialog
+          open={settingsOpen && !!bucket}
+          onOpenChange={(open) => (open ? setSettingsOpen(true) : closeSettings())}
+        >
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>{bucket?.name}</DialogTitle>
+            </DialogHeader>
             <ButtonBar
               actions={form.actions}
               showCreate={false}
-              // Deleting lives in the Settings danger zone below; a bar Delete would only ever be
-              // a disabled second button naming the same action.
+              // Deleting lives in the danger zone below; a bar Delete would only ever be a
+              // disabled second button naming the same action.
               showDelete={false}
               trailing={
                 <RecordApiButton
@@ -255,39 +325,35 @@ export function SchemasPane({
               }
               help={help}
             />
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 py-4">
-              {form.editing && form.draft ? (
-                <div className="flex flex-col gap-6" key={form.detailKey}>
-                  <SchemaDefinitionDetail
-                    title="Settings"
-                    draft={form.draft}
-                    onChange={form.onChange}
-                    error={form.error}
-                    schema={bucket}
-                    ecosystemRdid={ecosystemId}
-                    renderTransfer={renderTransfer}
-                    onDelete={
-                      bucket?.kind === "custom"
-                        ? async () => {
-                            await schemasApi.delete(bucket.id);
-                            if (leaf) leaf.onSelect(null);
-                            else form.actions.onCancel();
-                            await refresh();
-                          }
-                        : undefined
-                    }
-                  />
-                </div>
-              ) : (
-                <EmptyState
-                  title={
-                    schemas === null ? "Loading…" : "Select a bucket to edit, or create a new one."
+            {form.editing && form.draft && (
+              <div className="flex max-h-[70vh] flex-col gap-6 overflow-y-auto" key={form.detailKey}>
+                <SchemaDefinitionDetail
+                  title="Settings"
+                  draft={form.draft}
+                  onChange={form.onChange}
+                  error={form.error}
+                  schema={bucket}
+                  ecosystemRdid={ecosystemId}
+                  renderTransfer={renderTransfer}
+                  onDelete={
+                    bucket?.kind === "custom"
+                      ? async () => {
+                          await schemasApi.delete(bucket.id);
+                          setSettingsOpen(false);
+                          if (leaf) leaf.onSelect(null);
+                          else form.actions.onCancel();
+                          await refresh();
+                        }
+                      : undefined
                   }
                 />
-              )}
-            </div>
-          </>
-        )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <UnsavedChangesAlert {...rowsGate.exitAlertProps} />
+        <UnsavedChangesAlert {...settingsGate.exitAlertProps} />
 
         {/* Create is a scoped modal: name + description only (tables are added from the new
             bucket's own rail, which opens once the created bucket is selected). */}

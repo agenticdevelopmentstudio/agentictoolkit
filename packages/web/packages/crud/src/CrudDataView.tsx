@@ -53,8 +53,10 @@ export interface CrudDataViewProps {
   /** Values a NEW row starts with, for columns the surface already knows (a bucket's table view
    *  seeds `ecosystemId` with the bucket's ecosystem). Without it a create omits the column, the
    *  backend stamps the CALLER's ecosystem, and the row vanishes from a list filtered to another
-   *  one the moment it saves (Mike, 2026-09-24). Only writable columns are seeded; the user can
-   *  still edit the value before saving. */
+   *  one the moment it saves (Mike, 2026-09-24). Only writable columns are seeded, and a seeded
+   *  column is PINNED: hidden from the row form, because the surface has already decided it — a
+   *  bucket's row cannot be moved to another ecosystem from inside that bucket (Mike, 2026-09-24:
+   *  "you cannot change the ecosystem id here, don't show it"). */
   createDefaults?: Record<string, string>
 }
 
@@ -440,6 +442,7 @@ export function CrudDataView({
             meta={meta}
             rows={rows}
             draftKeys={draftKeys}
+            draftBaseline={blankDraft()}
             edits={edits}
             loading={loading}
             error={error}
@@ -455,6 +458,7 @@ export function CrudDataView({
         bottom={
           <RowDetails
             meta={meta}
+            pinned={defaultsKey}
             baseline={baseline}
             canWrite={canWrite}
             mode={isDraftActive ? 'create' : 'edit'}
@@ -506,6 +510,8 @@ interface RowListProps {
   draftKeys: string[]
   /** Staged edits — the source of a draft row's displayed cell values. */
   edits: Record<string, CrudDraft>
+  /** What every draft starts from (the view's `createDefaults`), under its staged edits. */
+  draftBaseline: CrudDraft
   loading: boolean
   error: string | null
   activeKey: string | null
@@ -531,6 +537,7 @@ function RowList({
   meta,
   rows,
   draftKeys,
+  draftBaseline,
   edits,
   loading,
   error,
@@ -649,14 +656,25 @@ function RowList({
                     </td>
                   )}
                   {columns.map((column) => {
-                    const text = formatCellDisplay(buffer?.[column.name])
+                    // The seeded values (a bucket's ecosystem) are the row's values too, and a
+                    // server-managed column is filled in on save — so neither reads as a blank
+                    // "—" the user might think they forgot (Mike, 2026-09-24: "the row is missing
+                    // a ton of things that should be there").
+                    const text = formatCellDisplay(
+                      buffer?.[column.name] ?? draftBaseline[column.name],
+                    )
                     return (
                       <td
                         key={column.name}
                         title={text || undefined}
                         className="truncate px-3 py-1.5 font-mono text-xs text-apt-text"
                       >
-                        {text || <span className="text-apt-text-dim">—</span>}
+                        {text ||
+                          (column.serverManaged ? (
+                            <span className="italic text-apt-text-dim">auto</span>
+                          ) : (
+                            <span className="text-apt-text-dim">—</span>
+                          ))}
                       </td>
                     )
                   })}
@@ -828,6 +846,8 @@ function ColumnHeader({
 
 interface RowDetailsProps {
   meta: CrudTableMeta
+  /** The view's `createDefaults`, serialized: those columns are fixed by the surface and hidden. */
+  pinned: string
   /** The active row's baseline values as a draft buffer, or null when no row. */
   baseline: CrudDraft | null
   /** 'create' for an unsaved draft (createOnly columns editable), else 'edit'. */
@@ -850,7 +870,7 @@ interface RowDetailsProps {
  * in the top row list). The row identity + the collapse disclosure live on the
  * split's header bar (CrudDataView passes them), not here.
  */
-function RowDetails({ meta, baseline, mode, canWrite, edits, onEdit }: RowDetailsProps) {
+function RowDetails({ meta, pinned, baseline, mode, canWrite, edits, onEdit }: RowDetailsProps) {
   const bodyId = useId()
 
   if (!baseline) {
@@ -860,7 +880,10 @@ function RowDetails({ meta, baseline, mode, canWrite, edits, onEdit }: RowDetail
       </p>
     )
   }
-  const columns = meta.columns.filter((column) => !isColumnHidden(column))
+  const pinnedNames = Object.keys(JSON.parse(pinned) as Record<string, string>)
+  const columns = meta.columns.filter(
+    (column) => !isColumnHidden(column) && !pinnedNames.includes(column.name),
+  )
 
   return (
     <div className="flex min-w-0 flex-col">

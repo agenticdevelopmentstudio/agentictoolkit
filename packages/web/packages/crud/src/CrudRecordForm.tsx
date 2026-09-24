@@ -85,7 +85,12 @@ export function buildPayload(meta: CrudTableMeta, draft: CrudDraft, mode: CrudFo
       try {
         payload[column.name] = JSON.parse(text)
       } catch {
-        throw new Error(`${column.name} must be valid JSON`)
+        // An `unknown` (untyped jsonb) column holds ANY JSON value, a string included — so text
+        // that isn't JSON is that string, not an error. Typing `bar` into a key/value pair's value
+        // was refused as "value must be valid JSON" (Mike, 2026-09-24). A declared object/array
+        // column still demands its shape.
+        if (column.type !== 'unknown') throw new Error(`${column.name} must be valid JSON`)
+        payload[column.name] = text
       }
     } else {
       payload[column.name] = text

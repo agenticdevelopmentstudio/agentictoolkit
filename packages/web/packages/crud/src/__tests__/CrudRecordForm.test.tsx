@@ -145,14 +145,16 @@ describe('buildPayload', () => {
       'config must be valid JSON',
     )
   })
-  it('parses unknown (jsonb) columns as JSON, with the field-named error', () => {
+  it('parses unknown (jsonb) columns as JSON, and keeps non-JSON text as a string', () => {
     expect(buildPayload(meta, { name: 'x', payload: '{"mode":"fast"}' }, 'create')).toEqual({
       name: 'x',
       payload: { mode: 'fast' },
     })
-    expect(() => buildPayload(meta, { name: 'x', payload: '{nope' }, 'create')).toThrow(
-      'payload must be valid JSON',
-    )
+    // Untyped jsonb holds any JSON value, so `bar` is the string "bar" (Mike, 2026-09-24).
+    expect(buildPayload(meta, { name: 'x', payload: 'bar' }, 'create')).toEqual({
+      name: 'x',
+      payload: 'bar',
+    })
   })
   it('skips createOnly columns on edit, before the required check', () => {
     expect(buildPayload(rdidMeta, { id: '', name: 'Thing' }, 'edit')).toEqual({ name: 'Thing' })
@@ -258,16 +260,15 @@ describe('CrudRecordForm', () => {
     )
   })
 
-  it('shows the field-named error for invalid JSON in an unknown column', async () => {
+  it('saves plain text in an unknown (jsonb) column as a string', async () => {
     const user = userEvent.setup()
-    const onSubmit = vi.fn()
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
     render(<CrudRecordForm meta={meta} canWrite onSubmit={onSubmit} onCancel={vi.fn()} />)
     await user.type(screen.getByLabelText('name *'), 'Widget')
     await user.click(screen.getByLabelText(/^payload/))
-    await user.paste('{nope')
+    await user.paste('bar')
     await user.click(screen.getByRole('button', { name: 'Save' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('payload must be valid JSON')
-    expect(onSubmit).not.toHaveBeenCalled()
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ name: 'Widget', payload: 'bar' }))
   })
 
   it('disables createOnly columns on edit (seeded) and drops them from the payload', async () => {

@@ -183,7 +183,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "deletedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "bucket/buckets": {
@@ -207,7 +207,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "deletedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/addresses": {
@@ -236,7 +236,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/categories": {
@@ -261,7 +261,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/category-edges": {
@@ -284,7 +284,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/category-items": {
@@ -308,7 +308,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/contacts": {
@@ -336,7 +336,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/counters": {
@@ -358,7 +358,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/dates": {
@@ -385,7 +385,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/events": {
@@ -407,7 +407,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/feedback": {
@@ -437,7 +437,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/key-value-pairs": {
@@ -459,7 +459,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/keyword-items": {
@@ -483,7 +483,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/keywords": {
@@ -506,7 +506,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/list-items": {
@@ -529,7 +529,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/lists": {
@@ -551,7 +551,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/locations": {
@@ -579,7 +579,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/poll-options": {
@@ -602,7 +602,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/polls": {
@@ -627,7 +627,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/queue-items": {
@@ -653,7 +653,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/queues": {
@@ -674,7 +674,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/relationships": {
@@ -700,7 +700,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/social-links": {
@@ -726,7 +726,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/tags": {
@@ -753,7 +753,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "content/urls": {
@@ -786,7 +786,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "isDeleted", "type": "boolean", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "customer/customers": {
@@ -816,7 +816,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "document/blocks": {
@@ -843,7 +843,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "lastOpId", "type": "string", "required": false, "nullable": true, "serverManaged": false, "maxLength": 36},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "document/documents": {
@@ -868,7 +868,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "lastSnapshotId", "type": "string", "required": false, "nullable": true, "serverManaged": false, "maxLength": 36},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "document/marks": {
@@ -894,7 +894,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "isDeleted", "type": "boolean", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "document/operations": {
@@ -922,7 +922,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "document/versions": {
@@ -948,7 +948,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "isDeleted", "type": "boolean", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "ecosystem/applications": {
@@ -971,7 +971,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "deletedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "ecosystem/ecosystem-regions": {
@@ -1050,7 +1050,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "integration/integration-audiences": {
@@ -1079,7 +1079,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "integration/integration-bookmarks": {
@@ -1113,7 +1113,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "integration/integration-calendar-events": {
@@ -1153,7 +1153,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "ecosystemId", "type": "string", "required": false, "nullable": false, "serverManaged": false, "maxLength": 36},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "integration/integration-campaign-stats": {
@@ -1192,7 +1192,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "integration/integration-financial-transactions": {
@@ -1228,7 +1228,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "integration/integration-items": {
@@ -1265,7 +1265,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "integration/integration-media-items": {
@@ -1299,7 +1299,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "integration/integration-pages": {
@@ -1330,7 +1330,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "integration/integration-social-notifications": {
@@ -1362,7 +1362,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "monitoring/endpoints": {
@@ -1476,7 +1476,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "persona-memory/facts": {
@@ -1511,7 +1511,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "persona-memory/links": {
@@ -1534,7 +1534,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "deletedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "persona-memory/memories": {
@@ -1573,7 +1573,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "persona/models": {
@@ -1698,7 +1698,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "personal/jobs": {
@@ -1725,7 +1725,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "project/tasks": {
@@ -1759,7 +1759,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "settings/notifications": {
@@ -1783,7 +1783,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncVersion", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
       {"name": "syncStampedAt", "type": "string", "required": false, "nullable": true, "serverManaged": true},
-      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": false},
+      {"name": "syncTxid", "type": "integer", "required": false, "nullable": false, "serverManaged": true},
     ],
   },
   "system/audit-events": {

@@ -43,6 +43,10 @@ export interface CrudTableProps {
   /** Opens the row — for editing when `canWrite`, else read-only. */
   onEdit: (row: CrudRow) => void
   onDelete: (row: CrudRow) => void
+  /** Why a read-only table is read-only, in the viewer's terms. Defaults to the shared-platform
+   *  reason, which is the generated tables' only one; a hand-fed table (a bucket's papers) has
+   *  its own. */
+  readOnlyNote?: string
 }
 
 /** Placeholder-grade row list for one table: no sorting/search/pagination (the
@@ -56,6 +60,7 @@ export function CrudTable({
   onNew,
   onEdit,
   onDelete,
+  readOnlyNote = 'Shared platform data — only an administrator can change it.',
 }: CrudTableProps) {
   const columns = displayColumns(meta)
   return (
@@ -73,9 +78,7 @@ export function CrudTable({
           // (a `title` tooltip reaches neither a screen reader nor a touch device).
           <span className="flex items-center gap-2">
             <Badge variant="neutral">Read-only</Badge>
-            <span className="text-xs text-apt-text-dim">
-              Shared platform data — only an administrator can change it.
-            </span>
+            <span className="text-xs text-apt-text-dim">{readOnlyNote}</span>
           </span>
         )}
       </div>

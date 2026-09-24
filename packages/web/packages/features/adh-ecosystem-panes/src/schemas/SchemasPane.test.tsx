@@ -6,9 +6,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TopicLevel } from "@agenticdevelopertoolkit/ui/blocks";
 
-// The bucket layout (Mike, 2026-09-24): the buckets list, then the open bucket's own rail —
-// Settings, a divider, its tables, with the "+" adding a table — and a table's detail is
-// `name: sql-table` over that table's data rows.
+// The bucket layout (Mike, 2026-09-24): the buckets list, then the open bucket's own rail — its
+// tables, with a gear opening the bucket's Settings in a dialog and the "+" adding a table — and a
+// table's detail is `name: sql-table` over that table's data rows.
 
 const { push } = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }), usePathname: () => "/" }));
@@ -21,18 +21,27 @@ vi.mock("@agentic-toolkit/data/markdown", async (importOriginal) => ({
   schemasApi,
 }));
 // Reports what the table view was handed — the bucket decides the filter and the new-row defaults.
-vi.mock("@agentic-toolkit/crud", () => ({
+// Its "stage a row" button stands in for an unsaved row: the view registers a dirty guard.
+vi.mock("@agentic-toolkit/crud", async () => ({
   CRUD_TABLES: { "content/contacts": { key: "content/contacts" } },
+  useExitGuardChannel: (await import("../../../../crud/src/useExitGuardChannel")).useExitGuardChannel,
   CrudDataView: ({
     meta,
     filter,
     createDefaults,
+    onGuardChange,
   }: {
     meta: { key: string };
     filter?: Record<string, string>;
     createDefaults?: Record<string, string>;
+    onGuardChange?: (g: { isDirty: () => boolean } | null) => void;
   }) => (
-    <div data-testid="rows">{`${meta.key} ${JSON.stringify(filter)} ${JSON.stringify(createDefaults)}`}</div>
+    <div>
+      <div data-testid="rows">{`${meta.key} ${JSON.stringify(filter)} ${JSON.stringify(createDefaults)}`}</div>
+      <button type="button" onClick={() => onGuardChange?.({ isDirty: () => true })}>
+        stage a row
+      </button>
+    </div>
   ),
 }));
 vi.mock("@agentic-toolkit/api-explorer", () => ({ RecordApiButton: () => null }));
@@ -80,6 +89,7 @@ function Host({ children }: { children: ReactNode }) {
       {levels.map((level) => (
         <nav key={level.id} aria-label={level.id}>
           <span>{level.title}</span>
+          {level.titleActions}
           {level.onNew && (
             <button type="button" onClick={level.onNew}>
               {level.newLabel}
@@ -123,6 +133,12 @@ async function openBucket() {
   return rail("bucket-contents");
 }
 
+async function openSettings() {
+  const contents = await openBucket();
+  fireEvent.click(within(contents).getByRole("button", { name: "Bucket settings" }));
+  return screen.findByRole("dialog");
+}
+
 beforeEach(() => {
   schemasApi.list.mockResolvedValue([BUCKET]);
   schemasApi.update.mockImplementation((_id: string, patch: Partial<typeof BUCKET>) =>
@@ -136,26 +152,30 @@ afterEach(() => {
 });
 
 describe("SchemasPane — the bucket layout", () => {
-  it("opens a bucket onto its own rail: Settings, a divider, then its tables", async () => {
+  it("opens a bucket onto its tables alone, the first one showing", async () => {
     const contents = await openBucket();
-    const rows = within(contents).getAllByRole("button").map((b) => b.textContent);
-    expect(rows).toEqual(["Add table", "Settings", "people"]);
-    expect(within(contents).getByRole("separator", { name: "Tables" })).toBeInTheDocument();
-    expect(within(contents).getByRole("button", { name: "Settings" })).toHaveAttribute(
+    const rows = within(contents).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent);
+    expect(rows).toEqual(["Bucket settings", "Add table", "people"]);
+    expect(within(contents).queryByRole("separator")).toBeNull();
+    expect(within(contents).getByRole("button", { name: "people" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    // Settings: name + description, and the danger zone.
-    expect(screen.getByDisplayValue("crm")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Customer data")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Danger Zone/ }));
-    expect(screen.getByRole("button", { name: /^Delete Bucket$/ })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("the gear opens Settings in a dialog: name, description, and the danger zone", async () => {
+    const dialog = await openSettings();
+    expect(within(dialog).getByDisplayValue("crm")).toBeInTheDocument();
+    expect(within(dialog).getByDisplayValue("Customer data")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: /Danger Zone/ }));
+    expect(within(dialog).getByRole("button", { name: /^Delete Bucket$/ })).toBeInTheDocument();
   });
 
   it("the built-in default bucket offers no Delete", async () => {
     schemasApi.list.mockResolvedValue([{ ...BUCKET, kind: "default" }]);
-    await openBucket();
-    expect(screen.queryByRole("button", { name: /Danger Zone/ })).toBeNull();
+    const dialog = await openSettings();
+    expect(within(dialog).queryByRole("button", { name: /Danger Zone/ })).toBeNull();
   });
 
   it("a table shows `name: sql-table` over the bucket ecosystem's rows", async () => {
@@ -168,14 +188,45 @@ describe("SchemasPane — the bucket layout", () => {
   });
 
   it("saving Settings sends the name and description only, never the table list", async () => {
-    await openBucket();
-    fireEvent.change(screen.getByDisplayValue("crm"), { target: { value: "customers" } });
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    const dialog = await openSettings();
+    fireEvent.change(within(dialog).getByDisplayValue("crm"), { target: { value: "customers" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /save/i }));
     await waitFor(() => expect(schemasApi.update).toHaveBeenCalled());
     expect(schemasApi.update).toHaveBeenCalledWith(BUCKET.id, {
       name: "customers",
       description: "Customer data",
     });
+  });
+
+  // "navigating away with an unsaved bucket didn't stop me with a warning" (Mike, 2026-09-24).
+  it("closing Settings over an edit asks first; Stay keeps it, Discard restores the saved name", async () => {
+    const dialog = await openSettings();
+    fireEvent.change(within(dialog).getByDisplayValue("crm"), { target: { value: "customers" } });
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.click(await screen.findByRole("button", { name: "Stay" }));
+    expect(within(screen.getByRole("dialog")).getByDisplayValue("customers")).toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(within(rail("bucket-contents")).getByRole("button", { name: "Bucket settings" }));
+    expect(within(await screen.findByRole("dialog")).getByDisplayValue("crm")).toBeInTheDocument();
+    expect(schemasApi.update).not.toHaveBeenCalled();
+  });
+
+  it("switching tables over an unsaved row asks first", async () => {
+    schemasApi.list.mockResolvedValue([
+      { ...BUCKET, tables: [...BUCKET.tables, { id: "t-2", name: "leads", type: "content.contacts" }] },
+    ]);
+    const contents = await openBucket();
+    fireEvent.click(screen.getByRole("button", { name: "stage a row" }));
+    fireEvent.click(within(contents).getByRole("button", { name: "leads" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Stay" }));
+    expect(screen.getByRole("heading")).toHaveTextContent("people: content.contacts");
+
+    fireEvent.click(within(rail("bucket-contents")).getByRole("button", { name: "leads" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.getByRole("heading")).toHaveTextContent("leads: content.contacts"));
   });
 
   it("the rail's + adds a table: type picks the name, and the save appends it", async () => {
