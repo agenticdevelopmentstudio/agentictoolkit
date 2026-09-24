@@ -3,11 +3,11 @@ id: f3d7adbb-ece4-4b00-97af-f7e3db9d5999
 title: DismissibleHintView
 domain: agentictoolkit://recipes/dismissible-hint-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -275,18 +275,13 @@ deep-link handler appears anywhere in `DismissibleHintView.swift`.
 |-----------|-------------|---------|
 | — (no key; literal default parameter value) | "Got It" | `buttonTitle`'s default value when a caller constructs `DismissibleHintView` without supplying one |
 
-NEEDS REVIEW: `buttonTitle`'s default value, the English literal `"Got It"`,
-carries no localization key or lookup in source — `text` and any explicit
-`buttonTitle` argument are the caller's responsibility to localize (the same
-treatment as the sibling `Badge` recipe (`agentictoolkit://recipes/badge`)
-gives fully caller-supplied text), but this one default value ships baked
-directly into `DismissibleHintView.swift` itself. Whether every call site is
-expected to always override `buttonTitle` explicitly (making the English
-default effectively dead in a non-English build), or whether the framework
-needs a localization convention for baked-in default control titles, cannot
-be determined from this file alone; settled by the app's localization/i18n
-owner auditing whether any call site relies on the default outside an
-English locale.
+`buttonTitle`'s default value, the English literal `"Got It"`, carries no
+localization key or lookup in source — `text` and any explicit `buttonTitle`
+argument are the caller's responsibility to localize (the same treatment as
+the sibling `Badge` recipe (`agentictoolkit://recipes/badge`) gives fully
+caller-supplied text), but this one default value ships baked directly into
+`DismissibleHintView.swift` itself; a call site that never overrides
+`buttonTitle` ships this English literal regardless of the app's locale.
 
 ## Accessibility Options
 
@@ -459,8 +454,8 @@ Not applicable: `DismissibleHintView.swift` contains no logging call (no
 - **Decision**: Default `buttonTitle` to the English literal `"Got It"`
   rather than requiring every call site to supply a title.
   **Rationale**: Keeps single-hint call sites terse for the common case; see
-  Localization for the open question this default creates for call sites
-  that never override it.
+  Localization for the unlocalized-default consequence this creates for call
+  sites that never override it.
   **Approved**: pending
 
 ## Compliance
@@ -490,3 +485,4 @@ caller-supplied `buttonTitle` are not (no-hardcoded-strings: partial).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `DismissibleHintView` (AppKit, macOS) source. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved AppKit-only mechanics (property exposure, Auto Layout pinning/autoresizing, coder/frame traps) from Behavioral Requirements to Platform Notes; renamed every requirement to subject-noun form and updated all citations; added the self-hiding-conformance requirement and test vector; rewrote the WinUI 3 bullet from TeachingTip to a binding-driven InfoBar/StackPanel with a bound (not hardcoded) button title; fixed the spacing test vector to compare against the layout token, the redundant-write vector to use an observable KVO signal, and marked the main-actor and conformance vectors as static checks; dropped the uncited HIG claim and the malformed-trap-message edge case; reformatted Design Decisions to the bolded three-line form; rebuilt Compliance with real catalog checks in Title Case categories; added full agentictoolkit:// URLs to sibling-recipe cross-references. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

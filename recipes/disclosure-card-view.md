@@ -3,11 +3,11 @@ id: d5aba939-471d-48cd-9a9c-888ac92adf38
 title: DisclosureCardView
 domain: agentictoolkit://recipes/disclosure-card-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -321,16 +321,7 @@ the folded set and rebuilds on toggle).
   override in source, so its click target is whatever AppKit's system
   disclosure control natively provides. The 44×44pt minimum is iOS/touch
   guidance, not a macOS pointer-interface requirement.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. All
-  colors are drawn from a `SemanticPalette` (`surfaceColor`/
-  `outlineColor`/`primaryTextColor`/etc.), and no numeric contrast check is
-  performed anywhere in `DisclosureCardView.swift`. Whether any given
-  theme's title-on-titlebar, subtitle-on-surface, or summary-value-on-
-  surface pairing meets a specific ratio (e.g. WCAG 2.1 AA's 4.5:1) cannot
-  be determined from this file alone — it depends on the actual color
-  values each `SemanticPalette`/theme resolves, which live outside this
-  source. This would be settled by auditing each shipped theme's resolved
-  colors for these role pairings.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. All colors are drawn from a `SemanticPalette` (`surfaceColor`/`outlineColor`/`primaryTextColor`/etc.), and no numeric contrast check is performed anywhere in `DisclosureCardView.swift`; whether any given theme's title-on-titlebar, subtitle-on-surface, or summary-value-on-surface pairing meets a specific ratio (e.g. WCAG 2.1 AA's 4.5:1) cannot be determined from this file or its palette mapping alone — the actual RGBA values each shipped theme resolves for these roles live outside both, and settling this needs auditing each shipped theme's resolved colors for these role pairings.
 
 ## Conformance Test Vectors
 
@@ -730,3 +721,4 @@ localization key (see Localization).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `DisclosureCardView` (AppKit, macOS) source. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: shortened the frontmatter summary and moved the platform-design-languages reference from `references` to `related`; restated Behavioral Requirements, States, Edge Cases, and Conformance Test Vectors in observable terms instead of private Swift member names, with the member-name mapping relocated to AppKit Platform Notes; defined `cornerPeakInset`, badge diameter, and the masthead width floor in Appearance; documented the `color(named:)` name-to-role map; added a precondition to vector 039; moved `prefers-dynamic-summary-colors` into a Configuration usage note; reworded the two no-guard Edge Cases as documented limitations; fixed the UIKit, React/Web, WinUI 3, and Compose Platform Notes bullets; reformatted Design Decisions' `Approved` line; and updated Compliance (`contrast-ratio` and `screen-reader-support` to `partial`, added a failing `no-hardcoded-strings` row, Title Case categories, and a rationale sentence).; removed Compliance rows for checks absent from the cookbook catalog |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

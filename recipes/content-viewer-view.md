@@ -3,11 +3,11 @@ id: 081703b7-036f-4fff-b580-d5dc9e5342d2
 title: Content Viewer View
 domain: agentictoolkit://recipes/content-viewer-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -105,7 +105,7 @@ approved-date: ''
 
 - **Role/trait**: Every `Text` in this view carries SwiftUI's default accessibility behavior — it is exposed as a static text element and its string is spoken verbatim. Every `Image(systemName:)` (the placeholder icon and the header icon) carries SwiftUI's automatically generated accessibility label derived from the SF Symbol's name; the source neither overrides nor suppresses it.
 - **Label requirements**: Each grid row's label (e.g. "Path:") and its value (e.g. the path string) are two separate `Text` views, not one composed label, so each is exposed to VoiceOver as its own accessibility element rather than a single "Path: /x/y" utterance.
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source. Switching `selectedNode` from `nil` to a value (or from one node to another) replaces the `Group`'s content, but the source posts no explicit accessibility notification around that replacement. Whether a VoiceOver user already focused in this pane is told the content changed depends on SwiftUI/AppKit's own automatic change detection, which cannot be confirmed from this source file alone. Settling it needs either a VoiceOver test pass across a selection change, or an explicit accessibility-notification addition to the view.
+- **Announce state changes**: Switching `selectedNode` from `nil` to a value (or from one node to another) replaces the `Group`'s content, but the source posts no explicit accessibility notification of its own around that replacement — no accessibility-notification call appears anywhere in `ContentViewerView.swift`. Whatever a VoiceOver user already focused in this pane hears comes entirely from SwiftUI/AppKit's own automatic change detection, not from an explicit call in source.
 - **Minimum tap target**: Not applicable: `ContentViewerView` targets macOS pointer input and contains no interactive control, so no tap or click target exists to size.
 
 ## Conformance Test Vectors
@@ -196,7 +196,7 @@ Not applicable: `ContentViewerView` has no URL scheme, route, or deep-link entry
 | (none — hardcoded literal) | Swift Source File / JSON File / Markdown Document / Text File / Property List / Entitlements File / Xcode Project / Xcode Workspace / PNG Image / JPEG Image / SVG Image / GIF Image / Shell Script / Zsh Script / Bash Script / Python Script / JavaScript File / TypeScript File / CSS Stylesheet / HTML Document / YAML File / TOML File / Git Ignore Rules | Type description for a file, by recognized extension (see `type-description-known-extension`) |
 | (none — hardcoded literal) | `<EXTENSION> File` / File | Type description fallback for an unrecognized or absent extension |
 
-The seven fixed labels are passed to `Text("…")` as literals, so SwiftUI treats each as a `LocalizedStringKey`: they are looked up in the bundle's string table and fall back to the literal when no translation exists. NEEDS REVIEW: Not implemented in source. The type descriptions (`Directory`, `Package`, the per-extension names, and the `<EXTENSION> File` fallback) are computed `String` values passed to `Text(_:)` as a `StringProtocol`, which SwiftUI renders verbatim with no lookup; whether those should be localized is a product decision the source does not make.
+The seven fixed labels are passed to `Text("…")` as literals, so SwiftUI treats each as a `LocalizedStringKey`: they are looked up in the bundle's string table and fall back to the literal when no translation exists. The type descriptions (`Directory`, `Package`, the per-extension names, and the `<EXTENSION> File` fallback) are computed `String` values passed to `Text(_:)` as a `StringProtocol`, which SwiftUI renders verbatim with no lookup: these are hardcoded English strings with no localization of their own.
 
 ## Accessibility Options
 
@@ -250,7 +250,7 @@ Not applicable: no logging call appears anywhere in `ContentViewerView.swift`.
   **Approved**: pending
 
 - **Decision**: No explicit accessibility change notification is posted when `selectedNode` changes and the `Group`'s content is replaced.
-  **Rationale**: Not stated in source: `ContentViewerView.swift` contains no accessibility-notification call anywhere. Whatever announcement (if any) a VoiceOver user hears on selection change comes entirely from SwiftUI/AppKit's own automatic change detection (see the Accessibility section's open question on this); a port needs to decide whether that is sufficient or whether an explicit notification should be added.
+  **Rationale**: Not stated in source: `ContentViewerView.swift` contains no accessibility-notification call anywhere. Whatever announcement (if any) a VoiceOver user hears on selection change comes entirely from SwiftUI/AppKit's own automatic change detection (see the Accessibility section's Announce state changes item); a port needs to decide whether that is sufficient or whether an explicit notification should be added.
   **Approved**: pending
 
 - **Decision**: `byteCountFormatter` and `dateFormatter` are declared as `static let` constants on `FileDetailView` rather than being created inside `body`.
@@ -272,7 +272,7 @@ Not applicable: no logging call appears anywhere in `ContentViewerView.swift`.
 | [unicode-support](agenticdevelopercookbook://compliance/internationalization#unicode-support) | passed | Internationalization |
 | [rtl-layout-support](agenticdevelopercookbook://compliance/internationalization#rtl-layout-support) | passed | Internationalization |
 
-The accessibility statuses are partial because this view relies entirely on SwiftUI's default `Text`/`Image` accessibility behavior — it sets no custom label, trait, or accessibility notification of its own — and because whether a selection change is announced to an already-focused VoiceOver user is unconfirmed from source (see the Accessibility section's marker). Dynamic-type-support is partial because text scales with the theme's own `sizeScale` preference rather than the system's native Dynamic Type category, and the two icon sizes do not scale with either. `no-hardcoded-strings` failed because the computed type description strings (`Directory`, `Package`, the per-extension names, and the `<EXTENSION> File` fallback — see Localization) are `String` values passed to `Text(_:)` with no localization lookup; the seven fixed grid/placeholder labels are literals passed directly to `Text("…")`, which SwiftUI does look up as a `LocalizedStringKey`. The internationalization passes hold because every string is plain Unicode `Text`, and the grid's leading/trailing alignment mirrors automatically for right-to-left locales.
+The accessibility statuses are partial because this view relies entirely on SwiftUI's default `Text`/`Image` accessibility behavior — it sets no custom label, trait, or accessibility notification of its own, including no explicit notification when the selection changes (see the Accessibility section's Announce state changes item). Dynamic-type-support is partial because text scales with the theme's own `sizeScale` preference rather than the system's native Dynamic Type category, and the two icon sizes do not scale with either. `no-hardcoded-strings` failed because the computed type description strings (`Directory`, `Package`, the per-extension names, and the `<EXTENSION> File` fallback — see Localization) are `String` values passed to `Text(_:)` with no localization lookup; the seven fixed grid/placeholder labels are literals passed directly to `Text("…")`, which SwiftUI does look up as a `LocalizedStringKey`. The internationalization passes hold because every string is plain Unicode `Text`, and the grid's leading/trailing alignment mirrors automatically for right-to-left locales.
 
 ## Change History
 
@@ -280,3 +280,4 @@ The accessibility statuses are partial because this view relies entirely on Swif
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Claude | Initial creation from source code |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: add depends-on cross-references; add grid-path-line-limit requirement and vector; reword the header-icon-color Design Decision as an analogy rather than causation; reframe the concurrent-access edge case as a known limitation and add a pending Design Decision for it; fix grid-label-color to say trailing-aligned; clarify children nil-vs-empty semantics with a new edge case and vector; remove a fabricated Compose API and a dangling Rule 15 reference; split the Font appearance bullet by role; add extension-mapping and md icon-color test vectors; add pending Design Decisions for split label/value accessibility elements and the missing selection-change notification; neutralize an app-specific test-vector value; narrow the no-hardcoded-strings compliance rationale; reword Overview wording and align summary with it |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

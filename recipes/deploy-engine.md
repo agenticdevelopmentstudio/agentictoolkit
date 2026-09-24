@@ -3,7 +3,7 @@ id: da6524ff-4def-461c-a885-d385a118e596
 title: Deploy Engine
 domain: agentictoolkit://recipes/deploy-engine
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -718,19 +718,12 @@ visual component.
   the three providers is recorded via the shared cooldown registry so a
   polling caller backs off rather than immediately re-hitting an already
   rate-limited provider.
-- **Vercel domain cache across teams**: NEEDS REVIEW: Not implemented in source.
-  `domainListCache` in `providers/vercel.ts` is keyed only by `projectName`,
-  not by `(teamId, projectName)`, so two Vercel teams sharing a project name
-  (or one account switching `teamId` for a project) read or overwrite each
-  other's cached domain list for up to the one-hour TTL. Whether one process
-  ever enumerates more than one `teamId` is not determinable from the source;
-  if it does, the key should include `teamId`.
-- **Non-positive `mapLimit` limit**: NEEDS REVIEW: Not implemented in source.
-  `mapLimit` sizes its worker pool as `Math.min(limit, items.length)` with no
-  check that `limit >= 1`; a `limit <= 0` yields zero workers, so the promise
-  resolves with every result `undefined`, no item processed and no error.
-  `map-limit.test.ts` has no case for it. Whether a non-positive `limit`
-  should throw, clamp to 1, or stay the caller's responsibility is undecided.
+- **Vercel domain cache scope**: `domainListCache` in `providers/vercel.ts`
+  is keyed only by `projectName`, not by `(teamId, projectName)`, so two
+  Vercel teams sharing a project name, or one account switching `teamId` for
+  the same project, read and overwrite each other's cached domain list for
+  up to the one-hour TTL.
+- **map-limit-non-positive-limit**: NEEDS REVIEW: Not implemented in source. `mapLimit` sizes its worker pool as `Math.min(limit, items.length)` with no check that `limit >= 1`; a `limit <= 0` yields zero workers, so every result stays `undefined` with no item processed and no error, and `map-limit.test.ts` has no case for it — whether a non-positive `limit` should throw, clamp to 1, or stay the caller's responsibility is undecided.
 
 ## Configuration
 
@@ -1008,7 +1001,7 @@ independently.
 | [error-response-handling](agenticdevelopercookbook://compliance/access-patterns#error-response-handling) | passed | Every provider adapter distinguishes a non-OK HTTP response, an API-level `success:false`/`errors` body, and a thrown network error, and returns a distinct, typed outcome for each. |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | `plan.ts` and `builder-match.ts`'s planners are pure functions with no I/O; every network call is isolated to `run.ts`'s `executeAdd`/`applySequentially` callers and the `providers/*` adapters. |
 | [explicit-error-handling](agenticdevelopercookbook://compliance/best-practices#explicit-error-handling) | passed | `applySequentially` and `wireMatchingEndpoints` both catch and record a per-item failure explicitly rather than letting one item's rejection abort the run. |
-| [unit-test-coverage](agenticdevelopercookbook://compliance/best-practices#unit-test-coverage) | passed | Every given source but `host-pick.ts` and the three utilities has a sibling `*.test.ts` with concrete assertions (`plan.test.ts`, `run.test.ts`, `classify.test.ts`, `builder-match.test.ts`, `claimed-by-nothing.test.ts`, `vercel-domains.test.ts`, `canon.test.ts`, `map-limit.test.ts`, `cached-single-flight.test.ts`); no test exercises `mapLimit` with `limit <= 0` — see the open question under Edge Cases (non-positive `mapLimit` limit). |
+| [unit-test-coverage](agenticdevelopercookbook://compliance/best-practices#unit-test-coverage) | passed | Every given source but `host-pick.ts` and the three utilities has a sibling `*.test.ts` with concrete assertions (`plan.test.ts`, `run.test.ts`, `classify.test.ts`, `builder-match.test.ts`, `claimed-by-nothing.test.ts`, `vercel-domains.test.ts`, `canon.test.ts`, `map-limit.test.ts`, `cached-single-flight.test.ts`); no test exercises `mapLimit` with `limit <= 0` — see the open question on map-limit-non-positive-limit. |
 | [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Every operator-facing reason/note/summary string (`"that domain is already wired to…"`, `summarizeAutoConfigure`'s sentences, the cooldown/Cloudflare/Railway `console.error` messages) is a hardcoded English literal with no localization mechanism anywhere in the given sources. |
 
 
@@ -1017,3 +1010,4 @@ independently.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-24 | Mike Fullerton | Initial creation, documenting the deploy-platform engine's canonicalization, cross-thread rate-limit cooldown, configuration-status classification, add/builder planners, the shared sequential-apply runner, the removal/claim axis, and the Vercel/Railway/Cloudflare provider adapters plus their shared utilities. Records the open question over the Vercel domain cache's team-scoping and the unvalidated `mapLimit` concurrency limit. |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

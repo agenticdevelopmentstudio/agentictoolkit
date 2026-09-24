@@ -3,11 +3,11 @@ id: ec64b22b-8a25-431d-8866-b7a01acd91fe
 title: CrudTable
 domain: agentictoolkit://recipes/crud-table
 type: ingredient
-version: 1.2.0
+version: 1.2.1
 status: review
 language: en
 created: '2026-07-03'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -144,12 +144,7 @@ data-fetching or state: the caller supplies `rows`, `loading`, and `error` (from
 - The count line ("N rows" / "Loading…") gives sighted and AT users a sense
   of table size. It is plain text with no `aria-live` region, so an assistive
   technology user does not get an automatic announcement when it changes.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
-  the header, cell, and muted caption text text color resolves from the active theme's apt-* text tokens role against
-  the hosting background at runtime; the component performs no contrast
-  check, so whether a given theme's resolved pair meets 4.5:1 cannot be
-  determined from this file. This would be settled by a theme-level
-  contrast audit of apt-* text tokens against the backgrounds it sits on.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. The header, cell, and muted caption text color resolves from the active theme's apt-* text token roles against the hosting background at runtime; the component performs no contrast check, so whether a given theme's resolved pair meets 4.5:1 cannot be determined from this file. This would be settled by a theme-level contrast audit of apt-* text tokens against the backgrounds it sits on.
 
 ## Conformance Test Vectors
 
@@ -313,3 +308,4 @@ row-count text ("N row"/"N rows") are all literal, unwrapped English strings in
 | 1.2.0 | 2026-09-23 | Mike Fullerton | Lint pass: relinked Compliance to real catalog checks (Accessibility + Internationalization) and dropped two checks with no catalog equivalent; reformatted Design Decisions to the Decision/Rationale/Approved form; gave Platform Notes all five platform bullets (generic guidance for SwiftUI/Compose/AppKit-UIKit/WinUI 3) and corrected the source file path and metadata-generator path; added body-precedence, composite-row-key, retain-rows-on-error, and label-row-actions-header requirements with test vectors, plus vectors for the empty-state row count and the 80-character truncation boundary; clarified that the column cap can drop excess primary-key columns, not just scalars; dropped the unsupported "live" claim about the row count; and stated that delete confirmation is the caller's responsibility in `onDelete`; records the unverified theme-token contrast as an open question. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Renamed every requirement to subject-only kebab-case, dropping the old prefix everywhere it is cited. |
 | 1.0.0 | 2026-07-03 | Mike Fullerton | Initial recipe; documents the metadata-driven CrudTable from @adh-shared/crud. |
+| 1.2.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

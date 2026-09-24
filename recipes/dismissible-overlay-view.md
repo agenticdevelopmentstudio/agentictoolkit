@@ -3,11 +3,11 @@ id: 0bc93127-4078-4bc6-a250-04dde181788b
 title: DismissibleOverlayView
 domain: agentictoolkit://recipes/dismissible-overlay-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -168,36 +168,20 @@ whatever it has running that needs to stop.
 - **Role/trait**: Not explicitly set — the source calls no
   `setAccessibilityRole`/`accessibilityRole` override anywhere; `NSView`'s
   own AppKit default applies unmodified.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source. Behavior
-  undefined. Nothing in `DismissibleOverlayView` sets an accessibility label
-  or description on itself or the backdrop, so a VoiceOver user has no
-  announced description that this is a dismissible overlay or of how to
-  dismiss it (click anywhere unclaimed, Escape, or Return). What is missing:
-  an accessibility label communicating the overlay's presence and dismissal
-  affordance. What would settle it: a decision from the design/accessibility
-  owner on the wording, since the base class owns no fixed content to
-  describe but the dismissal gesture itself is common to every subclass and
-  currently unaddressed by any of them.
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. Neither `present(in:)` nor `dismiss()` calls
+- **Label requirements**: Not implemented in source. Nothing in
+  `DismissibleOverlayView` sets an accessibility label or description on
+  itself or the backdrop, so a VoiceOver user gets no announced description
+  that this is a dismissible overlay or of how to dismiss it (click anywhere
+  unclaimed, Escape, or Return); any such label would have to come from a
+  subclass or caller, and none of the toolkit's current subclasses supplies
+  one.
+- **Announce state changes**: Not implemented in source. Neither
+  `present(in:)` nor `dismiss()` calls
   `NSAccessibility.post(element:notification:)` when the overlay appears or
-  disappears, so a VoiceOver user is not told a new layer just covered the
-  screen, nor that it went away. What is missing: an accessibility
-  notification posted at the start of `present(in:)` and once `dismiss()`
-  removes the view. What would settle it: a VoiceOver pass presenting and
-  dismissing an overlay, to confirm whether AppKit's default
-  subview-added/removed handling already surfaces this or an explicit post
-  is required.
-- **Keyboard focus containment**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. `performKeyEquivalent` only intercepts Escape, Return,
-  and keypad Enter; nothing in source restricts Tab-key focus traversal to
-  the overlay's own content while it is presented, so a keyboard user could
-  Tab focus onto a control in the host view underneath the (visually
-  blocking, but not focus-blocking) backdrop. What is missing: whether Tab
-  focus is meant to be trapped inside the overlay while presented. What
-  would settle it: a keyboard-only pass tabbing through a presented overlay
-  to confirm whether the host's underlying controls remain reachable, and
-  whether that is acceptable given they are also visually hidden.
+  disappears, so no explicit VoiceOver notification is posted at either
+  transition — only whatever AppKit's own default view-hierarchy handling
+  provides applies.
+- **keyboard-focus-containment**: NEEDS REVIEW: Not implemented in source. `performKeyEquivalent` only intercepts Escape, Return, and keypad Enter; nothing restricts Tab-key focus traversal to the overlay's own content while presented, so a keyboard user could Tab onto a host control underneath the backdrop, and whether that is acceptable can only be settled by a keyboard-only pass tabbing through a presented overlay with the running UI.
 - **Minimum tap target**: Not applicable in the small-target sense — per
   `mouse-down-dismissal` and `host-coverage`,
   the dismiss gesture's target is the overlay's entire frame, which itself
@@ -544,11 +528,13 @@ build) rather than a normal test-runner assertion.
 `keyboard-navigable` passes because Escape, Return, and keypad Enter all
 dismiss the overlay without requiring it to become first responder (see
 `escape-return-dismissal`). `focus-management` is `partial`: the overlay
-manages dismissal focus-independently, but the "Keyboard focus containment"
-open question under Accessibility is unresolved in source — nothing traps
-Tab focus to the overlay's own content. `screen-reader-support` fails for
-the "Label requirements" open question: no accessibility label describes
-the overlay's presence or dismissal affordance. `reduced-motion` passes
+manages dismissal focus-independently, but the open question on
+`keyboard-focus-containment` is unresolved in source — nothing traps
+Tab focus to the overlay's own content. `screen-reader-support` fails
+because the source sets no accessibility label describing the overlay's
+presence or dismissal affordance and posts no VoiceOver notification when
+it appears or disappears (see "Label requirements" and "Announce state
+changes" under Accessibility). `reduced-motion` passes
 because the only animation is an opacity fade (see Accessibility Options).
 `platform-theming` passes because the backdrop's appearance comes entirely
 from a system `NSVisualEffectView.Material` value, not a raw color this
@@ -560,3 +546,4 @@ view chooses itself.
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only kebab-case; reformatted Design Decisions to bold three-line form; moved the internal cross-reference from `references` to `related` and added the HIG Motion URL; corrected Compliance to real catalog checks and categories; added a two-overlay conformance vector and an `isDismissing` Configuration row; qualified the WinUI 3 accelerator-precedence claim; tightened animation-timing conformance vectors for XCTest executability; trimmed edge-case RFC tags and fixed the zero-sized-host accuracy issue. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `DismissibleOverlayView` (AppKit, macOS) source. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
