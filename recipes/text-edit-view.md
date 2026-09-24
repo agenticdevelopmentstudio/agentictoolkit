@@ -3,11 +3,11 @@ id: c1787e74-2485-4d7b-a219-feb4c07cf97c
 title: TextEditView
 domain: agentictoolkit://recipes/text-edit-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -102,7 +102,7 @@ behavior every row built from it — plain or secure — inherits.
 - **confines-to-main-actor**: Component MUST be usable only on the main
   actor; the class is declared `@MainActor`.
 - **conforms-to-settings-view-protocol**: Component MUST conform to
-  `SettingsViewProtocol`, the marker protocol
+  `SettingsViewProtocol`, a marker protocol
   (`.../Views/SettingsViewProtocol.swift`) that `ComposableSettings` uses
   to type its row views; the protocol adds no requirements of its own
   beyond `NSView` conformance.
@@ -175,18 +175,14 @@ behavior every row built from it — plain or secure — inherits.
 - **Role/trait**: Not customized — no `setAccessibilityRole` call appears
   in `TextEditView.swift`; `NSTextField` carries AppKit's own built-in
   text-field accessibility role.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. `TextEditView.swift` never calls
+- **Label requirements**: `TextEditView.swift` never calls
   `setAccessibilityTitleUIElement` or otherwise links `textField` to
   `label` — unlike the sibling `CheckboxView`, which links its switch to
   its label for exactly this reason ("AppKit gives a bare switch no
   name"). Without that link, VoiceOver announces `textField` as an
-  unnamed text field rather than by the row's title. What would settle it:
-  a decision on whether `TextEditView` should adopt the same
-  `setAccessibilityTitleUIElement(label)` call `CheckboxView` uses, or
-  accessibility-audit evidence that this omission is acceptable as-is.
-  Because `SecureTextEditView` inherits `init` unmodified, the same gap
-  applies there.
+  unnamed text field rather than by the row's title. Because
+  `SecureTextEditView` inherits `init` unmodified, the same gap applies
+  there.
 - **Announce state changes**: Not applicable — the component has no
   loading state and never disables itself in source (see States); typed
   characters being entered or deleted are announced through
@@ -197,16 +193,7 @@ behavior every row built from it — plain or secure — inherits.
   path in source); the 44×44pt minimum is iOS/touch guidance, not a macOS
   pointer-interface requirement. No `controlSize` is set on `textField`,
   so it keeps `NSTextField`'s regular system click-target metrics.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. `label`
-  and `textField`'s typed-text color both resolve to the theme's
-  `primaryText` role (theme foreground, unchanged; no minimum contrast is
-  computed for this role), and placeholder text resolves to
-  `placeholderText`, which the theme layer dims toward the background with
-  only a `minContrast: 1.6` floor (see Design Decisions). What is missing is
-  any check that the resolved colors clear WCAG 2.1 SC 1.4.3's 4.5:1
-  threshold for body text. Settling it needs the text-to-background ratio
-  measured for both roles under every shipped `ColorTheme`, or a raised
-  `placeholderText` floor in the theme layer.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. `label` and `textField`'s typed-text color both resolve to the theme's `primaryText` role (no minimum contrast computed for this role), and placeholder text resolves to `placeholderText`, dimmed toward the background with only a `minContrast: 1.6` floor (see Design Decisions) — below WCAG 2.1 SC 1.4.3's 4.5:1 threshold for body text; settling it needs the text-to-background ratio measured for both roles under every shipped `ColorTheme`, or a raised `placeholderText` floor in the theme layer.
 
 ## Conformance Test Vectors
 
@@ -496,7 +483,7 @@ Not applicable: `TextEditView.swift` contains no logging call (no
 styling; `keyboard-navigable` rests on the field's inherited, unmodified
 `NSControl` tab order (no custom key handling in source); `screen-reader-
 support` is `partial` because the accessibility title link to `label` is
-missing (see the open question in Accessibility above); `idempotent-
+missing (see Accessibility's Label requirements above); `idempotent-
 operations` rests on skips-redundant-commits's equality check before
 writing to `settingObserver.value`; `separation-of-concerns` rests on the
 view holding no persistence or business logic of its own — commits pass
@@ -508,3 +495,4 @@ straight through to the caller-supplied `settingObserver`.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: promote the onChange-overwrite edge case to a named claims-sole-onchange-observer requirement with a test vector and a pending design decision; reword the null-input edge case to drop normative language; state committed-edit routing and the field's content-hugging priority as observable outcomes instead of a private selector/literal, moving the selector name to Platform Notes; correct SwiftUI/Compose/React commit timing to submit-or-focus-loss instead of per-keystroke, matching NSTextField's target/action semantics; fix the WinUI Grid column order (Auto,*) so the TextBox actually stretches; remove the malformed fatalError decision and log it as a known source bug in Platform Notes instead; drop the "(the reason this recipe exists)" filler; reformat Design Decisions to the bold convention and add a pending accessibility-label decision; clarify test vectors 008 (spy-based write count) and 015 (compile-time check); title-case Compliance categories and add a supporting sentence; backfill the initial Change History row; records the unverified theme-token contrast as an open question. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

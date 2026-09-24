@@ -3,11 +3,11 @@ id: 8d944856-8dbe-4af8-8141-e44381500dc7
 title: TextAreaEditView
 domain: agentictoolkit://recipes/text-area-edit-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -261,12 +261,7 @@ may be subclassed.
   active theme's resolved `primaryText`-on-`controlBackground` pairing
   clears WCAG 2.1 SC 1.4.3's 4.5:1 threshold for normal text is a property
   of the chosen `ColorTheme`, not of `TextAreaEditView.swift`.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
-  the label and text-view text text color resolves from the active theme's primaryText role against
-  the hosting background at runtime; the component performs no contrast
-  check, so whether a given theme's resolved pair meets 4.5:1 cannot be
-  determined from this file. This would be settled by a theme-level
-  contrast audit of primaryText against the backgrounds it sits on.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. The label and text-view text color resolves from the active theme's primaryText role against the hosting background at runtime; the component performs no contrast check, so whether a given theme's resolved pair meets 4.5:1 cannot be determined from this file. This would be settled by a theme-level contrast audit of primaryText against the backgrounds it sits on.
 
 ## Conformance Test Vectors
 
@@ -637,3 +632,4 @@ passes because the view only wires up `NSTextView`/`NSScrollView` UI, while
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-form and updated all cross-references; reworded AppKit property-assignment requirements as observable outcomes and moved the concrete API calls into the AppKit/UIKit Platform Notes bullet; fixed the WinUI 3 bullet's lifecycle event and height-inset guidance; documented the unasserted keyboard-exit path and marked keyboard-navigable partial, and added a contrast-ratio compliance row; rewrote test vectors 027/028 around an observable write-counting observer instead of the private isCommitting flag; reformatted Design Decisions to the bold three-line form, dropped the document-scoped requirement-count decision, gave the label-resync decision a present-day rationale, and recorded the onChange-overwrite hazard as a decision instead of a MUST; removed normative "MUST" phrasing from Edge Cases; dropped the untestable permits-subclassing requirement and folded it into Overview; trimmed tags to 5, added related/references, and added the initial Change History row; records the unverified theme-token contrast as an open question. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

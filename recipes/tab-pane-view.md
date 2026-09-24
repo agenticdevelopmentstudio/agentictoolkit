@@ -3,11 +3,11 @@ id: d906afe1-a621-42f1-87c5-c71ec9d43c1e
 title: TabPaneView
 domain: agentictoolkit://recipes/tab-pane-view
 type: ingredient
-version: 1.1.1
+version: 1.1.2
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -254,18 +254,13 @@ tab.
 
 ## Accessibility
 
-- **Role/trait**: NEEDS REVIEW: Not implemented in source. Behavior
-  undefined. `TabPaneView` sets an `accessibilityIdentifier` on itself and on
-  each subview (for UI-test addressing) but no `accessibilityRole`, and does
-  not mark itself an accessibility element or group its children into one.
-  What is missing: whether a VoiceOver user should hear this card as one
-  grouped element (with a computed summary label) rather than as five
-  separate, individually-focused static-text elements in sequence with no
-  indication that they describe one tab. What would settle it: a VoiceOver
-  pass over a real tab bar, deciding whether to add
-  `isAccessibilityElement`/`accessibilityChildren()` grouping (as
-  `TabButton` does in `TabBarView.swift`, per the `multi-tabbed-view-controller`
-  recipe) or an explicit decision that per-label reading is acceptable here.
+- **Role/trait**: `TabPaneView` sets an `accessibilityIdentifier` on itself
+  and on each subview (for UI-test addressing) but sets no `accessibilityRole`
+  and does not mark itself an accessibility element or group its children
+  into one (as `TabButton` does in `TabBarView.swift`, per the
+  `multi-tabbed-view-controller` recipe). VoiceOver reads the card as five
+  separate, individually-focused static-text elements in sequence, with no
+  indication that they describe one tab.
 - **Label requirements**: `closeButton`'s image carries `accessibilityDescription:
   "Close"` (see Localization). Each status `NSImageView` carries the caller-supplied
   `TabPaneStatusSymbol.accessibilityLabel` via `setAccessibilityLabel(_:)`.
@@ -273,16 +268,12 @@ tab.
   `summaryLabel` receive no explicit `accessibilityLabel` call in this file;
   VoiceOver falls back to each `NSTextField`'s own `stringValue`, AppKit's
   default for a plain label control.
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. `applyDepth()` recolors and repositions the card
-  whenever it becomes or stops being the front card, but nothing in
+- **Announce state changes**: `applyDepth()` recolors and repositions the
+  card whenever it becomes or stops being the front card, but nothing in
   `TabPaneView.swift` posts an `NSAccessibility.post(element:notification:)`
-  (or any other accessibility notification) when that happens. What is
-  missing: whether a VoiceOver user tracking a different element is told this
-  card's selection state changed when no click of their own caused it. What
-  would settle it: a VoiceOver pass exercising a programmatic depth change, or
-  an explicit decision that the hosting bar's own announcement (if any) is
-  sufficient.
+  (or any other accessibility notification) when that happens; a VoiceOver
+  user tracking a different element is not told this card's selection state
+  changed when no click of their own caused it.
 - **Minimum tap target**: `closeButton`'s hit area is a fixed `14×14pt`
   (`closeButton.widthAnchor`/`heightAnchor`). macOS is a pointer-driven
   desktop platform; the `44×44pt` (iOS) / `48×48dp` (Android) touch-target
@@ -402,30 +393,23 @@ updated only by direct, in-process calls from `TabPaneViewController`.
 |-----------|-------------|---------|
 | — | "Close" | `NSImage(systemSymbolName:accessibilityDescription:)`'s description for `closeButton`'s `xmark.circle.fill` glyph |
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined. "Close" is a
-hardcoded English `String` literal passed directly to
+"Close" is a hardcoded English `String` literal passed directly to
 `accessibilityDescription`, not routed through `NSLocalizedString` or any
-other localization mechanism used in this file. What is missing: a translated
-string table entry for this description. What would settle it: adding it to
-the app's string catalog/`.strings` file and replacing the literal with a
-lookup. (The status symbols' `accessibilityLabel` values, and every label's
-displayed text, are caller-supplied data from `TabPaneDataSource`/
-`TabPaneStatusSymbol` — like a tab's own title in the `multi-tabbed-view-controller`
-recipe, they carry no localization concern of this view's own making.)
+other localization mechanism used in this file. (The status symbols'
+`accessibilityLabel` values, and every label's displayed text, are
+caller-supplied data from `TabPaneDataSource`/`TabPaneStatusSymbol` — like a
+tab's own title in the `multi-tabbed-view-controller` recipe, they carry no
+localization concern of this view's own making.)
 
 ## Accessibility Options
 
-- **Reduce Motion**: NEEDS REVIEW: Not implemented in source. Behavior
-  undefined. `place(animated:)` slides and resizes the card's paint and text
-  boxes (a position *and* size change, not a plain opacity cross-fade) over
-  `0.16s` whenever `stackDepth` changes on a windowed view; nothing in
-  `TabPaneView.swift` checks `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion`
-  (or any Reduce Motion signal) before running that animation. What is
-  missing: whether a Reduce Motion user should see the depth change apply
-  immediately instead of sliding. What would settle it: a decision from the
-  theme/accessibility owner on the substitute (an immediate jump, matching the
-  `animated: false` path already in `place(animated:)`), or confirmation that
-  a `0.16s` slide is short enough to be exempt.
+- **Reduce Motion**: `place(animated:)` slides and resizes the card's paint
+  and text boxes (a position *and* size change, not a plain opacity
+  cross-fade) over `0.16s` whenever `stackDepth` changes on a windowed view;
+  nothing in `TabPaneView.swift` checks
+  `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` (or any Reduce
+  Motion signal) before running that animation, so a Reduce Motion user sees
+  the same slide as anyone else.
 - **Increase Contrast**: Not applicable — every color this component draws
   (`projectPaneBackdrop`, `projectPaneOutline`, `windowBackground`, `border`,
   `.accent`, `.primaryText`, `.secondaryText`, `.tertiaryText`) is a semantic
@@ -627,3 +611,4 @@ description is a hardcoded English literal (see Localization).
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded the truncation-default requirement to name only its three non-overridden labels; fixed the Default and Front state descriptions; restated two internal-call test vectors as observable outcomes and the recession-slack vector to clear the size clamp; added missing test vectors for a nil context-menu provider and empty status symbols; corrected the WinUI 3 header layout and close-glyph and the Compose truncation/Reduce-Motion notes; documented `TabPaneStatusSymbol` in Configuration; moved a cookbook cross-reference from `references` to `related`; trimmed one tag over the 1-5 limit; and removed the two accessibility compliance rows that used a disallowed `not-applicable` status. |
 | 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog, remapped reduce-motion-support to reduced-motion |
+| 1.1.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

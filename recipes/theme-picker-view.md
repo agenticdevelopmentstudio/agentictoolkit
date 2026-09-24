@@ -3,11 +3,11 @@ id: c68fd42e-52e5-4129-9a13-2574d13a7a0e
 title: ThemePickerView
 domain: agentictoolkit://recipes/theme-picker-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -285,12 +285,8 @@ inert: `ThemeChoiceViewModel.init`'s `title: String = "Theme"` default
 (`ThemeChoiceViewModel.swift:10`) is a plain `String`, not routed through
 `String(localized:)`/`NSLocalizedString`, and because `ThemePickerView`
 supplies no title of its own, every `ThemePickerView` shows that unlocalized
-default. NEEDS REVIEW: Not implemented in source. What is missing: no
-localization key exists for the popup's `"Theme"` title, and
+`"Theme"` default; no localization key exists for the popup's title, and
 `ThemeChoiceViewModel` has no recipe of its own to record the gap against.
-What would settle it: routing `ThemeChoiceViewModel`'s `title` default
-through `String(localized:)` (or an equivalent localized-string mechanism)
-there, once that file has its own recipe or an accepted decision covers it.
 Every other visible string (choice labels, preview sample text) is owned by
 `ThemeChoiceViewModel.swift` and `ThemePreviewView.swift` respectively.
 
@@ -469,3 +465,4 @@ selection commit path (see Design Decisions).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for ThemePickerView, covering the popup/preview composition, the notification-mediated decoupling between selection and preview refresh, the private constituent views, and one open question on a disabled state. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: restated three implementation-detail requirements as observable contracts and moved their mechanics into Platform Notes; pinned three previously undated claims to source lines; replaced the suppressed Localization "Not applicable" with an open question on the unlocalized popup title; disambiguated ThemeScope identity in two requirements and test vectors 009/010, and gave test 006 a concrete expected value; dropped the incidental timing assertion from test 012; reworded three Edge Cases MUSTs to plain description; reformatted Design Decisions to the bold three-line form and removed two non-decision entries; shortened the summary; added related/depends-on domains for composed and sibling recipes; fixed a self-contradicting UIKit note and dropped WinUI aside noise; and marked three Compliance checks partial with the inherited-result explained. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
