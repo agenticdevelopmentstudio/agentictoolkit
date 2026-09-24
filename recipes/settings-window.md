@@ -3,11 +3,11 @@ id: 7cac2263-94fe-47ec-ab1d-6cf5a12baf14
 title: SettingsWindow
 domain: agentictoolkit://recipes/settings-window
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -257,15 +257,7 @@ still illustrates configuration a different way.
   palette (`ThemePaletteObserver`); contrast is a design-system-level
   concern this file does not decide, per
   `agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages`.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
-  panel-title label draws its text in the `.primaryText` role and the help
-  button tints itself with `secondaryTextColor`/`accentColor`, each against
-  whichever theme surface renders behind it under the transparent, unified
-  toolbar (see Appearance, Background); no contrast ratio between those
-  roles and their background is computed or asserted anywhere in this file.
-  Settling this needs a theme-level contrast audit of `SemanticPalette`'s
-  roles against the surfaces they are drawn over, not a change to
-  `SettingsWindow.swift` itself.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. The panel-title label draws its text in the `.primaryText` role and the help button tints itself with `secondaryTextColor`/`accentColor`, each against whichever theme surface renders behind it under the transparent, unified toolbar (see Appearance, Background); no contrast ratio between those roles and their background is computed or asserted anywhere in this file. Settling this needs a theme-level contrast audit of `SemanticPalette`'s roles against the surfaces they are drawn over, not a change to `SettingsWindow.swift` itself.
 
 ## Conformance Test Vectors
 
@@ -357,20 +349,14 @@ in `SettingsWindow.swift`. The window is opened only by direct method calls
 
 ## Localization
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined. Every
-user-facing string in this file is a hardcoded English literal passed
+Every user-facing string in this file is a hardcoded English literal passed
 directly to AppKit APIs, not a localization key: `"Settings"` (window
 title), `"Back"` / `"Forward"` (segment image accessibility descriptions),
 `"Back and forward"` (navigation control accessibility label),
 `"Back/Forward"` / `"Panel"` (toolbar item labels), `"Help"` (toolbar item
 label and the help button's stable accessibility name), and `"Show Help"` /
 `"Hide Help"` (tooltip text). None of these pass through
-`NSLocalizedString` or a String Catalog lookup anywhere in this file. This
-cannot be resolved from this source alone because it requires a product
-decision on which localization table these strings belong to and who owns
-translating them; settling it needs either an i18n pass adding
-`NSLocalizedString`/String Catalog entries for each literal above, or an
-explicit decision that this window is English-only.
+`NSLocalizedString` or a String Catalog lookup anywhere in this file.
 
 ## Accessibility Options
 
@@ -569,7 +555,8 @@ accessibility labels/descriptions on the navigation control and help button;
 ordinary keyboard-focusable AppKit controls). `dynamic-type-support` and
 `contrast-ratio` are `partial` because the source reads fonts and colors
 from the shared theme palette but this file neither asserts nor decides
-scaling or contrast itself (see the Minimum contrast ratio marker above).
+scaling or contrast itself (see the open question on
+minimum-contrast-ratio).
 `no-hardcoded-strings` and `string-externalization` are `failed` because
 every user-facing string this file passes to AppKit is a literal, not a
 localization key (see Localization).
@@ -580,3 +567,4 @@ localization key (see Localization).
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: replaced the fabricated recipe-quality Compliance rows with real accessibility/internationalization checks and their grounded statuses, cleaned up by `compliance_fix.py`; flagged the theme-token colors this file reads with a Minimum contrast ratio open question; downgraded `updates-help-glyph-on-navigation-change` from MUST to MAY and moved its private-method coupling into Platform Notes; recorded the stale `makeSettingsPanels()` doc comment as a pending Design Decision instead of prose; reformatted Design Decisions to the bold three-line form; trimmed `tags` to five entries and populated `depends-on`/`related`; removed leftover template instruction text from Accessibility Options; resolved the WinUI cross-reference to a full domain URL; and corrected three inaccurate conformance test vectors (settings-window-011, -015, -023, -024) and the "Activation disabled" States row. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from `SettingsWindow.swift`. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

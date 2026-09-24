@@ -3,11 +3,11 @@ id: 3f6268b8-410d-4d3c-979c-2a9f9f1534f3
 title: SingleWindowController
 domain: agentictoolkit://recipes/single-window-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -468,16 +468,13 @@ outside this class's responsibility.
 - **Increase Contrast**: Not applicable — the base class sets no colors of
   its own beyond HUD transparency, which is a deliberate translucency effect
   rather than a contrast-relevant foreground/background pairing.
-- **Reduce Transparency**: NEEDS REVIEW: Not implemented in source. Not
-  applicable to the base (non-HUD) configuration,
+- **Reduce Transparency**: Not applicable to the base (non-HUD) configuration,
   since no window built without `configureAsHUD` has any translucency to
   reduce. For a HUD-configured window, `setTransparency(_:)` sets translucency
-  unconditionally from the caller-supplied value with no observation of
-  `NSWorkspace.accessibilityDisplayShouldReduceTransparency`; whether the HUD
-  should re-clamp toward opaque under Reduce Transparency is the open
-  question, since the setting does apply to a HUD window and the source
-  simply has no code path for it. Settling it needs a decision on whether a
-  HUD window observes that setting and forces an opaque background.
+  unconditionally from the caller-supplied value; the class does not observe
+  `NSWorkspace.accessibilityDisplayShouldReduceTransparency`, so a HUD
+  window's `alphaValue` is never re-clamped toward opaque when the system
+  setting is enabled.
 
 ## Feature Flags
 
@@ -639,3 +636,4 @@ from `windowID` (screen-reader-support), and no-op repeats of
 |---|---|---|---|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from the Apple `SingleWindowController` (AppKit, macOS) source. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reframed the requirement-count design decision as deliberate coupling debt rather than scope justification; merged the loadWindow build-order requirements into one build-sequence requirement and corrected registry-registration timing to init(); renamed init-argument-storage to describe storage only; renamed all requirements to subject-only kebab-case; reworded windowSpec citations as "a registered WindowSpec"; corrected the forces-front/quiet-presentation, HUD transparency/floating/transparency-property wording; moved private refit-machinery names out of requirements and test vectors into Platform Notes; replaced test vectors 001 and 037 with behavioral vectors, added a setFloating(false) vector, and merged the forces-front vectors; corrected the fitWindow zero/negative-size edge case against the real guard clause; moved the platform-design-languages reference into related and added sibling recipe links; removed the macos tag; reformatted Compliance to Check/Status/Category and Design Decisions to bold labels; ran compliance_fix.py to drop uncataloged Compliance checks; rejected the default-placement, double-persist, and compliance-coverage findings against current source. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

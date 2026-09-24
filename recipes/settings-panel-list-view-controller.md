@@ -3,11 +3,11 @@ id: a41760b2-4ffd-413b-970f-c0373c9bd3b6
 title: PanelListViewController
 domain: agentictoolkit://recipes/settings-panel-list-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -178,9 +178,8 @@ matter what the search field currently hides.
   are posted through `NSOutlineView`'s own native accessibility
   notifications (inherited, unmodified); this file issues no
   `NSAccessibility.post` call of its own for a section rebuild, a search
-  filter change, or a panel's `isDisabled` flip. See the open question in
-  Edge Cases about a descriptor mutated after the sidebar has already been
-  populated.
+  filter change, a panel's `isDisabled` flip, or a descriptor mutated after
+  the sidebar has already been populated (see Edge Cases).
 - **Minimum tap target**: Not applicable — this is a macOS, pointer/
   keyboard-driven `NSOutlineView` row (no touch input path in this file or
   its ancestor); the 44×44pt minimum is iOS/touch guidance, not a macOS
@@ -243,14 +242,12 @@ matter what the search field currently hides.
   `.icon`, `.isDisabled`, and `.section` are all `@Published`
   (`ComposableSettings.SettingsPanelDescriptor: ObservableObject`), but this
   file subscribes to none of them — rows are built once, when
-  `setPanels(_:)` or a `searchQuery` change triggers `rebuildSections()`.
-  NEEDS REVIEW: Not implemented in source. Behavior undefined for a panel
-  whose descriptor changes after the sidebar has already been populated
-  (the row will show stale text/icon/disabled-state until some other event
-  triggers a rebuild). What would settle this: confirmation of whether
-  callers are expected to call `setPanels(_:)` again after mutating a
-  descriptor, or whether this component should subscribe to each panel's
-  `descriptor.objectWillChange` and rebuild automatically.
+  `setPanels(_:)` or a `searchQuery` change triggers `rebuildSections()`. A
+  panel's descriptor mutated after the sidebar has already been populated
+  leaves that row showing stale text/icon/disabled-state until some later
+  `setPanels(_:)` or `searchQuery` change triggers a rebuild; this file does
+  not subscribe to `descriptor.objectWillChange` or otherwise refresh a row
+  automatically.
 
 ## Configuration
 
@@ -281,7 +278,7 @@ text is the responsibility of whichever type constructs each
 |--------|----------|
 | Reduce Motion | Not applicable: no animation, transition, or `NSAnimationContext` call appears anywhere in this file; `setSections`/`reloadData` (inherited) apply immediately. |
 | Increase Contrast | Not applicable: this file sets no custom `NSColor`; all coloring flows through the inherited `TopicListViewController` lookups against the active `SemanticPalette`, unmodified here. |
-| Differentiate Without Color | NEEDS REVIEW: Not implemented in source. Behavior undefined for a reader with Differentiate Without Color enabled. A disabled panel's row is distinguished from an enabled one by text/icon color alone (`tertiaryTextColor` vs. `primaryTextColor`/`accentColor`, in `TopicListViewController.outlineView(viewFor:)`); `cell.textField?.alphaValue` is fixed at `1.0` regardless of `isDisabled`, so there is no opacity or other non-color cue. This file inherits that behavior and adds no additional signal of its own. What would settle this: a design decision on which non-color cue (e.g. an overlay glyph, italic style, or a trailing "coming soon" label) should mark a disabled row, and whether adding it belongs to this file or to `TopicListViewController`. |
+| Differentiate Without Color | Not supported: a disabled panel's row is distinguished from an enabled one by text/icon color alone (`tertiaryTextColor` vs. `primaryTextColor`/`accentColor`, in `TopicListViewController.outlineView(viewFor:)`); `cell.textField?.alphaValue` is fixed at `1.0` regardless of `isDisabled`, so there is no opacity or other non-color cue. This file inherits that behavior and adds no additional signal of its own. |
 
 ## Feature Flags
 
@@ -463,3 +460,4 @@ logger reference anywhere in source).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only kebab-case and updated every citation; deduped Appearance against the `TopicListViewController` recipe and added it to `depends-on` along with `settings-panel-view-controller`; dropped the `macos` tag; fixed the WinUI 3 and React/Web platform notes; replaced two unobservable test vectors with an observable rebuild-counter seam and strengthened cts-panel-list-010; reformatted Design Decisions to the bold three-line form, corrected a stale `SettingsViewController` citation, and added a decision for `open` subclassing (moved out of Behavioral Requirements/test vectors); fixed the `needs-review` compliance status to `partial` |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

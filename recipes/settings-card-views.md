@@ -3,11 +3,11 @@ id: afa90dd0-0ee6-435b-8cac-f5c6065e7496
 title: Settings Card Views
 domain: agentictoolkit://recipes/settings-card-views
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -88,7 +88,7 @@ approved-date: ''
 - **Label requirements**: `SettingsGroup`'s caption text is both the visible and accessible content of its `Text`, since `title` is displayed verbatim with no separate accessibility label. `SettingsSearchField`'s `placeholder` becomes `ThemedSearchField.placeholderString`, which `NSSearchField` also exposes as part of its default accessibility description; no separate `accessibilityLabel` is set.
 - **Announce state changes**: Not applicable — none of the six APIs defines a state that changes (see States); there is nothing for VoiceOver to announce beyond `NSSearchField`'s own native announcements of its text changing.
 - **Minimum tap target**: Not applicable for `SettingsGroup`/`SettingsCard`/`SettingsCardRow`/`SettingsCardDivider`, none of which is an interactive control. `SettingsSearchField`'s tappable target (text field bezel, clear button) is entirely `NSSearchField`'s native sizing, not a size this file computes.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. `SettingsCardDivider` fills with the `divider` role, derived as the background blended only 10% toward the foreground, and the source never checks that blend against the 3:1 non-text contrast ratio WCAG 1.4.11 asks of a meaningful UI boundary. What is missing is a minimum-contrast floor on the `divider` role (as `secondaryText` has) or a per-theme contrast measurement. Settling it needs the divider-to-`elevatedSurface` ratio measured under every shipped theme, or a decision that the divider is decorative and exempt from 1.4.11.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. `SettingsCardDivider` fills with the `divider` role, derived as the background blended only 10% toward the foreground, and the source never checks that blend against the 3:1 non-text contrast ratio WCAG 1.4.11 asks of a meaningful UI boundary. What is missing is a minimum-contrast floor on the `divider` role (as `secondaryText` has) or a per-theme contrast measurement. Settling it needs the divider-to-`elevatedSurface` ratio measured under every shipped theme, or a decision that the divider is decorative and exempt from 1.4.11.
 
 ## Conformance Test Vectors
 
@@ -146,7 +146,7 @@ Not applicable: `SettingsGroup`, `SettingsCard`, `SettingsCardRow`, `SettingsCar
 | Option | Behavior |
 |--------|----------|
 | Reduce Motion | Not applicable: none of the six APIs applies an animation, transition, or motion effect of its own — every one is built once from static modifiers, with no animator proxy, `withAnimation`, or looping effect anywhere in the source. |
-| Increase Contrast | Applies, but is not handled in source: `SettingsGroup`'s caption reuses the `secondaryText` role (3.0 minimum-contrast floor) and 11pt caption size that `HeaderView`'s caption also uses — the open question about raising that floor for Increase Contrast is tracked in the `header-view` recipe and not re-raised here. `SettingsCardDivider`'s `divider` role (10% blend, no stated minimum-contrast floor) raises the same open question independently — see the Contrast entry in Accessibility. |
+| Increase Contrast | Applies, but is not handled in source: `SettingsGroup`'s caption reuses the `secondaryText` role (3.0 minimum-contrast floor) and 11pt caption size that `HeaderView`'s caption also uses — the open question about raising that floor for Increase Contrast is tracked in the `header-view` recipe and not re-raised here. `SettingsCardDivider`'s `divider` role (10% blend, no stated minimum-contrast floor) raises the same open question independently — see the open question on minimum-contrast-ratio. |
 | Differentiate Without Color | Not applicable: none of the six APIs conveys state or meaning through color alone — each renders exactly one presentation, with no color-coded distinction for an alternate cue to replace. |
 
 ## Feature Flags
@@ -204,7 +204,7 @@ Not applicable: the source contains no logging calls (no `os_log`, `Logger`, or 
 | [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
 | [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | passed | Internationalization |
 
-`screen-reader-support` passes because `SettingsSearchField`'s only interactive control is a genuine `NSSearchField` (`ThemedSearchField`), which carries its own search-field accessibility role and description; the four pure layout views (`SettingsGroup`, `SettingsCard`, `SettingsCardRow`, `SettingsCardDivider`) render no interactive elements of their own. `keyboard-navigable` passes for the same reason — `NSSearchField`'s native focus, typing, and Escape-to-clear behavior come for free from wrapping the real control (see Focused in States). `dynamic-type-support` is partial because the caption's `.caption` style is scaled by the active theme's `sizeScale` (`ThemeTypography.defaultStyle(.caption)`), and whether that tracks the system's text-size preference depends on the active theme, which this file cannot determine on its own. `contrast-ratio` is partial because the `secondaryText` and `divider` roles each guarantee only a fixed minimum-contrast floor (3.0 and unstated, respectively) from their derivation formula, not a guarantee that any specific active theme clears WCAG's 4.5:1 (text) or 3:1 (non-text UI) thresholds — see the Contrast entry in Accessibility. `no-hardcoded-strings` passes because the file's only user-facing text, `title` and `placeholder`, are caller-supplied parameters with no literal string of this file's own baked in (see Localization).
+`screen-reader-support` passes because `SettingsSearchField`'s only interactive control is a genuine `NSSearchField` (`ThemedSearchField`), which carries its own search-field accessibility role and description; the four pure layout views (`SettingsGroup`, `SettingsCard`, `SettingsCardRow`, `SettingsCardDivider`) render no interactive elements of their own. `keyboard-navigable` passes for the same reason — `NSSearchField`'s native focus, typing, and Escape-to-clear behavior come for free from wrapping the real control (see Focused in States). `dynamic-type-support` is partial because the caption's `.caption` style is scaled by the active theme's `sizeScale` (`ThemeTypography.defaultStyle(.caption)`), and whether that tracks the system's text-size preference depends on the active theme, which this file cannot determine on its own. `contrast-ratio` is partial because the `secondaryText` and `divider` roles each guarantee only a fixed minimum-contrast floor (3.0 and unstated, respectively) from their derivation formula, not a guarantee that any specific active theme clears WCAG's 4.5:1 (text) or 3:1 (non-text UI) thresholds — see the open question on minimum-contrast-ratio. `no-hardcoded-strings` passes because the file's only user-facing text, `title` and `placeholder`, are caller-supplied parameters with no literal string of this file's own baked in (see Localization).
 
 ## Change History
 
@@ -212,3 +212,4 @@ Not applicable: the source contains no logging calls (no `os_log`, `Logger`, or 
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: move the platform-design-languages guideline reference from `references` to `related`; fix Design Decision approval-line formatting; rename requirements to subject-only names (`group-caption`, `group-caption-spacing`, `search-field-coordinator-binding`); split `card-and-search-field-stay-internal` into `card-stays-internal` and `search-field-stays-internal` (only the card's internal access has a Design Decision behind it) with a matching new test vector; drop layout literals duplicated between Behavioral Requirements and Appearance, keeping Appearance as the single source; make the corner-radius and coordinator-rebind test vectors assert checkable outcomes; pick a `<span>` for the React caption; fix the five-views-plus-one-modifier count and a frameworks' possessive typo; remove leftover template boilerplate from Accessibility Options; and correct the Compliance table to cite only real catalog checks. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
