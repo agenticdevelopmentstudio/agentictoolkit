@@ -3,11 +3,11 @@ id: c79094d2-1f4b-4c3f-8005-8fb095fb1b40
 title: BreadcrumbPopoverViewController
 domain: agentictoolkit://recipes/breadcrumb-popover-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
-created: '2026-09-23'
-modified: '2026-09-23'
+created: 2026-09-23
+modified: 2026-09-23
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -23,7 +23,8 @@ tags:
 - macos
 - appkit
 depends-on: []
-related: []
+related:
+- agentictoolkit://recipes/breadcrumb-view
 references: []
 approved-by: ''
 approved-date: ''
@@ -57,8 +58,10 @@ does not browse further down the tree.
   keystroke in the filter field, without waiting for the user to finish
   typing or press Return.
 - **filter-by-name-match**: Component MUST filter entries to only those whose
-  name has at least one match range against the current filter text, as
-  determined by `ProjectFilter.ranges(of:in:)`.
+  name contains at least one case-insensitive, diacritic-sensitive substring
+  occurrence of the current filter text — a literal substring search, not a
+  prefix-only or fuzzy/subsequence match — as determined by
+  `ProjectFilter.ranges(of:in:)`.
 - **show-all-entries-when-filter-empty**: Component MUST show all loaded
   entries when the filter text is empty.
 - **select-first-row-on-load**: Component MUST select the first row of the
@@ -82,28 +85,21 @@ does not browse further down the tree.
 - **relative-selection-movement**: Component MUST move the selection by a
   given relative offset from the current selection when instructed to do so,
   treating an absent selection as index 0.
-- **connect-move-selection-callback**: Component MUST assign its
-  `PickerKeyboardController`'s move-selection callback to move the table
-  selection by the requested offset when the view appears.
-- **connect-choose-callback**: Component MUST assign its
-  `PickerKeyboardController`'s choose callback to perform the choose action
-  when the view appears.
-- **connect-cancel-callback**: Component MUST assign its
-  `PickerKeyboardController`'s cancel callback to invoke `onCancel` when the
-  view appears.
-- **start-escape-monitor-on-appear**: Component MUST start its
-  `PickerKeyboardController`'s escape-key monitor, scoped to the view's
-  window, when the view appears.
+- **arrow-keys-move-selection**: While the filter field has keyboard focus,
+  the Down and Up arrow keys MUST move the table selection by a relative
+  offset of +1 and -1 respectively (see relative-selection-movement), for as
+  long as the view remains on screen.
+- **return-key-chooses-selection**: While the filter field has keyboard
+  focus, Return MUST perform the choose action on the current selection (see
+  open-selected-file, ignore-directory-choice,
+  ignore-choose-without-valid-selection).
 - **focus-filter-field-on-appear**: Component MUST make the filter field the
   window's first responder when the view appears.
-- **stop-escape-monitor-on-disappear**: Component MUST stop its
-  `PickerKeyboardController`'s escape-key monitor when the view is about to
-  disappear.
-- **delegate-command-selectors-to-keyboard-controller**: Component MUST route
-  the filter field's text-view command selectors (the mechanism by which
-  arrow keys, Return, and Escape reach a focused `NSSearchField`) to
-  `PickerKeyboardController.handle(_:)` and MUST return that call's result to
-  the caller.
+- **escape-key-cancels**: For the entire time the view is visible — from
+  when it appears until it is about to disappear — Escape MUST trigger the
+  cancel action (see invoke-cancel-callback-when-set, no-op-cancel-when-unset)
+  regardless of which control has keyboard focus, and MUST NOT trigger it
+  once the view has disappeared.
 - **double-click-chooses-row**: Double-clicking a row MUST perform the same
   choose action as invoking choose through the keyboard controller.
 - **open-selected-file**: Choosing a row MUST invoke the `onSelect` callback
@@ -117,9 +113,10 @@ does not browse further down the tree.
   been set.
 - **no-op-cancel-when-unset**: Component MUST have no observable effect from
   a cancel when `onCancel` has not been set.
-- **reuse-cell-views**: Component MUST reuse a previously created cell view
-  registered for the table column's identifier when one is available, rather
-  than always constructing a new one.
+- **reuse-row-views**: Component MUST reuse a previously constructed row view
+  for the table's column when one is available, constructing a new row view
+  only when none exists yet, rather than always constructing a new one on
+  reload.
 - **truncate-row-label-middle**: The row label MUST truncate overflowing text
   in the middle.
 - **single-column-table**: The table MUST present exactly one column.
@@ -152,9 +149,11 @@ does not browse further down the tree.
 - **Shadow**: Not applicable — no shadow is drawn or configured anywhere in
   source.
 - **Min/Max size**: `preferredContentSize` and the root view's frame are
-  fixed at 280×320pt (`Self.contentSize`); the single table column has a
-  fixed width of 248pt; no separate min/max constraint exists beyond this one
-  fixed size.
+  fixed at 280×320pt (`Self.contentSize`; see fixed-content-size), the
+  popover's one defined size constant, referenced elsewhere in this recipe by
+  name rather than restated as a bare number; the single table column has a
+  fixed width of 248pt (`column.width`); no separate min/max constraint
+  exists beyond these two fixed sizes.
 
 ## States
 
@@ -180,6 +179,13 @@ does not browse further down the tree.
   `NSTextField`'s own `attributedStringValue` (the entry's name, with matched
   characters bolded); source sets no separate `accessibilityLabel` override
   on the cell view or its text field.
+  NEEDS REVIEW: Not implemented in source. Neither the search field nor the
+  table sets an accessibility label (`setAccessibilityLabel`); identifiers are
+  not spoken, so VoiceOver has only the `"Filter"` placeholder for the field
+  and no name for the list. What is missing: the spoken name of each control
+  (for example, one that names the directory being filtered). What would
+  settle it: a VoiceOver pass over an instantiated popover, or an explicit
+  decision on the label text.
 - **Announce state changes**: NEEDS REVIEW: Not implemented in source.
   Behavior undefined. When `applyFilter()` reloads the table with a new,
   possibly much shorter, row count, source posts no accessibility
@@ -200,10 +206,10 @@ does not browse further down the tree.
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| breadcrumb-popover-001 | load-directory-children | Initialize with a `directoryURL` containing files "A.txt", "B.txt" and subdirectory "C" | `entries` and `filtered` both contain exactly those three nodes, as returned by `FileTreeNode.loadChildren(for:)` |
+| breadcrumb-popover-001 | load-directory-children | Initialize with a `directoryURL` containing files "A.txt", "B.txt" and subdirectory "C" | The table shows exactly 3 rows, one per entry returned by `FileTreeNode.loadChildren(for:)`, in that order, before any filter text is entered |
 | breadcrumb-popover-002 | fixed-content-size | Read `preferredContentSize` immediately after init | `preferredContentSize == NSSize(width: 280, height: 320)` |
 | breadcrumb-popover-003 | filter-placeholder-text | Inspect the search field before any input | `placeholderString == "Filter"` |
-| breadcrumb-popover-004 | filter-updates-immediately, filter-by-name-match | Entries "Apple.txt" and "Banana.txt" loaded; type "a" into the filter field | Table reloads to show only "Apple.txt" before any further keystroke or Return is pressed |
+| breadcrumb-popover-004 | filter-updates-immediately, filter-by-name-match | Entries "Apple.txt" and "Banana.txt" loaded; type "app" into the filter field | Table reloads to show only "Apple.txt" (the only name with a case-insensitive substring match for "app") before any further keystroke or Return is pressed |
 | breadcrumb-popover-005 | show-all-entries-when-filter-empty | Filter field contains "a" and is then cleared to `""` | Table shows all originally loaded entries again |
 | breadcrumb-popover-006 | select-first-row-on-load | View controller finishes `viewDidLoad` with 3 entries | Row 0 is selected |
 | breadcrumb-popover-007 | reselect-first-row-after-filter | Row 2 is selected; user types a filter that matches multiple entries | Row 0 of the newly filtered list is selected |
@@ -213,17 +219,17 @@ does not browse further down the tree.
 | breadcrumb-popover-011 | no-op-selection-when-empty | Filter text matches no entries; call `moveSelection(by: 1)` | No row is selected and no index-out-of-range error occurs |
 | breadcrumb-popover-012 | scroll-selection-into-view | Selection moves to a row currently scrolled out of view | `scrollRowToVisible` is called with that row index and the row becomes visible |
 | breadcrumb-popover-013 | relative-selection-movement | 5 filtered entries; row 1 is selected; call `moveSelection(by: 2)` | Row 3 becomes selected |
-| breadcrumb-popover-014 | connect-move-selection-callback, connect-choose-callback, connect-cancel-callback, start-escape-monitor-on-appear | View appears | `keyboard.onMoveSelection`, `keyboard.onChoose`, and `keyboard.onCancel` are all non-nil; the escape-key monitor has been started for the view's window |
+| breadcrumb-popover-014 | arrow-keys-move-selection | View has appeared with 3 entries and row 0 selected; filter field has keyboard focus; the Down arrow key is pressed twice | Row 2 becomes selected (see relative-selection-movement) |
 | breadcrumb-popover-015 | focus-filter-field-on-appear | View appears | The search field is the window's first responder |
-| breadcrumb-popover-016 | stop-escape-monitor-on-disappear | View is about to disappear | The escape-key monitor is stopped |
-| breadcrumb-popover-017 | delegate-command-selectors-to-keyboard-controller | The down-arrow key is pressed while the search field has focus | `control(_:textView:doCommandBy:)` forwards the command selector to `keyboard.handle(_:)` and returns its `Bool` result |
-| breadcrumb-popover-018 | double-click-chooses-row | User double-clicks a row representing a file | `chooseAction()` runs and `onSelect` is invoked with that file's URL |
+| breadcrumb-popover-016 | escape-key-cancels | `onCancel` is set; Escape is pressed while the view is visible; the view then disappears and Escape is pressed again | The first Escape invokes `onCancel` exactly once; the second Escape, after the view has disappeared, has no effect |
+| breadcrumb-popover-017 | return-key-chooses-selection | Filter field has keyboard focus; the selected row is a file "Notes.txt"; Return is pressed | `onSelect` is invoked exactly once with "Notes.txt"'s URL (see open-selected-file) |
+| breadcrumb-popover-018 | double-click-chooses-row | User double-clicks a row representing a file | `onSelect` is invoked with that file's URL — the same outcome as choosing it through the keyboard controller |
 | breadcrumb-popover-019 | open-selected-file | Selected row is a file "Notes.txt"; choose is invoked | `onSelect` is called exactly once, with "Notes.txt"'s URL |
 | breadcrumb-popover-020 | ignore-directory-choice | Selected row is a subdirectory; choose is invoked | `onSelect` is NOT called |
-| breadcrumb-popover-021 | ignore-choose-without-valid-selection | Filtered list is empty (`selectedRow == -1`); choose is invoked | `onSelect` is NOT called |
+| breadcrumb-popover-021 | ignore-choose-without-valid-selection | The current filter text matches no entries, so the table shows zero rows; Return is pressed | `onSelect` is NOT called |
 | breadcrumb-popover-022 | invoke-cancel-callback-when-set | `onCancel` has been set; keyboard controller reports cancel (Escape) | The `onCancel` closure is invoked exactly once |
 | breadcrumb-popover-023 | no-op-cancel-when-unset | `onCancel` is `nil`; keyboard controller reports cancel (Escape) | No callback fires and no crash occurs |
-| breadcrumb-popover-024 | reuse-cell-views | Table reloads repeatedly with the same column identifier | `makeView(withIdentifier:owner:)` returns and reuses the existing `NSTableCellView` rather than a newly constructed one on later reloads |
+| breadcrumb-popover-024 | reuse-row-views | The same 3 entries are shown, then the filter is applied and cleared twice in a row, forcing repeated table reloads | No more than one row view per visible row position is ever constructed; already-constructed views are reused across the reloads and only their displayed text changes |
 | breadcrumb-popover-025 | truncate-row-label-middle | Row label text is longer than the 248pt column width | The label's `lineBreakMode == .byTruncatingMiddle` and rendered text is elided in the middle |
 | breadcrumb-popover-026 | single-column-table, no-column-header | Inspect `tableView` after `loadView` | Exactly one `NSTableColumn` (identifier `"breadcrumb.entry"`) exists and `headerView == nil` |
 | breadcrumb-popover-027 | coder-initialization-unsupported | Attempt `BreadcrumbPopoverViewController(coder:)` | The call traps with a fatal error ("init(coder:) is not supported"); no instance is returned |
@@ -293,6 +299,13 @@ it programmatically as an `NSPopover`'s content view controller.
 |-----------|-------------|---------|
 | n/a (literal) | "Filter" | Search field placeholder text |
 
+NEEDS REVIEW: `"Filter"` is assigned to `searchField.placeholderString` as a
+plain AppKit `String` literal (BreadcrumbPopoverViewController.swift:65), not
+through `String(localized:)` or `NSLocalizedString`, so it never reaches a
+string catalog. What is missing: a localization key and catalog entry for the
+placeholder. What would settle it: routing the literal through
+`String(localized:)` in source.
+
 Not applicable beyond the table above: row labels come from `FileTreeNode.name`
 (file system entry names), not from a localized string table, so there is
 nothing else in this file for the component itself to localize.
@@ -348,11 +361,12 @@ logger reference anywhere in this file).
   `PickerKeyboardController`'s command-selector routing, and highlight
   matched-range substrings by building an `AttributedString` per row with
   `.bold()` applied to the matched runs, mirroring `attributedTitle(for:)`.
-  Give the list a fixed `.frame(width: 280, height: 320)` in place of
-  `preferredContentSize`. A directory row's tap/selection action should be a
-  no-op, mirroring `guard !node.isDirectory`.
+  Give the list a fixed `.frame(width: 280, height: 320)` (matching
+  fixed-content-size) in place of `preferredContentSize`. A directory row's
+  tap/selection action should be a no-op, mirroring `guard !node.isDirectory`.
 - **Compose**: Host in a `Popup` or `DropdownMenu` sized to a fixed
-  280×320dp `Box`. Compose's `LazyColumn` has no built-in keyboard-driven
+  280×320dp `Box` (matching fixed-content-size). Compose's `LazyColumn` has
+  no built-in keyboard-driven
   single selection the way `NSTableView` plus `PickerKeyboardController`
   provides, so intercept Up/Down/Enter/Escape with
   `Modifier.onPreviewKeyEvent` on the filter `OutlinedTextField`, moving a
@@ -361,7 +375,8 @@ logger reference anywhere in this file).
   `buildAnnotatedString` and `SpanStyle(fontWeight = FontWeight.Bold)` over
   the matched ranges. A directory row's `onClick` should be a no-op,
   mirroring `guard !node.isDirectory`.
-- **React/Web**: A fixed 280×320px container with an `<input type="search">`
+- **React/Web**: A fixed 280×320px container (matching fixed-content-size)
+  with an `<input type="search">`
   for the filter (its `onChange` re-filters immediately, mirroring
   `sendsSearchStringImmediately`/`controlTextDidChange`) above a
   `<ul role="listbox">` of `<li role="option">` rows. Implement Up/Down/
@@ -383,28 +398,43 @@ logger reference anywhere in this file).
   (`PickerKeyboardController`, wired in `viewDidAppear`), and match
   highlighting (`ProjectFilter.ranges(of:in:)`, applied in
   `attributedTitle(for:)`) are shared collaborators reused from the app's
-  other filterable pickers, not reimplemented locally. There is no UIKit code
-  path in source; a UIKit port would replace `NSSearchField`/`NSTableView`
-  with `UISearchBar`/`UITableView`, present the whole thing in a
+  other filterable pickers, not reimplemented locally. Keyboard routing
+  (arrow-keys-move-selection, return-key-chooses-selection,
+  escape-key-cancels) is wired in `viewDidAppear` by assigning
+  `keyboard.onMoveSelection`, `keyboard.onChoose`, and `keyboard.onCancel`
+  closures and calling `keyboard.startEscapeMonitor(for: view.window)`; the
+  monitor is stopped in `viewWillDisappear`. Because `NSSearchField` normally
+  consumes arrow keys, Return, and Escape as ordinary text-editing commands,
+  the `NSSearchFieldDelegate` method
+  `control(_:textView:doCommandBy:)` intercepts those command selectors
+  first and forwards them to `keyboard.handle(_:)`, returning its `Bool`
+  result so AppKit knows the key was handled. Row views (reuse-row-views)
+  come from `tableView.makeView(withIdentifier:owner:) as? NSTableCellView`,
+  falling back to constructing a new `NSTableCellView` only when none is
+  available for reuse. There is no UIKit code path in source; a UIKit port
+  would replace `NSSearchField`/`NSTableView` with `UISearchBar`/
+  `UITableView`, present the whole thing in a
   `UIPopoverPresentationController` (iPad) or a sheet (iPhone) instead of
-  `NSPopover`, and would need to grow the 20pt AppKit row height to at least
-  a 44pt touch target, since UIKit has no keyboard-first, pointer-driven
-  `PickerKeyboardController` equivalent to fall back on for non-touch
-  selection.
+  `NSPopover`, would need to grow the 20pt AppKit row height to at least a
+  44pt touch target, and would need `UIKeyCommand`-based hardware-keyboard
+  handling to reach parity with `PickerKeyboardController`'s arrow-key/
+  Return/Escape routing, since UIKit has no built-in equivalent.
 - **WinUI 3** (the reason this recipe exists): Build the popover content as
-  an `AutoSuggestBox` (the WinUI analog of `NSSearchField`, already wired for
-  immediate `TextChanged` filtering the way `sendsSearchStringImmediately`
-  is) stacked above a `ListView` bound to the filtered collection, both
-  hosted inside a `Flyout` (not a `MenuFlyout`, since arbitrary content — a
-  search box plus a list — is needed, mirroring the AppKit choice of
+  a `TextBox` with a `TextChanged` handler (not an `AutoSuggestBox`: its
+  built-in suggestion flyout would open its own popup list directly under
+  the box, clashing with the separate `ListView` this recipe already needs
+  below it) stacked above that `ListView`, bound to the filtered collection,
+  both hosted inside a `Flyout` (not a `MenuFlyout`, since arbitrary content —
+  a search box plus a list — is needed, mirroring the AppKit choice of
   `NSPopover` over a plain menu) anchored to the breadcrumb crumb's button,
-  sized to a fixed 280×320 epx `Grid` in place of `preferredContentSize`.
-  Update the `ListView`'s bound collection on every `AutoSuggestBox.TextChanged`
-  event, mirroring `applyFilter`'s `query.isEmpty ? entries :
-  entries.filter { ... }` substring match, and reselect index 0 after every
-  filter change, mirroring `reselect-first-row-after-filter`. Since WinUI has
-  no `doCommandBy:`-style command-selector routing, intercept Up/Down/Enter/
-  Escape in the `AutoSuggestBox`'s `PreviewKeyDown` handler, moving
+  sized to a fixed 280×320 epx `Grid` (matching fixed-content-size) in place
+  of `preferredContentSize`. Update the `ListView`'s bound collection on
+  every `TextBox.TextChanged` event, mirroring `applyFilter`'s
+  `query.isEmpty ? entries : entries.filter { ... }` substring match, and
+  reselect index 0 after every filter change, mirroring
+  `reselect-first-row-after-filter`. Since WinUI has no `doCommandBy:`-style
+  command-selector routing, intercept Up/Down/Enter/Escape in the
+  `TextBox`'s `PreviewKeyDown` handler, moving
   `ListView.SelectedIndex` and calling `ListView.ScrollIntoView(item)` — the
   direct analog of `scrollRowToVisible` — for Up/Down, invoking the choose
   logic for Enter, and calling `Flyout.Hide()` for Escape, the analog of
@@ -422,74 +452,72 @@ logger reference anywhere in this file).
 
 ## Design Decisions
 
-- Decision: Give the popover's root view an explicit pixel frame
+- **Decision**: Give the popover's root view an explicit pixel frame
   (`NSRect(origin: .zero, size: Self.contentSize)`) in `loadView()`,
   alongside setting `preferredContentSize` in `init`.
-  Rationale: Per the `loadView` source comment, `NSPopover` sizes an
+  **Rationale**: Per the `loadView` source comment, `NSPopover` sizes an
   Auto-Layout content view to that view's fitting size and ignores its own
   `contentSize`; with no subview here having an intrinsic width, an unsized
   root would collapse to a 16×46pt sliver. The frame gives the root view an
   explicit width and height (since `translatesAutoresizingMaskIntoConstraints`
   stays `true` on it) for the constrained subviews to hang from, matching
   what `preferredContentSize` tells the popover separately.
-  Approved: pending
-- Decision: Reuse `PickerKeyboardController` for keyboard wiring and
+  **Approved**: pending
+- **Decision**: Reuse `PickerKeyboardController` for keyboard wiring and
   `ProjectFilter.ranges(of:in:)` for match highlighting instead of
   implementing either locally.
-  Rationale: Per the type's doc comment, these are "the same two pieces the
-  provider and model pickers already share" — reusing them keeps keyboard
-  behavior and match highlighting consistent across every filterable picker
-  in the app instead of a fourth, divergent implementation.
-  Approved: pending
-- Decision: Guard `chooseAction()` so choosing a directory row is a no-op
-  instead of navigating into the subdirectory.
-  Rationale: Per the type's doc comment, "Choosing a directory row does
+  **Rationale**: Per the type's doc comment, these are "the same two pieces
+  the provider and model pickers already share" — reusing them keeps
+  keyboard behavior and match highlighting consistent across every
+  filterable picker in the app instead of a fourth, divergent implementation.
+  **Approved**: pending
+- **Decision**: Guard `chooseAction()` so choosing a directory row is a
+  no-op instead of navigating into the subdirectory.
+  **Rationale**: Per the type's doc comment, "Choosing a directory row does
   nothing; only files can be opened from here" — this popover is scoped to
   opening a file at the crumb's own directory level, not to browsing further
   down the tree.
-  Approved: pending
-- Decision: Unconditionally reselect row 0 in `applyFilter()` after every
-  filter change, rather than preserving the previous selection or
+  **Approved**: pending
+- **Decision**: Unconditionally reselect row 0 in `applyFilter()` after
+  every filter change, rather than preserving the previous selection or
   re-selecting the closest surviving match.
-  Rationale: `applyFilter()` calls `selectRow(0)` on every invocation with no
-  branch to preserve prior selection identity; this keeps the
+  **Rationale**: `applyFilter()` calls `selectRow(0)` on every invocation
+  with no branch to preserve prior selection identity; this keeps the
   type-to-narrow-then-Return flow always landing on the top result without
   added logic to track selection identity across filter changes.
-  Approved: pending
+  **Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
-| [live-region-announcements](agenticdevelopercookbook://compliance/accessibility#live-region-announcements) | flagged | accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | failed | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
-| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [live-region-announcements](agenticdevelopercookbook://compliance/accessibility#live-region-announcements) | failed | Accessibility |
+| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
 
 Keyboard navigation is fully wired via `PickerKeyboardController` and the
 search field's `doCommandBy:` delegation, hence passed. Screen-reader support
 is partial: `accessibilityID` values are set on the search field and table
 for automation, but no explicit `accessibilityLabel` override exists beyond
-`NSTextField`'s own text content, and no announcement is posted when the
-filtered result set changes (see live-region-announcements
-and **Announce state changes** under Accessibility). Differentiate Without Color
+`NSTextField`'s own text content. Live-region-announcements is failed: no
+notification is posted when the filtered result set changes (see
+**Announce state changes** under Accessibility). Differentiate Without Color
 passes because matched characters are conveyed by bold font weight, not
-color. Touch-target-size is failed because the 20pt table row height falls
-well under 44×44pt — expected for this pointer/keyboard-driven macOS list,
-not a defect, but the 44×44pt/48×48dp threshold does apply to the
-touch-platform translations in Platform Notes. Contrast-ratio is partial
-because row and search-field colors come entirely from AppKit's default
-system rendering, whose actual contrast values are not stated in this
-source. String-externalization is failed because the search field's
-`"Filter"` placeholder is a hardcoded English literal with no localization
-key. Main-actor-confined passes because the class is declared `@MainActor`.
+color. Touch-target-size is omitted from this table because it does not
+apply to this pointer/keyboard-driven macOS list — the 44×44pt/48×48dp
+threshold applies only to the touch-platform translations in Platform
+Notes, not to this source. Contrast-ratio is partial because row and
+search-field colors come entirely from AppKit's default system rendering,
+whose actual contrast values are not stated in this source.
+String-externalization is failed because the search field's `"Filter"`
+placeholder is a hardcoded English literal with no localization key.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Claude Sonnet 5 | Initial ingredient recipe for BreadcrumbPopoverViewController, covering directory loading, live filtering with bold match highlighting, clamped/relative selection, PickerKeyboardController wiring, the directory-is-inert choose guard, and one open accessibility question (filtered-result announcement) for review. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: stated the case-insensitive substring-match algorithm in filter-by-name-match and fixed test vector 004, which was wrong under that algorithm; replaced the AppKit-wiring requirements (callback assignment, escape-monitor start/stop, command-selector delegation, cell reuse) with behavior-first requirements for arrow-key/Return/Escape routing and row-view reuse, moving the AppKit mechanism detail into Platform Notes; rewrote four test vectors to assert observable table/callback behavior instead of private state or methods; fixed the Compliance table (dropped the non-catalog architecture/main-actor-confined row and the inapplicable touch-target-size row, capitalized categories, changed the disallowed `flagged` status to `failed`); added a `related` link to breadcrumb-view; recommended a `TextBox`/`TextChanged` WinUI 3 control over `AutoSuggestBox` to avoid a conflicting suggestion list; removed an unsupported UIKit claim in favor of a `UIKeyCommand` note; named the fixed content size once and cross-referenced it from every Platform Notes bullet instead of restating it; reformatted Design Decisions into the three-line bold form; and unquoted the frontmatter dates. |

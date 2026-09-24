@@ -3,7 +3,7 @@ id: aebda2fe-b953-4b3c-a65a-93d92c059fe1
 title: ChoiceSliderView
 domain: agentictoolkit://recipes/choice-slider-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -25,6 +25,7 @@ tags:
 depends-on: []
 related:
 - agentictoolkit://recipes/captioned-slider-view
+- agentictoolkit://recipes/popup-menu-choice-view
 references: []
 approved-by: ''
 approved-date: ''
@@ -73,10 +74,13 @@ it.
   when `viewModel.value` matches a choice's `value` — set the slider's
   `doubleValue` to that choice's index and the value label's text to that
   choice's `label`.
+- **claims-onchange-observer**: Component MUST assign its own handler to
+  `viewModel.onChange` during initialization, replacing any handler already
+  registered there.
 - **commits-slider-value**: Component MUST write the matching choice's
-  `value` into `viewModel.settingObserver.value` whenever the slider's action
-  fires with a rounded index inside `viewModel.choices.indices`, and that
-  value differs from the current `settingObserver.value`.
+  `value` into `viewModel.settingObserver.value` when the slider's action
+  fires (see ignores-out-of-range-tick and skips-redundant-commits for the
+  guard conditions).
 - **ignores-out-of-range-tick**: Component MUST NOT write to
   `viewModel.settingObserver.value` when the slider action's rounded index
   falls outside `viewModel.choices.indices`.
@@ -201,7 +205,7 @@ it.
 | choice-slider-view-005 | fixes-value-label-width | `viewModel.choices` labels are `"Small"` and `"Extra Small"` | After init, `valueLabel`'s width constraint constant equals `ceil("Extra Small".renderedWidth(usingFont: valueLabel.font))`, the widest of the two |
 | choice-slider-view-006 | initializes-from-view-model | `viewModel.title = "Size"`, `viewModel.choices = [(label: "Small", value: .small), (label: "Large", value: .large)]`, `viewModel.value = .large` | After init, `label.stringValue == "Size"`, `slider.doubleValue == 1`, `valueLabel.stringValue == "Large"` |
 | choice-slider-view-007 | commits-slider-value | `viewModel.settingObserver.value == choices[0].value`; set `slider.doubleValue = 1` and invoke `sliderChanged(slider)` | `viewModel.settingObserver.value == choices[1].value` after the call |
-| choice-slider-view-008 | ignores-out-of-range-tick | Set `slider.doubleValue` to a value whose rounded index is `viewModel.choices.count` (outside bounds) and invoke `sliderChanged(slider)` | `viewModel.settingObserver.value` is unchanged; no crash occurs |
+| choice-slider-view-008 | ignores-out-of-range-tick | Invoke `sliderChanged(_:)` directly with a stub `NSSlider` (or subclass override) whose `doubleValue` reports a rounded index of `viewModel.choices.count` (outside bounds) — a real, bound `NSSlider` with `allowsTickMarkValuesOnly` clamps `doubleValue` into `[minValue, maxValue]` and can never report an out-of-range value | `viewModel.settingObserver.value` is unchanged; no crash occurs |
 | choice-slider-view-009 | skips-redundant-commits | `viewModel.settingObserver.value == choices[0].value`; set `slider.doubleValue = 0` (same index) and invoke `sliderChanged(slider)` | `viewModel.settingObserver.value`'s setter is not invoked a second time (e.g. no additional write/observer notification is recorded) |
 | choice-slider-view-010 | syncs-on-external-change | After construction, externally change `viewModel.title` and set `viewModel.value` to a value present in `choices`, then invoke `viewModel.onChange(newValue)` | `label.stringValue`, `slider.doubleValue`, and `valueLabel.stringValue` all update to reflect the new `viewModel` state |
 | choice-slider-view-011 | leaves-display-unchanged-for-unmatched-value | After construction, invoke `viewModel.onChange(newValue)` where `newValue` matches no `choices[].value` | `slider.doubleValue` and `valueLabel.stringValue` remain at whatever they were before the call |
@@ -210,31 +214,31 @@ it.
 | choice-slider-view-014 | rejects-frame-only-initialization | Attempt `ChoiceSliderView(frame: .zero)` | The call traps with a fatal error; no instance is returned |
 | choice-slider-view-015 | stretches-to-superview-width | Add an initialized `ChoiceSliderView` as a subview of a parent `NSView` | After `viewDidMoveToSuperview` runs, a width constraint equal to the parent's `widthAnchor`, at priority `.required - 1`, is active on the component |
 | choice-slider-view-016 | confines-to-main-actor | Attempt to construct or mutate a `ChoiceSliderView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
+| choice-slider-view-017 | claims-onchange-observer | Register a closure on `viewModel.onChange`, then construct `ChoiceSliderView(viewModel:)` | Invoking `viewModel.onChange(newValue)` afterward no longer calls the previously registered closure; only the component's own handler runs |
 
 ## Edge Cases
 
 - Null/empty input: `viewModel` (`ChoiceViewModel<Value>`) is a non-optional,
-  typed constructor parameter; Swift's type system rules out `nil`. This is
-  a MUST: the component provides, and needs, no nil-handling path for its
-  one initializer parameter.
+  typed constructor parameter; Swift's type system rules out `nil`, so the
+  component provides, and needs, no nil-handling path for its one
+  initializer parameter.
 - Boundary values — empty `choices`: when `viewModel.choices.isEmpty`,
   `slider.maxValue` becomes `Double(max(-1, 0)) == 0` and
   `numberOfTickMarks` becomes `0`; `maxLabelWidth` reduces to `[].max() ?? 0`,
   so the value label's fixed width constraint is `0`. `syncSelection()`'s
   `firstIndex` search never matches, so the slider and value label are left
-  at their construction-time defaults. This is a MUST: source performs no
-  guard against, or special-casing for, an empty `choices` array.
+  at their construction-time defaults; source performs no guard against, or
+  special-casing for, an empty `choices` array.
 - Boundary values — single choice: when `viewModel.choices.count == 1`,
   `slider.maxValue` becomes `Double(max(0, 0)) == 0`, producing a single,
   non-interactive tick at position 0; source performs no minimum-count
   check.
 - Boundary values — `viewModel.value` absent from `choices`: source performs
   no fallback to a default index; see leaves-display-unchanged-for-
-  unmatched-value. This is a SHOULD-level note for implementors: a
-  view model whose current value has drifted out of its own `choices` list
-  (e.g. after a choices list is changed elsewhere) leaves the row showing
-  stale slider position and text rather than an explicit "no selection"
-  state.
+  unmatched-value. For implementors: a view model whose current value has
+  drifted out of its own `choices` list (e.g. after a choices list is
+  changed elsewhere) leaves the row showing stale slider position and text
+  rather than an explicit "no selection" state.
 - Concurrent access: Not applicable — the class is `@MainActor` and `Value`
   is constrained to `Sendable`, so all construction and mutation is
   serialized to the main actor (see confines-to-main-actor).
@@ -245,14 +249,13 @@ it.
 - Offline/disconnected: Not applicable — the component performs no
   networking of its own; it only reads from and writes to an in-process
   `ChoiceViewModel`.
-- Overwritten external observer: `viewModel.onChange` is a single closure
-  property. `ChoiceSliderView`'s initializer unconditionally assigns
-  `viewModel.onChange = { [weak self] _ in self?.syncSelection() }`,
-  replacing whatever handler (if any) was previously registered on that
-  `viewModel`. This is a MUST-level, source-traceable consequence of plain
-  closure-property assignment: the component MUST NOT be assumed to
-  coexist with another `onChange` observer already registered on the same
-  `ChoiceViewModel` instance.
+- Overwritten external observer: see **claims-onchange-observer**.
+  `viewModel.onChange` is a single closure property, and
+  `ChoiceSliderView`'s initializer unconditionally assigns it, replacing
+  whatever handler (if any) was previously registered on that `viewModel`.
+  A caller should not rely on its own `onChange` handler surviving once a
+  `ChoiceSliderView` is constructed over the same `ChoiceViewModel`
+  instance, since construction silently discards it.
 - Value-label text lags the visible tick during a drag: `sliderChanged(_:)`
   writes the resolved choice's value into `settingObserver.value` but never
   writes `valueLabel.stringValue` itself; the label is only ever updated by
@@ -262,9 +265,17 @@ it.
   call stack — the value label can visibly trail the slider's snapped tick
   position while dragging. This is inferred from the interaction between
   `ChoiceSliderView.swift` and `UserSetting.swift` rather than stated in a
-  single line of either file; it is a MUST-level, source-traceable
+  single line of either file; it is an observed, source-traceable
   consequence of how the two files are wired together, not an
   implementation choice `ChoiceSliderView` itself makes.
+- Frame-only initializer's fatal-error message text: the string passed to
+  `fatalError` in `init(frame:)` is the identical, truncated
+  `"init(frame frameRect: NSRect"` literal used by this file's sibling row
+  views, missing the closing signature text. It has no effect on behavior —
+  the call still traps unconditionally either way — and reads as a
+  copy-paste artifact carried over from an earlier row view rather than
+  authored fresh for this file; it is reproduced here as written, matching
+  source.
 
 ## Configuration
 
@@ -290,7 +301,7 @@ is nothing for this component to localize itself.
 | Option | Behavior |
 |--------|----------|
 | Reduce Motion | Not applicable — source contains no animation, transition, or `NSAnimationContext` call; every state change is an instantaneous property assignment. |
-| Increase Contrast | Not applicable — `ChoiceSliderView.swift` sets no custom `NSColor` anywhere; whatever coloring the row has comes entirely from AppKit's default control rendering and the theme's semantic roles, which follow system Increase Contrast automatically. |
+| Increase Contrast | Partial — the title label uses the theme's foreground color at full strength, which tracks system Increase Contrast normally, but the value label's color is theme-computed as `foreground.dimmed(towards: background, by: 0.32, minContrast: 3.0)` (see Foreground/Text): it enforces its own fixed 3.0 minimum contrast ratio rather than responding to the system's Increase Contrast setting. |
 | Differentiate Without Color | Not applicable — the current choice is communicated through the slider's tick position and the value label's text, not through any color-only signal; no color-coded state exists in source. |
 
 ## Feature Flags
@@ -325,8 +336,11 @@ Not applicable: `ChoiceSliderView.swift` contains no logging call (no
 ## Platform Notes
 
 - **SwiftUI**: Compose an `HStack` with `Text(viewModel.title)`, a
-  `Slider(value: $index, in: 0...Double(choices.count - 1), step: 1)` bound
-  to the selected index (SwiftUI's `step:` parameter is the direct analog of
+  `Slider(value: $index, in: 0...Double(max(choices.count - 1, 0)), step: 1)`
+  bound to the selected index — the `max(choices.count - 1, 0)` guard
+  mirrors the source's own guard so an empty `choices` array produces a
+  `0...0` range instead of trapping (see builds-tick-marks-from-choices)
+  (SwiftUI's `step:` parameter is the direct analog of
   `allowsTickMarkValuesOnly` + `numberOfTickMarks` — it snaps the value to
   whole steps natively), and a trailing `Text(choices[index].label)`. Give
   the `Slider` no fixed frame (it already expands to fill the `HStack`'s
@@ -341,15 +355,19 @@ Not applicable: `ChoiceSliderView.swift` contains no logging call (no
   (the Compose analog of the low hugging priority — `steps` is the count of
   discrete stops between the two ends, mirroring
   builds-tick-marks-from-choices), and a trailing `Text(choices[index]
-  .label)` sized with `Modifier.width(IntrinsicSize.Max)` against a
-  pre-measured maximum label width, mirroring fixes-value-label-width. Round
+  .label)` sized with `Modifier.width(with(density) {
+  measuredMaxWidth.toDp() })`, where `measuredMaxWidth` comes from a
+  `TextMeasurer` pass over the choice labels ahead of composition, mirroring
+  fixes-value-label-width. Round
   the reported float to the nearest index, guard it against
   `choices.indices` before writing (mirroring ignores-out-of-range-tick),
   and skip the write when the resolved value already equals the current one
   (mirroring skips-redundant-commits).
 - **React/Web**: A flex row (`display: flex; align-items: center`)
   containing a `<span>` for the title, an `<input type="range" min="0"
-  max={choices.length - 1} step="1">` given `flex: 1` (the native `step`
+  max={Math.max(choices.length - 1, 0)} step="1">` given `flex: 1` (guarding
+  `max` with the same `max(count - 1, 0)` floor as the source keeps an empty
+  `choices` array from producing a negative `max`; the native `step`
   attribute is the direct analog of `allowsTickMarkValuesOnly`, mirroring
   slider-hugs-loosely for the flex sizing), and a trailing `<span>` given a
   fixed `min-width` computed once from the widest choice label's measured
@@ -391,8 +409,8 @@ Not applicable: `ChoiceSliderView.swift` contains no logging call (no
   the `Auto`-measured width of the longest label string via a hidden
   measuring `TextBlock` — the WinUI analog of fixes-value-label-width's
   one-time `ceil(longestLabelWidth)` constant (like the source, do not
-  re-measure it on a later `FontSize` or theme change, unless an explicit
-  decision is made to fix that staleness — see Design Decisions). Use the
+  re-measure it on a later `FontSize` or theme change — see Design
+  Decisions). Use the
   `Slider`'s `ValueChanged` event handler to round and guard the index
   against `choices.Count` before writing back (mirroring
   ignores-out-of-range-tick), and skip the write — and so skip raising
@@ -434,18 +452,20 @@ Not applicable: `ChoiceSliderView.swift` contains no logging call (no
   branch in source; the component makes no attempt to represent an
   unrepresentable value, leaving whatever the views last displayed.
   Approved: pending
+- Decision: Measure the WinUI value column's width once, in code-behind
+  after `Loaded`, from the longest label string, rather than re-measuring it
+  if the control's `FontSize` or the active theme changes later.
+  Rationale: Mirrors the source's own one-time `ceil(longestLabelWidth)`
+  computation (see fixes-value-label-width); this recipe does not introduce
+  WinUI-specific staleness handling beyond matching that choice.
+  Approved: pending
 - Decision: Both `init(coder:)` and the frame-only `init(frame:)` trigger a
-  fatal error, leaving `init(viewModel:)` as the only usable initializer;
-  the frame-only override's message string is the identical, truncated
-  `"init(frame frameRect: NSRect"` literal used by this file's sibling row
-  views.
+  fatal error, leaving `init(viewModel:)` as the only usable initializer.
   Rationale: The view has no meaningful default state — it cannot render a
   title, tick range, or value without a `viewModel` — so both inherited
   `NSView` initializers that could construct it without one are
-  intentionally disabled. The shared, truncated message text across
-  sibling files indicates the string was copied forward from an earlier row
-  view rather than authored fresh for this one; it is reproduced here as
-  written rather than corrected, per source fidelity.
+  intentionally disabled. (The frame-only override's fatal-error message
+  text is a separate, unrelated observation — see Edge Cases.)
   Approved: pending
 
 ## Compliance
@@ -463,3 +483,5 @@ Not applicable: `ChoiceSliderView.swift` contains no logging call (no
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: added missing initial Change History row; added claims-onchange-observer requirement and test vector for the onChange-overwrite behavior; trimmed commits-slider-value to the positive write, letting ignores-out-of-range-tick and skips-redundant-commits own the guards; removed RFC 2119 keywords from Edge Cases and reframed several as plain observations; separated the frame-only initializer's copied fatal-error message text from the initializer-disabling Design Decision; added PopupMenuChoiceView to related; fixed the Increase Contrast/Appearance contradiction; fixed test vector 008 to use a stub sender instead of an unreachable real-slider state; guarded the SwiftUI and React empty-choices ranges; corrected the Compose value-label measurement approach; added a pending Design Decision for the WinUI value-label re-measurement staleness |

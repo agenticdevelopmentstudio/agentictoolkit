@@ -3,11 +3,11 @@ id: 08bfb299-851b-4b01-a84a-6a2a13e07c12
 title: ComposableTabsActivePane
 domain: agentictoolkit://recipes/composable-tabs-active-pane
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
-created: '2026-09-23'
-modified: '2026-09-23'
+created: 2026-09-23
+modified: 2026-09-23
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -22,10 +22,15 @@ tags:
 - focus
 - appkit
 - macos
-depends-on: []
-related: []
+depends-on:
+- agentictoolkit://recipes/composable-tabs-pane-view-controller
+related:
+- agentictoolkit://recipes/composable-tabs-arrange-overlay-view
 references:
-- https://developer.apple.com/design/human-interface-guidelines/
+- https://developer.apple.com/documentation/appkit/nsevent/addlocalmonitorforevents(matching:handler:)
+- https://developer.apple.com/documentation/appkit/nswindow/makefirstresponder(_:)
+- https://developer.apple.com/documentation/foundation/runloop/mode-swift.struct/eventtracking
+- https://www.w3.org/WAI/WCAG21/Understanding/non-text-contrast.html
 approved-by: ''
 approved-date: ''
 ---
@@ -58,7 +63,7 @@ Neither type renders or exposes anything else: no title, no icon, no
 interactive control of its own. The chrome a pane wears beyond this backdrop
 (title bar, gear menu, content identifier) belongs to
 `ComposableTabsPaneViewController` and its own sources, not to this file, and
-is out of scope for this recipe.
+is out of scope for this ingredient.
 
 ## Behavioral Requirements
 
@@ -77,30 +82,45 @@ is out of scope for this recipe.
   its superview chain.
 - **nil-window-has-no-active-node**: `activeNodeID(in:)` MUST return `nil`
   when passed a `nil` window.
+- **is-in-active-pane-ignores-key-window**: `isInActivePane(_:)` MUST return
+  the same result regardless of whether its view's window is the key window;
+  which pane the user is working in does not change because a different
+  window came forward.
+- **a-hidden-pane-remains-live**: A pane counts as "live" — eligible to hold
+  the active id, or to receive it as a departure's successor — as long as its
+  backdrop remains anywhere in the window, even if hidden (for example, by a
+  collapsed split). Only a pane removed from the window entirely stops
+  counting as live.
 - **arrival-claims-active-in-an-unclaimed-window**: `paneDidAppear(_:in:)`
-  MUST activate the arriving pane when no live pane already on screen in that
-  window holds the active id.
+  MUST activate the arriving pane when no live pane (per
+  **a-hidden-pane-remains-live**) already on screen in that window holds the
+  active id.
 - **arrival-does-not-steal-active-from-a-live-pane**: `paneDidAppear(_:in:)`
-  MUST NOT change the window's active id when a live pane already on screen
-  in that window holds it.
+  MUST NOT change the window's active id when a live pane (per
+  **a-hidden-pane-remains-live**) already on screen in that window holds it.
 - **arrival-enables-mouse-moved-tracking-when-setting-on**:
   `paneDidAppear(_:in:)` MUST set the window's `acceptsMouseMovedEvents` to
   `true` whenever `activePaneFollowsMouse` is enabled, regardless of whether
   the arriving pane becomes the active one.
 - **departure-hands-off-to-a-surviving-pane**: `paneDidDisappear(_:from:)`
-  MUST reassign the window's active id to another live pane in the same
-  window when the departing pane held the active id and at least one other
-  live pane remains.
+  MUST reassign the window's active id to another live pane (per
+  **a-hidden-pane-remains-live**) in the same window when the departing pane
+  held the active id and at least one other live pane remains.
 - **departure-clears-active-id-when-no-pane-survives**:
   `paneDidDisappear(_:from:)` MUST remove the window's active-id entry
   entirely when the departing pane held the active id and no other live pane
-  remains in that window.
+  (per **a-hidden-pane-remains-live**) remains in that window.
 - **departure-of-a-non-active-pane-is-inert**: `paneDidDisappear(_:from:)`
   MUST NOT alter the window's active id, and MUST NOT post
   `didChangeNotification`, when the departing pane did not hold the active id.
 - **window-close-clears-active-id-silently**: The component MUST remove a
   window's active-id entry when that `NSWindow` posts `willCloseNotification`,
   and MUST NOT post `didChangeNotification` when doing so.
+- **close-and-highlight-changes-dispatch-through-the-main-queue**: The
+  component MUST handle `NSWindow.willCloseNotification` and MUST have each
+  pane backdrop handle a `highlightActivePane` change by re-dispatching onto
+  `DispatchQueue.main`, not `RunLoop.main`, so the update still applies while
+  AppKit is tracking a mouse event in `.eventTracking` run-loop mode.
 - **activation-is-idempotent**: `activate(nodeID:in:)` MUST have no effect,
   and MUST NOT post `didChangeNotification`, when `nodeID` already equals the
   window's current active id.
@@ -115,6 +135,10 @@ is out of scope for this recipe.
   reset a window's `acceptsMouseMovedEvents` back to `false` when
   `activePaneFollowsMouse` is or becomes disabled; disabling the setting only
   stops `mouseMoved` events from being acted on, not received.
+- **event-monitor-is-local-to-the-apps-own-windows**: The component MUST
+  install its event monitor with `NSEvent.addLocalMonitorForEvents`, not a
+  global monitor, so it observes pointer events only inside this app's own
+  windows and requires no accessibility permission.
 - **clicks-are-evaluated-regardless-of-the-setting**: The event monitor MUST
   evaluate every `leftMouseDown` and `rightMouseDown` event regardless of the
   `activePaneFollowsMouse` setting.
@@ -126,6 +150,11 @@ is out of scope for this recipe.
   ignored when its window has an attached sheet.
 - **mouse-moved-is-gated-by-arrange-mode**: A `mouseMoved` event MUST be
   ignored when `ComposableTabsArrangeMode` is enabled for that window.
+- **an-event-with-no-window-is-ignored**: `record(_:)` MUST ignore (take no
+  action for) any monitored `NSEvent` whose `window` is `nil`.
+- **a-nil-content-view-means-no-pane**: `paneChain(under:in:)` MUST return
+  `nil` — no pane matched — for a window whose `contentView` is `nil`, rather
+  than treating any point in it as inside a pane.
 - **event-outside-any-pane-is-ignored**: An event whose hit-tested point does
   not land inside any `ComposableTabsPaneBackgroundView` MUST be ignored.
 - **event-on-the-already-active-pane-is-a-no-op**: An event, click or move,
@@ -168,7 +197,12 @@ is out of scope for this recipe.
 - **the-active-pane-uses-the-accent-outline-color**: `applyTheme(_:)` MUST
   color the border with `palette.projectActivePaneOutline` when, and only
   when, the pane holds its window's active id, the window is focused, and the
-  effective highlight setting is enabled.
+  effective highlight setting is enabled. This check compares
+  `activeNodeID(in:)` directly against the pane's own `nodeID` — it does not
+  call `isInActivePane(_:)`. When the window has no recorded active id (see
+  **unclaimed-pane-counts-as-active**), the comparison is against `nil`, so no
+  pane draws the accent, even though `isInActivePane(_:)` would report `true`
+  for a view inside any of them.
 - **every-other-pane-uses-the-hairline-outline-color**: `applyTheme(_:)` MUST
   color the border with `palette.projectPaneOutline` in every case that does
   not satisfy **the-active-pane-uses-the-accent-outline-color**.
@@ -211,9 +245,10 @@ is out of scope for this recipe.
   all four sides, leaving that band for the border to draw in.
 - **Font**: Not applicable. The component draws no text.
 - **Background**: `palette.projectPaneBackdrop` (a theme-overridable role,
-  falling back to a semantic surface role defined outside this file) on the
-  backdrop's layer; the fill subview inside it is a `ThemedBackgroundView`
-  painted with the `.windowBackground` role.
+  falling back to the `elevatedSurface` role when the theme sets no
+  `project.paneBackdrop` override — see `SemanticPalette.projectPaneBackdrop`)
+  on the backdrop's layer; the fill subview inside it is a
+  `ThemedBackgroundView` painted with the `.windowBackground` role.
 - **Foreground/Text**: Not applicable. The component draws no text or icon.
 - **Border**: 2 points wide on every pane, always. Color is
   `palette.projectActivePaneOutline` for the active pane in a focused window
@@ -302,11 +337,11 @@ is out of scope for this recipe.
 | CTA-24 | click-activates-a-different-pane-directly | `leftMouseDown` lands on a non-active pane | That pane becomes active |
 | CTA-25 | mouse-moved-takes-focus-before-activating | `activePaneFollowsMouse` enabled; pointer moves onto a non-active pane containing a focusable view | Focus moves to the innermost focusable view before the pane is activated |
 | CTA-26 | focus-refusal-blocks-mouse-moved-activation | Outgoing responder refuses `resignFirstResponder`; pointer moves onto a non-active pane | Active pane is unchanged; first responder is unchanged |
-| CTA-27 | the-event-monitor-never-consumes-an-event | Any monitored event | The event is still delivered to the responder chain afterward |
+| CTA-27 | the-event-monitor-never-consumes-an-event | A `leftMouseDown` lands on a view that overrides `mouseDown(with:)`, while the local monitor's handler runs first | The hit-tested view's `mouseDown(with:)` is still invoked after the monitor's handler returns the event unmodified |
 | CTA-28 | focus-walk-proceeds-innermost-to-outermost | A pane whose innermost hit-tested view refuses focus but an outer one accepts | The outer, focus-accepting view becomes first responder |
 | CTA-29 | focus-walk-treats-the-current-responder-as-already-taken | The innermost hit-tested view is already first responder | `takeFocus` reports success without calling `makeFirstResponder` again |
 | CTA-30 | focus-walk-stops-on-outgoing-refusal | The current first responder refuses to resign | `takeFocus` reports refusal; the walk does not continue to further candidates |
-| CTA-31 | focus-walk-restores-the-original-responder-on-exhaustion | No candidate in the chain accepts focus, and the window's first responder ends up on the window itself along the way | The original first responder is restored; `takeFocus` reports "nowhere to put" |
+| CTA-31 | focus-walk-restores-the-original-responder-on-exhaustion | Every view in the hit-tested chain reports `acceptsFirstResponder == true` but declines `becomeFirstResponder()`, so each `makeFirstResponder` call resigns the outgoing responder yet leaves `window.firstResponder` as the window itself before the walk tries the next candidate | After the walk exhausts every candidate, `takeFocus` calls `makeFirstResponder` with the original first responder and it succeeds, restoring it; `takeFocus` returns `.nowhereToPut` |
 | CTA-32 | focus-walk-reports-refused-when-restoration-fails | No candidate accepts focus and restoring the original first responder fails | `takeFocus` reports refusal |
 | CTA-33 | every-pane-is-always-outlined | Any pane, active or not | `layer.borderWidth` is `2` |
 | CTA-34 | the-backdrop-is-always-the-pane-backdrop-color | Any pane, active or not | `layer.backgroundColor` equals `palette.projectPaneBackdrop` |
@@ -321,16 +356,25 @@ is out of scope for this recipe.
 | CTA-43 | the-backdrop-repaints-on-its-own-windows-activation-change | `didChangeNotification` posted for the backdrop's own window | `applyTheme` is invoked; posting it for a different window does not invoke it |
 | CTA-44 | the-backdrop-repaints-on-any-key-window-change | Any window becomes or resigns key | `applyTheme` is invoked on every tracked backdrop, including ones in other windows |
 | CTA-45 | the-backdrop-repaints-on-a-highlight-setting-change | `UserSettings` publishes a change to `highlightActivePane` | `applyTheme` is invoked |
+| CTA-46 | a-hidden-pane-remains-live | A pane's backdrop is hidden by a collapsed split but stays in the window; its window's active pane then departs | The hidden pane is offered as the successor in **departure-hands-off-to-a-surviving-pane** |
+| CTA-47 | is-in-active-pane-ignores-key-window | A view inside the active pane's backdrop, queried while its window is not the key window | `isInActivePane` still returns `true`, the same as when the window is key |
+| CTA-48 | an-event-with-no-window-is-ignored | A monitored `NSEvent` whose `window` is `nil` | No state change; `record(_:)` takes no action |
+| CTA-49 | a-nil-content-view-means-no-pane | A window whose `contentView` is `nil` receives a monitored event | `paneChain(under:in:)` returns `nil`; the event is ignored |
+| CTA-50 | event-monitor-is-local-to-the-apps-own-windows | A pointer event delivered to a window belonging to a different application | The monitor never observes it; no pane in this app is affected |
+| CTA-51 | close-and-highlight-changes-dispatch-through-the-main-queue | `NSWindow.willCloseNotification` is posted, or `highlightActivePane` changes, while the run loop is tracking a mouse-down in `.eventTracking` mode | The active-id removal or backdrop repaint still applies before the tracking loop ends, because the handler is queued on `DispatchQueue.main` rather than `RunLoop.main` |
+| CTA-52 | the-active-pane-uses-the-accent-outline-color | No pane in a window has claimed the active id (`activeNodeID(in:)` is `nil`); `applyTheme` runs for any pane in it | `layer.borderColor` equals `palette.projectPaneOutline` for every pane in the window, not the accent, even though `isInActivePane` reports `true` for a view in any of them |
 
 ## Edge Cases
 
 - Null/empty input: `activeNodeID(in: nil)` MUST return `nil` rather than
   trapping or treating a missing window as any particular window's state.
 - Null/empty input: An `NSEvent` with no associated `window` MUST be ignored
-  by `record(_:)` — traced to `guard let window = event.window else { return }`.
+  by `record(_:)` — traced to `guard let window = event.window else { return }`
+  (see **an-event-with-no-window-is-ignored**).
 - Null/empty input: A window whose `contentView` is `nil` MUST be treated as
   having no pane under any point — traced to `paneChain(under:in:)`'s
-  `guard let contentView = window.contentView else { return nil }`.
+  `guard let contentView = window.contentView else { return nil }` (see
+  **a-nil-content-view-means-no-pane**).
 - Boundary values: A window with zero panes MUST have no entry in the active
   id map, and any view queried against that window (there being no pane to
   contain it) counts as active per **view-outside-any-pane-counts-as-active**.
@@ -395,7 +439,7 @@ localize.
   no secondary, non-color cue (outline width, an icon, a pattern, a label)
   and does not read the Differentiate Without Color setting. A non-color cue,
   if one is added, is a change to `applyTheme(_:)`'s drawing, not to the
-  tracking logic this recipe otherwise specifies.
+  tracking logic this ingredient otherwise specifies.
 
 ## Feature Flags
 
@@ -433,10 +477,12 @@ or `print`) anywhere in this file.
 - **SwiftUI**: There is no SwiftUI equivalent of a single, app-wide local
   `NSEvent` monitor, so the click/pointer capture still has to happen at
   whatever AppKit-hosting layer wraps the SwiftUI content. Model the tracker
-  itself as a small `ObservableObject` (mirroring `ComposableTabsActivePane`,
-  one instance per window/scene) exposed via `.environmentObject`, and give
-  each pane a modifier that reads its own `nodeID` against the tracker's
-  `activeNodeID(in:)` to pick `.overlay(RoundedRectangle(cornerRadius: 0).stroke(color, lineWidth: 2))`,
+  itself as a single, app-wide `ObservableObject` — mirroring
+  `ComposableTabsActivePane.shared`, one instance keyed internally by window,
+  not one instance per window/scene — exposed via `.environmentObject`, and
+  give each pane a modifier that reads its own `nodeID` against the tracker's
+  `activeNodeID(in:)` to pick `.overlay(Rectangle().strokeBorder(color, lineWidth: 2))`,
+  so the stroke stays inside the edge the way the inset border does here,
   where `color` switches between the accent and hairline tokens exactly as
   `applyTheme(_:)` does.
 - **Compose (Desktop)**: Compose Desktop's `Window` maps closely to `NSWindow`,
@@ -468,7 +514,14 @@ or `print`) anywhere in this file.
 - **WinUI 3**: Track the active pane per `Window` (WinUI 3's per-window model
   matches `NSWindow` closely) in a `Dictionary<Window, Guid>`, mutated only
   from the UI thread — WinUI is single-threaded per dispatcher, matching this
-  file's `@MainActor`. Replace the `NSEvent` local monitor with a
+  file's `@MainActor` — and remove a window's entry when its `Window.Closed`
+  event fires, mirroring how the source clears `activeByWindow` on
+  `NSWindow.willCloseNotification` (see
+  **close-and-highlight-changes-dispatch-through-the-main-queue** and
+  **window-close-clears-active-id-silently**) rather than relying on garbage
+  collection to age the entry out — `Guid` is a value type, so a
+  `ConditionalWeakTable` cannot hold it directly the way the source's weak
+  `NSHashTable`s hold reference types. Replace the `NSEvent` local monitor with a
   `PointerPressed` handler added at the `Window.Content` root via the
   `AddHandler` overload that takes `handledEventsToo: true`, so a click is
   still seen even if an inner control already marked it handled — the WinUI
@@ -566,44 +619,40 @@ or `print`) anywhere in this file.
   never owners; a closed window or a pane that has left its window needs to
   be able to go away without this component being told twice.
   **Approved**: pending
-- **Decision**: `palette.projectActivePaneOutline` is referenced by this file
-  but is not defined anywhere in the `external/agenticdevelopertoolkit`
-  submodule as currently vendored into this repository (that file's
-  `SemanticPalette` extension defines only `projectPaneBackdrop` and
-  `projectPaneOutline`); a definition for `projectActivePaneOutline` (as the
-  theme's `accent` color) exists in at least one more recent revision of the
-  same upstream source available on this machine, outside this repository's
-  pinned submodule commit.
-  **Rationale**: Recorded here as an observed fact about the state of this
-  repository's vendored dependency, not a behavior of `ComposableTabsActivePane.swift`
-  itself, so that whoever next bumps the `agenticdevelopertoolkit` submodule
-  pointer knows this file is already written against a property that pointer
-  needs to provide.
-  **Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [source-fidelity](agenticdevelopercookbook://compliance/recipe-quality#source-fidelity) | passed | recipe-quality |
+| [source-fidelity](agenticdevelopercookbook://compliance/recipe-quality#source-fidelity) | partial | recipe-quality |
 | [behavioral-requirements](agenticdevelopercookbook://compliance/recipe-quality#behavioral-requirements) | passed | recipe-quality |
-| [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | passed | recipe-quality |
+| [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | partial | recipe-quality |
 | [template-conformance](agenticdevelopercookbook://compliance/recipe-quality#template-conformance) | passed | recipe-quality |
 | [keyboard-focus-routing](agenticdevelopercookbook://compliance/accessibility#keyboard-focus-routing) | passed | accessibility |
-| [non-text-contrast](agenticdevelopercookbook://compliance/accessibility#non-text-contrast) | needs-review | accessibility |
+| [non-text-contrast](agenticdevelopercookbook://compliance/accessibility#non-text-contrast) | partial | accessibility |
 | [theme-token-only-colors](agenticdevelopercookbook://compliance/ui#theme-token-only-colors) | passed | ui |
 
 `keyboard-focus-routing` passes because every pointer-driven activation is
 paired with a standard `NSResponder` focus change, with no private
-accessibility-bypassing mechanism. `non-text-contrast` is `needs-review`
-because the actual color values behind `projectPaneBackdrop`,
-`projectPaneOutline`, and `projectActivePaneOutline` are chosen per theme,
-outside this file, per the marker in Accessibility > Contrast.
-`theme-token-only-colors` passes because every color this file reads is a
-`SemanticPalette` role, never a raw literal.
+accessibility-bypassing mechanism. `non-text-contrast` is `partial` because
+the actual color values behind `projectPaneBackdrop`, `projectPaneOutline`,
+and `projectActivePaneOutline` are chosen per theme, outside this file, per
+the marker in Accessibility > Contrast. `theme-token-only-colors` passes
+because every color this file reads is a `SemanticPalette` role, never a raw
+literal. `source-fidelity` and `completeness` are `partial`, not `passed`,
+because `palette.projectActivePaneOutline` — read by `applyTheme(_:)` — is
+not defined anywhere in the `external/agenticdevelopertoolkit` submodule at
+its currently pinned commit (that file's `SemanticPalette` extension defines
+only `projectPaneBackdrop` and `projectPaneOutline`); the property is added by
+upstream commit `62aa1e4ea5208f91c5f6f60d2cffe17e932ca415`
+("feat(theme): separate the project frame's line from the active pane's"),
+which this repository's submodule pointer needs to be bumped to at or past
+before this file's active-pane accent color can compile and resolve
+correctly.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: cited specific APIs and WCAG 1.4.11 instead of the HIG landing page; defined "live" pane and cross-referenced it from the arrival/departure requirements; added five untested behaviors (key-window blindness, nil-window and nil-content-view guards, the local-not-global monitor, and the main-queue dispatch for close/highlight changes) as MUST requirements with conformance vectors; clarified that `applyTheme` compares `activeNodeID(in:)` directly rather than calling `isInActivePane` and added a vector for an unclaimed window; corrected the SwiftUI platform note's per-scene/app-wide contradiction and its `RoundedRectangle(cornerRadius: 0)` stroke; corrected the WinUI 3 note's strong-dictionary lifecycle; tightened CTA-27 and CTA-31 to concrete, reproducible setups; named the `elevatedSurface` fallback for the pane backdrop color; moved the vendored-submodule gap out of Design Decisions, named the upstream commit that supplies it, and marked `source-fidelity`/`completeness`/`non-text-contrast` `partial` accordingly; populated `depends-on`/`related` with the sibling ingredients this file actually composes and observes; and fixed the frontmatter date quoting. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from source. |

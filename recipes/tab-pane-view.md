@@ -3,7 +3,7 @@ id: d906afe1-a621-42f1-87c5-c71ec9d43c1e
 title: TabPaneView
 domain: agentictoolkit://recipes/tab-pane-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -21,13 +21,12 @@ tags:
 - tab-bar
 - card
 - layout
-- macos
 - appkit
 depends-on: []
 related:
 - agentictoolkit://recipes/multi-tabbed-view-controller
-references:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references:
 - https://developer.apple.com/design/human-interface-guidelines/
 approved-by: ''
 approved-date: ''
@@ -61,11 +60,13 @@ tab.
   `tabID` passed to it, so two tabs never share an identifier.
 - **init-from-coder-unavailable**: `init?(coder:)` MUST be unavailable; the
   type MUST be constructed only through `init(edge:tabID:)`.
-- **labels-truncate-by-middle-default**: `agentLabel`, `sessionLabel`,
-  `directoryLabel`, `branchLabel`, and `summaryLabel` MUST default to
-  `.byTruncatingMiddle` line breaking.
-- **labels-resist-compression-at-low-priority**: The same five labels MUST set
-  their horizontal compression-resistance priority to `.defaultLow`.
+- **labels-truncate-by-middle-default**: `agentLabel`, `sessionLabel`, and
+  `branchLabel` MUST use `.byTruncatingMiddle` line breaking (the other two
+  text labels start there too, before **directory-label-truncates-head** and
+  **summary-label-truncates-tail** override them).
+- **labels-resist-compression-at-low-priority**: `agentLabel`, `sessionLabel`,
+  `directoryLabel`, `branchLabel`, and `summaryLabel` MUST each set their
+  horizontal compression-resistance priority to `.defaultLow`.
 - **directory-label-truncates-head**: `directoryLabel` MUST override its line
   break mode to `.byTruncatingHead`.
 - **summary-label-truncates-tail**: `summaryLabel` MUST override its line
@@ -241,8 +242,8 @@ tab.
 
 | State | Appearance change |
 |-------|------------------|
-| Default | — |
-| Front (`stackDepth == 0`) | Background = `projectPaneBackdrop`, border = `projectPaneOutline`, `agentLabel` = `.accent`, `sessionLabel` = `.primaryText`, the other three labels and the close tint = `.secondaryText`; painted background overhangs the workspace-facing side by `1pt`; text stays inset by `0`. |
+| Default (`stackDepth == 1`, before any caller sets it) | Behind — same as the "Behind, horizontal edge" or "Behind, vertical edge" row below, whichever edge this card is on. |
+| Front (`stackDepth == 0`) | Background = `projectPaneBackdrop`, border = `projectPaneOutline`, `agentLabel` = `.accent`, `sessionLabel` = `.primaryText`, the other three labels and the close tint = `.secondaryText`; painted background overhangs the workspace-facing side by `1pt`; text inset = `recession(0)` = `0` — only the paint overhangs. |
 | Behind, horizontal edge (`stackDepth > 0`, `.top`/`.bottom`) | Background = `windowBackground`, border = `border`, `agentLabel` = `.primaryText`, the rest and the close tint = `.tertiaryText`; card and text pulled in `4pt` on every side, flat regardless of depth. |
 | Behind, vertical edge (`stackDepth` 1–3, `.left`/`.right`) | Same palette as "Behind" above; card and text pulled in `4pt` per step of depth, up to `12pt` at depth `3` and beyond, so deeper cards read visibly smaller and further back. |
 | Depth transition (view in a window) | The recolor/reposition above animates over `0.16s` with an `easeOut` curve rather than jumping; off-screen (`window == nil`) it jumps. |
@@ -311,9 +312,9 @@ tab.
 | tab-pane-017 | self-not-pinned-either-axis | Inspect `view.constraints` and `view`'s own `widthAnchor`/`heightAnchor` | No required-priority constraint pins `view`'s width or height directly |
 | tab-pane-018 | wants-layer-on-self-and-boxes | Construct a `TabPaneView` | `view.wantsLayer == true`; `background.wantsLayer == true`; `content.wantsLayer == true` |
 | tab-pane-019 | content-size-floors | All labels empty, no status symbols, on a `.top` edge | `contentSize.width == 240`; `contentSize.height == 136` |
-| tab-pane-020 | content-size-grows-with-recession-slack | Compare `contentSize` on a `.top` edge vs. a `.left` edge with identical content | The `.left` edge's `contentSize` is `2 × 12 = 24pt` larger on each axis (before the min/max clamp) |
+| tab-pane-020 | content-size-grows-with-recession-slack | Compare `contentSize` on a `.top` edge vs. a `.left` edge, both with identical content sized so the stack's `fittingSize` lands clear of both the `240`–`340pt` width floor/ceiling and the `136pt` height floor on either edge | The `.left` edge's `contentSize` is exactly `2 × 12 = 24pt` larger than the `.top` edge's, on both width and height |
 | tab-pane-021 | front-card-defined-by-zero-depth | Set `stackDepth = 0`, then `stackDepth = 1` | `isFrontCard` reads `true`, then `false` (verified indirectly via `cardFillColor`) |
-| tab-pane-022 | depth-change-applies-only-on-change | Set `stackDepth = 1` when it is already `1` | `applyDepth(animated:)` is not invoked (no layout/color change occurs) |
+| tab-pane-022 | depth-change-applies-only-on-change | Record `cardFillColor`, `cardBorderColor`, and `runningMoveAnimationKeys`, then set `stackDepth = 1` when it is already `1` | All three are unchanged afterward: no new animation keys appear and the colors are identical to the values recorded before the redundant set |
 | tab-pane-023 | depth-recession-flat-on-horizontal-edge | `.top` edge; set `stackDepth` to `1`, then `5` | Card inset is `4pt` in both cases |
 | tab-pane-024 | depth-recession-accumulates-on-vertical-edge | `.left` edge; set `stackDepth` to `1`, `2`, `3` | Card inset is `4pt`, `8pt`, `12pt` respectively |
 | tab-pane-025 | depth-recession-clamps-past-max-stack-depth | `.left` edge; set `stackDepth` to `3`, then `10` | Card inset is `12pt` in both cases |
@@ -328,7 +329,7 @@ tab.
 | tab-pane-034 | theme-change-repaints-card | Post `ThemeManager.didChangeNotification` with a new palette | `cardFillColor`/`cardBorderColor` update to the new palette's values without any other call |
 | tab-pane-035 | animated-only-when-in-window | Change `stackDepth` on a `TabPaneView` not attached to a window, then on one attached to a window | `runningMoveAnimationKeys` stays empty in the first case and non-empty (mid-transition) in the second |
 | tab-pane-036 | depth-animation-duration-and-curve | Change `stackDepth` on a windowed view | The running `CAAnimation`'s duration is `0.16` and its timing function matches `easeOut` |
-| tab-pane-037 | depth-animation-settles-pending-layout-first | Trigger a pending layout, then change `stackDepth` on a windowed view | `layoutSubtreeIfNeeded()` runs before the animation group opens (view has no stale frame at the animation's start) |
+| tab-pane-037 | depth-animation-settles-pending-layout-first | Resize the card without calling `layoutSubtreeIfNeeded()` (leaving a pending layout), then change `stackDepth` on a windowed view | The running animation's `fromValue` (`background`'s presentation frame at the animation's start) equals the frame the pending layout would have produced, not the frame from before the resize — no stale frame is animated from |
 | tab-pane-038 | context-menu-delegates-to-provider | Set `contextMenuProvider = { _ in myMenu }`; call `menu(for: event)` | Returns `myMenu` |
 | tab-pane-039 | context-menu-delegates-to-provider | Leave `contextMenuProvider` returning `nil`; call `menu(for: event)` | Returns `super.menu(for: event)`'s result |
 | tab-pane-040 | status-symbols-replace-existing | Call `setStatusSymbols([a, b])`, then `setStatusSymbols([c])` | `statusStack.arrangedSubviews.count == 1` after the second call, with no leftover views for `a`/`b` |
@@ -342,6 +343,8 @@ tab.
 | tab-pane-048 | workspace-overhang-accessor | Query `workspaceOverhang` before `setUp()` has run (`cardSides == nil`) | Returns `0` |
 | tab-pane-049 | animation-keys-accessor | Mid-way through an animated depth change | `runningMoveAnimationKeys` is non-empty |
 | tab-pane-050 | onclose-is-optional | Leave `onClose == nil`; press `closeButton` | No crash; no observable side effect |
+| tab-pane-051 | context-menu-provider-is-optional | Leave `contextMenuProvider == nil` (never assigned); call `menu(for: event)` | Returns `super.menu(for: event)`'s result |
+| tab-pane-052 | status-symbols-replace-existing | On a freshly constructed `TabPaneView` with no prior status symbols, call `setStatusSymbols([])` | `statusStack.arrangedSubviews.count == 0`; `statusViews == []` |
 
 ## Edge Cases
 
@@ -379,6 +382,13 @@ tab.
 | `stackDepth` | `Int` | `1` | How far back in the stack this card is drawn; `0` means the front (selected) card. |
 | `onClose` | `(() -> Void)?` | `nil` | Called when `closeButton`'s action fires. |
 | `contextMenuProvider` | `((NSEvent) -> NSMenu?)?` | `nil` | Supplies the menu `menu(for:)` returns; falls back to `super.menu(for:)` when `nil` or when it returns `nil`. |
+
+`setStatusSymbols(_:)` takes `[TabPaneStatusSymbol]` (defined in the sibling
+file `TabPaneStatusSymbol.swift`, same directory): a small `Equatable`,
+`Sendable` struct pairing an SF Symbol name with an accessibility label.
+Source defines one value, `.idle` (`symbolName: "moon.zzz"`,
+`accessibilityLabel: "Idle"` — the value tab-pane-041 exercises); callers may
+construct others directly via `TabPaneStatusSymbol(symbolName:accessibilityLabel:)`.
 
 ## Deep Linking
 
@@ -474,12 +484,16 @@ Not applicable: source contains no logging call (no `print`, `os_log`, or
   `Box`, sized by a `Modifier.widthIn(min = 240.dp, max = 340.dp)` /
   `heightIn(min = 136.dp)`. Represent front/behind with an `animateDpAsState`
   (or `animateFloatAsState`) driving inset/offset over `160.milliseconds`
-  with an `EaseOut` easing curve, checked against
-  `LocalAccessibilityManager`/a Reduce Motion setting equivalent before
-  animating. Lay out the header as a `Row` with a `Spacer(Modifier.weight(1f))`
+  with an `EaseOut` easing curve, checked against the system animator
+  duration scale (`Settings.Global.ANIMATOR_DURATION_SCALE`, read via
+  `ContentResolver` — a scale of zero means Reduce Motion is on;
+  `LocalAccessibilityManager` does not expose this setting) before animating.
+  Lay out the header as a `Row` with a `Spacer(Modifier.weight(1f))`
   in place of `gap`, and the remaining lines in a `Column`, each using
-  `Modifier.basicMarquee()` or `TextOverflow.Ellipsis` with the matching
-  start/middle/end truncation.
+  `TextOverflow.StartEllipsis`, `TextOverflow.MiddleEllipsis`, or
+  `TextOverflow.Ellipsis` to match the per-label head/middle/tail truncation
+  mode (`Modifier.basicMarquee()` scrolls text rather than truncating it, so
+  it does not apply here).
 - **React/Web**: Build the card as a `<div>` whose `background` fills the
   full rect but whose `border` is set on only three sides (the CSS
   longhands `border-top`/`border-left`/`border-right`, omitting the
@@ -520,11 +534,13 @@ Not applicable: source contains no logging call (no `print`, `os_log`, or
   which this port should not repeat. Swap `Background`/`Foreground`
   `SolidColorBrush`es between the front and behind palettes with a
   `VisualStateManager` `FrontCard`/`BehindCard` state group, the way
-  `applyDepth()` swaps palette roles. Lay out the header as a horizontal
-  `StackPanel` with a zero-width `Grid` column (`Width="*"`) in place of
-  `gap`, followed by a close `Button` styled borderless
+  `applyDepth()` swaps palette roles. Lay out the header as a `Grid` with
+  `Auto,Auto,*,Auto` columns (agent label, status stack, gap, close button) —
+  a horizontal `StackPanel` cannot host a star-sized column, so the third
+  column's `*` sizing takes the place of `gap`, absorbing the header's extra
+  width — followed by a close `Button` in the fourth column, styled borderless
   (`Style="{StaticResource TransparentButtonStyle}"` or equivalent), sized
-  `14x14`, using the Segoe Fluent Icons `` ("Cancel") glyph, with
+  `14x14`, using the Segoe Fluent Icons `&#xE711;` ("Cancel") glyph, with
   `AutomationProperties.Name="Close"`. Represent the status symbols as a
   horizontal `ItemsRepeater`/`StackPanel` of `14x14` `FontIcon`s, each with
   its own `AutomationProperties.Name` bound to the caller-supplied label.
@@ -594,8 +610,6 @@ Not applicable: source contains no logging call (no `print`, `os_log`, or
 | [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
 | [live-region-announcements](agenticdevelopercookbook://compliance/accessibility#live-region-announcements) | failed | accessibility |
 | [reduce-motion-support](agenticdevelopercookbook://compliance/accessibility#reduce-motion-support) | failed | accessibility |
-| [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | not-applicable | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | not-applicable | accessibility |
 | [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
 
 Main-actor-confined passes because `TabPaneView`, `TabCardBackgroundView`,
@@ -615,9 +629,6 @@ and status-symbol labels are set explicitly, but the card sets no
 `accessibilityRole` and groups nothing for VoiceOver (see Accessibility).
 Live-region-announcements and reduce-motion-support are failed for the gaps
 documented in Accessibility and Accessibility Options respectively.
-Touch-target-size and contrast-ratio are not-applicable because this is a
-pointer-driven macOS desktop control, not a touch surface, and its colors are
-palette tokens whose contrast is defined outside this source.
 String-externalization is failed because `closeButton`'s "Close" accessibility
 description is a hardcoded English literal (see Localization).
 
@@ -625,3 +636,5 @@ description is a hardcoded English literal (see Localization).
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded the truncation-default requirement to name only its three non-overridden labels; fixed the Default and Front state descriptions; restated two internal-call test vectors as observable outcomes and the recession-slack vector to clear the size clamp; added missing test vectors for a nil context-menu provider and empty status symbols; corrected the WinUI 3 header layout and close-glyph and the Compose truncation/Reduce-Motion notes; documented `TabPaneStatusSymbol` in Configuration; moved a cookbook cross-reference from `references` to `related`; trimmed one tag over the 1-5 limit; and removed the two accessibility compliance rows that used a disallowed `not-applicable` status. |

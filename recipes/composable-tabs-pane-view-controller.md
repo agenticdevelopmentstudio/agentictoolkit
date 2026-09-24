@@ -3,7 +3,7 @@ id: 4d75a371-181e-4d80-a16b-022d37dc0d48
 title: ComposableTabsPaneViewController
 domain: agentictoolkit://recipes/composable-tabs-pane-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -22,12 +22,14 @@ tags:
 - pane
 - view-controller
 - appkit
-- macos
 - accessibility
-depends-on: []
-related: []
-references:
+depends-on:
+- agentictoolkit://recipes/pane-view-controller
+related:
+- agentictoolkit://recipes/composable-tabs-arrange-overlay-view
+- agentictoolkit://recipes/composable-tabs-active-pane
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -56,7 +58,7 @@ It is a subclass of `PaneViewController` (`packages/apple/AgenticToolkit/macOS/U
 - **content-nil-without-project**: The pane MUST return a nil content view controller, without consulting any registry, when its weak `project` reference has already been released.
 - **content-layout-override-precedence**: The pane MUST resolve content against `layoutOverride`'s registry when `layoutOverride` is set, and against the project's own layout registry otherwise.
 - **container-draws-active-outline**: The pane MUST use a `ComposableTabsPaneBackgroundView` keyed by `nodeID` as its container view.
-- **content-inset-matches-border**: The pane MUST hold its title bar and content 2pt off the container's edges, matching `ComposableTabsPaneBackgroundView.borderInset`, so the chrome never overlaps the active-pane border.
+- **content-inset-matches-border**: The pane MUST hold its title bar and content off the container's edges by `ComposableTabsPaneBackgroundView.borderInset` (2pt), so the chrome never overlaps the active-pane border. This is the one place this inset is defined as a literal; every other requirement and the Appearance section below refer to it by name rather than repeating the number.
 
 ### Naming & identity strings
 
@@ -78,7 +80,7 @@ It is a subclass of `PaneViewController` (`packages/apple/AgenticToolkit/macOS/U
 
 - **overlay-tracks-arrange-mode**: The pane MUST install the arrange overlay when arrange mode is enabled for its window, and MUST remove it when arrange mode is disabled.
 - **overlay-install-idempotent**: Installing the overlay when one already exists MUST NOT create a second overlay; it MUST instead refresh the existing overlay's availability.
-- **overlay-inset-from-border**: The overlay MUST be inset 2pt from every edge of the pane, matching the active-pane border inset, so it sits above content but inside the border.
+- **overlay-inset-from-border**: The overlay MUST be inset from every edge of the pane by the border inset (see **content-inset-matches-border**), so it sits above content but inside the border.
 - **overlay-shows-pane-name**: The overlay MUST display the pane's resolved title.
 - **overlay-add-availability**: The overlay's Add control MUST report available exactly when at least one distinct, non-placeholder view id can legally be inserted beside this pane.
 - **overlay-remove-availability**: The overlay's Remove control MUST report available exactly when the enclosing split reports this pane may be removed as a leaf.
@@ -89,7 +91,7 @@ It is a subclass of `PaneViewController` (`packages/apple/AgenticToolkit/macOS/U
 ### Keyboard handling
 
 - **exit-keys-disable-arrange-mode**: The pane MUST disable arrange mode for its window and consume the key event when Return (key code 36), Enter (key code 76), or Escape (key code 53) is pressed while arrange mode is enabled in the pane's own window.
-- **arrow-key-moves-active-pane-only**: While arrange mode is enabled in the pane's own window, an arrow key matching one of the four move directions' key codes MUST move this pane and consume the event only when this pane is that window's active pane (per `ComposableTabsActivePane`); it MUST NOT act, and MUST NOT consume the event, otherwise.
+- **arrow-key-moves-active-pane-only**: While arrange mode is enabled in the pane's own window, an arrow key matching one of the four move directions' key codes — 123 (`Direction.left`), 124 (`Direction.right`), 125 (`Direction.below`, Down), 126 (`Direction.above`, Up) — MUST move this pane and consume the event only when this pane is that window's active pane (per `ComposableTabsActivePane`); it MUST NOT act, and MUST NOT consume the event, otherwise.
 - **key-monitor-ignores-other-windows**: The pane's key monitor MUST take no action and MUST leave the event unconsumed when the event's window is not the pane's own window, or arrange mode is not enabled in that window.
 
 ### Move / gear menu
@@ -121,16 +123,16 @@ It is a subclass of `PaneViewController` (`packages/apple/AgenticToolkit/macOS/U
 - **state-owner-retargets-store**: Setting `stateOwnerNodeID` MUST retarget the pane's `ProjectPaneStateStore`'s `ownerNodeID` to the new value.
 - **contains-first-responder-unloaded**: `containsFirstResponder` MUST report `false` without loading the pane's view when the view has not yet been loaded.
 - **contains-first-responder-hierarchy-walk**: When the view is loaded, `containsFirstResponder` MUST report `true` exactly when the window's first responder is the pane's view or a descendant of it.
-- **title-bar-bottom-constant**: `titleBarBottom` MUST equal the 2pt border inset plus the title bar's fixed 26pt height (28pt total).
+- **title-bar-bottom-constant**: `titleBarBottom` MUST equal the border inset (see **content-inset-matches-border**) plus the title bar's fixed 26pt height (28pt total).
 
 ### Appearance fact
 
-- **active-pane-cue-is-color-only**: The pane's backdrop MUST distinguish the active pane from an inactive one by border color alone (`projectActivePaneOutline` vs. `projectPaneOutline`); border width MUST remain a constant 2pt in both states.
+- **active-pane-cue-is-color-only**: As built, the pane's backdrop distinguishes the active pane from an inactive one by border color alone (`projectActivePaneOutline` vs. `projectPaneOutline`), with a constant 2pt border width in both states. This describes the current implementation; it is not a constraint against adding a secondary cue — see the open question under Differentiate Without Color in Accessibility Options.
 
 ## Appearance
 
 - **Corner radius**: None on the pane's own backdrop or title bar. The arrange-mode toolbar (`ComposableTabsArrangeOverlayView.buildToolbar`) uses an 8pt corner radius.
-- **Padding**: Content and title bar are held 2pt off the container's edges (`contentInset` = `ComposableTabsPaneBackgroundView.borderInset`). The arrange overlay is inset 2pt from the pane on every side. Inside the overlay's toolbar, the button stack is inset 8pt on every side and the buttons are spaced 8pt apart; the pane-name label and the toolbar are stacked with 10pt spacing between them.
+- **Padding**: Content and title bar are held off the container's edges by the border inset (`contentInset` = `ComposableTabsPaneBackgroundView.borderInset`, 2pt — see **content-inset-matches-border**). The arrange overlay is inset from the pane by that same border inset on every side. Inside the overlay's toolbar, the button stack is inset 8pt on every side and the buttons are spaced 8pt apart; the pane-name label and the toolbar are stacked with 10pt spacing between them.
 - **Font**: Not set directly in this file. The overlay's pane-name label uses `ThemedLabel(role: .primaryText, textRole: .heading)` — a semantic heading style resolved by the theme system, not a literal point size.
 - **Background**: The pane's own fill is `ThemedBackgroundView(role: .windowBackground)`, drawn inside `ComposableTabsPaneBackgroundView`. While arranging, the scrim's background is `windowBackground` at 72% alpha (dims content toward the window background rather than toward black, so a light theme stays light); the toolbar's background is the `elevatedSurface` semantic color.
 - **Foreground/Text**: The overlay's pane-name label uses the `primaryText` semantic role. Border colors are theme-resolved semantic tokens, not literal values: `projectActivePaneOutline` for the active pane, `projectPaneOutline` otherwise.
@@ -176,7 +178,7 @@ It is a subclass of `PaneViewController` (`packages/apple/AgenticToolkit/macOS/U
 | ctpvc-012 | fallback-title-placeholder-layout | `layoutOverride` nil, `project` deallocated | `fallbackTitle` returns a name resolved from a placeholder-only layout rather than crashing |
 | ctpvc-013 | accessibility-id-from-view-id | `viewID.rawValue` = "whippet.terminal", `paneIndex` nil | `paneAccessibilityIdentifier` == "pane.terminal" |
 | ctpvc-014 | accessibility-id-includes-pane-index | Same as above, `paneIndex` = 2 | `paneAccessibilityIdentifier` == "pane.terminal.2" |
-| ctpvc-015 | pane-index-update-is-idempotent | Call `assignPaneIndex(3)` twice in a row on a loaded view | The container's accessibility identifier is written once, not twice |
+| ctpvc-015 | pane-index-update-is-idempotent | Call `assignPaneIndex(3)` twice in a row on a loaded view, with a spy/KVO observer on the container view's `setAccessibilityIdentifier` | The observer records exactly one call, not two |
 | ctpvc-016 | pane-index-update-refreshes-identifier | Call `assignPaneIndex(1)` then `assignPaneIndex(2)` on a loaded view | The container's accessibility identifier updates to reflect index 2 |
 | ctpvc-017 | arrange-mode-change-scoped-to-own-window | Post the arrange-mode change notification with a different window as its object | This pane's overlay state is unchanged |
 | ctpvc-018 | layout-change-refreshes-overlay-globally | Pane A has an overlay installed in window 1; post the layout-change notification from a change made in window 2 | Pane A's overlay `refreshAvailability()` runs |
@@ -192,17 +194,21 @@ It is a subclass of `PaneViewController` (`packages/apple/AgenticToolkit/macOS/U
 | ctpvc-028 | overlay-done-disables-arrange-mode | Activate the overlay's Done control | `ComposableTabsArrangeMode.shared.isEnabled(in: window)` becomes false |
 | ctpvc-029 | overlay-installs-key-monitor | Install, then remove, the overlay | A key monitor exists after install and is nil after removal |
 | ctpvc-030 | exit-keys-disable-arrange-mode | Arrange mode enabled in the pane's window; post a keyDown with key code 53 (Escape) to that window | Arrange mode becomes disabled; the event is consumed (not passed through) |
+| ctpvc-030b | exit-keys-disable-arrange-mode | Same setup; post a keyDown with key code 36 (Return) | Arrange mode becomes disabled; the event is consumed |
+| ctpvc-030c | exit-keys-disable-arrange-mode | Same setup; post a keyDown with key code 76 (Enter) | Arrange mode becomes disabled; the event is consumed |
 | ctpvc-031 | arrow-key-moves-active-pane-only | Arrange mode enabled; this pane is the window's active pane; post keyDown with key code 126 (Up/above) | `move(.above)` runs and the event is consumed |
 | ctpvc-031b | arrow-key-moves-active-pane-only | Same setup, but this pane is NOT the window's active pane | No move occurs; the event is not consumed |
 | ctpvc-032 | key-monitor-ignores-other-windows | Post a matching keyDown whose `event.window` is a different window than the pane's | No action taken; event left unconsumed |
-| ctpvc-033 | move-delegates-to-split | Enclosing split's `move(self, .right)` returns true | No refusal is announced |
+| ctpvc-033 | move-delegates-to-split | Request a move to `.right`; enclosing split's `move(self, .right)` returns true | `split.move(self, .right)` is called with that exact direction, and no refusal is announced |
 | ctpvc-034 | move-refusal-announced | Enclosing split's `move(self, .right)` returns false | `RefusalFeedback.announce()` is called exactly once |
 | ctpvc-035 | gear-menu-move-submenu | Call `makeMenuItems()` | Returns exactly one item titled "Move" whose submenu has four items, one per `Direction.allCases` |
 | ctpvc-036 | gear-menu-move-enablement | All four submenu items disabled | The "Move" item itself is disabled |
+| ctpvc-036b | gear-menu-move-enablement | Exactly one of the four submenu items enabled, the rest disabled | The "Move" item itself is enabled |
 | ctpvc-037 | add-choices-exclude-placeholder | Enclosing split's `allowedInsertions(beside:)` includes an insertion with `viewID == .placeholder` | That insertion is excluded from the computed choices |
 | ctpvc-038 | add-choices-deduplicated | `allowedInsertions(beside:)` reports the same non-placeholder view id insertable in two directions | The computed choices contain exactly one entry for that view id |
 | ctpvc-039 | add-refused-when-empty | Computed choices are empty | `presentAddSheet()` announces a refusal and presents no picker |
-| ctpvc-040 | add-picker-presentation | Overlay installed with a non-nil `addButtonView` | Picker is presented as a popover anchored to that view; without an overlay it is presented as a sheet |
+| ctpvc-040 | add-picker-presentation | Overlay installed with a non-nil `addButtonView` | Picker is presented as a popover anchored to that view |
+| ctpvc-040b | add-picker-presentation | No overlay installed (`arrangeOverlay` is nil) | Picker is presented as a sheet |
 | ctpvc-041 | add-selection-splits-pane | Picker returns `(viewID: X, direction: .right)` | Enclosing split's `split(self, adding: X, direction: .right)` is called |
 | ctpvc-042 | remove-refused-when-not-removable | Enclosing split's `canRemoveLeaf(self)` is false | `confirmAndRemove()` announces a refusal and does not remove the pane |
 | ctpvc-043 | remove-skips-confirmation-when-silent | Content is not `PaneContentRemovalConfirmation`, or its `removalConfirmationMessage` is nil | The pane is removed immediately with no alert shown |
@@ -255,7 +261,7 @@ NEEDS REVIEW: Not implemented in source. Behavior undefined. No localization key
 
 ## Accessibility Options
 
-Document which accessibility display options (Rule 15) this component responds to:
+Document which accessibility display options this component responds to:
 
 | Option | Behavior |
 |--------|----------|
@@ -292,31 +298,40 @@ Not applicable: no logging call (`Logger`, `os_log`, or otherwise) appears anywh
 
 ## Design Decisions
 
-Decision: The layout-change notification handler refreshes this pane's arrange-overlay availability for every tab's layout change, not only its own window's.
-Rationale: One pane moving changes what every other pane in every open tab may legally do next (a column's last pane loses Up, a tab's last leaf loses Remove), and the source posts one unscoped notification for exactly this reason rather than one per window.
-Approved: pending
+**Decision**: The layout-change notification handler refreshes this pane's arrange-overlay availability for every tab's layout change, not only its own window's.
+**Rationale**: One pane moving changes what every other pane in every open tab may legally do next (a column's last pane loses Up, a tab's last leaf loses Remove), and the source posts one unscoped notification for exactly this reason rather than one per window.
+**Approved**: pending
 
-Decision: Removing a pane behind a confirmation sheet re-resolves the enclosing split inside the sheet's completion handler instead of capturing the split reference before presenting the sheet.
-Rationale: The tree can change while the sheet is up — another pane could be moved or removed — so acting on a reference captured before the sheet opened risks removing the wrong leaf or acting on one that already left the tree.
-Approved: pending
+**Decision**: Removing a pane behind a confirmation sheet re-resolves the enclosing split inside the sheet's completion handler instead of capturing the split reference before presenting the sheet.
+**Rationale**: The tree can change while the sheet is up — another pane could be moved or removed — so acting on a reference captured before the sheet opened risks removing the wrong leaf or acting on one that already left the tree.
+**Approved**: pending
 
-Decision: Arrow-key handling for arrange mode is implemented as a local `NSEvent` monitor per pane rather than an override of `keyDown(_:)`.
-Rationale: The pane's own content (a terminal, an editor) owns first responder and would consume the arrow key before a `keyDown` override on this controller ever saw it; a local monitor sees the event before AppKit's responder chain delivers it.
-Approved: pending
+**Decision**: Arrow-key handling for arrange mode is implemented as a local `NSEvent` monitor per pane rather than an override of `keyDown(_:)`.
+**Rationale**: The pane's own content (a terminal, an editor) owns first responder and would consume the arrow key before a `keyDown` override on this controller ever saw it; a local monitor sees the event before AppKit's responder chain delivers it.
+**Approved**: pending
 
-Decision: The active/inactive pane cue is color-only; border width stays a constant 2pt in both states.
-Rationale: The source's own comment states the intent — outlining only the active pane would read as one pane with a seam down the middle — but implements no additional cue (width, icon, or pattern) for a person who cannot rely on color alone; this is the open question flagged under Accessibility Options.
-Approved: pending
+**Decision**: The active/inactive pane cue is color-only; border width stays a constant 2pt in both states.
+**Rationale**: The source's own comment states the intent — outlining only the active pane would read as one pane with a seam down the middle — but implements no additional cue (width, icon, or pattern) for a person who cannot rely on color alone; this is the open question flagged under Accessibility Options.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [accessibility-identifiers](agenticdevelopercookbook://compliance/ui#accessibility-identifiers) | passed | UI |
-| [local-persistence-durability](agenticdevelopercookbook://compliance/data#local-persistence-durability) | passed | Data Persistence |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [dynamic-type-support](agenticdevelopercookbook://compliance/accessibility#dynamic-type-support) | partial | Accessibility |
+| [focus-management](agenticdevelopercookbook://compliance/accessibility#focus-management) | passed | Accessibility |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+| [rtl-layout-support](agenticdevelopercookbook://compliance/internationalization#rtl-layout-support) | passed | Internationalization |
+
+Accessibility statuses rest on the explicit `accessibilityDescription` labels alongside the unaddressed VoiceOver-notification and Differentiate-Without-Color gaps recorded in Accessibility and Accessibility Options, the theme-delegated colors and heading-style label recorded in Appearance, and the native `NSAlert` modal/sheet handling in `confirmAndRemove()`; internationalization statuses rest on the hardcoded literals listed in Localization and the `leadingAnchor`/`trailingAnchor` overlay constraints in `installArrangeOverlay()`.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: rebuilt Compliance with real accessibility/internationalization catalog checks, defined the border inset once and referenced it by name elsewhere, restated the color-only active-pane cue as a descriptive fact rather than a foreclosing MUST, listed all four arrow-key codes, split and sharpened several test vectors, reformatted Design Decisions, moved the cookbook reference into `related`, added `depends-on`/`related` for sibling artifacts, and trimmed tags |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |

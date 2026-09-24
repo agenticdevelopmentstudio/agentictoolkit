@@ -3,7 +3,7 @@ id: 92d66361-a16d-4c35-a0d3-4c1c8bbd5f52
 title: ComposableTabsSettingsViewController
 domain: agentictoolkit://recipes/composable-tabs-settings-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -22,8 +22,10 @@ tags:
 - split-view
 - sheet
 - macos
-- appkit
-depends-on: []
+depends-on:
+- agentictoolkit://recipes/split-view-controller
+- agentictoolkit://recipes/group-view
+- agentictoolkit://recipes/spacing-control
 related: []
 references: []
 approved-by: ''
@@ -52,20 +54,18 @@ staged state, no commit, and no cancel.
 
 ## Behavioral Requirements
 
-- **constructs-topic-list-from-closures**: Component MUST construct a
-  `ProjectSettingsSplitViewController`, passing through the initializer's
-  `isEdgeEnabled` and `setEdgeEnabled` closures, during its own
-  initialization.
+- **constructs-topic-list-from-closures**: Component MUST construct its
+  topic list during its own initialization, passing through the
+  `isEdgeEnabled` and `setEdgeEnabled` closures it was given.
 - **rejects-coder-initialization**: Component MUST NOT support construction
-  via `init(coder:)`; that initializer is marked `@available(*, unavailable)`
-  and MUST trigger a fatal error.
+  via `init(coder:)`; that initializer MUST trigger a fatal error if
+  invoked.
 - **tags-window-background-role**: Component MUST set its root view to a
   `ThemedBackgroundView` constructed with role `.windowBackground`.
 - **identifies-sheet-root**: Component MUST set the root view's accessibility
   identifier to `project-window.project-settings`.
 - **embeds-topic-list-as-child**: Component MUST add the topic list as a
-  child view controller (`addChild`) and add its view as a subview of the
-  root view.
+  child view controller and add its view as a subview of the root view.
 - **pins-panel-to-top-leading-trailing**: Component MUST pin the topic list's
   view to the root view's top, leading, and trailing edges, and MUST NOT pin
   it to the root view's bottom edge (the Done button occupies the remaining
@@ -103,8 +103,8 @@ staged state, no commit, and no cancel.
   `addPanel(spacingPanel)`) and MUST select the panel at index 0 (Tabs) once
   both are added.
 - **rejects-coder-initialization-on-panels**: The topic list, Tabs panel, and
-  Spacing panel MUST NOT support construction via `init(coder:)`; each is
-  marked `@available(*, unavailable)` and MUST trigger a fatal error.
+  Spacing panel MUST NOT support construction via `init(coder:)`; each MUST
+  trigger a fatal error if invoked.
 - **lists-edges-in-reading-order**: The Tabs panel MUST present the window's
   four edges in the fixed order Top, Right, Bottom, Left.
 - **labels-tabs-descriptor**: The Tabs panel MUST construct its descriptor
@@ -156,10 +156,10 @@ staged state, no commit, and no cancel.
 
 ## Appearance
 
-- **Corner radius**: 10pt on every group's card
-  (`SettingsLayout.default[.cardCornerRadius]`, consumed by
-  `ComposableSettings.GroupView`'s `ThemedBox`). This file sets no corner
-  radius of its own; it inherits it by composing `GroupView`.
+- **Corner radius**: `SettingsLayout.default[.cardCornerRadius]` on every
+  group's card, inherited by composing `ComposableSettings.GroupView`'s
+  `ThemedBox` — see agentictoolkit://recipes/group-view#appearance for the
+  current value. This file sets no corner radius of its own.
 - **Padding**: The sheet itself contributes 0pt of padding around the topic
   list (pinned flush to the root view's top/leading/trailing) and fixed
   offsets around the Done button: 12pt above it (from the topic list), 20pt
@@ -169,11 +169,13 @@ staged state, no commit, and no cancel.
   never forces extra height), and
   `SettingsLayout.default[.groupSpacing]` = 20pt separates the Spacing
   panel's two groups (the Tabs panel has only one group, so this spacing is
-  never visually exercised there). Inside each card,
-  `SettingsLayout.default[.cardHorizontalInset]` = 14pt and
-  `SettingsLayout.default[.cardVerticalInset]` = 9pt pad each row's content,
-  and `SettingsLayout.default[.captionSpacing]` = 6pt separates each
-  group's caption from its card.
+  never visually exercised there) — both are this file's own panel-level
+  settings, not `GroupView`'s. Inside each card,
+  `SettingsLayout.default[.cardHorizontalInset]` and
+  `SettingsLayout.default[.cardVerticalInset]` pad each row's content, and
+  `SettingsLayout.default[.captionSpacing]` separates each group's caption
+  from its card — see agentictoolkit://recipes/group-view#appearance for the
+  current values, since `GroupView` is what consumes them.
 - **Font**: Each group's caption ("Tab Bars", "Frame Spacing", "Pane Divider
   Spacing") renders as a `ThemedLabel` with `textRole: .caption`
   (`ComposableSettings.HeaderView`, which `GroupView` builds internally).
@@ -182,9 +184,9 @@ staged state, no commit, and no cancel.
   belong to `SpacingControl`'s own implementation, not to this file.
 - **Background**: The sheet's root view paints `palette.nsColor(.windowBackground)`
   (`ThemedBackgroundView(role: .windowBackground)`). Each group's card
-  paints the theme's `.elevatedSurface` role
-  (`ThemedBox(fill: .elevatedSurface, stroke: nil, cornerRadius: 10)`,
-  inside `GroupView`). The topic list's own panel body additionally paints
+  paints the theme's `.elevatedSurface` role via a `ThemedBox` inside
+  `GroupView` — see agentictoolkit://recipes/group-view#appearance for its
+  exact construction. The topic list's own panel body additionally paints
   `palette.windowBackgroundColor` behind the cards (`PanelView`, composed by
   `SettingsPanelViewController`, not set directly by this file).
 - **Foreground/Text**: Each Tabs checkbox's title is forced to
@@ -193,12 +195,12 @@ staged state, no commit, and no cancel.
   `ThemedLabel(role: .secondaryText, ...)`). The Done button's title uses
   `NSButton`'s own default system label color; this file sets no explicit
   color on it.
-- **Border**: Each card's `ThemedBox` is built with `stroke: nil` — no
-  border stroke. A 1pt hairline divider
+- **Border**: Each card's `ThemedBox` has no border stroke of its own, and a
+  hairline divider separates a card row from the row above it — both are
+  `GroupView`'s construction, not this file's; see
+  agentictoolkit://recipes/group-view#appearance for the current values
   (`SettingsLayout.default[.dividerThickness]`, drawn by
-  `ThemedSeparatorView(role: .divider)`) separates a card row from the row
-  above it, inset 14pt from the row's leading edge — present above every
-  row except the first visible one in a card.
+  `ThemedSeparatorView(role: .divider)`).
 - **Shadow**: Not applicable — no shadow, `NSShadow`, or layer shadow
   property is set anywhere in this file, nor in the `GroupView`/`PanelView`/
   `ThemedBox` types it composes.
@@ -262,7 +264,7 @@ staged state, no commit, and no cancel.
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
 | cts-settings-vc-001 | constructs-topic-list-from-closures | Construct with `isEdgeEnabled`/`setEdgeEnabled` closures | A `ProjectSettingsSplitViewController` child exists whose Tabs panel was constructed with the same two closures |
-| cts-settings-vc-002 | rejects-coder-initialization | Attempt `ComposableTabsSettingsViewController(coder:)` | The call traps with a fatal error; no instance is returned |
+| cts-settings-vc-002 | rejects-coder-initialization | Compile a call site invoking `ComposableTabsSettingsViewController(coder:)` | Compilation fails: `init(coder:)` is unavailable |
 | cts-settings-vc-003 | tags-window-background-role | Trigger `loadView()` | `self.view` is a `ThemedBackgroundView` constructed with role `.windowBackground` |
 | cts-settings-vc-004 | identifies-sheet-root | Trigger `loadView()` | `self.view.accessibilityIdentifier() == "project-window.project-settings"` |
 | cts-settings-vc-005 | embeds-topic-list-as-child | Trigger `loadView()` | `panels` appears in `self.children`, and `panels.view` is a subview of `self.view` |
@@ -272,14 +274,14 @@ staged state, no commit, and no cancel.
 | cts-settings-vc-009 | identifies-done-button | Trigger `loadView()` | The Done button's `accessibilityIdentifier() == "project-window.project-settings.done"` |
 | cts-settings-vc-010 | lays-out-done-button-offsets | Trigger `loadView()`, resolve constraints | Done button's top is 12pt below `panelsView.bottom`; container's trailing is 20pt beyond Done's trailing; container's bottom is 16pt beyond Done's bottom |
 | cts-settings-vc-011 | dismisses-on-done | Click the Done button | `dismiss(self)` is invoked (the sheet closes) |
-| cts-settings-vc-012 | applies-changes-live | Toggle an edge checkbox, then inspect state without clicking Done | `setEdgeEnabled` has already been called; no additional commit action exists or is required |
+| cts-settings-vc-012 | applies-changes-live | Toggle an edge checkbox, then inspect a `setEdgeEnabled` spy's call order relative to Done/dismiss | The `setEdgeEnabled` spy was already called at the moment of the toggle, before any Done-button click or `dismiss(self)` call occurs |
 | cts-settings-vc-013 | sizes-preferred-content | Trigger `loadView()` | `preferredContentSize == NSSize(width: 760, height: 520)` |
 | cts-settings-vc-014 | titles-sidebar-project | Construct the topic list | `sidebarTitle == "Project"` |
 | cts-settings-vc-015 | widens-detail-pane | Read the topic list's `detailMinimumThickness` | Returns `420` |
 | cts-settings-vc-016 | fixes-sidebar-width | Read the topic list's `contentSizedSidebar` | Returns `true` |
 | cts-settings-vc-017 | presents-help-as-popover | Construct the topic list, trigger `viewDidLoad()` | `helpPresenter` is a `ComposableSettings.HelpPopoverController` instance |
 | cts-settings-vc-018 | registers-two-panels-in-order | Trigger `viewDidLoad()` on the topic list | Panel at index 0 is the Tabs panel, index 1 is the Spacing panel, and the selected panel is index 0 |
-| cts-settings-vc-019 | rejects-coder-initialization-on-panels | Attempt `init(coder:)` on the topic list, the Tabs panel, and the Spacing panel | Each call traps with a fatal error |
+| cts-settings-vc-019 | rejects-coder-initialization-on-panels | Compile a call site invoking `init(coder:)` on the topic list, the Tabs panel, and the Spacing panel | Compilation fails for each: `init(coder:)` is unavailable on all three types |
 | cts-settings-vc-020 | lists-edges-in-reading-order | Trigger `viewDidLoad()` on the Tabs panel | Checkboxes appear in the group in the order Top, Right, Bottom, Left |
 | cts-settings-vc-021 | labels-tabs-descriptor | Construct the Tabs panel | Its descriptor's `title == "Tabs"`, icon is the `rectangle.3.group` symbol |
 | cts-settings-vc-022 | groups-edge-checkboxes | Trigger `viewDidLoad()` on the Tabs panel | All four checkboxes are rows of one `GroupView` titled "Tab Bars"; no second group exists |
@@ -291,8 +293,9 @@ staged state, no commit, and no cancel.
 | cts-settings-vc-028 | guards-invalid-checkbox-tag | Invoke `toggleEdge(_:)` with a sender whose `tag == 99` | `setEdgeEnabled` is not called; the handler returns with no effect |
 | cts-settings-vc-029 | labels-spacing-descriptor | Construct the Spacing panel | Its descriptor's `title == "Spacing"`, icon is the `squareshape.split.2x2` symbol |
 | cts-settings-vc-030 | groups-frame-and-divider-controls | Trigger `viewDidLoad()` on the Spacing panel | Two `GroupView`s exist, titled "Frame Spacing" and "Pane Divider Spacing" respectively, each containing exactly one `SpacingControl` |
-| cts-settings-vc-031 | binds-frame-spacing-to-settings / binds-divider-spacing-to-settings | Change `PaneSpacing.edgeSettings[.top]`'s value externally after `viewDidLoad()` | The frame-spacing control's displayed top value updates to match |
+| cts-settings-vc-031 | binds-frame-spacing-to-settings | Change `PaneSpacing.edgeSettings[.top]`'s value externally after `viewDidLoad()` | The frame-spacing control's displayed top value updates to match |
 | cts-settings-vc-032 | closes-tab-loop-between-spacing-controls | Focus the frame-spacing control's last number field, press Tab | Focus moves to the divider-spacing control's first number field (and Tab from its last field returns focus to the frame-spacing control's first field) |
+| cts-settings-vc-033 | binds-divider-spacing-to-settings | Change `PaneSpacing.gutterSettings[.betweenColumns]`'s value externally after `viewDidLoad()` | The divider-spacing control's displayed value updates to match |
 
 ## Edge Cases
 
@@ -300,9 +303,9 @@ staged state, no commit, and no cancel.
   escaping closure parameters; Swift's type system rules out `nil`. A
   closure that always returns `false` from `isEdgeEnabled` is well-defined
   here: every checkbox initializes `.off`. No string or collection input
-  in this file can be empty in a way that changes its behavior. This is a
-  MUST: the component provides, and needs, no nil-handling path for either
-  closure parameter.
+  in this file can be empty in a way that changes its behavior. The
+  component provides, and needs, no nil-handling path for either closure
+  parameter.
 - Boundary values: The four checkboxes are two-valued (on/off); there is no
   numeric boundary in the Tabs panel. The Spacing panel's numeric range
   (`0...40`) is the default of `SpacingControl.boundToSettings`'s `range`
@@ -312,14 +315,14 @@ staged state, no commit, and no cancel.
   own responsibility, not decided in this file.
 - Concurrent access: All four classes in this file are `@MainActor`, so the
   Swift compiler serializes every construction and mutation to the main
-  actor — this file itself has no concurrency hazard. It MUST be noted,
-  though, that `PaneSpacing.edgeSettings`/`gutterSettings` are shared,
-  app-wide `UserSetting<Int>` instances (per `PaneSpacing`'s own doc
-  comment: "App-wide, deliberately... A window whose panes are spaced
-  differently from the window beside it reads as a bug"): opening this
-  sheet on two project windows at once and editing spacing in one MUST be
-  expected to update the bound control's displayed value in the other,
-  since both bind live to the same setting objects.
+  actor — this file itself has no concurrency hazard. Worth noting, though:
+  `PaneSpacing.edgeSettings`/`gutterSettings` are shared, app-wide
+  `UserSetting<Int>` instances (per `PaneSpacing`'s own doc comment:
+  "App-wide, deliberately... A window whose panes are spaced differently
+  from the window beside it reads as a bug"), so opening this sheet on two
+  project windows at once and editing spacing in one updates the bound
+  control's displayed value in the other, since both bind live to the same
+  setting objects.
 - Error states: Not applicable — every call in this file (layout,
   `dismiss(self)`, `setEdgeEnabled`, `SpacingControl.boundToSettings`) is
   synchronous and non-throwing; no `try`, `Result`, or completion-with-error
@@ -327,18 +330,19 @@ staged state, no commit, and no cancel.
 - Offline/disconnected: Not applicable — this file performs no networking;
   every dependency it touches (`UserSetting`, the injected closures, the
   theme palette) is in-process, local state.
-- Last-edge-disable refusal: MUST — per **reverts-checkbox-to-authoritative-state**,
+- Last-edge-disable refusal: Per **reverts-checkbox-to-authoritative-state**,
   this file has no independent rule of its own that keeps at least one edge
   enabled; it only reflects whatever `isEdgeEnabled` reports after calling
   `setEdgeEnabled`. The actual "refuse to disable the last edge" logic — and
   its persistence — live entirely outside this file, behind the injected
   closures.
-- Out-of-range checkbox tag: MUST — `toggleEdge(_:)` guards
-  `Self.edges.indices.contains(sender.tag)` before indexing; this file's own
-  construction path only ever assigns tags `0...3`, so the guard is dead
-  code under normal use, but it is source-present, testable behavior: a
-  checkbox retagged to an out-of-range value externally (e.g., from test
-  code) causes the action to silently no-op rather than trap.
+- Out-of-range checkbox tag: Per **guards-invalid-checkbox-tag**,
+  `toggleEdge(_:)` guards `Self.edges.indices.contains(sender.tag)` before
+  indexing; this file's own construction path only ever assigns tags
+  `0...3`, so the guard is dead code under normal use, but it is
+  source-present, testable behavior: a checkbox retagged to an
+  out-of-range value externally (e.g., from test code) causes the action to
+  silently no-op rather than trap.
 
 ## Configuration
 
@@ -453,22 +457,28 @@ logger reference anywhere in source).
   Use explicit `tabIndex` values (or DOM order) to close the Tab loop
   between the last field of one spacing group and the first field of the
   other.
-- **AppKit** (source platform): Source file
+- **AppKit / UIKit** (source platform): Source file
   `packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/ComposableTabsSettingsViewController.swift`.
   A macOS-only (`import AppKit`), `@MainActor` composition of one public
   `NSViewController` and three private classes, all final, none
-  `Codable`/`NSCoding`-constructible. It composes
-  `ComposableSettings.SplitViewController`, `SettingsPanelViewController`,
-  `GroupView`, `HelpPopoverController`, and `SpacingControl` — all defined
-  elsewhere in `AgenticToolkit` — rather than reimplementing any of their
-  layout or persistence logic. There is no UIKit code path in source; a
-  UIKit port would need an entirely different navigation shell, since
-  `NSSplitViewController`'s sidebar/detail model has no direct
-  `UISplitViewController` equivalent at this content-sized-sidebar,
+  `Codable`/`NSCoding`-constructible. The topic list is the private
+  `ProjectSettingsSplitViewController` subclass, added as a child view
+  controller via `addChild`; it and both panel subclasses mark
+  `init(coder:)` `@available(*, unavailable)` to produce the required
+  fatal-error trap. It composes `ComposableSettings.SplitViewController`,
+  `SettingsPanelViewController`, `GroupView`, `HelpPopoverController`, and
+  `SpacingControl` — all defined elsewhere in `AgenticToolkit` — rather than
+  reimplementing any of their layout or persistence logic. There is no
+  UIKit code path in source; a UIKit port would need an entirely different
+  navigation shell, since `NSSplitViewController`'s sidebar/detail model has
+  no direct `UISplitViewController` equivalent at this content-sized-sidebar,
   non-draggable configuration.
 - **WinUI 3** (the reason this recipe exists): Build the sheet as a
-  `ContentDialog` (or a secondary `Window` sized 760×520 effective pixels,
-  matching `preferredContentSize`) hosting a `NavigationView` with
+  `ContentDialog` (overriding the `ContentDialogMaxWidth` resource, since
+  its default caps a dialog at roughly 548 effective pixels wide — well
+  under the 760pt this sheet needs) or, more simply, a secondary `Window`
+  sized 760×520 effective pixels, matching `preferredContentSize`, hosting a
+  `NavigationView` with
   `PaneDisplayMode="Left"`, `IsPaneOpen="True"`, and `IsSettingsVisible="False"`
   — `NavigationView`'s pane, unlike `SplitView`'s, has no user-draggable
   splitter by default, which is the WinUI analog of `contentSizedSidebar`
@@ -482,7 +492,11 @@ logger reference anywhere in source).
   explicitly set `IsChecked` back from the injected getter's current value
   — WinUI's two-way `x:Bind` would otherwise leave the box showing whatever
   the user clicked, so the handler-level re-read is required to reproduce
-  reverts-checkbox-to-authoritative-state. Set
+  reverts-checkbox-to-authoritative-state. Guard that re-read (a boolean
+  flag, or comparing against the value already set) before writing
+  `IsChecked`, since setting it from inside the `Checked`/`Unchecked`
+  handler re-fires that same handler; alternatively, handle `Click` instead
+  of `Checked`/`Unchecked` to sidestep the re-entrancy entirely. Set
   `AutomationProperties.Name` on each `CheckBox` from its content text
   (the WinUI analog of the visible label supplying the accessible name),
   and additionally mark the `CheckBox` with
@@ -568,12 +582,22 @@ logger reference anywhere in source).
 |-------|--------|----------|
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
 | [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | needs-review | accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | partial | accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
 | [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | reliability |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
+
+`keyboard-navigable` and `screen-reader-support` are `partial` because the
+Done button and the four checkboxes rely on AppKit's default key-view loop
+and default accessibility roles, which this file never overrides or
+verifies (see **Accessibility**); `string-externalization` is `failed`
+because every user-facing string in this file is a hardcoded English
+literal (see **Localization**).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: populated depends-on with composed ingredients (split-view-controller, group-view, spacing-control); trimmed tags to five; decoupled three requirements from private implementation details (moved to Platform Notes); replaced restated GroupView metrics in Appearance with citations to its recipe; downgraded keyboard-navigable and screen-reader-support to partial and added a failed string-externalization check, with a sentence explaining both; renamed the AppKit platform-notes bullet to AppKit / UIKit; tightened three conformance test vectors (coder-init traps as compile-time checks, applies-changes-live as call-order assertion) and split/added divider-binding vectors; expanded WinUI 3 notes for ContentDialog width and checkbox re-entrancy; removed descriptive MUST usage from Edge Cases. |

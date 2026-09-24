@@ -3,7 +3,7 @@ id: c0e95399-ddab-4445-a22a-566d07339f9b
 title: ColorPickerView
 domain: agentictoolkit://recipes/color-picker-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -23,7 +23,11 @@ tags:
 - macos
 - appkit
 depends-on: []
-related: []
+related:
+- agentictoolkit://recipes/captioned-slider-view
+- agentictoolkit://recipes/checkbox-view
+- agentictoolkit://recipes/number-field-view
+- agentictoolkit://recipes/popup-menu-choice-view
 references: []
 approved-by: ''
 approved-date: ''
@@ -57,13 +61,25 @@ into `viewModel.color`.
   `sender.color` every time `colorChanged(_:)` — the color well's
   target-action — is invoked, unconditionally, with no comparison against
   the current value.
+- **delegates-color-clamping**: Component MUST NOT perform its own
+  clamping or validation of `sender.color` before writing it to
+  `viewModel.color`; normalizing an out-of-gamut or malformed color is
+  `RGBAColor`'s responsibility, one layer below this component.
 - **syncs-on-external-change**: Component MUST re-set `label.stringValue`
   to `viewModel.title` and `colorWell.color` to `viewModel.color` whenever
   `viewModel.onChange` fires.
+- **owns-on-change**: Component MUST assign its own closure to
+  `viewModel.onChange` during initialization, unconditionally replacing
+  any handler already registered on that `ColorViewModel` instance;
+  callers MUST NOT share a single `ColorViewModel` across more than one
+  observer (for example, two `ColorPickerView` instances, or a
+  `ColorPickerView` and another registered `onChange` handler), because
+  constructing the later observer silently drops whichever handler was
+  registered first.
 - **exposes-constituent-views**: Component MUST expose `label` and
   `colorWell` as public, directly-accessible, read-only (`let`)
   properties.
-- **requires-designated-initializer**: Component MUST NOT support
+- **rejects-coder-initialization**: Component MUST NOT support
   construction via `init(coder:)`; that initializer MUST trigger a fatal
   error.
 - **rejects-frame-only-initialization**: Component MUST NOT support
@@ -158,18 +174,19 @@ into `viewModel.color`.
 | color-picker-view-001 | arranges-row-layout | Construct `ColorPickerView` with any `viewModel` | `label` and `colorWell` are arranged (with an internal spacer) in a single row view that is pinned to the component's edges; no other layout container appears |
 | color-picker-view-002 | initializes-from-view-model | `viewModel.title = "Accent"`, `viewModel.color = NSColor.red` | After init, `label.stringValue == "Accent"` and `colorWell.color == NSColor.red` |
 | color-picker-view-003 | commits-color-value | Set `colorWell.color = NSColor.blue` and invoke `colorChanged(colorWell)` | `viewModel.color == NSColor.blue` after the call |
-| color-picker-view-004 | commits-color-value | `viewModel.color` already equals `colorWell.color`; invoke `colorChanged(colorWell)` again with the same color | `viewModel.color`'s setter is invoked again (the write is not skipped), unlike a sibling row view that guards against redundant writes |
+| color-picker-view-004 | commits-color-value | Construct with a counting/spy `ColorViewModel` stub whose `color` setter increments a call counter; set `colorWell.color = NSColor.blue` and invoke `colorChanged(colorWell)` twice in a row with the same color | The setter's call counter increments on both invocations (the second, redundant-value write is not skipped) |
 | color-picker-view-005 | syncs-on-external-change | After construction, externally change `viewModel.title` and `viewModel.color`, then invoke `viewModel.onChange(newColor)` | `label.stringValue` and `colorWell.color` both update to reflect the new `viewModel` state |
 | color-picker-view-006 | exposes-constituent-views | Construct the component, then access `.label` and `.colorWell` from outside the type | Both properties are accessible and return the same `NSTextField`/`NSColorWell` instances built during init (`label` is a `ThemedLabel` instance, declared as `NSTextField`) |
-| color-picker-view-007 | requires-designated-initializer | Attempt `ColorPickerView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
+| color-picker-view-007 | rejects-coder-initialization | Attempt `ColorPickerView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
 | color-picker-view-008 | rejects-frame-only-initialization | Attempt `ColorPickerView(frame: .zero)` | The call traps with a fatal error; no instance is returned |
+| color-picker-view-009 | owns-on-change | Construct two `ColorPickerView` instances in turn against the same `ColorViewModel` instance, then invoke `viewModel.onChange(someColor)` | Only the second view's `label`/`colorWell` update; the first view's handler was silently replaced and is never invoked |
+| color-picker-view-010 | delegates-color-clamping | Set `colorWell.color` to an out-of-gamut `NSColor` and invoke `colorChanged(colorWell)` | `ColorPickerView` writes `sender.color` into `viewModel.color` unchanged — no clamping call appears in `ColorPickerView.swift`; any normalization happens inside `RGBAColor`'s initializer, one layer below |
 
 ## Edge Cases
 
-- Null/empty input: `viewModel` (`ColorViewModel`) is a non-optional,
-  non-escaping-typed constructor parameter; Swift's type system rules out
-  `nil`. This is a MUST: the component provides, and needs, no
-  nil-handling path for its one initializer parameter.
+- Null/empty input: `viewModel` (`ColorViewModel`) is a non-optional
+  parameter; nil is ruled out by the type system. The component provides,
+  and needs, no nil-handling path for its one initializer parameter.
 - Boundary values — out-of-range or out-of-gamut color: `ColorPickerView`
   performs no clamping or validation of `sender.color` before writing it
   to `viewModel.color`. Clamping happens one layer down: `ColorViewModel`'s
@@ -178,8 +195,7 @@ into `viewModel.color`.
   `[0, 1]` via a private `Double.clamped()` helper — so an out-of-gamut or
   malformed `NSColor` is always normalized before it reaches storage, but
   that normalization is `RGBAColor`'s behavior, not `ColorPickerView`'s.
-  This is a MUST: the component MUST NOT perform its own clamping or
-  validation of the color value.
+  See **delegates-color-clamping**.
 - Concurrent access: Not applicable — the class is `@MainActor`-isolated,
   so Swift's concurrency checker serializes all access to the main actor;
   there is no code path by which two threads can mutate the view
@@ -194,25 +210,14 @@ into `viewModel.color`.
 - Overwritten external observer: `viewModel.onChange` is a single closure
   property. `ColorPickerView`'s initializer unconditionally assigns
   `viewModel.onChange = { [weak self] _ in ... }`, replacing whatever
-  handler (if any) was previously registered on that `viewModel`. This is
-  a MUST-level, source-traceable consequence of plain closure-property
-  assignment: the component MUST NOT be assumed to coexist with another
-  `onChange` observer already registered on the same `ColorViewModel`
-  instance — constructing a second `ColorPickerView` (or any other
-  observer) against the same view model silently drops the earlier
-  handler.
-- Malformed fatal-error message text: the frame-only initializer's fatal
-  error string is `"init(frame frameRect: NSRect"` — missing its closing
-  parenthesis. The behavior (a fatal error, terminating the process) is
-  unaffected, but the literal message text shipped in source is
-  malformed; an implementor porting this initializer verbatim would
-  reproduce that same truncated string unless corrected.
+  handler (if any) was previously registered on that `viewModel`. See
+  **owns-on-change**.
 
 ## Configuration
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `viewModel` | `ColorViewModel` | — (required) | Supplies the row's title and current color; receives committed color-well changes via `viewModel.color`. The initializer also overwrites this view model's `onChange` closure with the component's own sync handler (see Edge Cases). |
+| `viewModel` | `ColorViewModel` | — (required) | Supplies the row's title and current color; receives committed color-well changes via `viewModel.color`. The initializer also overwrites this view model's `onChange` closure with the component's own sync handler (see **owns-on-change**). |
 
 ## Deep Linking
 
@@ -273,22 +278,26 @@ Not applicable: `ColorPickerView.swift` contains no logging call (no
 
 ## Platform Notes
 
-- **SwiftUI**: Compose an `HStack` with `Text(viewModel.title)` and a
-  trailing `ColorPicker("", selection: $color)` with `.labelsHidden()`
-  applied, bound to a `Binding<Color>` that reads and writes through the
-  same view-model color, mirroring `commits-color-value`'s unconditional,
-  no-equality-check write on every change.
+- **SwiftUI**: Compose a `ColorPicker(viewModel.title, selection: $color)`
+  bound to a `Binding<Color>` that reads and writes through the same
+  view-model color — passing `viewModel.title` as the picker's own label
+  parameter (rather than `ColorPicker("", …)` with `.labelsHidden()` next
+  to a separate `Text`) keeps the visual title programmatically linked to
+  the control's accessible name, mirroring `commits-color-value`'s
+  unconditional, no-equality-check write on every change.
 - **Compose**: Use a `Row` with a leading `Text(title)` and a trailing
   color swatch `Box` (a fixed-size, rounded-rect `Modifier.background`)
   that on click opens a color-selection dialog or bottom sheet; commit
   the picked color back to the view model's state on every selection
   callback, again with no equality guard, mirroring `commits-color-value`.
 - **React/Web**: A flex row (`display: flex; align-items: center`)
-  containing a `<span>` for the title and a trailing `<input
-  type="color" value>` given a fixed width; update the bound value on the
-  input's `onInput`/`onChange` handler unconditionally, mirroring
-  `commits-color-value`.
-- **AppKit/UIKit** (source platform): Source file
+  containing a `<label htmlFor="…">` wrapping (or `for`-linked to) the
+  title text and a trailing `<input type="color" id="…" value>` given a
+  fixed width — the `<label for>` association replaces a bare `<span>`
+  so the title is programmatically tied to the control; update the bound
+  value on the input's `onInput`/`onChange` handler unconditionally,
+  mirroring `commits-color-value`.
+- **AppKit / UIKit** (source platform): Source file
   `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/ColorPickerView.swift`.
   A macOS-only (`import AppKit`) `NSView` subclass, `@MainActor`, inside
   the `ComposableSettings` namespace, conforming to `SettingsViewProtocol`.
@@ -300,14 +309,18 @@ Not applicable: `ColorPickerView.swift` contains no logging call (no
   `UIButton` that presents a `UIColorPickerViewController` and receives
   the chosen color through `UIColorPickerViewControllerDelegate` rather
   than target/action. UIKit also has no `NSCoder`-vs-frame initializer
-  split to fatal-error on both the way `requires-designated-initializer`
+  split to fatal-error on both the way `rejects-coder-initialization`
   and `rejects-frame-only-initialization` do.
 - **WinUI 3** (the reason this recipe exists): Build the row as a `Grid`
-  with column definitions `Auto,Auto`: a `TextBlock` for the title in
-  column 0, and a `Button` styled as a swatch in column 1 whose
-  `Background` is a `SolidColorBrush` converted from the bound color (an
+  with column definitions `*,Auto`: a `TextBlock` for the title in column
+  0, given the star-sized column so it absorbs the row's leftover width,
+  and a `Button` styled as a swatch pinned in column 1 whose `Background`
+  is a `SolidColorBrush` converted from the bound color (an
   `IValueConverter` mirroring the `NSColor`↔stored-value bridge
-  `ColorViewModel.color` performs). The swatch `Button`'s `Click` handler
+  `ColorViewModel.color` performs) — the star/auto split mirrors the
+  AppKit row's flexible spacer between `label` and `colorWell`, keeping
+  the swatch pinned to the row's trailing edge instead of hugging the
+  title. The swatch `Button`'s `Click` handler
   opens a `Microsoft.UI.Xaml.Controls.ColorPicker` inside a `Flyout` — the
   WinUI analog of `NSColorWell` opening the system color panel, mirroring
   the Pressed state's inherited open-a-picker behavior. Wire the
@@ -320,29 +333,25 @@ Not applicable: `ColorPickerView.swift` contains no logging call (no
 
 ## Design Decisions
 
-- Decision: Write `sender.color` into `viewModel.color` inside
+- **Decision**: Write `sender.color` into `viewModel.color` inside
   `colorChanged(_:)` on every invocation, with no comparison against the
   current value.
-  Rationale: Source contains no equality check before the write, unlike
-  the sibling `CaptionedSliderView`, which does guard its commit; a color
-  well's action already fires only in response to a user-driven color
-  change, so no additional guard was added here.
-  Approved: pending
-- Decision: Overwrite `viewModel.onChange` unconditionally in the
+  **Rationale**: `colorChanged(_:)` only fires from `NSColorWell`'s
+  target-action in response to a user-driven change committed in the
+  system color panel, so a redundant same-value write is user-caused and
+  harmless; unlike the sibling `CaptionedSliderView`, whose slider fires
+  continuously during a drag and needs an equality guard to avoid a flood
+  of redundant writes on every pixel of motion, a color well's action
+  fires once per committed selection, so no guard was added here.
+  **Approved**: pending
+- **Decision**: Overwrite `viewModel.onChange` unconditionally in the
   initializer, replacing any handler already registered on that
   `ColorViewModel`.
-  Rationale: Mirrors the same closure-property-assignment pattern used
+  **Rationale**: Mirrors the same closure-property-assignment pattern used
   across the ComposableSettingsWindow row family; the view provides no
-  way to compose with an existing observer.
-  Approved: pending
-- Decision: Give `ColorPickerView` fewer behavioral requirements (7) than
-  its structurally similar sibling `CaptionedSliderView` (13).
-  Rationale: The source class genuinely does less — no content-hugging or
-  compression-resistance priority tuning, no caller-supplied formatter,
-  and no live-versus-committed value distinction — so matching the
-  sibling's requirement count would invent behavior the source does not
-  have.
-  Approved: pending
+  way to compose with an existing observer. This constraint on callers is
+  now captured as the **owns-on-change** requirement.
+  **Approved**: pending
 
 ## Compliance
 
@@ -350,13 +359,24 @@ Not applicable: `ColorPickerView.swift` contains no logging call (no
 |-------|--------|----------|
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
 | [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | partial | accessibility |
 | [semantic-markup](agenticdevelopercookbook://compliance/accessibility#semantic-markup) | partial | accessibility |
 | [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | reliability |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
+
+`native-controls-preference`, `platform-design-language`, `idempotent-operations`,
+and `separation-of-concerns` rest on the source review of
+`ColorPickerView.swift` and `ComposableSettings.makeRow`/`pinToEdges`, which
+compose stock AppKit controls with no ad hoc state or cross-cutting logic;
+`keyboard-navigable` and `semantic-markup` are `partial` because the file
+supplies no explicit VoiceOver labeling or keyboard-focus verification of its
+own — it relies entirely on `NSColorWell`/`NSTextField`'s built-in AppKit
+accessibility and focus behavior, unconfirmed by any recorded keyboard or
+VoiceOver pass.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for ColorPickerView, covering row layout, unguarded color-well commit behavior, and one open accessibility question (color well/title label association) for review. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: promoted the color-clamping and onChange-ownership edge cases to named MUST requirements with test vectors; renamed `requires-designated-initializer` to `rejects-coder-initialization`; fixed the WinUI grid columns and the SwiftUI/React platform notes to stop copying the color-well/title accessibility gap onto new platforms; bolded Design Decision labels, rewrote Decision 1's rationale, and dropped the meta decision about requirement count; populated `related` with the sibling row recipes; marked `keyboard-navigable` partial pending a keyboard/VoiceOver pass; removed the source-typo edge case; fixed the `AppKit / UIKit` platform-notes label. |

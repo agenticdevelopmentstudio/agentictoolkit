@@ -3,7 +3,7 @@ id: aea5e7b2-00d2-4f23-bfc5-8dc64e8d0d2a
 title: ComposableTabsAddPaneViewController
 domain: agentictoolkit://recipes/composable-tabs-add-pane-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -22,7 +22,8 @@ tags:
 - form-control
 - macos
 - appkit
-depends-on: []
+depends-on:
+- agentictoolkit://recipes/composable-tabs-view-controller
 related: []
 references: []
 approved-by: ''
@@ -78,9 +79,8 @@ without invoking it.
 - **ok-button-enabled-when-choices-present**: The OK button's `isEnabled`
   MUST be `true` at load time when `choices` is non-empty.
 - **ok-button-enabled-state-fixed-at-load**: The OK button's enabled state
-  MUST be computed once, from `choices`, at `loadView()` time, and MUST NOT
-  be re-evaluated afterward in response to either popup's selection
-  changing.
+  MUST be computed once, from `choices`, at `loadView()` time; enablement
+  depends only on `choices`, not on either popup's selection.
 - **cancel-precedes-ok-in-button-order**: The Cancel button MUST be
   positioned before the OK button, left to right.
 - **cancel-bound-to-escape-key**: The Cancel button's key equivalent MUST be
@@ -90,7 +90,7 @@ without invoking it.
 - **cancel-dismisses-without-invoking-onadd**: Activating Cancel MUST
   dismiss the view controller and MUST NOT invoke `onAdd`.
 - **confirm-dismisses-before-invoking-onadd**: Activating OK with a valid
-  selection MUST dismiss the view controller before invoking `onAdd`.
+  selection MUST invoke `dismiss(_:)` before invoking `onAdd`.
 - **confirm-invokes-onadd-with-selection**: Activating OK MUST, when both
   popups have a valid selected index, invoke `onAdd` with the `viewID` of
   the selected `Choice` and the `Direction` at the selected "Where" index.
@@ -118,6 +118,9 @@ without invoking it.
 - **coder-initialization-unsupported**: The component MUST NOT support
   initialization via `init(coder:)` and MUST fail fast (fatal error) if it
   is invoked.
+- **associates-popup-with-row-caption**: Each popup SHOULD be associated
+  with its row's caption ("Add:" / "Where:") so VoiceOver announces the
+  caption together with the popup's current value.
 
 ## Appearance
 
@@ -175,8 +178,9 @@ without invoking it.
   their own visible titles ("Cancel", "OK"). Each `choices` entry with a
   `symbolName` gets an explicit accessibility description (the entry's
   `displayName`) on its popup-item image. NEEDS REVIEW: Not implemented in
-  source. Behavior undefined. Neither popup is associated with its row
-  caption ("Add:" / "Where:") via `setAccessibilityTitleUIElement` or an
+  source. Per **associates-popup-with-row-caption**, neither popup is
+  associated with its row caption ("Add:" / "Where:") via
+  `setAccessibilityTitleUIElement` or an
   explicit `accessibilityLabel` override, so VoiceOver announces only the
   popup's current value (e.g. "Right") without the "Where" context a
   sighted user gets from the adjacent label. What is missing: whether a
@@ -211,12 +215,12 @@ without invoking it.
 | add-pane-009 | ok-button-enabled-when-choices-present | `choices = [A]` | `okButton.isEnabled == true` |
 | add-pane-010 | ok-button-enabled-state-fixed-at-load | Load with `choices = [A]`; change the Where selection, then the Add selection | `okButton.isEnabled` remains `true`, unchanged by either selection |
 | add-pane-011 | cancel-precedes-ok-in-button-order | Inspect the button stack's `views` | `views[0]` is Cancel, `views[1]` is OK |
-| add-pane-012 | cancel-bound-to-escape-key | Inspect `cancel.keyEquivalent` | Equals the Escape character |
-| add-pane-013 | ok-bound-to-return-key | Inspect `okButton.keyEquivalent` | Equals the Return character |
+| add-pane-012 | cancel-bound-to-escape-key | Inspect `cancel.keyEquivalent` | Equals `"\u{1b}"` |
+| add-pane-013 | ok-bound-to-return-key | Inspect `okButton.keyEquivalent` | Equals `"\r"` |
 | add-pane-014 | cancel-dismisses-without-invoking-onadd | Click Cancel | The sheet is dismissed; `onAdd` is never called |
-| add-pane-015 | confirm-dismisses-before-invoking-onadd | Select a valid Add and Where combination; click OK | The sheet's dismissal completes before `onAdd` runs (observable via call-order instrumentation) |
+| add-pane-015 | confirm-dismisses-before-invoking-onadd | Select a valid Add and Where combination; click OK | `dismiss(_:)` is invoked before `onAdd` (observable via call-order instrumentation) |
 | add-pane-016 | confirm-invokes-onadd-with-selection | "Add" popup selects `choices[1]`; "Where" popup selects "Above" | `onAdd` is called once, with `(choices[1].viewID, .above)` |
-| add-pane-017 | confirm-dismisses-without-onadd-on-invalid-selection | `choices = []`; force-invoke the confirm action with the "Add" popup's selected index `== -1` | The sheet is dismissed; `onAdd` is never called |
+| add-pane-017 | confirm-dismisses-without-onadd-on-invalid-selection | `choices = []`; force-invoke the private confirm action by selector name (`NSApp.sendAction(Selector(("confirm:")), to: controller, from: nil)`), leaving the "Add" popup's selected index `== -1` | The sheet is dismissed; `onAdd` is never called |
 | add-pane-018 | enforces-minimum-container-width | Measure the container's width constraint after `loadView()` | A `greaterThanOrEqualToConstant` constraint of 320pt exists on the container's width |
 | add-pane-019 | root-view-accessibility-identifier | Inspect the container's accessibility identifier | Equals "composable-tabs.add-pane" |
 | add-pane-020 | view-popup-accessibility-identifier | Inspect the "Add" popup's accessibility identifier | Equals "composable-tabs.add-pane.view" |
@@ -239,15 +243,15 @@ without invoking it.
   initializer parameters, so Swift's type system rules out passing `nil`
   for either; the component provides, and needs, no nil-handling path for
   them.
-- Boundary values (MUST): the "Where" popup always contains exactly the
+- Boundary values (observed): the "Where" popup always contains exactly the
   four fixed directions, so its selected index is always valid (0 through
   3) through ordinary UI interaction; the bounds guard in the confirm
   action only ever fails, for "Where", in a hypothetical, non-UI-driven
   case.
-- Boundary values (MUST): the fallback that picks index 0 if "Right" were
-  ever absent from the fixed direction list is unreachable dead code in
-  the current source, since that list is a hardcoded four-case literal
-  that always contains "Right" (see Design Decisions).
+- Boundary values (observed): the fallback that picks index 0 if "Right"
+  were ever absent from the fixed direction list is unreachable dead code
+  in the current source, since that list is a hardcoded four-case literal
+  that always contains "Right" (see **Design Decisions**).
 - Concurrent access: Not applicable — the class is declared `@MainActor`,
   so Swift's concurrency checker confines all reads and writes of
   `choices`, the two popups, and the two buttons to the main actor.
@@ -289,6 +293,15 @@ presents it programmatically.
 | n/a (literal) | "Cancel" | Cancel button title |
 | n/a (literal) | "OK" | OK button title |
 
+NEEDS REVIEW: Not implemented in source. Every string above is a plain AppKit
+`String` literal (for example `NSButton(title: "Cancel", …)` and
+`NSButton(title: "OK", …)` at ComposableTabsAddPaneViewController.swift:70
+and :75, and the `"Add:"`/`"Where:"` captions at :82–83), none routed through
+`String(localized:)` or `NSLocalizedString`, so none reaches a string catalog.
+What is missing: localization keys and catalog entries for the captions,
+direction names, and button titles. What would settle it: routing the
+literals through `String(localized:)` in source.
+
 Not applicable beyond the table above: each `choices` entry's own
 `displayName` shown in the "Add" popup is supplied by the caller, not
 hardcoded in this file, so localizing it is the caller's responsibility, not
@@ -299,10 +312,13 @@ this component's.
 - **Reduce Motion**: Not applicable — source defines no animation,
   transition, or `NSAnimationContext` call; the sheet's content is built
   once, synchronously, in `loadView()`.
-- **Increase Contrast**: Not applicable — every color in this file comes
-  from a `ThemeRole` (`.windowBackground`, `.primaryText`) resolved by the
-  shared theme system; the file itself sets no literal `NSColor` and
-  performs no contrast-specific branching.
+- **Increase Contrast**: Every color in this file comes from a `ThemeRole`
+  (`.windowBackground`, `.primaryText`) resolved by the shared theme
+  system; the file itself sets no literal `NSColor` and performs no
+  contrast-specific branching. Whether the resolved colors meet a minimum
+  contrast ratio is determined by theme resolution, not this file — see
+  Compliance's **contrast-ratio** check, marked partial for the same
+  reason.
 - **Differentiate Without Color**: Not applicable — the component conveys
   no state through color alone; the Add/Where choices and the OK/Cancel
   actions are identified by text and icons, not color.
@@ -350,8 +366,9 @@ or logger reference anywhere in this file).
   reproduces the fixed-at-load OK enablement.
 - **Compose**: Use two dropdown-menu composables inside an `AlertDialog`
   (or a `Dialog` with custom content) — one bound to a `selectedChoice`
-  state seeded to the first entry, one to a `selectedDirection` state
-  seeded to the "right" direction. Render each Add-menu item with an
+  state seeded to the first entry, or to no selection when `choices` is
+  empty, one to a `selectedDirection` state seeded to the "right"
+  direction. Render each Add-menu item with an
   optional leading icon when a symbol equivalent exists, mirroring the
   source's per-item image. Wire the dialog's confirm/dismiss actions
   through its own confirm/dismiss slots, disabling the confirm action once,
@@ -366,7 +383,7 @@ or logger reference anywhere in this file).
   key equivalents, and set the OK button's disabled state once, at open
   time, from `choices.length === 0`, mirroring the source's fixed-at-load
   enablement rather than a reactive binding.
-- **AppKit/UIKit** (source platform): Implemented in
+- **AppKit / UIKit** (source platform): Implemented in
   `packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/ComposableTabsAddPaneViewController.swift`
   as a `@MainActor`, `final` `NSViewController` with no nib/XIB —
   `loadView()` builds an `NSGridView` of two `NSPopUpButton`s and their
@@ -378,7 +395,7 @@ or logger reference anywhere in this file).
   view), replace the grid with a stack view of horizontal rows, and present
   the whole thing as a small view controller in a form-sheet presentation,
   since UIKit has no direct analog of `NSGridView`/`NSPopUpButton`.
-- **WinUI 3** (the reason this recipe exists): Build the sheet as a
+- **WinUI 3**: Build the sheet as a
   `ContentDialog` with `PrimaryButtonText="OK"` and
   `CloseButtonText="Cancel"` — `ContentDialog` already binds its primary
   button to Enter and its close button to Escape, the direct analogs of the
@@ -400,51 +417,53 @@ or logger reference anywhere in this file).
 
 ## Design Decisions
 
-- Decision: Split "what to add" and "where to put it" into two independent
-  popups rather than one flattened list (e.g. "Add Terminal Below").
-  Rationale: Per the type's doc comment, the second answer (the four
-  directions) is the same regardless of the first, so a flattened list
-  would force the user to read a cross product of eight or twelve items
-  instead of making two small choices.
-  Approved: pending
-- Decision: Default the "Where" popup's selection to "Right" rather than
-  the first item ("Left") or no selection.
-  Rationale: Per the source comment, the pane the user is looking at is on
-  the left of a document more often than not, so placing the new pane to
-  its right is the least surprising default.
-  Approved: pending
-- Decision: Dismiss the sheet before invoking `onAdd` in the confirm
-  action, rather than invoking `onAdd` first.
-  Rationale: Per the source comment, `onAdd` re-parents view controllers by
-  splitting the pane; doing that while the sheet is still presented would
-  leave the sheet anchored to a window whose content has already moved out
-  from under it.
-  Approved: pending
-- Decision: Fix the direction list to the hardcoded order left, right,
-  above, below and reuse that same list both to populate the "Where"
-  popup and to map its selected index back to a direction.
-  Rationale: Per the source comment, a fixed order makes the popup read
-  the way the pane visually looks; reusing one list for both population
-  and index-mapping keeps the two in sync by construction rather than by
-  convention.
-  Approved: pending
-- Decision: Center-align the grid's rows instead of using `NSGridView`'s
-  default first-baseline row alignment.
-  Rationale: Per the source comment, a label baseline-aligned against a
-  popup sits high in it, which reads as a row that did not quite line up;
-  centering both views in the row instead makes the label and popup look
-  vertically aligned.
-  Approved: pending
-- Decision: Leave a defensive fallback to index 0 for the "Right" lookup,
-  even though the direction list is a hardcoded literal that always
-  contains "Right".
-  Rationale: Not explained in source; recorded here as an observed,
-  currently-unreachable defensive path so other-platform implementations
-  do not need to reproduce a "what if Right is missing" branch, and so a
-  future edit to the direction list that did drop "Right" would be caught
-  by this recipe's boundary-value edge case rather than silently changing
-  the default.
-  Approved: pending
+**Decision**: Split "what to add" and "where to put it" into two independent
+popups rather than one flattened list (e.g. "Add Terminal Below").
+**Rationale**: Per the type's doc comment, the second answer (the four
+directions) is the same regardless of the first, so a flattened list would
+force the user to read a cross product of eight or twelve items instead of
+making two small choices.
+**Approved**: pending
+
+**Decision**: Default the "Where" popup's selection to "Right" rather than
+the first item ("Left") or no selection.
+**Rationale**: Per the source comment, the pane the user is looking at is on
+the left of a document more often than not, so placing the new pane to its
+right is the least surprising default.
+**Approved**: pending
+
+**Decision**: Dismiss the sheet before invoking `onAdd` in the confirm
+action, rather than invoking `onAdd` first.
+**Rationale**: Per the source comment, `onAdd` re-parents view controllers by
+splitting the pane; doing that while the sheet is still presented would
+leave the sheet anchored to a window whose content has already moved out
+from under it.
+**Approved**: pending
+
+**Decision**: Fix the direction list to the hardcoded order left, right,
+above, below and reuse that same list both to populate the "Where" popup
+and to map its selected index back to a direction.
+**Rationale**: Per the source comment, a fixed order makes the popup read
+the way the pane visually looks; reusing one list for both population and
+index-mapping keeps the two in sync by construction rather than by
+convention.
+**Approved**: pending
+
+**Decision**: Center-align the grid's rows instead of using `NSGridView`'s
+default first-baseline row alignment.
+**Rationale**: Per the source comment, a label baseline-aligned against a
+popup sits high in it, which reads as a row that did not quite line up;
+centering both views in the row instead makes the label and popup look
+vertically aligned.
+**Approved**: pending
+
+**Decision**: Leave a defensive fallback to index 0 for the "Right" lookup,
+even though the direction list is a hardcoded literal that always contains
+"Right".
+**Rationale**: Not explained in source; recorded here as an observed,
+currently-unreachable defensive path, so other-platform implementations do
+not need to reproduce a "what if Right is missing" branch.
+**Approved**: pending
 
 ## Compliance
 
@@ -458,7 +477,6 @@ or logger reference anywhere in this file).
 | [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
 | [modal-dismissal-and-focus](agenticdevelopercookbook://compliance/accessibility#modal-dismissal-and-focus) | passed | accessibility |
 | [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | passed | accessibility |
 | [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
 | [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
 | [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
@@ -468,17 +486,15 @@ equivalents and every other control is a stock, natively keyboard-accessible
 `NSPopUpButton`/`NSButton`. Screen-reader-support is partial: accessibility
 identifiers back automation on every control and the SF Symbol images carry
 descriptions, but neither popup is associated with its row caption via
-`setAccessibilityTitleUIElement` (see the Accessibility section's NEEDS
-REVIEW marker). Modal-dismissal-and-focus passes on the strength of AppKit's
-native sheet presentation and dismissal, which this file does not override.
+`setAccessibilityTitleUIElement` (see **associates-popup-with-row-caption**).
+Modal-dismissal-and-focus passes on the strength of AppKit's native sheet
+presentation and dismissal, which this file does not override.
 Differentiate-without-color passes because no state here is conveyed by
-color alone. Touch-target-size passes because every control uses AppKit's
-standard control metrics for a pointer/keyboard-driven macOS sheet, not a
-custom undersized control; the 44×44pt/48×48dp minimum applies only to the
-touch-platform translations in Platform Notes. Contrast-ratio is partial
-because colors come entirely from `ThemeRole` tokens resolved by the shared
-theme system, whose actual contrast values are not stated in this file.
-String-externalization is failed because every label in this file ("Add:",
+color alone. Contrast-ratio is partial because colors come entirely from
+`ThemeRole` tokens resolved by the shared theme system, whose actual
+contrast values are not stated in this file (see Accessibility Options'
+Increase Contrast). String-externalization is failed because every label
+in this file ("Add:",
 "Where:", "Left", "Right", "Above", "Below", "Cancel", "OK") is a hardcoded
 English literal with no localization key. Main-actor-confined passes because
 the class is declared `@MainActor`.
@@ -488,3 +504,4 @@ the class is declared `@MainActor`.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Claude Sonnet 5 | Initial ingredient recipe for ComposableTabsAddPaneViewController: two-popup Add/Where sheet, fixed direction order and Right default, dismiss-before-invoke confirm ordering, fixed-at-load OK enablement, and one open accessibility question (popup-to-caption label association) for review. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded the confirm-dismisses-before-invoking-onadd requirement and its vector to assert that `dismiss(_:)` is invoked rather than completed; added a SHOULD requirement for popup-to-caption accessibility association, cited by the existing open-question marker; reformatted all Design Decisions into the canonical three-line block and trimmed the unreachable-fallback rationale to an observed path; added the ComposableTabsViewController recipe to depends-on; removed the inapplicable touch-target-size compliance row and reconciled the contrast-ratio/Increase Contrast cross-reference; fixed the AppKit / UIKit platform-note label and removed the WinUI 3 aside; clarified the Compose note's empty-choices seeding; relabeled two unreachable boundary-value edge cases as observations; gave literal key-equivalent values for add-pane-012/013; and named the confirm-action selector for add-pane-017. |

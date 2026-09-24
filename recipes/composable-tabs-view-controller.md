@@ -3,7 +3,7 @@ id: 0640ca96-95c5-4234-925e-386425cc4435
 title: ComposableTabsViewController
 domain: agentictoolkit://recipes/composable-tabs-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -21,10 +21,11 @@ tags:
 - split-view
 - layout
 - tabs
-- macos
 - appkit
 depends-on: []
-related: []
+related:
+- agentictoolkit://recipes/composable-tabs-pane-view-controller
+- agentictoolkit://recipes/pane-spacing
 references: []
 approved-by: ''
 approved-date: ''
@@ -121,7 +122,8 @@ the live `NSSplitViewItem`s.
   fractions unchanged.
 - **apply-arrangement-no-op-for-default-arranger**: `applyArrangement()` MUST
   have no observable effect when the installed `arranger` is
-  `InheritedSlotArranger`.
+  `InheritedSlotArranger` (see **default-arranger-is-inherited-slot** for why:
+  that arranger returns its input unchanged).
 - **apply-arrangement-resolves-actual-axis**: When applying a non-default
   arranger, Component MUST hand the arranger the axis of its own snapshot's
   split orientation when that snapshot is itself a split node, rather than
@@ -180,11 +182,16 @@ the live `NSSplitViewItem`s.
   original pane held in its slot, and the original pane's own fraction MUST
   be cleared, so the two panes start out sharing the inner split evenly.
 - **split-propagates-configuration**: The inner split created by
-  `split(_:adding:direction:)` MUST inherit the enclosing split's `arranger`,
-  `layoutOverride`, `stateOwnerNodeID`, and `clampsToContainer`.
+  `split(_:adding:direction:)` MUST end up with the enclosing split's
+  `arranger`, `layoutOverride`, `stateOwnerNodeID`, and `clampsToContainer`, per
+  **inherit-arranger-to-nested-splits**, **inherit-layout-override**,
+  **inherit-state-owner-node-id**, and **inherit-clamps-to-container**.
 - **split-persists-and-rearranges**: After a `split(_:adding:direction:)` call
   completes, Component MUST call `applyArrangement()` and persist the tree,
   both from the root.
+- **split-no-ops-without-project**: `split(_:adding:direction:)` MUST return
+  immediately, performing no mutation, when its project has already been
+  deallocated.
 - **remove-refuses-non-direct-child**: `remove(_:)` MUST have no effect when
   the given pane is not a direct child of the split it is called on.
 - **remove-honors-spec-veto**: `remove(_:)` MUST have no effect when the
@@ -205,12 +212,16 @@ the live `NSSplitViewItem`s.
 - **remove-persists-and-rearranges**: After a `remove(_:)` call completes,
   Component MUST call `applyArrangement()` and persist the tree, both from the
   root.
-- **move-computes-arithmetically-then-rebuilds**: `move(_:_:)` MUST compute
-  the candidate new tree via `ComposableTabsMove.moving(_:_:in:)` against the
-  root's current snapshot, MUST return `false` without mutating the tree when
-  the project's layout spec disallows the resulting tree (or reports no spec
-  at all is treated as permitting the move), and otherwise MUST rebuild the
-  root from that tree and return `true`.
+- **move-refused-by-spec**: `move(_:_:)` MUST compute the candidate new tree
+  via `ComposableTabsMove.moving(_:_:in:)` against the root's current snapshot,
+  and MUST return `false` without mutating the tree when the project's layout
+  spec disallows the resulting tree.
+- **move-permitted-without-spec**: `move(_:_:)` MUST treat a resolved project
+  that has no layout spec configured at all as permitting the move, rather than
+  refusing it.
+- **move-rebuilds-root**: When the candidate tree is permitted (by
+  **move-refused-by-spec** or **move-permitted-without-spec**), `move(_:_:)`
+  MUST rebuild the root from that tree and return `true`.
 - **available-directions-filtered-by-spec**: `availableMoveDirections(for:)`
   MUST return only the directions, among those `ComposableTabsMove.availableDirections`
   reports, for which the resulting moved tree is allowed by the project's
@@ -240,7 +251,7 @@ the live `NSSplitViewItem`s.
   result of asking the layout spec whether the given leaf may be removed from
   the root's current snapshot, and MUST return `false` when the split has no
   root.
-- **root-split-walk-uses-isRoot**: `rootSplit()` MUST walk up through
+- **root-split-walk-uses-is-root**: `rootSplit()` MUST walk up through
   `enclosingSplit` until it reaches the node whose `isRoot` is `true`, and
   MUST NOT stop merely because a node currently has no visible AppKit parent.
 - **tear-down-panes-notifies-every-leaf**: `tearDownPanes()` MUST call
@@ -445,13 +456,13 @@ the live `NSSplitViewItem`s.
 | composable-tabs-003 | vertical-split-set-from-axis | Construct with `axis: .horizontal`, then load the view | `splitView.isVertical == true` |
 | composable-tabs-004 | thin-divider-style | Load the view | `splitView.dividerStyle == .thin` |
 | composable-tabs-005 | custom-split-view-type | Inspect `splitView` after `loadView` | `splitView` is a `PaneSplitView` instance |
-| composable-tabs-006 | gutter-spacing-observers | View is loaded; `UserSettings.paneSpacingBetweenColumns` value is changed | `PaneSplitView.spacingDidChange()` is invoked (observable via `needsDisplay` becoming `true` and `dividerStyle` round-tripping) |
+| composable-tabs-006 | gutter-spacing-observers | View is loaded with a spy `PaneSplitView` subclass overriding `spacingDidChange()`; `UserSettings.paneSpacingBetweenColumns` value is changed | The spy records exactly one `spacingDidChange()` invocation, and `splitView.needsDisplay == true` immediately afterward |
 | composable-tabs-007 | add-split-item-per-child | Construct with 2 children, then call `viewDidLoad()` | `splitViewItems.count == 2`, in the same order as `layoutChildren` |
 | composable-tabs-008 | reassign-identifiers-on-root-load | Construct a root controller with two panes of the same `paneTypeIdentifier`, load the view | Both panes receive non-nil, sequential indices from `reassignPaneIdentifiers()` |
-| composable-tabs-009 | schedule-persist-on-resize | Preferred thicknesses already applied once; split view posts a resize notification | `scheduleThicknessPersist()` runs on the root, arming a pending `DispatchWorkItem` |
-| composable-tabs-010 | apply-preferred-thickness-on-layout | `viewDidLayout()` is called with a real (non-placeholder) split-view width | `applyPreferredThicknessesIfNeeded()` sets divider positions from each child's fraction |
+| composable-tabs-009 | schedule-persist-on-resize | Preferred thicknesses already applied once; split view posts a resize notification | `scheduleThicknessPersist()` runs on the root; a subsequent call to `flushPendingThicknessPersist()` now performs a write (a persist is pending) |
+| composable-tabs-010 | apply-preferred-thickness-on-layout | `viewDidLayout()` is called with a real (non-placeholder) split-view width | Divider positions are set from each child's `thicknessFraction` |
 | composable-tabs-011 | preferred-thickness-one-shot | Thicknesses already applied for the current arrangement; a further `viewDidLayout()` fires | No divider position is changed by the second call |
-| composable-tabs-012 | skip-zero-thickness-pass | Split view's bounds width is `0`; `viewDidLayout()` fires | `applyPreferredThicknessesIfNeeded()` returns without setting any divider position and without flipping the one-shot guard |
+| composable-tabs-012 | skip-zero-thickness-pass | Split view's bounds width is `0`; `viewDidLayout()` fires | No divider position is set; when `viewDidLayout()` later fires with a real width, thicknesses are still applied then (the skip did not consume the one-shot) |
 | composable-tabs-013 | dragged-fraction-outranks-descriptor | Child's own `thicknessFraction == 0.7`; its split item's `preferredThicknessFraction == 0.3` | The divider is placed using `0.7`, not `0.3` |
 | composable-tabs-014 | clamp-thickness-to-minimum | Fraction implies a thickness below the item's `minimumThickness` | The divider is placed at `minimumThickness`, not the smaller fraction-derived value |
 | composable-tabs-015 | widen-divider-grab-area | Gutter is set to `0`pt (vertical split); AppKit asks for `effectiveRect(forDrawnRect:ofDividerAt:)` | The returned rect is inset to at least `PaneSpacing.minimumDividerGrab` (6pt) wide while the drawn rect stays at 0pt |
@@ -472,9 +483,9 @@ the live `NSSplitViewItem`s.
 | composable-tabs-030 | apply-sizes-matches-existing-shape | Live tree has 1 child; template `LayoutNode` is a 2-child split | `applySizes(from:)` leaves the live tree's single child untouched |
 | composable-tabs-031 | apply-sizes-forces-relayout | `applySizes(from:)` is called on a loaded view | The one-shot thickness guard is reset and dividers move to the new fractions before the next natural layout pass |
 | composable-tabs-032 | debounce-thickness-persist | Two resize notifications arrive 100ms apart | Only one `onLayoutDidChange` call happens, timed 300ms after the second notification |
-| composable-tabs-033 | dedupe-unchanged-persist | A pending persist's thickness signature matches `lastPersistedThicknesses` | `onLayoutDidChange` is not invoked |
+| composable-tabs-033 | dedupe-unchanged-persist | A pending persist's rounded thickness signature matches the signature already delivered to `onLayoutDidChange` | `onLayoutDidChange` is not invoked |
 | composable-tabs-034 | flush-pending-persist-on-demand | No persist is currently pending; `flushPendingThicknessPersist()` is called | `onLayoutDidChange` is not invoked and no error occurs |
-| composable-tabs-035 | persist-only-from-root | Call `scheduleThicknessPersist()` on a non-root split | No `DispatchWorkItem` is armed and no write ever occurs from that instance |
+| composable-tabs-035 | persist-only-from-root | Call `scheduleThicknessPersist()` on a non-root split | No persist is armed and no write ever occurs from that instance; a subsequent `flushPendingThicknessPersist()` on it still does nothing |
 | composable-tabs-036 | split-creates-sibling-pane | Call `split(pane, adding: viewID, direction: .right)` | A new pane showing `viewID` is added as the second child of a new inner split, `pane` as the first |
 | composable-tabs-037 | split-wraps-in-inner-split | Same call as above | `layoutChildren[index]` is replaced by a new `ComposableTabsViewController` with `axis == .horizontal` (from `Direction.right.axis`) |
 | composable-tabs-038 | split-inherits-slot-size | `pane.thicknessFraction == 0.4` before the split | The new inner split's `thicknessFraction == 0.4`; `pane.thicknessFraction` is `nil` afterward |
@@ -487,7 +498,7 @@ the live `NSSplitViewItem`s.
 | composable-tabs-045 | remove-collapses-degenerate-split | Non-root split with 2 children; one is removed | The split itself is replaced in its parent by the surviving child, at the collapsing split's former `thicknessFraction` |
 | composable-tabs-046 | remove-rehomes-focus | Removed pane's view was first responder | After removal, the root's first leaf (depth-first) becomes first responder |
 | composable-tabs-047 | remove-persists-and-rearranges | `remove(_:)` completes | `applyArrangement()` runs and `onLayoutDidChange` fires from the root |
-| composable-tabs-048 | move-computes-arithmetically-then-rebuilds | Spec disallows the moved tree | `move(leaf, .left)` returns `false`; `layoutChildren` is unchanged |
+| composable-tabs-048 | move-refused-by-spec | Spec disallows the moved tree | `move(leaf, .left)` returns `false`; `layoutChildren` is unchanged |
 | composable-tabs-049 | available-directions-filtered-by-spec | `ComposableTabsMove.availableDirections` reports `.left, .right`; spec disallows `.left`'s resulting tree | `availableMoveDirections(for: leaf) == [.right]` |
 | composable-tabs-050 | rebuild-reuses-live-panes | New shape's leaf id matches a currently-live pane's `nodeID` | `rebuild(from:)` reuses the exact same `ComposableTabsPaneViewController` instance for that id |
 | composable-tabs-051 | rebuild-tears-down-dropped-panes | New shape omits a leaf id that was live before | That leaf's `paneWillBeRemoved()` is called exactly once |
@@ -497,7 +508,7 @@ the live `NSSplitViewItem`s.
 | composable-tabs-055 | rebuild-persists-from-root | `rebuild(from:)` completes | `onLayoutDidChange` fires from the root with the new snapshot |
 | composable-tabs-056 | allowed-insertions-delegates-to-spec | Split has a root; `allowedInsertions(beside: leaf)` is called | Returns exactly what `layout.spec.allowedInsertions(at:in:registry:)` returns for the root's snapshot |
 | composable-tabs-057 | can-remove-leaf-delegates-to-spec | Split has no root (`rootSplit() == nil`) | `canRemoveLeaf(_:)` returns `false` |
-| composable-tabs-058 | root-split-walk-uses-isRoot | A non-root split's view has never loaded (no AppKit `parent`) but its `layoutParent` chain reaches an `isRoot == true` node | `rootSplit()` returns that root, not `nil` |
+| composable-tabs-058 | root-split-walk-uses-is-root | A non-root split's view has never loaded (no AppKit `parent`) but its `layoutParent` chain reaches an `isRoot == true` node | `rootSplit()` returns that root, not `nil` |
 | composable-tabs-059 | tear-down-panes-notifies-every-leaf | Subtree has 3 leaves; `tearDownPanes()` is called | All 3 leaves' `paneWillBeRemoved()` are called exactly once each |
 | composable-tabs-060 | reassign-ambiguous-pane-numbers | Tab has 2 terminals and 1 file browser | Both terminals get non-nil, sequential indices; the file browser's index is `nil` |
 | composable-tabs-061 | persist-tree-only-from-root | `persistTreeToDocument()` is called on a non-root split | No pane identifiers are reassigned and `onLayoutDidChange` is not invoked |
@@ -512,23 +523,31 @@ the live `NSSplitViewItem`s.
 | composable-tabs-070 | build-carries-fraction-to-child | Persisted leaf node has `thicknessFraction == 0.6` | The constructed pane's `thicknessFraction == 0.6` |
 | composable-tabs-071 | close-checks-membership | `pane` is not in `layoutChildren` of the split receiving the request | `RefusalFeedback.announce()` fires; `remove(_:)` is never called |
 | composable-tabs-072 | close-honors-spec-veto-with-fallback | Spec vetoes removal; `onLastPaneCloseRequest` is `nil` | Refusal is announced; the pane is not removed |
-| composable-tabs-072b | close-honors-spec-veto-with-fallback | Spec vetoes removal; `onLastPaneCloseRequest` is set; tab holds exactly 1 pane | The handler is invoked with the pane; `remove(_:)` is not called |
-| composable-tabs-073 | close-clears-zoom-before-removal | `pane` is the root's `zoomedLeaf`; close is requested and permitted | `zoomedLeaf` is `nil` by the time `remove(_:)` runs |
-| composable-tabs-074 | can-close-mirrors-close-refusal | Spec allows removing the pane | `canClose(pane) == true` |
-| composable-tabs-075 | minimize-refuses-unresolvable-edge | `PaneMinimizeGeometry.resolvedEdge` returns `nil` for the requested edge | No item is pinned and `leaf.setMinimized(to:)` is not called |
-| composable-tabs-076 | minimize-clears-zoom-first | Root is zoomed; a pane is minimized | `zoomedLeaf` becomes `nil`; `captureThicknessFractions()` is not invoked for this minimize |
-| composable-tabs-077 | minimize-pins-split-item | Minimize succeeds and an item exists | `item.minimumThickness == item.maximumThickness == leaf.minimizedThickness(for: resolved)`; `holdingPriority == .defaultHigh`; `preferredThicknessFraction` unchanged |
-| composable-tabs-078 | minimize-is-unconditional-on-model | Tab has never been displayed (no split view item exists) | `leaf.setMinimized(to: edge)` is still called |
-| composable-tabs-079 | restore-unpins-and-clears | An item exists for a minimized pane; restore is requested | `restoreSizing(of: item)` runs and `leaf.setMinimized(to: nil)` is called |
-| composable-tabs-080 | zoom-toggles-and-excludes-minimize | A minimized pane is zoomed | The pane is restored first, then `zoomedLeaf` is set to that pane |
-| composable-tabs-081 | zoom-collapses-off-path-items | Deep tree; a leaf 3 levels down is zoomed | Every split item not on the root-to-leaf path has `isCollapsed == true`; items on the path do not |
-| composable-tabs-082 | zoom-preserves-tree-shape | A pane is zoomed then unzoomed | `snapshotNode()` before and after report identical structure and thickness fractions |
-| composable-tabs-083 | persisted-state-applies-once | `applyPersistedPaneState()` is called twice on the same root instance | The second call has no additional effect (`hasAppliedPersistedPaneState` guards it) |
-| composable-tabs-084 | persisted-minimize-restores-if-edge-invalid | A leaf's persisted edge no longer resolves against the current tree | The leaf is restored (`paneDidRequestRestore`) instead of minimized |
-| composable-tabs-085 | reapply-pane-state-is-idempotent | `reapplyPaneState()` is called twice in a row with no tree change between calls | No additional resize notification or persist is triggered by the second call |
-| composable-tabs-086 | reapply-drops-stale-zoom | `zoomedLeaf` points to a pane no longer among `allLeaves()` | `zoomedLeaf` becomes `nil` and every item is un-collapsed |
-| composable-tabs-087 | reapply-reresolves-minimize-edge | A rebuild changed the axis under a minimized pane so its stored edge no longer applies, but a different edge does | `leaf.setMinimized(to: newEdge)` is called with the re-resolved edge, not the stale one |
-| composable-tabs-088 | refresh-pane-controls-notifies-every-leaf | Tab has 3 leaves; `refreshPaneControls()` is called | Each of the 3 leaves' `refreshControlAvailability()` is called exactly once |
+| composable-tabs-073 | close-honors-spec-veto-with-fallback | Spec vetoes removal; `onLastPaneCloseRequest` is set; tab holds exactly 1 pane | The handler is invoked with the pane; `remove(_:)` is not called |
+| composable-tabs-074 | close-clears-zoom-before-removal | `pane` is the root's `zoomedLeaf`; close is requested and permitted | `zoomedLeaf` is `nil` by the time `remove(_:)` runs |
+| composable-tabs-075 | can-close-mirrors-close-refusal | Spec allows removing the pane | `canClose(pane) == true` |
+| composable-tabs-076 | minimize-refuses-unresolvable-edge | The requested edge cannot be resolved against the axis of the tree at the pane's position (for example, a leading/trailing edge requested where the enclosing split is `.vertical`-axis) | No item is pinned and `leaf.setMinimized(to:)` is not called |
+| composable-tabs-077 | minimize-clears-zoom-first | Root is zoomed; a pane is minimized | `zoomedLeaf` becomes `nil`; `captureThicknessFractions()` is not invoked for this minimize |
+| composable-tabs-078 | minimize-pins-split-item | Minimize succeeds and an item exists | `item.minimumThickness == item.maximumThickness == leaf.minimizedThickness(for: resolved)`; `holdingPriority == .defaultHigh`; `preferredThicknessFraction` unchanged |
+| composable-tabs-079 | minimize-is-unconditional-on-model | Tab has never been displayed (no split view item exists) | `leaf.setMinimized(to: edge)` is still called |
+| composable-tabs-080 | restore-unpins-and-clears | An item exists for a minimized pane; restore is requested | `restoreSizing(of: item)` runs and `leaf.setMinimized(to: nil)` is called |
+| composable-tabs-081 | zoom-toggles-and-excludes-minimize | A minimized pane is zoomed | The pane is restored first, then `zoomedLeaf` is set to that pane |
+| composable-tabs-082 | zoom-collapses-off-path-items | Deep tree; a leaf 3 levels down is zoomed | Every split item not on the root-to-leaf path has `isCollapsed == true`; items on the path do not |
+| composable-tabs-083 | zoom-preserves-tree-shape | A pane is zoomed then unzoomed | `snapshotNode()` before and after report identical structure and thickness fractions |
+| composable-tabs-084 | persisted-state-applies-once | `applyPersistedPaneState()` is called twice on the same root instance | The second call has no additional effect: no leaf's minimize or zoom state changes as a result of the second call |
+| composable-tabs-085 | persisted-minimize-restores-if-edge-invalid | A leaf's persisted edge no longer resolves against the current tree | The leaf is restored (`paneDidRequestRestore`) instead of minimized |
+| composable-tabs-086 | reapply-pane-state-is-idempotent | `reapplyPaneState()` is called twice in a row with no tree change between calls | No additional resize notification or persist is triggered by the second call |
+| composable-tabs-087 | reapply-drops-stale-zoom | `zoomedLeaf` points to a pane no longer among `allLeaves()` | `zoomedLeaf` becomes `nil` and every item is un-collapsed |
+| composable-tabs-088 | reapply-reresolves-minimize-edge | A rebuild changed the axis under a minimized pane so its stored edge no longer applies, but a different edge does | `leaf.setMinimized(to: newEdge)` is called with the re-resolved edge, not the stale one |
+| composable-tabs-089 | refresh-pane-controls-notifies-every-leaf | Tab has 3 leaves; `refreshPaneControls()` is called | Each of the 3 leaves' `refreshControlAvailability()` is called exactly once |
+| composable-tabs-090 | split-no-ops-without-project | `project` has already been deallocated; `split(pane, adding: viewID, direction: .right)` is called | `layoutChildren` is unchanged and no split view item is added |
+| composable-tabs-091 | move-permitted-without-spec | Resolved project has no layout spec configured at all | `move(leaf, .left)` returns `true` and rebuilds the root from the moved tree |
+| composable-tabs-092 | move-rebuilds-root | Spec permits the moved tree | `move(_:_:)` returns `true` and the root's `layoutChildren` match the moved tree's shape |
+| composable-tabs-093 | can-close-mirrors-close-refusal | Spec disallows removing the pane and no `onLastPaneCloseRequest` handler is installed | `canClose(pane) == false` |
+| composable-tabs-094 | flush-pending-persist-on-demand | A resize notification has armed a pending debounced persist; `flushPendingThicknessPersist()` is called before the debounce timer fires | The write happens immediately and no later timer-driven write follows |
+| composable-tabs-095 | vertical-split-set-from-axis | Construct with `axis: .vertical`, then load the view | `splitView.isVertical == false` |
+| composable-tabs-096 | reassign-identifiers-on-root-load | Construct a non-root controller with two panes of the same `paneTypeIdentifier`, load the view | Neither pane's index is assigned by `viewDidLoad()` (no call to `reassignPaneIdentifiers()` on a non-root instance) |
+| composable-tabs-097 | persisted-state-applies-once | Leaf X has a persisted minimize edge and lies off the path to leaf Y, the persisted `zoomedLeaf`; `applyPersistedPaneState()` is called | X's split item ends up both pinned (`minimumThickness == maximumThickness`) and collapsed (`isCollapsed == true`) — minimize pinned it before zoom collapsed it, so neither effect is lost |
 
 ## Edge Cases
 
@@ -549,14 +568,13 @@ the live `NSSplitViewItem`s.
   `layoutChildren` and its own stored properties only on the main actor;
   source provides no path for two threads to mutate one instance
   simultaneously.
-- Error states (MUST): `project` is a `weak var`; when it has already been
-  deallocated, `split(_:adding:direction:)` returns immediately via its
-  `guard let project = project else { return }` and performs no mutation.
-  `allowsBySpec(_:)` treats the complete absence of a layout spec on the
-  resolved project as "no constraint" (`guard let spec = ... else { return
-  true }`), so a move is permitted rather than silently refused when no spec
-  has been configured. `layoutParent` is `weak`; `rootSplit()`'s upward walk
-  simply stops if that chain is broken, rather than throwing.
+- Error states: see the named requirements **split-no-ops-without-project**
+  (`project` is a `weak var`, and a deallocated project makes
+  `split(_:adding:direction:)` return immediately with no mutation) and
+  **move-permitted-without-spec** (a resolved project with no layout spec
+  configured permits a move rather than refusing it). `layoutParent` is
+  `weak`; `rootSplit()`'s upward walk simply stops if that chain is broken,
+  rather than throwing.
 - Offline/disconnected: Not applicable — this component performs no
   networking; persistence is delegated entirely to the `onLayoutDidChange`
   callback the host installs, and durability of whatever that callback does
@@ -579,9 +597,9 @@ the live `NSSplitViewItem`s.
   mutation when the spec refuses it — there is no partial move to roll back.
 - Rebuilding onto a shape with fewer leaves than were live (MUST): every
   previously-live leaf whose id does not survive into the new shape has
-  `paneWillBeRemoved()` called on it during `detachSubtree()`'s teardown pass,
-  so its process/watcher resources are released rather than merely
-  dereferenced.
+  `paneWillBeRemoved()` called on it before the new tree is constructed (see
+  **rebuild-tears-down-dropped-panes**), so its process/watcher resources are
+  released rather than merely dereferenced.
 
 ## Configuration
 
@@ -665,12 +683,14 @@ or `ComposableTabsPaneHost.swift`).
 ## Platform Notes
 
 - **SwiftUI**: Model the tree as a recursive `enum LayoutNode` (already the
-  persistence type) driving a recursive `View`: a `.split` node renders an
-  `HSplitView`/`VSplitView` (macOS) around two recursive calls, each wrapped
-  in a `GeometryReader`-driven `.frame(width:)`/`.frame(height:)` computed
-  from `thicknessFraction`, with a custom `DragGesture` on a thin overlay
-  divider (SwiftUI's built-in split views do not expose a fraction API) to
-  reproduce `applyPreferredThicknessesIfNeeded`'s clamp-to-minimum behavior. A
+  persistence type) driving a recursive `View`: a `.split` node renders a
+  custom recursive `HStack`/`VStack` (from the node's axis) around two
+  recursive calls, each sized with a `GeometryReader`-driven
+  `.frame(width:)`/`.frame(height:)` computed from `thicknessFraction`, with a
+  custom `DragGesture` on a thin overlay divider between them — SwiftUI's
+  built-in `HSplitView`/`VSplitView` expose no fraction API, so a hand-built
+  stack-and-overlay is used instead — to reproduce the clamp-to-minimum
+  behavior of **clamp-thickness-to-minimum**. A
   `.leaf` node renders the pane's own view. Persist sizes with a
   `.onChange(of:)` debounced through a `Task` with `Task.sleep(for: .milliseconds(300))`,
   mirroring `scheduleThicknessPersist()`, and skip the write when the rounded
@@ -712,7 +732,14 @@ or `ComposableTabsPaneHost.swift`).
   recursive binary tree of itself and `ComposableTabsPaneViewController`
   leaves, with no UIKit code path in source at all — this is a macOS-only,
   pointer-and-window-driven component (draggable dividers, a rail-pinned
-  minimize, a zoom that collapses `NSSplitViewItem`s). A UIKit/iPadOS port has
+  minimize, a zoom that collapses `NSSplitViewItem`s). The requirements and
+  test vectors above state everything in observable terms; the private
+  symbols that implement them (`applyPreferredThicknessesIfNeeded()`,
+  `hasAppliedPersistedPaneState`, `detachSubtree()`, the debounced
+  `DispatchWorkItem`/`pendingThicknessPersist`, `lastPersistedThicknesses`,
+  and `PaneMinimizeGeometry.resolvedEdge`) are named here because they are
+  private to this source file and have no analog for another platform's port
+  to match. A UIKit/iPadOS port has
   no direct analog to `NSSplitViewController`'s per-item collapse/pin/minimum
   API; it would most likely use `UISplitViewController` for the fixed
   two-column case, or a hand-built recursive container (mirroring this file's
@@ -755,96 +782,81 @@ or `ComposableTabsPaneHost.swift`).
 
 ## Design Decisions
 
-- Decision: One-shot `hasAppliedPreferredThicknesses` guard, reset explicitly
-  by every mutation that changes the arrangement (split, remove, rebuild,
-  `applySizes`) rather than on every `layoutChildren` assignment.
-  Rationale: Per the `viewDidLayout` doc comment, "after the first real layout
-  the user owns the dividers, and re-imposing a fraction on every layout pass
-  would fight them"; resetting only where the arrangement actually changes
-  keeps a plain window resize from re-snapping dividers back to their
+- **Decision**: One-shot `hasAppliedPreferredThicknesses` guard, reset
+  explicitly by every mutation that changes the arrangement (split, remove,
+  rebuild, `applySizes`) rather than on every `layoutChildren` assignment.
+  **Rationale**: Per the `viewDidLayout` doc comment, "after the first real
+  layout the user owns the dividers, and re-imposing a fraction on every
+  layout pass would fight them"; resetting only where the arrangement actually
+  changes keeps a plain window resize from re-snapping dividers back to their
   preferred fractions.
-  Approved: pending
-- Decision: `captureThicknessFractions()` refuses to run over a zoomed tree,
-  and skips a whole split (not just its pinned item) when any item in it
+  **Approved**: pending
+- **Decision**: `captureThicknessFractions()` refuses to run over a zoomed
+  tree, and skips a whole split (not just its pinned item) when any item in it
   shows a rail.
-  Rationale: Per the method's own doc comment, a zoom or a rail is "an
+  **Rationale**: Per the method's own doc comment, a zoom or a rail is "an
   arrangement of the screen rather than a decision about sizes," and reading
   either back would silently corrupt the persisted layout — a saved layout
   while zoomed would "restore unzoomed and wrong," and a captured rail
   fraction would make a dragged 200pt pane "reopen at its floor" after a
   relaunch.
-  Approved: pending
-- Decision: Thickness persistence is debounced 300ms and deduplicated by a
+  **Approved**: pending
+- **Decision**: Thickness persistence is debounced 300ms and deduplicated by a
   rounded signature, rather than writing on every `splitViewDidResizeSubviews`.
-  Rationale: A drag posts a resize notification per mouse event and a window
-  resize posts one per frame; per the method's doc comment, writing on each
-  "would put the database in the middle of a gesture," and the signature
+  **Rationale**: A drag posts a resize notification per mouse event and a
+  window resize posts one per frame; per the method's doc comment, writing on
+  each "would put the database in the middle of a gesture," and the signature
   check drops writes "that changed nothing" — a resize that ends where it
   began costs no write.
-  Approved: pending
-- Decision: `restoreSizing(of:)` clears `maximumThickness` before it lowers
-  `minimumThickness`/`holdingPriority`, rather than the reverse order.
-  Rationale: Per the method's doc comment, raising the minimum first would
+  **Approved**: pending
+- **Decision**: `restoreSizing(of:)` clears `maximumThickness` before it
+  lowers `minimumThickness`/`holdingPriority`, rather than the reverse order.
+  **Rationale**: Per the method's doc comment, raising the minimum first would
   briefly ask AppKit to satisfy a minimum at or above the still-pinned
   maximum — a pair AppKit "cannot satisfy, logs, and recovers from by
   breaking one of them." Lifting the ceiling first keeps every intermediate
   state satisfiable.
-  Approved: pending
-- Decision: A non-root split with one remaining child collapses itself out of
-  the tree instead of being left in place holding a single child.
-  Rationale: Per `remove(_:)`'s doc comment, "a non-root split left with one
-  child is a degenerate split" that should collapse into its parent; the
+  **Approved**: pending
+- **Decision**: A non-root split with one remaining child collapses itself out
+  of the tree instead of being left in place holding a single child.
+  **Rationale**: Per `remove(_:)`'s doc comment, "a non-root split left with
+  one child is a degenerate split" that should collapse into its parent; the
   *root* is allowed to hold a single child, because that legitimately
   represents "a tab reduced to one full-size pane."
-  Approved: pending
-- Decision: `zoomedLeaf` and `onLastPaneCloseRequest` are stored on the root
-  and read through `rootSplit()`, never on an intermediate split.
-  Rationale: Per their doc comments, a zoom "is a fact about the tab rather
-  than about one split," and the last-pane-close override is "the right
-  answer for a window's own tree" but has to be installed per tab (root) since
-  which container "has somewhere else for the request to go" differs by
-  container.
-  Approved: pending
+  **Approved**: pending
+- **Decision**: `zoomedLeaf` and `onLastPaneCloseRequest` are stored on the
+  root and read through `rootSplit()`, never on an intermediate split.
+  **Rationale**: Per their doc comments, a zoom "is a fact about the tab
+  rather than about one split," and the last-pane-close override is "the
+  right answer for a window's own tree" but has to be installed per tab
+  (root) since which container "has somewhere else for the request to go"
+  differs by container.
+  **Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [binary-split-invariant](agenticdevelopercookbook://compliance/architecture#binary-split-invariant) | passed | architecture |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | failed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | failed | accessibility |
-| [live-region-announcements](agenticdevelopercookbook://compliance/accessibility#live-region-announcements) | flagged | accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | not-applicable | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | not-applicable | accessibility |
-| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | not-applicable | internationalization |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | failed | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | failed | Accessibility |
 
-Main-actor-confined passes because the class, and its `PaneHost` extension,
-are both declared `@MainActor`. Binary-split-invariant passes because every
-constructor path (`init`, the `first:second:` convenience init, `split`,
-`rebuild`) enforces at most two children, asserted in the array-taking
-initializer. Keyboard-navigable is failed because no keyboard path exists in
+Keyboard-navigable is failed because no keyboard path exists in
 source for resizing a divider (see the open question about non-pointer
 divider resize in Accessibility) — arrow-key pane *movement* is a real
 feature, but it is dispatched from elsewhere (out of this source) into
 `move(_:_:)`, not implemented here. Screen-reader-support is failed because
 no accessibility role, label, or announcement is set anywhere in this source;
 the divider, split view, and zoom/minimize transitions rely entirely on
-AppKit's unmodified defaults. Live-region-announcements is flagged for the
-same reason as the open question about announcing state changes in
-Accessibility — a zoom, minimize, split, remove, or move changes what's on
-screen with no accessibility notification posted.
-Differentiate-without-color passes trivially: this component conveys no state
-through color at all. Touch-target-size and contrast-ratio are marked
-not-applicable because this is a pointer/keyboard-driven macOS desktop
-control, not a touch surface, and the one custom color it draws
-(`projectPaneBackdrop`) is a theme token whose contrast is not stated in this
-source. String-externalization is not-applicable because this file defines no
-user-facing string literals of its own.
+AppKit's unmodified defaults — a zoom, minimize, split, remove, or move
+changes what's on screen with no accessibility notification posted (see the
+open question about announcing state changes in Accessibility). No other
+category's checks apply: this is a pointer/keyboard-driven macOS desktop
+control, not a touch surface, drawing no user-facing text and performing no
+networking, telemetry, or logging of its own.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from `ComposableTabsViewController.swift` and `ComposableTabsPaneHost.swift`. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: restated private-symbol requirements/vectors in observable terms; split a garbled move requirement into three and promoted two implicit edge cases to named requirements with vectors; added missing opposite-branch test vectors; fixed an untestable vector; resolved the conflicting SwiftUI platform note; renamed a non-kebab-case requirement; reformatted Design Decisions; fixed the Compliance table's invalid statuses and undefined checks; renumbered a broken test-vector ID sequence; trimmed tags to 5; populated `related`. |
