@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState, type ReactElement } from "react";
+import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { SlidersHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
-import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
+import { DialogErrorText, ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import {
   useFeatureCatalog,
@@ -41,10 +41,24 @@ export function EcosystemFeaturesPane({
   const apply = useApplyFeatureChange(ecosystemId);
   const remove = useRemoveFeature(ecosystemId);
 
-  const [picking, setPicking] = useState(false);
+  const [picking, setPickingRaw] = useState(false);
   // The row awaiting its removal confirm. The whole feature, not just the key, so the
   // dialog can name it after the list has already re-rendered.
   const [removing, setRemoving] = useState<{ key: string; label: string } | null>(null);
+
+  /**
+   * Opens/closes the picker, clearing `apply`'s mutation state with it. Without this a failed
+   * apply's error survives the close — react-query keeps a mutation's `error` until the next
+   * `mutate`/`reset` — so reopening the picker on an unrelated visit would show last visit's
+   * failure before the user has done anything this time.
+   */
+  const setPicking = useCallback(
+    (next: boolean) => {
+      apply.reset();
+      setPickingRaw(next);
+    },
+    [apply],
+  );
 
   const catalog = useMemo(() => catalogQ.data ?? [], [catalogQ.data]);
   const byKey = useMemo(() => new Map(catalog.map((f) => [f.key, f])), [catalog]);
@@ -97,7 +111,10 @@ export function EcosystemFeaturesPane({
       </div>
 
       <ErrorText error={loadError} />
-      <ErrorText error={remove.isError ? "Failed to remove the feature." : null} />
+      {/* Only while the remove confirm is CLOSED: while it's open, the same error renders
+          inside that modal (below) — rendering it here too would put it behind the modal's
+          backdrop, invisible until the user dismisses the very dialog that caused it. */}
+      <ErrorText error={removing == null && remove.isError ? "Failed to remove the feature." : null} />
 
       {provisionedQ.isPending ? (
         <p className="text-sm text-apt-text-muted">Loading…</p>
@@ -136,6 +153,7 @@ export function EcosystemFeaturesPane({
         alreadyProvisioned={presentKeys}
         busy={apply.isPending}
         error={apply.isError ? "Failed to change the features. Check the list and try again." : null}
+        catalogError={catalogQ.isError ? "Failed to load the feature catalog." : null}
         onApply={(change) => apply.mutate(change, { onSuccess: () => setPicking(false) })}
         onCancel={() => setPicking(false)}
       />
@@ -143,7 +161,17 @@ export function EcosystemFeaturesPane({
       <AlertModal
         open={removing != null}
         title={`Remove ${removing?.label ?? ""}?`}
-        description="The feature is hidden and turned off for this ecosystem, including over the REST and MCP APIs. Its data is kept, and adding it back restores it."
+        description={
+          <>
+            The feature is hidden and turned off for this ecosystem, including over the REST and
+            MCP APIs. Its data is kept, and adding it back restores it.
+            {/* `DialogErrorText`, not `ErrorText`: Base UI renders `DialogDescription` as a `<p>`,
+                and `ErrorText`'s own `<p role="alert">` cannot legally nest inside one. This is
+                also the ONLY place a failed removal is visible while this modal stays open on
+                failure — the pane's own `ErrorText` above is behind the backdrop right now. */}
+            <DialogErrorText error={remove.isError ? "Failed to remove the feature." : null} />
+          </>
+        }
         confirmLabel="Remove"
         cancelLabel="Cancel"
         destructive

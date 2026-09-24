@@ -29,6 +29,7 @@ export function PersonasFeature({
   renderKnowledgeBases,
   renderProject,
   renderTransferOwnership,
+  renderIntegrations,
 }: {
   /** This feature's URL base — every push lands under it (e.g. `/<slug>/personas`, or `/home` on a
    *  feature site). Supplied by the host route rather than derived here, so the same feature
@@ -54,6 +55,9 @@ export function PersonasFeature({
   /** Host-rendered "Transfer Ownership" section for the open persona. See
    *  {@link PersonasSection}. */
   renderTransferOwnership?: (persona: Persona) => ReactNode;
+  /** Renders the integrations pane scoped to a persona's owned ecosystem. See
+   *  {@link PersonasSection}. */
+  renderIntegrations?: (ecosystemId: string) => ReactNode;
 }) {
   const { pushSegment, pushNested } = useBasePathRoute(basePath);
   // RailHostBoundary: standalone, PersonasSection's own-HTD fallback renders the persona
@@ -74,6 +78,7 @@ export function PersonasFeature({
         renderKnowledgeBases={renderKnowledgeBases}
         renderProject={renderProject}
         renderTransferOwnership={renderTransferOwnership}
+        renderIntegrations={renderIntegrations}
       />
     </RailHostBoundary>
   );

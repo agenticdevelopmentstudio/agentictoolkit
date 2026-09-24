@@ -43,6 +43,12 @@ export interface FeaturePickerDialogProps {
   busy?: boolean;
   /** A failed change, shown under the list. The ticks survive so the user can simply retry. */
   error?: string | null;
+  /**
+   * The catalog failed to load. Without this the dialog has nothing to distinguish from — an
+   * empty `catalog` prop looks exactly like a catalog that is still loading or genuinely empty,
+   * so it would sit on "No features" forever instead of saying the fetch failed.
+   */
+  catalogError?: string | null;
   /** Confirmed. `add` is the newly ticked keys, `remove` the provisioned keys unticked — each in
    *  catalog order. At least one of the two is non-empty. */
   onApply: (change: FeatureChange) => void;
@@ -71,16 +77,21 @@ export function FeaturePickerDialog({
   alreadyProvisioned,
   busy = false,
   error = null,
+  catalogError = null,
   onApply,
   onCancel,
 }: FeaturePickerDialogProps): ReactElement {
   const provisioned = alreadyProvisioned ?? EMPTY;
 
   const [query, setQuery] = useState("");
-  // The rows the user has FLIPPED this visit. A row is ticked when it is provisioned XOR flipped,
-  // so a provisioned key here is a removal and any other key an add — and the ecosystem's list can
-  // arrive after the dialog opens without clobbering what the user already did.
-  const [flipped, setFlipped] = useState<ReadonlySet<string>>(EMPTY);
+  // The TARGET state per row the user has touched this visit: key -> desired on/off. A row not
+  // in the map just follows `provisioned`. This is deliberately NOT an XOR-against-provisioned
+  // set (what it used to be): `alreadyProvisioned` refetches mid-visit — after a partial apply
+  // failure, most visibly — and XOR against a NEW list inverts intent, since membership in the
+  // set no longer means what it meant when the user clicked. A stored target survives that
+  // refetch untouched: "add" still means add, "remove" still means remove, whatever the
+  // ecosystem now reports.
+  const [desired, setDesired] = useState<ReadonlyMap<string, boolean>>(EMPTY_MAP);
   // The row whose description the detail pane is showing. Also the arrow keys' cursor:
   // one concept, because a keyboard cursor that did not drive the details pane would be a
   // second highlight on the same list meaning something else.
@@ -91,7 +102,7 @@ export function FeaturePickerDialog({
   useEffect(() => {
     if (!open) return;
     setQuery("");
-    setFlipped(EMPTY);
+    setDesired(EMPTY_MAP);
     setActiveId(null);
     setConfirming(false);
   }, [open]);
@@ -99,34 +110,48 @@ export function FeaturePickerDialog({
   const visible = useMemo(() => visibleFeatures(catalog, query), [catalog, query]);
   const byKey = useMemo(() => new Map(catalog.map((f) => [f.key, f])), [catalog]);
 
+  /** What the row shows RIGHT NOW: the user's touched target, else the ecosystem's own state. */
+  const desiredOn = useCallback((key: string) => desired.get(key) ?? provisioned.has(key), [desired, provisioned]);
+
   // The order the backend is asked for is the CATALOG's, not the click order: each batch is a
-  // set, and a stable order makes the request reproducible.
+  // set, and a stable order makes the request reproducible. A key is a change only when its
+  // TARGET differs from what the ecosystem currently has — not merely because it was clicked
+  // (clicking a row back to its original state must drop it from the change, not add it twice).
   const change: FeatureChange = useMemo(() => {
-    const flippedKeys = catalog.filter((f) => flipped.has(f.key) && !f.comingSoon).map((f) => f.key);
-    return {
-      add: flippedKeys.filter((k) => !provisioned.has(k)),
-      remove: flippedKeys.filter((k) => provisioned.has(k)),
-    };
-  }, [catalog, flipped, provisioned]);
+    const add: string[] = [];
+    const remove: string[] = [];
+    for (const f of catalog) {
+      if (f.comingSoon) continue;
+      const on = desiredOn(f.key);
+      if (on === provisioned.has(f.key)) continue;
+      (on ? add : remove).push(f.key);
+    }
+    return { add, remove };
+  }, [catalog, desiredOn, provisioned]);
   const changeCount = change.add.length + change.remove.length;
 
   const toggle = useCallback(
     (key: string) => {
       if (byKey.get(key)?.comingSoon) return; // not built — nothing to provision
-      setFlipped((prev) => {
-        const next = new Set(prev);
-        if (!next.delete(key)) next.add(key);
+      setDesired((prev) => {
+        const current = prev.get(key) ?? provisioned.has(key);
+        const flippedTo = !current;
+        const next = new Map(prev);
+        // Back to the ecosystem's own state: drop it rather than storing a no-op target, so a
+        // click-then-click-back leaves no residue and the map only ever holds real changes.
+        if (flippedTo === provisioned.has(key)) next.delete(key);
+        else next.set(key, flippedTo);
         return next;
       });
     },
-    [byKey],
+    [byKey, provisioned],
   );
 
   const checkedIds = useMemo(() => {
     const s = new Set<string>();
-    for (const f of catalog) if (provisioned.has(f.key) !== flipped.has(f.key)) s.add(f.key);
+    for (const f of catalog) if (desiredOn(f.key)) s.add(f.key);
     return s;
-  }, [catalog, flipped, provisioned]);
+  }, [catalog, desiredOn]);
 
   const items: TopicDetailItem[] = useMemo(
     () =>
@@ -195,6 +220,11 @@ export function FeaturePickerDialog({
         e.preventDefault();
         if (activeId != null) toggle(activeId);
       } else if (e.key === "Enter") {
+        // An IME commits its candidate on Enter too (`isComposing`, and `keyCode === 229` for
+        // the browsers that report a synthetic code instead of setting the flag). That keystroke
+        // is confirming the TYPED TEXT, not the picker — treating it as "confirm" would open the
+        // apply dialog out from under someone still composing a filter.
+        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
         e.preventDefault();
         openConfirm();
       }
@@ -291,15 +321,24 @@ export function FeaturePickerDialog({
             className="flex min-h-0 shrink flex-col overflow-hidden rounded-lg border border-apt-border"
             style={{ height: boxHeight ?? "26rem" }}
           >
-            <HierarchicalDetailView
-              levels={[level]}
-              showBreadcrumb={false}
-              layoutMode="wide"
-              manualCollapse={false}
-              minDetailWidth="18rem"
-            >
-              <FeatureDetail feature={active} />
-            </HierarchicalDetailView>
+            {catalogError ? (
+              // The catalog never arrived — `catalog` is `[]` exactly as it is while still
+              // loading, so without this the dialog sits on "No features" forever instead of
+              // saying the fetch failed. Same box, so the dialog doesn't jump.
+              <div className="flex flex-1 items-center justify-center p-6 text-center">
+                <ErrorText error={catalogError} />
+              </div>
+            ) : (
+              <HierarchicalDetailView
+                levels={[level]}
+                showBreadcrumb={false}
+                layoutMode="wide"
+                manualCollapse={false}
+                minDetailWidth="18rem"
+              >
+                <FeatureDetail feature={active} />
+              </HierarchicalDetailView>
+            )}
           </div>
 
           <ErrorText error={error} />
@@ -348,6 +387,8 @@ function findScroller(root: HTMLElement): HTMLElement | null {
 
 /** One shared empty set, so a default prop and a cleared state are the same identity. */
 const EMPTY: ReadonlySet<string> = new Set<string>();
+/** One shared empty map, for the same reason — the initial and post-open-reset `desired`. */
+const EMPTY_MAP: ReadonlyMap<string, boolean> = new Map<string, boolean>();
 
 function plural(n: number): string {
   return `${n} ${n === 1 ? "feature" : "features"}`;

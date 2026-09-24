@@ -21,7 +21,7 @@
 // mechanism and must not take on adh product vocabulary.
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { authedJson, authedRequest } from "../http";
+import { authedJson, authedRequest, isNotFound } from "../http";
 import { enc } from "../client-helpers";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -122,9 +122,19 @@ export const ecosystemFeaturesApi = {
     return body.features;
   },
 
-  /** Remove one feature. Marks it removed; the data it provisioned is left alone. */
+  /**
+   * Remove one feature. Marks it removed; the data it provisioned is left alone.
+   *
+   * A 404 is treated as success: the row is already gone, which is the caller's goal
+   * either way. Without this, a double-click, a stale list, or a second tab racing the
+   * same removal reports failure for an outcome that already happened.
+   */
   async remove(ecosystemId: string, featureKey: string): Promise<void> {
-    await authedRequest(`${BASE}/${enc(ecosystemId)}/${enc(featureKey)}`, { method: "DELETE" });
+    try {
+      await authedRequest(`${BASE}/${enc(ecosystemId)}/${enc(featureKey)}`, { method: "DELETE" });
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+    }
   },
 };
 
@@ -191,8 +201,10 @@ export function useRemoveFeature(ecosystemId: string | null | undefined) {
 
 /**
  * Apply one picker visit: the adds as a single POST (one transaction, see `provision`), then one
- * DELETE per removal. Removal only marks the ledger row — the backend then refuses the feature's
- * routes and tools — so nothing it owns is deleted and a later add restores all of it.
+ * DELETE per removal, in parallel via `Promise.allSettled` — one removal's failure (a 404 is
+ * already success, see `remove`, but a real 5xx isn't) must not abort the rest silently the way a
+ * sequential `for … await` would. Any removals that did fail are named in a thrown error so the
+ * caller can surface which keys are still provisioned.
  *
  * Adds go first so a failed removal never costs the owner the features they just added. The list
  * is invalidated whatever happened, since a failure partway still changed some of it.
@@ -203,7 +215,13 @@ export function useApplyFeatureChange(ecosystemId: string | null | undefined) {
     mutationFn: async ({ add, remove }: FeatureChange) => {
       const id = ecosystemId as string;
       if (add.length > 0) await ecosystemFeaturesApi.provision(id, add);
-      for (const key of remove) await ecosystemFeaturesApi.remove(id, key);
+      const results = await Promise.allSettled(
+        remove.map((key) => ecosystemFeaturesApi.remove(id, key)),
+      );
+      const failed = remove.filter((_, i) => results[i]?.status === "rejected");
+      if (failed.length > 0) {
+        throw new Error(`Couldn't remove: ${failed.join(", ")}`);
+      }
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: KEYS.provisioned(ecosystemId ?? "") });

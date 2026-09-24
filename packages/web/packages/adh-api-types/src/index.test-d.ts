@@ -44,11 +44,11 @@ export type Checks = [
 ]
 
 // a valid create payload compiles:
-const okCustomer: CustomerCreate = { email: 'test@example.com' }
+const okCustomer: CustomerCreate = { email: 'test@example.com', slug: 'test' }
 void okCustomer
 
 // @ts-expect-error — `bogus` is not a writable column; the guard must reject it.
-const badCustomer: CustomerCreate = { email: 'x@x.com', bogus: 1 }
+const badCustomer: CustomerCreate = { email: 'x@x.com', slug: 'x', bogus: 1 }
 void badCustomer
 
 // a partial update (PUT) accepts a subset of the writable columns:

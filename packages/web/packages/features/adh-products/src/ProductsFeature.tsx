@@ -11,6 +11,7 @@ import {
   ShieldCheck,
   HardDrive,
   Plug,
+  Puzzle,
   MessageCircle,
   LayoutDashboard,
   CreditCard,
@@ -74,6 +75,10 @@ import { GamingGroup } from "./GamingGroup";
 // both, or the same feature wears different icons depending on whether you reached it from the
 // hub rail or from inside a product.
 const ICONS: Record<string, ReactNode> = {
+  // Claimed by EcosystemsFeature itself, same as "settings" — see PRODUCT_TOPICS' comment on
+  // "features". The glyph still lives here: this map is total over PRODUCT_TOPICS regardless of
+  // who renders the pane, and it matches the icon IN_PACKAGE_TOPICS wears for the same id.
+  features: <Puzzle size={16} aria-hidden />,
   storage: <HardDrive size={16} aria-hidden />,
   integrations: <Plug size={16} aria-hidden />,
   messaging: <MessageCircle size={16} aria-hidden />,

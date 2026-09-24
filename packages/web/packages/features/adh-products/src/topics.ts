@@ -22,6 +22,12 @@
  * It lives here rather than in the hub because BOTH hosts of the Products feature render it, and
  * a copy per host is two rails that nothing makes agree. */
 export const PRODUCT_TOPICS = [
+  // FIRST, matching EcosystemsFeature's own IN_PACKAGE_TOPICS ordering: what this product has
+  // been PROVISIONED WITH is now what an ecosystem IS, so the rail opens on the cause before the
+  // consequences everything after it describes. Claimed by EcosystemsFeature itself (the id is
+  // reserved the same way "settings" is — see its `topics` rendering), not by this package's own
+  // switch, which is why it carries no case in `productTopicPaneRenderer` below.
+  { id: "features", label: "Features", dividerAfter: true },
   { id: "storage", label: "Storage", dividerAfter: false },
   { id: "integrations", label: "Integrations", dividerAfter: false },
   // Messaging: send email/SMS to this product's customers via its OWN connected

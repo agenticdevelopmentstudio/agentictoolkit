@@ -1011,6 +1011,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "createdAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "updatedAt", "type": "string", "required": false, "nullable": false, "serverManaged": true},
       {"name": "isDeleted", "type": "boolean", "required": false, "nullable": false, "serverManaged": true},
+      {"name": "isDefault", "type": "boolean", "required": false, "nullable": false, "serverManaged": false},
       {"name": "isInfrastructure", "type": "boolean", "required": false, "nullable": false, "serverManaged": false},
       {"name": "namespaceId", "type": "string", "required": false, "nullable": true, "serverManaged": false, "maxLength": 36},
       {"name": "parentId", "type": "string", "required": false, "nullable": true, "serverManaged": false, "maxLength": 36},

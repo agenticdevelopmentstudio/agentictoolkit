@@ -55,10 +55,10 @@ const KB_TABLES = personaMemoryTables();
  *   the two resolve the same keys, which is why this one can serve both rather than becoming a
  *   third seam nobody could tell was wrong.
  *
- * Seams a HOST fills — see {@link PersonasHostSeams}. The live try-it chat, the Project facet and
- * Transfer Ownership are each a package boundary this one cannot cross, so on this site the editor
- * shows the fallbacks {@link PersonaEditor} documents (the same ones personabuilder shows) and the
- * hub fills all three.
+ * Seams a HOST fills — see {@link PersonasHostSeams}. The live try-it chat, the Project facet,
+ * Transfer Ownership and Integrations are each a package boundary this one cannot cross, so on
+ * this site the editor shows the fallbacks {@link PersonaEditor} documents (the same ones
+ * personabuilder shows) and the hub fills all four.
  *
  * This file DECLARES the route; SiteHomeRoute assembles it — reading the `[workspace]` param and
  * the path below it, and mounting what `render` returns inside SiteHomeShell, which resolves the
@@ -93,6 +93,7 @@ export const personasHome = defineSiteHome({
         renderChatPane={host.renderChatPane}
         renderProject={host.renderProject}
         renderTransferOwnership={host.renderTransferOwnership}
+        renderIntegrations={host.renderIntegrations}
         {...view}
       />
     </ToolkitQueryProvider>
@@ -121,6 +122,10 @@ export interface PersonasHostSeams {
   /** Transfer Ownership for the open persona. Omitted ⇒ no such section — the destination list is
    *  the caller's whole workspace tree, which is a host's to build and not this package's. */
   renderTransferOwnership?: (persona: Persona) => ReactNode;
+  /** The persona's own Integrations facet — the provider-config pane scoped to the ecosystem it
+   *  OWNS (@agentic-toolkit/integrations' IntegrationsPane is not a dependency a portable feature
+   *  site carries). Omitted ⇒ the editor's "not available in this view" fallback. */
+  renderIntegrations?: (ecosystemId: string) => ReactNode;
 }
 
 // The default export is what `app/home/page.tsx` and the workspace route import, so

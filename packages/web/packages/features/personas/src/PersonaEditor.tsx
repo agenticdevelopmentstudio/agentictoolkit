@@ -10,6 +10,7 @@ import {
   IdCard,
   KeyRound,
   MessageSquare,
+  Plug,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
@@ -209,11 +210,15 @@ export function saveBlockedReason(draft: PersonaDraft): SaveBlock | null {
  *    a provider re-fetch, which read/write the host's service rows);
  *  - `profileUrlFor` — the persona's public profile URL (needs the host's site-URL config);
  *  - `renderKnowledgeBases` — the Knowledge Bases browser (a separate feature package this one
- *    doesn't depend on).
+ *    doesn't depend on);
+ *  - `renderIntegrations` — the provider-config pane scoped to the ecosystem this persona OWNS
+ *    (same @agentic-toolkit/integrations pane the Products FTD mounts for a product's ecosystem —
+ *    a persona is an ecosystem too, and its integrations are reached by going into it rather than
+ *    from a destination picker; see the Integrations facet below).
  * Each is optional, and omitting one degrades rather than breaks: the affordance is hidden (profile
  * URL, model details — the plain Select still picks a model) or replaced by a distinct "not
- * available in this view" notice (chat / knowledge bases) rather than the misleading "save first"
- * copy — the persona IS already saved, the view just doesn't wire it.
+ * available in this view" notice (chat / knowledge bases / integrations) rather than the misleading
+ * "save first" copy — the persona IS already saved, the view just doesn't wire it.
  */
 export function PersonaEditor({
   persona,
@@ -229,6 +234,7 @@ export function PersonaEditor({
   renderKnowledgeBases,
   renderProject,
   renderTransferOwnership,
+  renderIntegrations,
 }: {
   /** The persona to edit, or null to create a new one. */
   persona: Persona | null;
@@ -277,6 +283,11 @@ export function PersonaEditor({
   /** Host-rendered "Transfer Ownership" section for the Identity topic. The workspace list and the
    *  transfer mutation live in the host; this package stays host-agnostic. Omitted ⇒ no section. */
   renderTransferOwnership?: (persona: Persona) => ReactNode;
+  /** Renders the integrations pane scoped to the persona's OWNED ecosystem (the Integrations
+   *  facet) — @agentic-toolkit/integrations' IntegrationsPane is a separate feature package this
+   *  one doesn't depend on, so the host injects it, the same seam shape as renderKnowledgeBases.
+   *  Omit to show a "not available in this view" notice instead. */
+  renderIntegrations?: (ecosystemId: string) => ReactNode;
 }) {
   // Derive the initial draft from the persona prop; keyed remount (per id) in the
   // parent gives each persona a fresh editor, so seeding state here is safe.
@@ -571,6 +582,31 @@ export function PersonaEditor({
         return (
           <PersonaMemoryPane personaId={persisted.id} ownedEcosystemId={persisted.ownedEcosystemId} />
         );
+      },
+    },
+    {
+      id: "integrations",
+      label: "Integrations",
+      icon: <Plug size={16} aria-hidden />,
+      // This persona's own provider connections — GitHub, Stripe, Gmail… — scoped to the
+      // ecosystem it OWNS. A persona is an ecosystem with its own features, so its integrations
+      // are reached by going INTO it (this facet) rather than from the workspace-level
+      // Integrations destination picker, which deliberately dropped personas (see
+      // agenticdeveloperhub's IntegrationsRoute doc comment). Host-injected because
+      // @agentic-toolkit/integrations is a sibling package this one doesn't depend on — same seam
+      // shape as Knowledge/Memory above. Gated behind the first save and the owned ecosystem
+      // existing, same as Memory.
+      render: () => {
+        if (!persisted) {
+          return <SaveFirstNotice>Save this persona first to manage its integrations.</SaveFirstNotice>;
+        }
+        if (!persisted.ownedEcosystemId) {
+          return <SaveFirstNotice>This persona's integrations aren't available yet.</SaveFirstNotice>;
+        }
+        if (!renderIntegrations) {
+          return <SaveFirstNotice>Integrations aren't available in this view.</SaveFirstNotice>;
+        }
+        return renderIntegrations(persisted.ownedEcosystemId);
       },
     },
     {

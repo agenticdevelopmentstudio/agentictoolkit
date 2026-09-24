@@ -17950,7 +17950,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * An ecosystem's provisioned features (owner or admin)
+         * An ecosystem's provisioned features (its managers, or a member of the owning org)
          * @description Every row, INCLUDING removed ones — a removed feature’s artifacts still exist, so the picker can say that re-adding it is free.
          */
         get: {
@@ -57380,6 +57380,7 @@ export interface paths {
                             createdAt: string;
                             updatedAt: string;
                             isDeleted: boolean;
+                            isDefault: boolean;
                             isInfrastructure: boolean;
                             namespaceId: string | null;
                             parentId: string | null;
@@ -57417,6 +57418,7 @@ export interface paths {
                         region?: string;
                         dedicatedDbConnectionId?: string | null;
                         primaryDomain?: string;
+                        isDefault?: boolean;
                         isInfrastructure?: boolean;
                         namespaceId?: string | null;
                         parentId?: string | null;
@@ -57444,6 +57446,7 @@ export interface paths {
                             createdAt: string;
                             updatedAt: string;
                             isDeleted: boolean;
+                            isDefault: boolean;
                             isInfrastructure: boolean;
                             namespaceId: string | null;
                             parentId: string | null;
@@ -57516,6 +57519,7 @@ export interface paths {
                             createdAt: string;
                             updatedAt: string;
                             isDeleted: boolean;
+                            isDefault: boolean;
                             isInfrastructure: boolean;
                             namespaceId: string | null;
                             parentId: string | null;
@@ -57563,6 +57567,7 @@ export interface paths {
                         region?: string;
                         dedicatedDbConnectionId?: string | null;
                         primaryDomain?: string;
+                        isDefault?: boolean;
                         isInfrastructure?: boolean;
                         namespaceId?: string | null;
                         parentId?: string | null;
@@ -57589,6 +57594,7 @@ export interface paths {
                             createdAt: string;
                             updatedAt: string;
                             isDeleted: boolean;
+                            isDefault: boolean;
                             isInfrastructure: boolean;
                             namespaceId: string | null;
                             parentId: string | null;
