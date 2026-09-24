@@ -3,6 +3,7 @@
 import { createPortal } from 'react-dom'
 import { BitbagDock } from '@agentic-toolkit/bitbag'
 import { useChatTheme } from './chat-theme-store'
+import { useFooterRestOffset } from './useFooterRestOffset'
 // bitbag's CSS rides with THIS lazily-loaded chunk (not the always-loaded shared
 // stylesheet), so pages that never open the chat don't pay for it. ONE sheet, not
 // three: `bitbag-dock.css` `@import`s the underlying persona-chat base + inline sheets
@@ -35,11 +36,11 @@ import '@agentic-toolkit/bitbag/css/bitbag-dock.css'
  *
  * `rest="avatar"` is the one way he differs from fishlamp's mounting, and it is a
  * difference of CONTEXT, not a fork: here he shares the bottom edge with the footer
- * bar, so at rest he is his face alone, in the slot at the bar's right end, and when
- * he is tapped he grows back to the centre with his chat opening under him (the
- * corner is adh-site.css's, a translate off the dock's centre). His resting entry
- * line used to lie across the middle of the bar, over its links, and made every page
- * reserve 6rem for it.
+ * bar, so at rest he is his face alone, in the slot the bar keeps just left of its
+ * Legal menu, and when he is tapped he grows back to the centre with his chat opening
+ * under him (the slot is adh-site.css's; `useFooterRestOffset` measures where it
+ * is). His resting entry line used to lie across the middle of the bar, over its
+ * links, and made every page reserve 6rem for it.
  *
  * PORTALLED TO `document.body`, not rendered in place. The dock positions itself
  * (`position: fixed`, bottom-centred, riding the keyboard — see bitbag-dock.css),
@@ -59,6 +60,7 @@ import '@agentic-toolkit/bitbag/css/bitbag-dock.css'
  */
 export default function FooterChatInner() {
   const [chatTheme] = useChatTheme()
+  useFooterRestOffset()
   // `document` is guaranteed by the `ssr: false` loader — but only for callers who
   // go through it, and this module is an exported package subpath (tsup keeps it
   // un-inlined precisely so it CAN be imported directly). Reaching it any other way

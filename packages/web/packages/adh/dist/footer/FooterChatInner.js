@@ -47,11 +47,47 @@ function useChatTheme() {
   return [theme, setTheme];
 }
 
+// src/footer/useFooterRestOffset.ts
+import { useLayoutEffect } from "react";
+var REST_OFFSET_VAR = "--adh-footer-rest-x";
+var REST_SLOT_SELECTOR = ".adh-footer--with-chat .adh-footer__legal";
+function restOffset(doc) {
+  const host = doc.querySelector(REST_SLOT_SELECTOR);
+  if (!host) return null;
+  const slot = parseFloat(getComputedStyle(host).marginLeft) || 0;
+  return host.getBoundingClientRect().left - slot / 2 - doc.documentElement.clientWidth / 2;
+}
+function useFooterRestOffset() {
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const update = () => {
+      const x = restOffset(document);
+      if (x === null) root.style.removeProperty(REST_OFFSET_VAR);
+      else root.style.setProperty(REST_OFFSET_VAR, `${x}px`);
+    };
+    update();
+    window.addEventListener("resize", update);
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    for (const el of document.querySelectorAll(".adh-footer, " + REST_SLOT_SELECTOR)) ro?.observe(el);
+    let live = true;
+    document.fonts?.ready.then(() => {
+      if (live) update();
+    });
+    return () => {
+      live = false;
+      window.removeEventListener("resize", update);
+      ro?.disconnect();
+      root.style.removeProperty(REST_OFFSET_VAR);
+    };
+  }, []);
+}
+
 // src/footer/FooterChatInner.tsx
 import "@agentic-toolkit/bitbag/css/bitbag-dock.css";
 import { jsx } from "react/jsx-runtime";
 function FooterChatInner() {
   const [chatTheme] = useChatTheme();
+  useFooterRestOffset();
   if (typeof document === "undefined") return null;
   return createPortal(
     /* @__PURE__ */ jsx(BitbagDock, { className: "adh-footer__chat", theme: chatTheme ?? void 0, rest: "avatar" }),

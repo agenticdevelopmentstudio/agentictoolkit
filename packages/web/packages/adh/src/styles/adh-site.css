@@ -84,10 +84,10 @@
   color: var(--adh-footer-brand-color-hover, var(--color-accent-bright));
 }
 
-/* THE BAR'S SHAPE — one shape at every width: the copyright on the left; on the right
-   the Legal menu (SiteFooter folds Terms + Privacy into it everywhere) and, past it,
-   bitbag's resting slot. Folding the links and moving him out of the bar's middle is
-   what lets the studio's full name fit on one line on a phone.
+/* THE BAR'S SHAPE — one shape at every width: the copyright on the left; at the far
+   right the Legal menu (SiteFooter folds Terms + Privacy into it everywhere), and just
+   left of it bitbag's resting slot. Folding the links and moving him out of the bar's
+   middle is what lets the studio's full name fit on one line on a phone.
 
    The inline Terms / Privacy pair is the no-popover fallback, shown only by the
    @supports block further down. */
@@ -95,29 +95,26 @@
   display: none;
 }
 
-/* HIS SLOT. bitbag rests in the bar's lower-right corner, just past Legal — and the
-   bar reserves the room for him in its right padding, so nothing it lays out can end
-   up under him. SiteFooter sets `--with-chat` only when it mounts him, so a footer
-   without chat keeps its plain padding. The slot is his resting box's full width (not
-   just the visible face): that box is hit-testable (see the z-index note below), so a
-   narrower slot would let it sit over Legal's right edge and take its clicks.
-
-   On :root, not `.adh-footer`: the dock rule further down parks him in the slot's
-   centre from the same two numbers, and the dock is portaled to `document.body`, out
-   from under the footer, so it could not inherit them from there. */
-:root {
+/* HIS SLOT: room the bar keeps empty for bitbag's resting face, as Legal's left margin,
+   so Legal holds the corner and nothing the bar lays out can end up under him.
+   SiteFooter sets `--with-chat` only when it mounts him, so a footer without chat has
+   no gap. The slot is his resting box's full width, not just the visible face: that box
+   is hit-testable (see the z-index note below), so a narrower slot would let it sit
+   over Legal's left edge and take its clicks. Where the slot lands is measured, not
+   computed here — see `useFooterRestOffset`, which reads this margin. */
+.adh-footer {
   --adh-footer-pad-x: 1.5rem;
   --adh-footer-rest-slot: 4.25rem;
 }
 
-.adh-footer--with-chat .adh-footer__container {
-  padding-right: calc(var(--adh-footer-pad-x) + var(--adh-footer-rest-slot));
+.adh-footer--with-chat .adh-footer__legal {
+  margin-left: var(--adh-footer-rest-slot);
 }
 
 /* A small phone: the edge padding gives up a third so the one-line bar still fits at
    375px (iPhone mini / SE). */
 @media (max-width: 24rem) {
-  :root {
+  .adh-footer {
     --adh-footer-pad-x: 1rem;
   }
   .adh-footer__container {
@@ -131,10 +128,8 @@
    type steps down and loses its tracking, and the gaps tighten — the name still reads,
    whole, on one line. */
 @media (max-width: 21rem) {
-  :root {
-    --adh-footer-pad-x: 0.75rem;
-  }
   .adh-footer {
+    --adh-footer-pad-x: 0.75rem;
     --adh-footer-size: 0.6rem;
     --adh-footer-letter-spacing: 0;
   }
@@ -145,8 +140,8 @@
 
 /* WHERE BITBAG PARKS — one line of it, because the rest is HIS.
    The dock now positions itself: bottom-centred and fixed to the viewport, 560px
-   wide, riding up over a phone keyboard, dimming the page behind it when engaged
-   (bitbag-dock.css, ported from fishlamp.com's rig). This block used to hold a
+   wide, riding up over a phone keyboard (bitbag-dock.css, ported from fishlamp.com's
+   rig). This block used to hold a
    whole competing geometry — absolute inside the footer bar, a width, a
    breakpoint that lifted it above the bar on narrow screens — and that was the
    drift: bitbag was parked one way here and another way on fishlamp, so "the same
@@ -155,8 +150,8 @@
    genuinely local to adh.
 
    Which is the stack. `.adh-header` is at 50 here, above the dock's default 45,
-   so the ENGAGED chat would be painted under the header and its scrim would stop
-   short of it. 51 clears the header.
+   so on a short screen the ENGAGED chat would be painted under the header. 51 clears
+   the header.
 
    ONLY WHILE ENGAGED, and that condition is the whole rule. The lift used to be
    unconditional, on the claim that "51 stays under every overlay above it — a
@@ -177,12 +172,12 @@
    `elementFromPoint` there answers with his hit box
    (`e2e/work-item-comments.spec.ts`, "reacting adds the viewer's emoji").
 
-   Conditioning on `:has(.persona-chat:not(.pc-collapsed))` — the same selector the
-   scrim two blocks down already engages on — costs the lift nothing it was written
-   for and takes back everything it was not. Resting, the rig is his face alone
-   sitting in the footer bar and the header is at the top: they cannot
-   overlap, so 45 is indistinguishable from 51 except to the overlays. Engaged, the
-   scrim covers the viewport and the lift is exactly the reason it exists.
+   Conditioning on `:has(.persona-chat:not(.pc-collapsed))` — the same selector
+   bitbag-dock.css engages on — costs the lift nothing it was written for and takes
+   back everything it was not. Resting, the rig is his face alone sitting in the
+   footer bar and the header is at the top: they cannot overlap, so 45 is
+   indistinguishable from 51 except to the overlays. Engaged, his chat is the tall
+   thing that can reach the header, and the lift is exactly the reason it exists.
 
    This only works because FooterChatInner portals the dock to `document.body`:
    inside `.adh-footer` — sticky WITH a z-index, hence a stacking context — no
@@ -202,31 +197,38 @@
   z-index: 51;
 }
 
-/* ROOM IS RESERVED FOR HIS FACE, AND ONLY FOR HIS FACE — the slot at the bar's right
-   end (above). What used to be reserved was his resting ENTRY LINE: a 560px composer
-   fixed across the bottom edge, which covered the bar's links below 64rem (so the bar
-   padded itself 4.5rem tall to lift them clear) and overhung every page's last row (so
-   `.adh-app-shell__main` padded itself 6rem, and viewport-filling consoles had to opt
-   back out with `data-fills-viewport`). FooterChatInner now docks him with
-   `rest="avatar"`: resting he is his face alone, laid out at half size, inside the
-   bar's own height. His chat only exists while he is being talked to, under the scrim
-   that dims the page anyway. Nothing overhangs, so nothing under the page is paid for.
+/* NOT MODAL: talking to him dims nothing. bitbag-dock.css paints a viewport-wide scrim
+   under an engaged chat (its ::before), and that is fishlamp's design, where he is the
+   page's main event. Here he is a footer fixture beside the page someone is using, so
+   the page stays lit and takes its own clicks while the chat is open; a tap outside
+   still folds the chat away (useChatSizing's own outside-pointerdown, not the scrim).
+   `display: none` rather than a zero opacity, so the scrim cannot catch that tap
+   either. Their rule sets opacity and pointer-events, never display, so there is no
+   specificity contest here to lose when their sheet lands later. */
+.bb-dock.adh-footer__chat::before {
+  display: none;
+}
 
-   WHERE HE RESTS: the slot's centre, bottom-right. The dock is a full-width column that
-   centres him, and waking must bring him back to that centre — his chat opens under
-   him there — so the corner is a TRANSLATE off the centre, not a different layout.
-   That is what makes the wake a single motion: bitbag-dock.css drops the resting
-   transform to `none` and grows his width, both on its 0.34s curve, so he slides from
-   the corner to the middle as he grows. A layout move (margin-left:auto, a
-   justify change) would jump instead, because neither animates.
+/* ROOM IS RESERVED FOR HIS FACE, AND ONLY FOR HIS FACE — the slot beside Legal (above).
+   What used to be reserved was his resting ENTRY LINE: a 560px composer fixed across the
+   bottom edge, which covered the bar's links below 64rem (so the bar padded itself 4.5rem
+   tall to lift them clear) and overhung every page's last row (so `.adh-app-shell__main`
+   padded itself 6rem, and viewport-filling consoles had to opt back out with
+   `data-fills-viewport`). FooterChatInner now docks him with `rest="avatar"`: resting he
+   is his face alone, laid out at half size, inside the bar's own height. His chat only
+   exists while he is being talked to. Nothing overhangs, so nothing under the page is
+   paid for.
 
-   The offset is half the viewport less the slot's centre from the right edge. `vw`,
-   not container units: `container-type` would put layout containment on the dock,
-   which makes it the containing block for the fixed scrim its ::before paints over the
-   whole viewport — the scrim would shrink to the dock's own box. `100vw` counts a
-   classic (non-overlay) scrollbar the dock does not span, so on such a desktop he sits
-   up to half a scrollbar's width further right; the slot's 2px of slack does not cover
-   that, but the error is toward the screen edge, away from Legal.
+   WHERE HE RESTS: the slot's centre. The dock is a full-width column that centres him,
+   and waking must bring him back to that centre — his chat opens under him there — so
+   the slot is a TRANSLATE off the centre, not a different layout. That is what makes the
+   wake a single motion: bitbag-dock.css drops the resting transform to `none` and grows
+   his width, both on its 0.34s curve, so he slides from the slot to the middle as he
+   grows. A layout move (margin-left:auto, a justify change) would jump instead, because
+   neither animates. The distance is `--adh-footer-rest-x`, measured by
+   `useFooterRestOffset` because Legal's width — which the slot sits beside — belongs to
+   the theme's font. Unmeasured (no JS yet, or no slot), he rests at the centre, which is
+   bitbag's own default rather than a guess.
 
    His resting face also sat on the bar's bottom edge, reading as cut off rather than
    centred in it: lifted 6px over bitbag's own 0.1rem rest margin. Both of
@@ -236,7 +238,7 @@
    either. */
 .adh-footer__chat.bb-dock--resting .bb-dock__avatar,
 .adh-footer__chat.bb-dock--resting:has(.persona-chat.pc-collapsed) .bb-dock__avatar {
-  transform: translateX(calc(50vw - var(--adh-footer-pad-x) - var(--adh-footer-rest-slot) / 2));
+  transform: translateX(var(--adh-footer-rest-x, 0px));
   margin-bottom: calc(0.1rem + 6px);
 }
 
