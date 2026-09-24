@@ -3,11 +3,11 @@ id: c0e95399-ddab-4445-a22a-566d07339f9b
 title: ColorPickerView
 domain: agentictoolkit://recipes/color-picker-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -144,21 +144,17 @@ into `viewModel.color`.
   `setAccessibilityRole`, `setAccessibilityElement`, or similar call
   appears in source. `NSColorWell` and `NSTextField` each carry AppKit's
   built-in accessibility role (color well, static text) automatically.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. `label` and `colorWell` are laid out as sibling
+- **Label requirements**: `label` and `colorWell` are laid out as sibling
   views in the same row, but source sets no
   `accessibilityLabel`/`accessibilityTitleUIElement` (or equivalent) on
   `colorWell` linking it to `label` — confirmed by comparison with sibling
   row views in the same directory: `CheckboxView`, `NumberFieldView`, and
   `PopupMenuChoiceView` each call
   `<control>.setAccessibilityTitleUIElement(self.label)` on their control,
-  but `ColorPickerView` does not do so for `colorWell`. What is missing:
-  whether VoiceOver announces the row's title when focus lands on the
-  color well, or only "color well" with no further context. What would
-  settle it: a VoiceOver pass over an instantiated row, or an explicit
-  decision to call `colorWell.setAccessibilityTitleUIElement(label)` in
-  `init`/the sync closure, matching the pattern the other
-  control-with-label rows already use.
+  but `ColorPickerView` does not do so for `colorWell`. `colorWell` relies
+  entirely on `NSColorWell`'s own default AppKit accessibility role, with
+  no explicit, programmatic link from the color well to the row's title
+  text.
 - **Announce state changes (e.g., loading, disabled)**: Not applicable —
   the component has no loading state and never disables itself (see
   States); there is no state transition to announce.
@@ -380,3 +376,4 @@ VoiceOver pass.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for ColorPickerView, covering row layout, unguarded color-well commit behavior, and one open accessibility question (color well/title label association) for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: promoted the color-clamping and onChange-ownership edge cases to named MUST requirements with test vectors; renamed `requires-designated-initializer` to `rejects-coder-initialization`; fixed the WinUI grid columns and the SwiftUI/React platform notes to stop copying the color-well/title accessibility gap onto new platforms; bolded Design Decision labels, rewrote Decision 1's rationale, and dropped the meta decision about requirement count; populated `related` with the sibling row recipes; marked `keyboard-navigable` partial pending a keyboard/VoiceOver pass; removed the source-typo edge case; fixed the `AppKit / UIKit` platform-notes label. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

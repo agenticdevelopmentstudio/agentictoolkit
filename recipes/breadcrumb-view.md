@@ -3,11 +3,11 @@ id: c2417a5c-953b-458e-856b-2c4f7e3a6fde
 title: Breadcrumb View
 domain: agentictoolkit://recipes/breadcrumb-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -91,7 +91,7 @@ approved-date: ''
 - **Identifier**: Each crumb button carries the accessibility identifier `breadcrumb.crumb.<index>` (via `accessibilityID`), set from the crumb's zero-based position in the strip — an identifier for automation, not the label VoiceOver announces.
 - **Label**: `NSButton`'s accessibility label derives from its `title`, which is the full crumb title text. `lineBreakMode = .byTruncatingMiddle` changes only the rendered glyphs, not `title`, so VoiceOver announces the complete crumb title even when the visible text is truncated.
 - **Role**: Crumb buttons keep the default `NSButton` "button" accessibility role; no custom role or trait is set. The chevron separators are `NSImageView`s created with `accessibilityDescription: nil` — a deliberate decorative marking, so VoiceOver does not present them as a separate stop.
-- **Assistive technology**: NEEDS REVIEW: Not implemented in source. `rebuild()` replaces every crumb view whenever `fileURL` changes, but the source never posts an accessibility notification (such as a layout-changed or announcement notification) around that replacement. Whether a VoiceOver user tracking the strip is told the path changed depends on AppKit's own automatic detection of the view-tree change, which cannot be confirmed from this source file alone. Settling it needs either a VoiceOver test pass on `BreadcrumbView` after a `fileURL` change, or an explicit accessibility-notification addition to `rebuild()`.
+- **Assistive technology**: `rebuild()` replaces every crumb view whenever `fileURL` changes without posting an accessibility notification (such as a layout-changed or announcement notification) around that replacement. A VoiceOver user tracking the strip is told the path changed only if AppKit's own automatic detection of the view-tree change surfaces it; the source itself makes no explicit announcement.
 - **Minimum tap target**: Not applicable: `BreadcrumbView` targets macOS pointer and trackpad input, not touch. The source sets no minimum width or height on a crumb button — each button sizes to its (possibly truncated) title — and macOS's HIG does not mandate a minimum click-target dimension for inline chrome controls the way iOS mandates a touch-target minimum.
 
 ## Conformance Test Vectors
@@ -222,7 +222,7 @@ Not applicable: no logging call appears anywhere in `BreadcrumbView.swift`.
 | [unicode-support](agenticdevelopercookbook://compliance/internationalization#unicode-support) | passed | Internationalization |
 | [rtl-layout-support](agenticdevelopercookbook://compliance/internationalization#rtl-layout-support) | partial | Internationalization |
 
-The accessibility statuses are partial because the source sets only an accessibility identifier per crumb and leaves label, dynamic-text, and contrast behavior to AppKit's own defaults (a plain `NSButton` title and `NSColor.secondaryLabelColor`) rather than defining or verifying them itself, and because no accessibility notification accompanies a strip rebuild (see the Assistive technology marker above). The internationalization statuses for hardcoded strings and Unicode support are passed because the source has no hardcoded user-facing strings and displays crumb titles through `NSButton`'s native Unicode-capable text handling. `rtl-layout-support` is partial rather than passed: the strip's own leading/trailing anchors and `NSStackView` layout mirror automatically for right-to-left locales, but the chevron separator is drawn with the `chevron.right` SF Symbol, which does not mirror to point left in RTL — `chevron.forward` is the symbol that does.
+The accessibility statuses are partial because the source sets only an accessibility identifier per crumb and leaves label, dynamic-text, and contrast behavior to AppKit's own defaults (a plain `NSButton` title and `NSColor.secondaryLabelColor`) rather than defining or verifying them itself, and because no accessibility notification accompanies a strip rebuild (see Assistive technology, above). The internationalization statuses for hardcoded strings and Unicode support are passed because the source has no hardcoded user-facing strings and displays crumb titles through `NSButton`'s native Unicode-capable text handling. `rtl-layout-support` is partial rather than passed: the strip's own leading/trailing anchors and `NSStackView` layout mirror automatically for right-to-left locales, but the chevron separator is drawn with the `chevron.right` SF Symbol, which does not mirror to point left in RTL — `chevron.forward` is the symbol that does.
 
 ## Change History
 
@@ -230,3 +230,4 @@ The accessibility statuses are partial because the source sets only an accessibi
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: marked rtl-layout-support partial for the non-mirroring chevron.right symbol, made native-keyboard-activation's Tab behavior conditional on Full Keyboard Access, reworded the chevron-fallback-image vector to code inspection since no injection seam exists, added the popover's domain to related, restated single-crumb-outside-root as a component-wise path comparison with a new sibling-path vector, named the exact .defaultLow (250) compression-resistance priority, unified the onSelect payload description across Overview/Configuration/selectCrumb(at:), rewrote vectors that named private internals against observable public behavior, added a popover-transient requirement, downgraded rebuild-on-every-file-assignment to MAY with a supporting Design Decision, and dropped an unlinked "(Rule 15)" citation |
 | 1.0.0 | 2026-09-23 | Claude | Initial creation from source code |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

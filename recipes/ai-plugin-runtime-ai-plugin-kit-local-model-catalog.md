@@ -171,7 +171,7 @@ component.
 | LMC-006 | empty-parse-is-treated-as-failure | Fetcher succeeds and returns `Data("not json".utf8)` (or `{"models":[]}`) for a `baseURL` with a prior cached entry | `LocalModelServer.parseSizes` yields `[:]`, so `sizes(baseURL:)` treats the attempt as a failure: the prior known sizes are retained, and the new entry is marked `lastFetchFailed: true` — traced to the `parsed.isEmpty ? nil : parsed` line and `LocalModelServerTests.parseSizesToleratesGarbage` |
 | LMC-007 | live-fetcher-request-shape | `LocalModelCatalog.liveFetcher` invoked against a URL whose server responds with HTTP `404` | Throws `URLError(.badServerResponse)` — traced directly to `liveFetcher`'s `guard let http = ... , http.statusCode == 200 else { throw ... }`; not exercised by `LocalModelCatalogTests`, which always injects a fetcher and never runs `liveFetcher` itself |
 | LMC-008 | cache-key-is-the-raw-base-url | A fetcher that counts invocations; call `sizeBytes(model: "m", baseURL: "http://localhost:11434/v1")` then `sizeBytes(model: "m", baseURL: "http://localhost:11434/v1/")` | The fetcher runs twice — once per distinct `baseURL` string — even though both resolve to the same native tags URL (`http://localhost:11434/api/tags`); traced directly to `cache[baseURL]` being keyed on the unnormalized parameter in `sizes(baseURL:)`; not exercised by the given test suite, which always calls with one fixed `baseURL` spelling |
-| LMC-009 | concurrent-fetch-deduplication (the open question) | Two concurrent `Task`s call `sizeBytes(model: "m", baseURL: "http://localhost:11434/v1")` for a `baseURL` with no cache entry yet, against a fetcher that counts invocations | The fetcher MAY run twice, and the final cached `Entry` is whichever task's write executes last — not exercised by `LocalModelCatalogTests`, whose calls are made sequentially with `await`; traced to the unguarded `await fetcher(url)` between the cache-miss check and `cache[baseURL] = Entry(...)` in `sizes(baseURL:)` |
+| LMC-009 | concurrent-fetch-deduplication | Two concurrent `Task`s call `sizeBytes(model: "m", baseURL: "http://localhost:11434/v1")` for a `baseURL` with no cache entry yet, against a fetcher that counts invocations | The fetcher MAY run twice, and the final cached `Entry` is whichever task's write executes last — not exercised by `LocalModelCatalogTests`, whose calls are made sequentially with `await`; traced to the unguarded `await fetcher(url)` between the cache-miss check and `cache[baseURL] = Entry(...)` in `sizes(baseURL:)` |
 | LMC-010 | never-known-stays-nil | Fetcher always throws; call `sizeBytes(model: "m", baseURL: "http://localhost:11434/v1")` for a `baseURL` with no prior cache entry | Returns `nil`, and the cached `Entry.sizes` is `nil` (not a previously-seen value, since none exists) — traced to `sizes = fetched ?? cache[baseURL]?.sizes` where both operands are `nil` on a first, failing lookup; the same code path `LocalModelCatalogTests.failureReturnsNilAndIsNotHammered` exercises, generalized to the "no prior entry at all" case |
 
 ## Edge Cases
@@ -198,10 +198,10 @@ component.
   serialized at the statement level with no possibility of a torn read or
   write of `cache`. This is applicable — `LocalModelCatalog.shared` is
   read from at least `LocalInferenceGuard`, which itself runs from multiple
-  callers — and is safe by construction for memory, but see
-  `concurrent-fetch-deduplication` above: statement-level safety does not
+  callers — and is safe by construction for memory, but see the
+  open question on concurrent-fetch-deduplication above: statement-level safety does not
   prevent two concurrent callers for the same key from each triggering their
-  own network fetch — this is the open question named above.
+  own network fetch.
 - **Server unreachable (network/offline).** When the local server's process
   is not running or the host is otherwise unreachable, `fetcher` throws
   (`URLError(.cannotConnectToHost)` from `liveFetcher`, or any error from an
@@ -403,8 +403,8 @@ open on `nil` rather than blocking a request it cannot evaluate.
 fault-tolerance passes because a persistently down or non-ollama server is
 retried on the slower `failureTTL` cadence instead of being hit on every
 lookup. idempotent-operations is partial because concurrent calls for the
-same uncached or expired `baseURL` are not deduplicated — see
-`concurrent-fetch-deduplication`, the open question in Behavioral
+same uncached or expired `baseURL` are not deduplicated — see the
+open question on concurrent-fetch-deduplication in Behavioral
 Requirements — so repeated concurrent invocations can each trigger their own
 network side effect instead of converging on one. explicit-error-handling
 fails because every fetch, HTTP-status, and parse failure is discarded via
@@ -417,4 +417,4 @@ distinguish the failure modes from one another.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | | | Initial creation |
-| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited NEEDS REVIEW markers against the marker rules; kept markers are one-line named bullets. |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

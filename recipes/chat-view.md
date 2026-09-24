@@ -3,11 +3,11 @@ id: 4d0c6859-ed34-46ca-bfe4-ca87234ad684
 title: ChatView
 domain: agentictoolkit://recipes/chat-view
 type: ingredient
-version: 1.1.1
+version: 1.1.2
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -128,8 +128,8 @@ approved-date: ''
 ## Accessibility
 
 - **Role/trait**: Not applicable — unlike a single-purpose control, `ChatView` sets no accessibility role on itself; it is a container whose subviews (`NSTextField`, `NSButton`, `NSScrollView`) carry AppKit's own default roles.
-- **Label requirements**: The prompt label, status label, composer field, and send button carry the accessibility identifiers `ai-chat.prompt`, `ai-chat.status`, `ai-chat.input`, and `ai-chat.send-button` respectively (see **accessibility-identifiers**), and the send button's SF Symbol image carries the accessibility description `Send`. **NEEDS REVIEW: Not implemented in source. Behavior undefined.** The composer field itself has no `setAccessibilityLabel` call and no programmatic association with the prompt label; its only textual cues are an accessibility *identifier* (a UI-test hook, not a spoken label) and a placeholder string, which AppKit does not guarantee VoiceOver treats as the field's accessible name. Settling this needs either an explicit `inputField.setAccessibilityLabel(...)` call in source, or confirmation from a VoiceOver pass over the built app that the placeholder is announced as the field's name.
-- **Announce state changes**: The typing indicator's appearance/disappearance and a row's selection change are drawn visually (see States) but no `NSAccessibility.post(element:notification:)` call accompanies either in this source. **NEEDS REVIEW: Not implemented in source. Behavior undefined.** Row selection has a real keyboard path (arrow keys, Return, letters — see **arrow-key-selection**), so this is a genuine gap rather than an inapplicable concern: a VoiceOver user moving the selection with the keyboard has no source-confirmed way to hear which row is now selected. Settling this needs either an `NSAccessibility.post(element:notification: .selectedChildrenChanged)` call in `select(_:reveal:)`, or a VoiceOver-pass confirmation that AppKit's default `NSView` accessibility tree already surfaces the change.
+- **Label requirements**: The prompt label, status label, composer field, and send button carry the accessibility identifiers `ai-chat.prompt`, `ai-chat.status`, `ai-chat.input`, and `ai-chat.send-button` respectively (see **accessibility-identifiers**), and the send button's SF Symbol image carries the accessibility description `Send`. The composer field itself has no `setAccessibilityLabel` call and no programmatic association with the prompt label; its only textual cues are an accessibility *identifier* (a UI-test hook, not a spoken label) and a placeholder string, which AppKit does not guarantee VoiceOver treats as the field's accessible name.
+- **Announce state changes**: The typing indicator's appearance/disappearance and a row's selection change are drawn visually (see States) but no `NSAccessibility.post(element:notification:)` call accompanies either in this source. Row selection has a real keyboard path (arrow keys, Return, letters — see **arrow-key-selection**): a VoiceOver user moving the selection with the keyboard has no source-confirmed way to hear which row is now selected.
 - **Minimum tap target**: Not applicable in the iOS/touch sense — this is a macOS, pointer-driven `NSView`; Apple's 44×44pt minimum applies to touch targets, not to mouse-driven AppKit controls. The send button's own clickable area is whatever `NSButton` derives from its 18pt symbol content plus its default button metrics; no explicit minimum-size constraint is set on it in this source.
 
 ## Conformance Test Vectors
@@ -230,7 +230,7 @@ Not applicable: `ChatView` contains no URL scheme or deep-link handling in sourc
 | n/a (literal) | `Type a message...` | Composer placeholder text shown while the field is empty |
 | n/a (literal) | `Send` | Accessibility description on the send button's SF Symbol image |
 
-NEEDS REVIEW: Not implemented in source. The composer placeholder `"Type a message..."` (ChatView.swift:253) and the send image's accessibility description `"Send"` (:292) are — plain `String` literals, none routed through `String(localized:)` or `NSLocalizedString`, so none reaches a string catalog. What is missing: localization keys and catalog entries for the placeholder and the send button's description. What would settle it: routing the literals through `String(localized:)` in source.
+Both listed strings are plain `String` literals in source — the composer placeholder `"Type a message..."` (ChatView.swift:253) and the send image's accessibility description `"Send"` (:292) — and neither is routed through `String(localized:)` or `NSLocalizedString`, so neither reaches a string catalog.
 
 ## Accessibility Options
 
@@ -325,3 +325,4 @@ Statuses rest on: the accessibility identifiers present throughout but the two s
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: recast the plain-bubble floor and failed-session-state behavior as pending Design Decisions instead of MUSTs; rephrased transcript-explicit-width as observable resize behavior; stated the 200pt floor in plain-bubble-width-cap; filled depends-on with the composed child recipes; trimmed the summary; clarified Return's composer-vs-selection ambiguity; added modifier-guard test vectors for `g` and modified `m`; corrected WinUI 3 (`Divider`, `SystemAnimationsAreEnabled`) and Compose (`LocalAccessibilityManager`) platform-note inaccuracies; removed internal-symbol leakage from the SwiftUI, Compose, and WinUI 3 notes; reconciled the Reduce Motion cross-references with the delegated status in Accessibility Options; and proposed localization keys |
 | 1.1.1 | 2026-09-23 | Mike Fullerton | Recorded the unlocalized composer placeholder and Send button literals as an open question; replaced proposed localization keys with n/a (literal) |
+| 1.1.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

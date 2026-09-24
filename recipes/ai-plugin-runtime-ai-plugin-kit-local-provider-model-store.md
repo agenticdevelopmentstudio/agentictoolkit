@@ -240,7 +240,7 @@ component.
 | local-provider-model-store-018 | stats-cache-write | `viaOllamaPage: true`, page `downloads: nil` and `updated: nil` (line 115's `page.downloads != nil \|\| page.updated != nil` is `false`). | Returned `stats` is `nil`; the page-stats cache entry for that model is left unchanged. |
 | local-provider-model-store-019 | rank-independent-of-page | `fetchModelInfo(model:, viaOllamaPage: false)` with `ArtificialAnalysisStore.rank` stubbed to return a non-nil rank (line 101). | Returned `rank` is that non-nil value even though `viaOllamaPage` is `false` and no page fetch ever occurs. |
 | local-provider-model-store-020 | per-field-independent-nil | `fetchModelInfo` where the catalog call returns `nil` and the page call fails, but the rank call succeeds. | `description` is `nil`, `stats` is `nil`, `rank` is the successful non-nil value — one field's failure does not null out the others. |
-| local-provider-model-store-021 | no-request-coalescing, concurrent-fetch-deduplication (the open question) | Two concurrent tasks both call `fetchModels(baseURL: "http://x/v1")` against a call-counting stub, for a `baseURL` with no prior cache entry (lines 144-163). | The stub's handler is invoked twice (no coalescing, per `no-request-coalescing`); the final cached entry for `"http://x/v1"` is whichever call's write executes last — not necessarily the call issued last, since neither call's completion order is guaranteed (the open question). |
+| local-provider-model-store-021 | no-request-coalescing, concurrent-fetch-deduplication | Two concurrent tasks both call `fetchModels(baseURL: "http://x/v1")` against a call-counting stub, for a `baseURL` with no prior cache entry (lines 144-163). | The stub's handler is invoked twice (no coalescing, per `no-request-coalescing`); the final cached entry for `"http://x/v1"` is whichever call's write executes last — not necessarily the call issued last, since neither call's completion order is guaranteed (see the open question on concurrent-fetch-deduplication). |
 | local-provider-model-store-022 | mainactor-atomic-cache-update | Two concurrent tasks call `fetchModels` for two *different* base URLs (`"http://a/v1"`, `"http://b/v1"`) whose stubbed responses resolve in overlapping windows (lines 156-158). | Both entries end up correctly present afterward — `cachedModels` for `a` and for `b` each return their own fetched ids; neither call's write is lost, because each call's own read-modify-write of `cache.value` runs with no intervening `await`. |
 | local-provider-model-store-023 | cancellation-as-ordinary-failure | A task calling `fetchModels(baseURL:)` is cancelled while suspended on `URLSession.shared.data(for:)` (lines 149-162). | `fetchModels` returns `nil` (the thrown `CancellationError` is caught by the generic `catch`), and the cache entry for that `baseURL` is left exactly as it was before the call. |
 | local-provider-model-store-024 | cache-persistence, cache-non-secure-storage | Call `fetchModels` successfully against `UserSettings.shared` backed by a real `UserDefaultsSettingsStorageProvider` suite; tear down and reconstruct `UserSettings.shared` against the same suite; then call `cachedModels(baseURL:)` (lines 29-30). | The previously fetched ids are still returned after reconstruction (persisted, not memory-only); a spy `SecureSettingsStorageProvider` substituted for `UserSettings.shared`'s secure provider records zero calls across the whole scenario, since none of the five caches is `isSecure`. |
@@ -277,7 +277,7 @@ component.
   `mainactor-atomic-cache-update`). Two *concurrent* calls for the *same*
   key are not deduplicated and race on which one's result is cached last
   (MUST NOT deduplicate, see `no-request-coalescing`; final value undefined,
-  see `concurrent-fetch-deduplication`, the open question).
+  see the open question on concurrent-fetch-deduplication).
 - **Error states**: Every network failure — a bad URL, a thrown transport
   error, a non-`200` status, an undecodable body, or (for `fetchSizes`) a
   parse that yields no entries — is treated identically: the affected
@@ -507,8 +507,8 @@ deliberate freshness-over-load-shedding tradeoff, not an oversight, but it
 does not meet the reliability bar as written. idempotent-operations is
 partial for the same reason as `LocalModelCatalog`: repeated successful
 calls converge on the same result, but concurrent calls for the same key are
-not deduplicated (`no-request-coalescing`, `concurrent-fetch-deduplication`,
-the open question). explicit-error-handling fails because every fetch,
+not deduplicated (`no-request-coalescing`; see the open question on
+concurrent-fetch-deduplication). explicit-error-handling fails because every fetch,
 HTTP-status, and parse failure is discarded with zero diagnostic signal
 (`fetch-error-is-fully-swallowed`).
 
@@ -517,4 +517,4 @@ HTTP-status, and parse failure is discarded with zero diagnostic signal
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | | | Initial creation |
-| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited NEEDS REVIEW markers against the marker rules; kept markers are one-line named bullets. |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

@@ -3,11 +3,11 @@ id: aebda2fe-b953-4b3c-a65a-93d92c059fe1
 title: ChoiceSliderView
 domain: agentictoolkit://recipes/choice-slider-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -171,21 +171,14 @@ it.
   `setAccessibilityRole`, `setAccessibilityElement`, or similar call appears
   in source. `NSSlider` and `NSTextField` each carry AppKit's built-in
   accessibility role (slider, static text) automatically.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source. Behavior
-  undefined. The title label (`label`) and the slider are laid out as
-  sibling views in the same row, but source sets no
+- **Label requirements**: The title label (`label`) and the slider are laid
+  out as sibling views in the same row, but source sets no
   `accessibilityLabel`/`accessibilityTitleUIElement` (or equivalent) on the
-  slider linking it to the title text. This is confirmed by comparison with
-  `PopupMenuChoiceView` — the sibling row that shares the same
-  `ChoiceViewModel<Value>` — which calls
+  slider linking it to the title text — unlike `PopupMenuChoiceView`, the
+  sibling row over the same `ChoiceViewModel<Value>`, which calls
   `self.popUpButton.setAccessibilityTitleUIElement(self.label)` on its
-  control, while `ChoiceSliderView` does not do the equivalent for
-  `self.slider`. What is missing: whether VoiceOver announces the row's
-  title when focus lands on the slider, or only "slider" with no further
-  context. What would settle it: a VoiceOver pass over an instantiated row,
-  or an explicit decision to call `slider.setAccessibilityTitleUIElement
-  (label)` in `init`/`syncSelection()`, matching `PopupMenuChoiceView`'s
-  pattern.
+  control. VoiceOver focus on the slider is therefore not programmatically
+  tied to the row's title text.
 - **Announce state changes (e.g., loading, disabled)**: Not applicable — the
   component has no loading state and never disables itself (see States);
   there is no state transition to announce.
@@ -485,3 +478,4 @@ Not applicable: `ChoiceSliderView.swift` contains no logging call (no
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: added missing initial Change History row; added claims-onchange-observer requirement and test vector for the onChange-overwrite behavior; trimmed commits-slider-value to the positive write, letting ignores-out-of-range-tick and skips-redundant-commits own the guards; removed RFC 2119 keywords from Edge Cases and reframed several as plain observations; separated the frame-only initializer's copied fatal-error message text from the initializer-disabling Design Decision; added PopupMenuChoiceView to related; fixed the Increase Contrast/Appearance contradiction; fixed test vector 008 to use a stub sender instead of an unreachable real-slider state; guarded the SwiftUI and React empty-choices ranges; corrected the Compose value-label measurement approach; added a pending Design Decision for the WinUI value-label re-measurement staleness |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

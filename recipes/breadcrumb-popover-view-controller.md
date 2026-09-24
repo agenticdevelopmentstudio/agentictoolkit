@@ -3,11 +3,11 @@ id: c79094d2-1f4b-4c3f-8005-8fb095fb1b40
 title: BreadcrumbPopoverViewController
 domain: agentictoolkit://recipes/breadcrumb-popover-view-controller
 type: ingredient
-version: 1.1.1
+version: 1.1.2
 status: review
 language: en
 created: 2026-09-23
-modified: 2026-09-23
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -175,27 +175,19 @@ does not browse further down the tree.
 - **Label requirements**: The search field and table view each carry an
   explicit accessibility identifier — `"breadcrumb.popover.filter"` and
   `"breadcrumb.popover.table"` respectively, via `accessibilityID(_:)` — for
-  automation/testing. Each row's accessible content comes from its
+  automation/testing, not for VoiceOver, which does not speak identifiers.
+  Neither control sets an accessibility label (`setAccessibilityLabel`):
+  VoiceOver has only the `"Filter"` placeholder for the search field and no
+  spoken name for the table. Each row's accessible content comes from its
   `NSTextField`'s own `attributedStringValue` (the entry's name, with matched
   characters bolded); source sets no separate `accessibilityLabel` override
   on the cell view or its text field.
-  NEEDS REVIEW: Not implemented in source. Neither the search field nor the
-  table sets an accessibility label (`setAccessibilityLabel`); identifiers are
-  not spoken, so VoiceOver has only the `"Filter"` placeholder for the field
-  and no name for the list. What is missing: the spoken name of each control
-  (for example, one that names the directory being filtered). What would
-  settle it: a VoiceOver pass over an instantiated popover, or an explicit
-  decision on the label text.
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. When `applyFilter()` reloads the table with a new,
-  possibly much shorter, row count, source posts no accessibility
-  notification (e.g. no `NSAccessibility.post(element:notification:)` call)
-  informing VoiceOver that the visible option set has changed. What is
-  missing: whether a VoiceOver user is told the result count changed, or
-  hears nothing until they navigate back into the table. What would settle
-  it: a VoiceOver pass over an instantiated popover while typing a filter, or
-  an explicit decision to post a row-count-changed/announcement notification
-  from `applyFilter()`.
+- **Announce state changes**: Not implemented in source. When `applyFilter()`
+  reloads the table with a new, possibly much shorter, row count, source
+  posts no accessibility notification (e.g. no
+  `NSAccessibility.post(element:notification:)` call) informing VoiceOver
+  that the visible option set has changed; a VoiceOver user hears nothing
+  until navigating back into the table.
 - **Minimum tap target**: The table's row height is 20pt, well under the
   44×44pt iOS minimum; this is expected for a pointer/keyboard-driven macOS
   list (not a touch surface) and is not a tap-target defect on this platform.
@@ -299,12 +291,10 @@ it programmatically as an `NSPopover`'s content view controller.
 |-----------|-------------|---------|
 | n/a (literal) | "Filter" | Search field placeholder text |
 
-NEEDS REVIEW: `"Filter"` is assigned to `searchField.placeholderString` as a
-plain AppKit `String` literal (BreadcrumbPopoverViewController.swift:65), not
-through `String(localized:)` or `NSLocalizedString`, so it never reaches a
-string catalog. What is missing: a localization key and catalog entry for the
-placeholder. What would settle it: routing the literal through
-`String(localized:)` in source.
+`"Filter"` is assigned to `searchField.placeholderString` as a plain AppKit
+`String` literal (BreadcrumbPopoverViewController.swift:65), not through
+`String(localized:)` or `NSLocalizedString`, so it never reaches a string
+catalog; there is no localization key or catalog entry for the placeholder.
 
 Not applicable beyond the table above: row labels come from `FileTreeNode.name`
 (file system entry names), not from a localized string table, so there is
@@ -516,3 +506,4 @@ placeholder is a hardcoded English literal with no localization key.
 | 1.0.0 | 2026-09-23 | Claude Sonnet 5 | Initial ingredient recipe for BreadcrumbPopoverViewController, covering directory loading, live filtering with bold match highlighting, clamped/relative selection, PickerKeyboardController wiring, the directory-is-inert choose guard, and one open accessibility question (filtered-result announcement) for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: stated the case-insensitive substring-match algorithm in filter-by-name-match and fixed test vector 004, which was wrong under that algorithm; replaced the AppKit-wiring requirements (callback assignment, escape-monitor start/stop, command-selector delegation, cell reuse) with behavior-first requirements for arrow-key/Return/Escape routing and row-view reuse, moving the AppKit mechanism detail into Platform Notes; rewrote four test vectors to assert observable table/callback behavior instead of private state or methods; fixed the Compliance table (dropped the non-catalog architecture/main-actor-confined row and the inapplicable touch-target-size row, capitalized categories, changed the disallowed `flagged` status to `failed`); added a `related` link to breadcrumb-view; recommended a `TextBox`/`TextChanged` WinUI 3 control over `AutoSuggestBox` to avoid a conflicting suggestion list; removed an unsupported UIKit claim in favor of a `UIKeyCommand` note; named the fixed content size once and cross-referenced it from every Platform Notes bullet instead of restating it; reformatted Design Decisions into the three-line bold form; and unquoted the frontmatter dates. |
 | 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog |
+| 1.1.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

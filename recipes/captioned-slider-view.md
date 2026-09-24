@@ -3,11 +3,11 @@ id: 64825f85-8b4d-4406-befc-aa08ce55cc8b
 title: CaptionedSliderView
 domain: agentictoolkit://recipes/captioned-slider-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -175,21 +175,18 @@ back into the view model's `settingObserver`.
   `setAccessibilityRole`, `setAccessibilityElement`, or similar call
   appears in source. `NSSlider` and `NSTextField` each carry AppKit's
   built-in accessibility role (slider, static text) automatically.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. The title label (`label`) and the slider are laid
-  out as sibling views in the same row, but source sets no
+- **Label requirements**: The title label (`label`) and the slider are
+  laid out as sibling views in the same row, but source sets no
   `accessibilityLabel`/`accessibilityTitleUIElement` (or equivalent) on
   the slider linking it to the title text — confirmed by comparison with
   sibling row views in the same directory: `CheckboxView`,
   `NumberFieldView`, and `PopupMenuChoiceView` each call
   `<control>.setAccessibilityTitleUIElement(self.label)` on their
   control, but neither `CaptionedSliderView` nor the plain `SliderView`
-  it's modeled on does so for `slider`. What is missing: whether
-  VoiceOver announces the row's title when focus lands on the slider, or
-  only "slider" with no further context. What would settle it: a
-  VoiceOver pass over an instantiated row, or an explicit decision to
-  call `slider.setAccessibilityTitleUIElement(label)` in `init`/`sync()`,
-  matching the pattern the other control-with-label rows already use.
+  it's modeled on does so for `slider`. Without that link, VoiceOver
+  announces the slider on its own when focus lands on it, with no
+  route to the row's title text, unlike the sibling control-with-label
+  rows.
 - **Announce state changes (e.g., loading, disabled)**: Not applicable —
   the component has no loading state and never disables itself (see
   States); there is no state transition to announce.
@@ -486,3 +483,4 @@ value sync, with rendering and formatting delegated elsewhere).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for CaptionedSliderView, covering row layout/priority behavior, live-versus-committed value sync, and one open accessibility question (slider/title label association) for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: add named requirements and test vectors for the unvalidated range and the overwritten `onChange` observer; decouple Appearance's font/color values from the theme files that own them; fix the Increase Contrast contradiction, the formatter-escaping claim, and the SwiftUI `onEditingChanged` guidance; drop RFC 2119 misuse and an editorial aside from Edge Cases and Platform Notes; correct the Compliance table and add related sibling-recipe links; note that the example formatters aren't locale-aware. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

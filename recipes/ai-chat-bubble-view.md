@@ -284,4 +284,4 @@ Statuses rest on: the expand toggle's explicit accessibility label versus the bu
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Claude Sonnet 5 | Initial creation from AIChatBubbleView.swift and its TerminalBoxStyle/TerminalAppearance/SemanticPalette dependencies |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved private source identifiers (vPad, textInset, toggleGap, toggleSize, appliedPalette) into Platform Notes, defined the isExpandable condition inline in States, pinned locale and gave exact values in the timestamp test vectors, added WinUI chevron code points, cited Themeable/ThemePaletteObserver's source file, and corrected MessageBubbleView's toolkit attribution throughout |
-| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited NEEDS REVIEW markers against the marker rules; kept markers are one-line named bullets. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
