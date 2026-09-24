@@ -50,6 +50,12 @@ export interface CrudDataViewProps {
    *  Save / Discard / Cancel instead of silently dropping staged edits. Omitted
    *  when the view is used standalone. */
   onGuardChange?: (guard: PaneExitGuard | null) => void
+  /** Values a NEW row starts with, for columns the surface already knows (a bucket's table view
+   *  seeds `ecosystemId` with the bucket's ecosystem). Without it a create omits the column, the
+   *  backend stamps the CALLER's ecosystem, and the row vanishes from a list filtered to another
+   *  one the moment it saves (Mike, 2026-09-24). Only writable columns are seeded; the user can
+   *  still edit the value before saving. */
+  createDefaults?: Record<string, string>
 }
 
 /** A synthetic local key prefix for create drafts — rows that exist only in the
@@ -94,7 +100,13 @@ function formatCellDisplay(value: unknown): string {
  * multi-selects rows and confirms before issuing a DELETE per row. `meta` stays the
  * only required input.
  */
-export function CrudDataView({ meta, filter, scopeEcosystemId, onGuardChange }: CrudDataViewProps) {
+export function CrudDataView({
+  meta,
+  filter,
+  scopeEcosystemId,
+  onGuardChange,
+  createDefaults,
+}: CrudDataViewProps) {
   const resource = useCrudResource(meta, filter, scopeEcosystemId)
   const { rows, loading, fetching, error } = resource
 
@@ -168,10 +180,18 @@ export function CrudDataView({ meta, filter, scopeEcosystemId, onGuardChange }: 
   // The active row's baseline as a draft buffer: a draft's is the table's blank
   // defaults; an existing row's is its server values. Displayed value per field is
   // `edits[activeKey][col] ?? baseline[col]`.
+  // Serialized so an inline `createDefaults={{…}}` literal doesn't change identity every render.
+  const defaultsKey = JSON.stringify(createDefaults ?? {})
+  const blankDraft = useCallback((): CrudDraft => {
+    const draft = toDraft(meta)
+    for (const [name, value] of Object.entries(JSON.parse(defaultsKey) as Record<string, string>))
+      if (name in draft) draft[name] = value
+    return draft
+  }, [meta, defaultsKey])
   const baseline = useMemo<CrudDraft | null>(() => {
-    if (isDraftActive) return toDraft(meta)
+    if (isDraftActive) return blankDraft()
     return activeRow ? toDraft(meta, activeRow) : null
-  }, [meta, activeRow, isDraftActive])
+  }, [meta, activeRow, isDraftActive, blankDraft])
 
   const setEdit = (key: string, name: string, value: string | boolean) =>
     setEdits((prev) => ({ ...prev, [key]: { ...prev[key], [name]: value } }))
@@ -270,7 +290,7 @@ export function CrudDataView({ meta, filter, scopeEcosystemId, onGuardChange }: 
       dropEdit(key) // persisted — drop its staged edits so a retry won't re-PUT it
     }
     for (const key of draftKeys) {
-      await resource.createRow(buildPayload(meta, mergeDraft(toDraft(meta), edits[key]), 'create'))
+      await resource.createRow(buildPayload(meta, mergeDraft(blankDraft(), edits[key]), 'create'))
       // created — drop the draft + its edits so a retry won't re-POST a duplicate
       setDraftKeys((prev) => prev.filter((k) => k !== key))
       dropEdit(key)

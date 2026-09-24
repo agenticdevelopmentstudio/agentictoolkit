@@ -5,9 +5,9 @@ import { Card, CardContent } from "@agenticdevelopertoolkit/ui/components/card";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Textarea } from "@agenticdevelopertoolkit/ui/components/textarea";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
-import type { SchemaDefinition, SchemaDefinitionInput } from "./schema-model";
+import type { SchemaDefinition, SchemaDefinitionInput, SchemaTable } from "./schema-model";
 import { DetailSection } from "@agentic-toolkit/resource";
-import { SchemaTablesEditor } from "./SchemaTablesEditor";
+import { DeleteEntitySection } from "@agentic-toolkit/adh-ui/blocks";
 import type { RenderTransferSection } from "../transfer-seam";
 
 export function schemaBlank(): SchemaDefinitionInput {
@@ -16,6 +16,17 @@ export function schemaBlank(): SchemaDefinitionInput {
 
 export function schemaToInput(s: SchemaDefinition): SchemaDefinitionInput {
   return { name: s.name, description: s.description, tables: s.tables };
+}
+
+/** Returns an error message for a new table's name, or null when it is valid. Names are unique
+ *  per bucket (backend unique (bucket, name) index), so a clash is caught here rather than
+ *  thrown mid-save. */
+export function tableNameValidate(name: string, tables: SchemaTable[]): string | null {
+  const n = name.trim();
+  if (!n) return "Name is required.";
+  if (tables.some((t) => t.name.trim().toLowerCase() === n.toLowerCase()))
+    return `A table named "${n}" already exists in this bucket.`;
+  return null;
 }
 
 /** Returns an error message, or null when the draft is valid. */
@@ -41,10 +52,10 @@ export function schemaValidate(
 }
 
 /**
- * Controlled bucket-definition form — name, description, and the tables editor.
- * Single-purpose: access lists live in their own "Access" topic (AccessPane), not
- * here. Save/Cancel/Delete live in the MasterDetailLayout button bar; the pane
- * owns the draft + dirty/validity state.
+ * A bucket's Settings: name and description, then the danger zone — Transfer Ownership and
+ * Delete. The tables are NOT edited here: each is its own row in the bucket's rail, under the
+ * Settings row, added with that rail's "+" (Mike, 2026-09-24). Save/Cancel live in the pane's
+ * button bar; the pane owns the draft + dirty/validity state.
  */
 export function SchemaDefinitionDetail({
   title,
@@ -54,6 +65,7 @@ export function SchemaDefinitionDetail({
   schema,
   ecosystemRdid,
   renderTransfer,
+  onDelete,
 }: {
   title: string;
   draft: SchemaDefinitionInput;
@@ -72,6 +84,9 @@ export function SchemaDefinitionDetail({
   ecosystemRdid?: string;
   /** The host's Transfer Ownership section; omitted ⇒ the bucket offers no transfer. */
   renderTransfer?: RenderTransferSection;
+  /** Deletes the bucket; omitted for the built-in `default` bucket, which the backend refuses to
+   *  delete — so it gets no Delete button rather than one that always fails. */
+  onDelete?: () => Promise<void>;
 }) {
   return (
     <>
@@ -95,12 +110,7 @@ export function SchemaDefinitionDetail({
               />
             </Field>
 
-            <SchemaTablesEditor
-              tables={draft.tables}
-              onChange={(tables) => onChange({ ...draft, tables })}
-            />
-
-            {/* Form-level error (name OR tables) — not bound to a single field. */}
+            {/* Form-level error — not bound to a single field. */}
             <ErrorText error={error} />
           </CardContent>
         </Card>
@@ -124,6 +134,15 @@ export function SchemaDefinitionDetail({
           entityLabel: schema.id,
           ecosystemRdid,
         })}
+
+      {schema && onDelete && (
+        <DeleteEntitySection
+          entityNoun="Bucket"
+          confirmValue={schema.id}
+          childEntities="its list of tables (the rows in those tables stay in the ecosystem)"
+          onConfirm={onDelete}
+        />
+      )}
     </>
   );
 }

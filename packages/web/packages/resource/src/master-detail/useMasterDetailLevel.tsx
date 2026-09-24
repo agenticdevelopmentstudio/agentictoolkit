@@ -43,6 +43,7 @@ export function useMasterDetailLevel<TItem, TInput>({
   onToggleChecked,
   itemNoun,
   overviewHelp,
+  publish = true,
 }: {
   /** Stable level id (e.g. "applications-list"). */
   id: string;
@@ -96,7 +97,13 @@ export function useMasterDetailLevel<TItem, TInput>({
   itemNoun?: string;
   /** Bespoke select-nudge copy: what one of these rows is and why to choose one. */
   overviewHelp?: ReactNode;
-}): void {
+  /** `false` when the pane publishes this level ITSELF, together with a deeper level of its own
+   *  (a bucket's Settings ▸ Tables rail), through {@link StackLevels}. Two separate registrations
+   *  at one depth reorder whenever the first re-registers, and a hook names no busy target for
+   *  the detail below it — so the pair has to go up as ONE `StackLevels` publish. The level is
+   *  returned either way; the exit guard is registered either way. */
+  publish?: boolean;
+}): TopicLevel {
   const rows: TopicDetailItem[] = (items ?? []).map((it) => ({
     id: getId(it),
     label: getLabel(it),
@@ -145,7 +152,7 @@ export function useMasterDetailLevel<TItem, TInput>({
     overviewHelp,
   };
 
-  useStackLevel(level);
+  useStackLevel(publish ? level : null);
   // Registered only while the draft is actually DIRTY, not merely while an editor is open.
   // Two things ride on this. HTDV is unaffected — it treats "no guard" and "clean guard"
   // identically, both exiting immediately. But the rail host re-renders on register/withdraw,
@@ -153,4 +160,5 @@ export function useMasterDetailLevel<TItem, TInput>({
   // the shell's UnsavedChangesGuard needs, since its `when` prop cannot call `isDirty()`.
   // Costs one re-render per clean↔dirty transition, not per keystroke.
   useRailExitGuard(form.dirty ? form.guard : null);
+  return level;
 }
