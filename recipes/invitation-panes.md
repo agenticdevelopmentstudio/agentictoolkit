@@ -3,7 +3,7 @@ id: a9222936-8474-4073-8581-d314a258bf0a
 title: InvitationPanes
 domain: agentictoolkit://recipes/invitation-panes
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -56,6 +56,13 @@ chrome, keyboard behavior, and accessibility contract of `ListWithDetailsPane`,
 `SendInvitationModal`, and `AddUsersModal` are each documented in their own
 recipe and are not restated here.
 
+Each pane calls `renderNotesAndHistory`/`renderNotesModal` with a fixed
+`subjectTable`, one of the string constants imported from
+`../lib/invitations-types.ts`: `"invitation_requests"`
+(`TABLE_INVITATION_REQUESTS`, Requests), `"pending_users"`
+(`TABLE_PENDING_USERS`, Pending Users), and `"invitations"`
+(`TABLE_INVITATIONS`, Invites).
+
 ## Behavioral Requirements
 
 - **shows-loading-placeholder**: While `loading` is true, each pane MUST render
@@ -64,10 +71,19 @@ recipe and are not restated here.
   render `ListWithDetailsPane` configured with that pane's fixed columns,
   `rows`, `getRowId`, `ariaLabel`, `emptyLabel`, and `storageKey` (see
   Appearance for the exact per-pane values).
+- **pending-null-dates-render-dash**: `InvitationPendingUsersPane`'s
+  `lastRequestDate` and `lastInviteSentDate` columns MUST render "—" when the
+  row's value for that field is `null`, and the raw value otherwise.
 - **forwards-param-key**: Each pane MUST forward its `paramKey` prop to
   `ListWithDetailsPane` unchanged.
 - **forwards-delete-callback**: Each pane MUST forward its `onDelete` prop to
   `ListWithDetailsPane`'s `onDelete` unchanged.
+- **shows-delete-confirm-copy**: Each pane MUST forward a fixed
+  `deleteConfirm` title/description to `ListWithDetailsPane`: Requests —
+  "Delete requests?" / "This removes the selected invitation requests.";
+  Pending Users — "Delete pending users?" / "This removes the selected pending
+  users."; Invites — "Delete invites?" / "This removes the selected sent
+  invites."
 - **notes-action-requires-selection**: The "Admin notes" toolbar action MUST be
   configured with `requiresSelection: true`.
 - **notes-action-sets-first-selected-id**: Activating "Admin notes" MUST set the
@@ -81,9 +97,13 @@ recipe and are not restated here.
 - **passes-required-aria-label**: Each pane MUST pass a fixed, non-empty
   `ariaLabel` to `ListWithDetailsPane`: "Invitation requests" (Requests),
   "Pending users" (Pending Users), "Sent invites" (Invites).
-- **requests-and-pending-show-source-and-note**: `InvitationRequestsPane`'s and
-  `InvitationPendingUsersPane`'s detail panel MUST render a "Source:" line and a
-  "Note…:" line above the `renderNotesAndHistory` output.
+- **requests-and-pending-show-source-and-note**: `InvitationRequestsPane`'s
+  detail panel MUST render "Source:" followed by the row's `source` field, then
+  "Note to the team:" followed by the row's `note` field, above the
+  `renderNotesAndHistory` output. `InvitationPendingUsersPane`'s detail panel
+  MUST render "Source:" followed by the row's `lastSource` field, then "Note
+  from user:" followed by the row's `lastNote` field, above the
+  `renderNotesAndHistory` output.
 - **invites-detail-is-notes-only**: `InvitationInvitesPane`'s detail panel MUST
   render exactly the return value of `renderNotesAndHistory({ subjectTable:
   "invitations", subjectId })`, with no additional fields.
@@ -109,6 +129,11 @@ recipe and are not restated here.
 - **keeps-send-modal-open-on-reject**: When the caller's `onSend` promise
   rejects, the handler MUST leave `sendOpen` unchanged (the modal stays open)
   and MUST NOT throw or propagate the rejection.
+- **reports-send-rejection-reason**: When the caller's `onSend` promise
+  rejects, the handler SHOULD surface the rejection reason — in the modal or
+  back to the caller — rather than discarding it silently. The current
+  implementation discards it via `() => undefined` (see Edge Cases and Design
+  Decisions); this requirement stays unmet until that is settled.
 - **add-action-has-divider**: `InvitationPendingUsersPane`'s "Add users"
   toolbar action MUST be configured with `dividerBefore: true`.
 - **add-action-opens-modal**: Activating "Add users" MUST set `addOpen` to
@@ -122,13 +147,19 @@ recipe and are not restated here.
 
 ## Appearance
 
-`invitation-panes.tsx` renders no styling of its own beyond the single loading
-paragraph (`text-sm text-apt-text-dim`, a neutral Tailwind design token — no
-raw hex, no `!important`). Everything else is delegated to `ListWithDetailsPane`,
-`SendInvitationModal`, and `AddUsersModal`, each of which owns and documents its
-own corner radius, padding, typography, color, border, shadow, and sizing. What
-differs between the three panes is entirely the *data* each supplies to
-`ListWithDetailsPane`:
+`invitation-panes.tsx` renders no corner radius, padding, background, border,
+or shadow of its own. It does apply a small, fixed set of neutral Tailwind
+typography/foreground-color utility classes directly — no raw hex, no
+`!important`: the loading paragraph (`text-sm text-apt-text-dim`) and, in
+`InvitationRequestsPane`'s and `InvitationPendingUsersPane`'s detail panels, a
+wrapper `text-sm text-apt-text`, `text-apt-text-muted` on the "Source:"/"Note
+…:" label spans, and `mt-1` top margin on the note line.
+`InvitationInvitesPane`'s detail panel applies none of these — it renders
+`renderNotesAndHistory`'s return value directly, with no wrapper. Everything
+else is delegated to `ListWithDetailsPane`, `SendInvitationModal`, and
+`AddUsersModal`, each of which owns and documents its own corner radius,
+padding, typography, color, border, shadow, and sizing. What differs between
+the three panes is entirely the *data* each supplies to `ListWithDetailsPane`:
 
 | Pane | Columns (`key` — header, width, align, notes) | Empty label | `storageKey` | `ariaLabel` |
 |---|---|---|---|---|
@@ -136,11 +167,22 @@ differs between the three panes is entirely the *data* each supplies to
 | InvitationPendingUsersPane | `name` — "Name"; `phone` — "Phone"; `email` — "Email"; `invitedCount` — "Invited" 6rem, align end; `requestCount` — "Requests" 6rem, align end; `lastRequestDate` — "Last request" 9rem, renders `—` when null; `lastInviteSentDate` — "Last invite" 9rem, renders `—` when null; `requestedDate` — "Requested" 9rem | "No pending users." | `adm-inv-pending` | "Pending users" |
 | InvitationInvitesPane | `name` — "Name"; `email` — "Email"; `sentBy` — "Sent by"; `sentDate` — "Sent" 9rem | "No invites sent." | `adm-inv-invites` | "Sent invites" |
 
-- **Corner radius / Padding / Font / Background / Foreground / Border / Shadow /
-  Min-Max size**: Not applicable — traced. `invitation-panes.tsx` sets none of
-  these itself; the loading paragraph carries only a font-size/color utility
-  class, and every other visible surface belongs to a composed component with
-  its own recipe.
+Every date column (`requestedDate`, `sentDate`, `lastRequestDate`,
+`lastInviteSentDate`) is rendered exactly as received in the row's string
+field; `invitation-panes.tsx` applies no formatting, truncation, or locale
+conversion of its own beyond the `— ` fallback for a `null` value (see
+**pending-null-dates-render-dash**). The row types declare these fields as
+already-formatted strings, so any date formatting happens upstream of this
+file, not within it.
+
+- **Corner radius / Padding / Background / Border / Shadow / Min-Max size**:
+  Not applicable — traced. `invitation-panes.tsx` sets none of these itself;
+  every such surface belongs to a composed component with its own recipe.
+- **Font / Foreground**: traced. `invitation-panes.tsx` itself applies only
+  the neutral Tailwind utility classes listed above — `text-sm`,
+  `text-apt-text-dim`, `text-apt-text`, `text-apt-text-muted` — no raw hex, no
+  `!important`. Every other font/color surface belongs to a composed component
+  with its own recipe.
 
 ## States
 
@@ -205,7 +247,7 @@ differs between the three panes is entirely the *data* each supplies to
 | invitation-panes-019 | send-seed-collects-non-empty-phones | Selected rows have phones `["", "+15550100"]` | Seed `phones` is `["+15550100"]` |
 | invitation-panes-020 | send-seed-carries-selected-ids | Activate Send with ids `["u1","u2"]` | Seed `ids` is exactly `["u1","u2"]` |
 | invitation-panes-021 | send-action-opens-modal | Activate "Send invitation" | `sendOpen` becomes `true` |
-| invitation-panes-022 | remounts-send-modal-on-reseed | Open Send for selection A, close, open Send for a different selection B | `SendInvitationModal`'s `key` differs between the two opens |
+| invitation-panes-022 | remounts-send-modal-on-reseed | Open Send for selection A (`ids=["u1"]`, email `a@x.io`), close, open Send for selection B with different contacts (`ids=["u2"]`, email `b@x.io`) | `SendInvitationModal`'s `key` differs between the two opens |
 | invitation-panes-023 | closes-send-modal-only-on-resolve | Caller's `onSend` promise resolves | `sendOpen` becomes `false` |
 | invitation-panes-024 | keeps-send-modal-open-on-reject | Caller's `onSend` promise rejects | `sendOpen` remains `true`; no error is thrown out of the handler |
 | invitation-panes-025 | add-action-has-divider | Inspect the "Add users" action | `dividerBefore` is `true` |
@@ -213,6 +255,11 @@ differs between the three panes is entirely the *data* each supplies to
 | invitation-panes-027 | forwards-onadd | `AddUsersModal` invokes `onAdd(users)` | The pane's `onAdd` prop is called with `users` |
 | invitation-panes-028 | forwards-send-busy | Render `InvitationPendingUsersPane` with `sendBusy=true` | `SendInvitationModal` receives `busy=true` |
 | invitation-panes-029 | forwards-add-busy | Render `InvitationPendingUsersPane` with `addBusy=true` | `AddUsersModal` receives `busy=true` |
+| invitation-panes-030 | shows-delete-confirm-copy | Inspect `InvitationRequestsPane`'s `deleteConfirm` | `{ title: "Delete requests?", description: "This removes the selected invitation requests." }` |
+| invitation-panes-031 | shows-delete-confirm-copy | Inspect `InvitationPendingUsersPane`'s `deleteConfirm` | `{ title: "Delete pending users?", description: "This removes the selected pending users." }` |
+| invitation-panes-032 | shows-delete-confirm-copy | Inspect `InvitationInvitesPane`'s `deleteConfirm` | `{ title: "Delete invites?", description: "This removes the selected sent invites." }` |
+| invitation-panes-033 | requests-and-pending-show-source-and-note | Select a pending-user row with `lastSource="referral"`, `lastNote="thanks"` | Detail shows "Source: referral" and "Note from user: thanks" above the notes/history output |
+| invitation-panes-034 | pending-null-dates-render-dash | Render `InvitationPendingUsersPane` with a row whose `lastRequestDate` and `lastInviteSentDate` are both `null` | Both columns render "—" |
 
 ## Edge Cases
 
@@ -232,17 +279,25 @@ differs between the three panes is entirely the *data* each supplies to
   check only), so an empty-string `lastNote` renders as blank, not `—` — the
   two panes are NOT symmetric here even though their detail layout looks the
   same.
+- **Remount-key collision**: `SendInvitationModal`'s `key` is built from the
+  seed's joined `emails` and `phones` (`remounts-send-modal-on-reseed`). Two
+  different selections that resolve to the same email/phone set — or two
+  selections that both have no email and no phone at all — produce the same
+  key, so the modal does not remount between them and stale edits from the
+  first selection can leak into the second; the source places no additional
+  disambiguator (e.g. the seed's `ids`) on the key.
+- **Error states**: The one error path the source defines is `onSend`
+  rejecting: `.then(() => setSendOpen(false), () => undefined)` discards the
+  rejection reason entirely — no error message, log, or re-throw — and only
+  leaves the modal open (see `keeps-send-modal-open-on-reject`,
+  `reports-send-rejection-reason`, and Design Decisions). `onDelete` and
+  `onAdd` are synchronous `void` callbacks in this file; it performs no error
+  handling around them, so any failure handling for those two happens in the
+  caller's own implementation, outside this file.
 - **Concurrent access**: Not applicable — traced. `notesForId`, `sendOpen`,
   `sendSeed`, and `addOpen` are single-writer `React.useState` values updated
   only from this component's own event handlers on the main thread; the file
   defines no shared or cross-session mutable state.
-- **Error states**: The one error path the source defines is `onSend`
-  rejecting: `.then(() => setSendOpen(false), () => undefined)` discards the
-  rejection reason entirely — no error message, log, or re-throw — and only
-  leaves the modal open (see `keeps-send-modal-open-on-reject` and Design
-  Decisions). `onDelete` and `onAdd` are synchronous `void` callbacks in this
-  file; it performs no error handling around them, so any failure handling for
-  those two happens in the caller's own implementation, outside this file.
 - **Offline/disconnected state**: Not applicable — traced. The file performs no
   network access itself (per its own doc comment, "the shared blocks never
   fetch"); `rows`, `onDelete`, `onSend`, and `onAdd` are all caller-supplied, so
@@ -311,22 +366,35 @@ or translation lookup anywhere in `invitation-panes.tsx`.
 
 | String Key | Default (en) | Context |
 |-----------|-------------|---------|
-| — | "Loading…" | Loading placeholder (all panes) |
-| — | "Admin notes" | Toolbar action label (all panes) |
-| — | "Send invitation" | Toolbar action label (Pending Users only) |
-| — | "Add users" | Toolbar action label (Pending Users only) |
-| — | "No invitation requests." | `emptyLabel` (Requests) |
-| — | "No pending users." | `emptyLabel` (Pending Users) |
-| — | "No invites sent." | `emptyLabel` (Invites) |
-| — | "Delete requests?" / "This removes the selected invitation requests." | `deleteConfirm` title/description (Requests) |
-| — | "Delete pending users?" / "This removes the selected pending users." | `deleteConfirm` title/description (Pending Users) |
-| — | "Delete invites?" / "This removes the selected sent invites." | `deleteConfirm` title/description (Invites) |
-| — | "User #", "Requested" | Requests-only column headers (Name/Phone/Email are shared) |
-| — | "Invited", "Requests", "Last request", "Last invite" | Pending-Users-only column headers |
-| — | "Sent by", "Sent" | Invites-only column headers |
-| — | "Source:", "Note to the team:" | Requests detail labels |
-| — | "Source:", "Note from user:" | Pending Users detail labels |
-| — | "—" | Fallback text for a null/empty `lastRequestDate`, `lastInviteSentDate`, or `note`/`lastNote` (see Edge Cases for the two panes' differing fallback rule) |
+| `loading-message` | "Loading…" | Loading placeholder (all panes) |
+| `admin-notes-action` | "Admin notes" | Toolbar action label (all panes) |
+| `send-invitation-action` | "Send invitation" | Toolbar action label (Pending Users only) |
+| `add-users-action` | "Add users" | Toolbar action label (Pending Users only) |
+| `requests-empty-label` | "No invitation requests." | `emptyLabel` (Requests) |
+| `pending-empty-label` | "No pending users." | `emptyLabel` (Pending Users) |
+| `invites-empty-label` | "No invites sent." | `emptyLabel` (Invites) |
+| `requests-delete-confirm-title` | "Delete requests?" | `deleteConfirm.title` (Requests) |
+| `requests-delete-confirm-description` | "This removes the selected invitation requests." | `deleteConfirm.description` (Requests) |
+| `pending-delete-confirm-title` | "Delete pending users?" | `deleteConfirm.title` (Pending Users) |
+| `pending-delete-confirm-description` | "This removes the selected pending users." | `deleteConfirm.description` (Pending Users) |
+| `invites-delete-confirm-title` | "Delete invites?" | `deleteConfirm.title` (Invites) |
+| `invites-delete-confirm-description` | "This removes the selected sent invites." | `deleteConfirm.description` (Invites) |
+| `column-name` | "Name" | Column header, shared by all three panes |
+| `column-phone` | "Phone" | Column header, shared by Requests and Pending Users |
+| `column-email` | "Email" | Column header, shared by all three panes |
+| `column-user-number` | "User #" | Column header (Requests only) |
+| `column-requested` | "Requested" | Column header (Requests and Pending Users) |
+| `column-invited` | "Invited" | Column header (Pending Users only) |
+| `column-request-count` | "Requests" | Column header (Pending Users only) |
+| `column-last-request` | "Last request" | Column header (Pending Users only) |
+| `column-last-invite` | "Last invite" | Column header (Pending Users only) |
+| `column-sent-by` | "Sent by" | Column header (Invites only) |
+| `column-sent` | "Sent" | Column header (Invites only) |
+| `requests-source-label` | "Source:" | Detail label, Requests (`r.source`) |
+| `requests-note-label` | "Note to the team:" | Detail label, Requests (`r.note`) |
+| `pending-source-label` | "Source:" | Detail label, Pending Users (`u.lastSource`) |
+| `pending-note-label` | "Note from user:" | Detail label, Pending Users (`u.lastNote`) |
+| `empty-value-dash` | "—" | Fallback text for a null/empty `lastRequestDate`, `lastInviteSentDate`, or `note`/`lastNote` (see Edge Cases for the two panes' differing fallback rule) |
 
 ## Accessibility Options
 
@@ -413,8 +481,10 @@ discarded with `() => undefined`, not logged (see Design Decisions).
 - **WinUI 3**: Model each pane as a page or `UserControl` hosting a `ListView`
   (or the Community Toolkit's `DataGrid`) bound to an
   `ObservableCollection<Row>`, with the master/detail split via `TwoPaneView`
-  (mirroring `ResizableSplit`'s peer layout) or the `ListDetailsView` control's
-  built-in adaptive behavior. Reproduce the toolbar with a `CommandBar`'s
+  (mirroring the peer layout of `ResizableSplit`,
+  agenticdevelopertoolkit://recipes/resizable-split) or the `ListDetailsView`
+  control's built-in adaptive behavior. Reproduce the toolbar with a
+  `CommandBar`'s
   `AppBarButton`s for "Admin notes" / "Send invitation" / "Add users", each
   `IsEnabled` bound to `SelectedItems.Count > 0` (visual state via
   `VisualStateManager`, e.g. `SelectionEmpty`/`SelectionNonEmpty` states) to
@@ -473,12 +543,27 @@ Approved: pending
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [artifact-formatting](agenticdevelopercookbook://compliance/recipe-quality#artifact-formatting) | passed | recipe-quality |
-| [no-raw-hex-no-important](agenticdevelopercookbook://compliance/ui-guidelines#no-raw-hex-no-important) | passed | ui-guidelines |
-| [composes-shared-primitives-only](agenticdevelopercookbook://compliance/ui-guidelines#composes-shared-primitives-only) | passed | ui-guidelines |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [data-minimization](agenticdevelopercookbook://compliance/privacy-and-data#data-minimization) | passed | Privacy & Data |
+| [no-pii-in-logs](agenticdevelopercookbook://compliance/privacy-and-data#no-pii-in-logs) | passed | Privacy & Data |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
+| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
+| [explicit-error-handling](agenticdevelopercookbook://compliance/best-practices#explicit-error-handling) | failed | Best Practices |
+
+Statuses rest on this file's own sections: Accessibility documents that
+`passes-required-aria-label` is this file's one direct, forced contribution
+while every other interactive/semantic element is delegated (partial); Privacy
+and Logging show the file collects, stores, transmits, and logs nothing of its
+own (passed); Localization shows every user-facing string is hardcoded with no
+i18n key or lookup (failed); Overview shows data-fetching, persistence, and the
+notes/history UI are all pushed to the caller, leaving this file pure
+presentation (passed); and Edge Cases/Design Decisions show the `onSend`
+rejection reason is discarded via `() => undefined` with no log or rethrow
+(failed, see `reports-send-rejection-reason`).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from `invitation-panes.tsx` (InvitationRequestsPane, InvitationPendingUsersPane, InvitationInvitesPane). |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: named the exact per-pane Source/Note labels and fields, added delete-confirm-copy and null-date-dash requirements plus a SHOULD requirement for reporting the send-rejection reason, added a remount-key-collision edge case and tightened vector 022, added missing test vectors, reconciled Appearance's class list with Accessibility Options, filled in Localization string keys and the shared Name/Phone/Email row, linked the WinUI 3 ResizableSplit mention, stated date columns render as received, and replaced the Compliance table with real catalog checks. |

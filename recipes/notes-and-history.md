@@ -1,13 +1,13 @@
 ---
 id: b2c3bfad-cfd1-4a0f-bfbf-89f5d3712700
-title: NotesAndHistory
+title: Notes and History
 domain: agentictoolkit://recipes/notes-and-history
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
-created: '2026-09-23'
-modified: '2026-09-23'
+created: 2026-09-23
+modified: 2026-09-23
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -40,6 +40,22 @@ itself never fetches anything. Notes and history are independent: each has its
 own optional loading flag, so a slow history fetch never withholds
 already-loaded notes, and vice versa.
 
+## Types
+
+- `AdminNote` (from `invitations-types.ts`): `{ id: string; content: string;
+  author: string; addedDate: string; modifiedDate: string; subjectTable:
+  string; subjectId: string }`. The component reads only `id`, `content`,
+  `author`, and `modifiedDate`; `addedDate`, `subjectTable`, and `subjectId`
+  exist on the type but are not rendered here.
+- `HistoryEntry` (from `invitations-types.ts`): `{ id: string; actor: string;
+  action: string; timestamp: string }`. The component reads all four fields.
+- Date formatting: `modifiedDate` and `timestamp` arrive as plain `YYYY-MM-DD`
+  strings, already formatted before this component ever sees them —
+  `toAdminNote`/`toHistoryEntry` in `invitations-types.ts` produce them via
+  `updatedAt.slice(0, 10)` / `createdAt.slice(0, 10)`. `NotesAndHistory` MUST
+  NOT parse, reformat, or re-localize either field; it renders whatever
+  string arrives on the prop.
+
 ## Behavioral Requirements
 
 - **renders-notes-section**: The component MUST render an "Admin notes"
@@ -61,13 +77,15 @@ already-loaded notes, and vice versa.
   `history` is empty, the component MUST render "No history." instead of a
   list.
 - **notes-list-rendering**: WHEN `notesLoading` is not `true` and `notes` is
-  non-empty, the component MUST render one list item per entry in `notes`,
-  and each item MUST display that note's `content`, `author`, and
-  `modifiedDate`.
+  non-empty, the component MUST render one list item per entry in `notes`.
+  Each item MUST display that note's `content` on its own line, followed by
+  a line reading `author · modifiedDate` — the note's `author` and
+  `modifiedDate` joined by a middle dot (`·`) with one space on each side.
 - **history-list-rendering**: WHEN `historyLoading` is not `true` and
   `history` is non-empty, the component MUST render one list item per entry
-  in `history`, and each item MUST display that entry's `timestamp`,
-  `actor`, and `action`.
+  in `history`. Each item MUST read `timestamp — actor action` — the
+  entry's `timestamp` set off by an em dash (`—`) with one space on each
+  side, followed by `actor` and `action` separated by a single space.
 - **preserves-source-order**: The component MUST render notes and history
   list items in the same order as the `notes`/`history` arrays supplied by
   the caller; it MUST NOT sort or otherwise reorder them.
@@ -156,7 +174,7 @@ already-loaded notes, and vice versa.
 | notes-and-history-005 | history-empty-message | `historyLoading=false`, `history=[]` | History section renders "No history." and no list |
 | notes-and-history-006 | notes-list-rendering, preserves-source-order | `notes=[noteA(id:"1"), noteB(id:"2")]`, `notesLoading=false` | Two list items render in array order; the first shows `noteA.content` and "`noteA.author` · `noteA.modifiedDate`"; the second shows `noteB`'s fields |
 | notes-and-history-007 | history-list-rendering, preserves-source-order | `history=[entryA(id:"1"), entryB(id:"2")]`, `historyLoading=false` | Two list items render in array order; each reads "`timestamp` — `actor` `action`" |
-| notes-and-history-008 | no-internal-data-fetching | Render with any props while monitoring network activity (e.g. a mocked `fetch`/XHR) | Zero network requests originate from the component during render or re-render |
+| notes-and-history-008 | no-internal-data-fetching | Stub `window.fetch` and `XMLHttpRequest` to throw if invoked, then render the component with any valid `notes`/`history`/loading props and re-render it with new props | Both the render and the re-render complete without throwing, and the `fetch`/`XMLHttpRequest` stubs are never called |
 | notes-and-history-009 | loading-props-default-to-false | `notesLoading` and `historyLoading` both omitted (`undefined`); `notes=[]`, `history=[]` | Both sections render their empty messages ("No admin notes.", "No history."), not "Loading…" |
 
 ## Edge Cases
@@ -189,9 +207,13 @@ already-loaded notes, and vice versa.
   `history`/the loading flags reach this component.
 - Duplicate `id` values: Source keys each list item by `id`
   (`key={n.id}`/`key={h.id}`) with no uniqueness check or de-duplication.
-  The component MUST NOT de-duplicate by `id` — behavior for a duplicate
-  `id` is whatever React's list-key handling does, not something this
-  component guards against.
+  Unique `id`s within `notes` and within `history` are a caller
+  precondition, not something this component validates. WHEN that
+  precondition is violated, the component still performs no de-duplication;
+  implementations SHOULD emit a dev-mode-only warning when they detect a
+  duplicate `id` (mirroring React's own duplicate-key warning) rather than
+  silently rendering whatever a keyed-list collision resolves to on that
+  platform.
 - Empty-string field values: An `AdminNote` with `content: ""` or a
   `HistoryEntry` with `action: ""` still counts as populated (array length
   `> 0`) and MUST render as a list item with a blank content/action
@@ -219,10 +241,17 @@ in `notes-and-history.tsx`).
 
 ## Localization
 
-Not applicable: every user-facing string ("Admin notes", "Loading…", "No
-admin notes.", "History", "No history.") is a hardcoded English literal in
-JSX; source calls no translation function (no `t()`, `useTranslation`, or
-`FormattedMessage`), so there are no localizable string keys to document.
+| String Key | Default (en) | Context |
+|-----------|-------------|---------|
+| `notes-and-history.admin-notes-heading` | Admin notes | `<h4>` heading above the notes section |
+| `notes-and-history.loading` | Loading… | Shown in place of either section's list/empty message while that section's loading flag is `true` |
+| `notes-and-history.no-admin-notes` | No admin notes. | Shown when `notesLoading` is not `true` and `notes` is empty |
+| `notes-and-history.history-heading` | History | `<h4>` heading above the history section |
+| `notes-and-history.no-history` | No history. | Shown when `historyLoading` is not `true` and `history` is empty |
+
+Source hardcodes all five strings as English JSX literals with no
+translation call (no `t()`, `useTranslation`, or `FormattedMessage`); the
+keys above are what an implementation would externalize them to.
 
 ## Accessibility Options
 
@@ -264,14 +293,6 @@ effect to log.
 
 ## Platform Notes
 
-- **React/Web**: Source file
-  `packages/web/packages/adh-ui/src/blocks/notes-and-history.tsx`. A plain
-  function component (`ReactElement`, no `"use client"` directive, no
-  hooks) that consumes `AdminNote`/`HistoryEntry` from `../lib/
-  invitations-types`. Two sibling `<section>`s in a `flex flex-col gap-4`
-  container; each section is a ternary chain (`loading ? … : empty ? … :
-  list`) styled with Tailwind utilities and the `apt-*` design-token
-  vocabulary — no CSS modules, no styled-components.
 - **SwiftUI**: A `VStack(alignment: .leading, spacing: 16)` holding two
   child `VStack`s (one per section), each starting with a small,
   semibold, uppercase `Text` header. Within each child, switch on
@@ -287,6 +308,14 @@ effect to log.
   (loading, list.isEmpty()): a "Loading…" `Text`, a "No admin notes."/"No
   history." `Text`, or a `Column` (or `LazyColumn` for very large lists)
   built with `items(notes)`/`items(history)` rendering each row.
+- **React/Web**: Source file
+  `packages/web/packages/adh-ui/src/blocks/notes-and-history.tsx`. A plain
+  function component (`ReactElement`, no `"use client"` directive, no
+  hooks) that consumes `AdminNote`/`HistoryEntry` from `../lib/
+  invitations-types`. Two sibling `<section>`s in a `flex flex-col gap-4`
+  container; each section is a ternary chain (`loading ? … : empty ? … :
+  list`) styled with Tailwind utilities and the `apt-*` design-token
+  vocabulary — no CSS modules, no styled-components.
 - **AppKit/UIKit**: A vertical `UIStackView` (spacing 16) with two child
   stack views, each headed by a `UILabel` styled as small, semibold,
   uppercase (UIKit has no built-in `text-transform`, so uppercase the
@@ -308,51 +337,89 @@ effect to log.
   ("NotesState"/"HistoryState" with states "Loading"/"Empty"/"Populated"),
   driven by two independent `bool` `x:Bind` properties (`NotesLoading`,
   `HistoryLoading`) — mirroring the source's two separate loading flags
-  rather than one shared loading state. Note item template: a `Border
-  CornerRadius="6" BorderThickness="1"
+  rather than one shared loading state. Loading and empty `TextBlock`s use
+  `Foreground="{ThemeResource TextFillColorTertiaryBrush}"` (mapping the
+  source's dim `apt-text-dim`), and body-content `TextBlock`s use
+  `Foreground="{ThemeResource TextFillColorPrimaryBrush}"` (mapping
+  `apt-text`). Note item template: a `Border CornerRadius="6"
+  BorderThickness="1" Padding="8"
+  BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
   Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"`
-  wrapping a `StackPanel` with the content `TextBlock` and a secondary,
-  muted `TextBlock` reading "author · modifiedDate". History item
-  template: a single `TextBlock` with a muted inline `Run` for the
-  timestamp followed by a plain run reading " — actor action" — no
-  `Border`, matching the source's unstyled history rows.
+  wrapping a `StackPanel` with the content `TextBlock`
+  (`TextFillColorPrimaryBrush`) and a secondary, muted `TextBlock`
+  (`TextFillColorSecondaryBrush`, mapping `apt-text-muted`) reading
+  "author · modifiedDate". History item template: a single `TextBlock`
+  with a muted (`TextFillColorSecondaryBrush`) inline `Run` for the
+  timestamp followed by a plain (`TextFillColorPrimaryBrush`) run reading
+  " — actor action" — no `Border`, matching the source's unstyled history
+  rows.
 
 ## Design Decisions
 
-- Decision: Give notes and history independent loading flags
+- **Decision**: Give notes and history independent loading flags
   (`notesLoading`, `historyLoading`) rather than one combined loading
   flag.
-  Rationale: The source comment states each section "has its own loading
+  **Rationale**: The source comment states each section "has its own loading
   flag — a slow history fetch never withholds already-loaded notes." A
   single shared flag would force both sections to wait on the slower of
   the two fetches.
-  Approved: pending
-- Decision: Keep the component purely presentational, with no internal
+  **Approved**: pending
+- **Decision**: Keep the component purely presentational, with no internal
   data fetching, caching, or state management.
-  Rationale: The source comment states "the caller fetches the data
+  **Rationale**: The source comment states "the caller fetches the data
   (react-query lives in the app, never here)." This keeps the block reusable
   by any caller regardless of its data-fetching strategy.
-  Approved: pending
-- Decision: Render admin notes as bordered/background cards
+  **Approved**: pending
+- **Decision**: Render admin notes as bordered/background cards
   (`rounded-md border ... bg-apt-surface-2/40 p-2`) while history entries
   render as plain, unstyled text lines.
-  Rationale: Notes carry free-form, user-authored content that benefits
+  **Rationale**: Notes carry free-form, user-authored content that benefits
   from a visually distinct container; history entries are terse, uniform
   log lines that read better as a compact, unadorned list.
-  Approved: pending
+  **Approved**: pending
+- **Decision**: Fix each section's heading at `<h4>` rather than exposing a
+  configurable heading-level prop.
+  **Rationale**: Source hardcodes `<h4>` for both "Admin notes" and
+  "History" with no prop controlling it; `NotesAndHistory` is always
+  composed as a sub-section of a larger detail panel, so its heading depth
+  is assumed rather than negotiated with the caller. Accessibility
+  tradeoff: a caller whose surrounding structure doesn't already place an
+  `<h3>` (or shallower) immediately above this block will produce a
+  skipped heading level for assistive-technology heading navigation — see
+  **renders-notes-section**/**renders-history-section**.
+  **Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [no-raw-hex-or-important](agenticdevelopercookbook://compliance/ui-guidelines#no-raw-hex-or-important) | passed | ui-guidelines |
-| [components-use-shared-tokens](agenticdevelopercookbook://compliance/ui-guidelines#components-use-shared-tokens) | passed | ui-guidelines |
-| [presentational-components-are-prop-driven](agenticdevelopercookbook://compliance/architecture#presentational-components-are-prop-driven) | passed | architecture |
-| [async-status-messages-announced](agenticdevelopercookbook://compliance/accessibility#async-status-messages-announced) | needs-review | accessibility |
-| [async-error-state-defined](agenticdevelopercookbook://compliance/error-handling#async-error-state-defined) | needs-review | error-handling |
+| [platform-theming](agenticdevelopercookbook://compliance/platform-compliance#platform-theming) | passed | Platform Compliance |
+| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
+| [dynamic-type-support](agenticdevelopercookbook://compliance/accessibility#dynamic-type-support) | partial | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [semantic-markup](agenticdevelopercookbook://compliance/accessibility#semantic-markup) | partial | Accessibility |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+| [locale-aware-formatting](agenticdevelopercookbook://compliance/internationalization#locale-aware-formatting) | partial | Internationalization |
+
+`platform-theming`/`separation-of-concerns` pass on every color in source
+using the `apt-*` token vocabulary with no raw hex value or `!important`,
+and on the component containing no data-fetching, caching, or
+state-management code (see Design Decisions). The three accessibility
+checks are `partial`: source uses relative-unit Tailwind text utilities and
+semantic `<section>`/`<h4>` markup with no incorrect ARIA, but neither
+Dynamic Type behavior nor token contrast ratios are verifiable from source
+alone, and the missing `aria-live` wiring for the loading-to-populated
+transition (see Accessibility: Announce state changes) is a real gap.
+`string-externalization`/`no-hardcoded-strings` fail because all five
+strings are English JSX literals with no translation call;
+`locale-aware-formatting` is `partial` because `modifiedDate`/`timestamp`
+arrive pre-formatted from `invitations-types.ts` (see Types) and the
+component itself performs no formatting of its own.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for NotesAndHistory, covering independent per-section loading/empty/populated states, source-fidelity edge cases, and two open accessibility/error-handling questions for review. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: retitled to a human-readable form; added a Types section documenting `AdminNote`/`HistoryEntry` fields and date-formatting ownership; tied the notes/history list-rendering requirements and test vectors to their exact separators; reworded the duplicate-`id` edge case as a caller precondition instead of a MUST NOT; externalized the five hardcoded strings as localization keys; made test vector 008 a concrete fetch/XHR stub; reordered Platform Notes and filled in WinUI padding, border, and token mappings; bolded Design Decision labels and added one for the fixed heading level; replaced the Compliance table's non-catalog check citations with real cookbook compliance checks and sourced statuses; and switched `created`/`modified` to bare ISO dates. |

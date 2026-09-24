@@ -3,7 +3,7 @@ id: 96bc198e-c726-476a-bc4a-ddc1d5c0c2f8
 title: DeleteEntitySection
 domain: agentictoolkit://recipes/delete-entity-section
 type: recipe
-version: 1.2.0
+version: 1.3.0
 status: review
 language: en
 created: '2026-07-03'
@@ -51,7 +51,7 @@ a destructive Delete button. Deleting is gated behind a **two-phase confirm dial
    entity's data (including the named `childEntities`) and asks "Do you wish to
    proceed?" (Cancel / Yes).
 2. **Type-to-confirm** — the user must type the entity's exact identifier
-   (`confirmValue`, the rdid) into an input; the "Permanently Delete" button enables
+   (`confirmValue`, the entity's unique identifier) into an input; the "Permanently Delete" button enables
    **only** on an exact, case-sensitive, untrimmed match before the delete runs.
 
 While the delete is in flight the dialog cannot be dismissed, and a thrown error
@@ -71,6 +71,12 @@ type-to-confirm field, `autoFocus`, `autoComplete="off"`, `spellCheck={false}`),
 `Label` (`sr-only` label for that input), and the `lucide-react` `Trash2` /
 `TriangleAlert` glyphs.
 
+The frontmatter `ingredients` field points to `agenticdevelopertoolkit://recipes/…`
+domains rather than `ingredients/…` domains because Disclosure, Button, and
+Dialog are each documented as their own recipe in that toolkit, not as bare
+ingredients — this recipe composes those recipes, it doesn't restate them as
+ingredients of its own.
+
 ## Integration Requirements
 
 - **collapse-by-default**: The section MUST render its `Disclosure` collapsed
@@ -84,6 +90,12 @@ type-to-confirm field, `autoFocus`, `autoComplete="off"`, `spellCheck={false}`),
 - **open-warn-phase-first**: Activating the Delete button MUST open the confirm
   dialog on the acknowledge ("warn") phase, describing the cascade through
   `childEntities` and asking whether to proceed.
+- **select-article-from-first-letter**: The warn-phase body MUST prefix the
+  lowercased `entityNoun` with "an" when `entityNoun`'s first character (after
+  trimming) is a vowel (case-insensitive `/^[aeiou]/i`), and "a" otherwise —
+  e.g. "an ecosystem", "a bucket". This is a literal first-letter check, not a
+  phonetic one, so it also reads "an user" for `entityNoun="User"` and "a hour"
+  for `entityNoun="Hour"`.
 - **advance-to-confirm-on-yes**: Choosing "Yes" on the acknowledge phase MUST
   advance the dialog to the type-to-confirm phase and MUST NOT delete yet.
 - **require-exact-identifier**: The final delete button MUST remain disabled
@@ -91,17 +103,29 @@ type-to-confirm field, `autoFocus`, `autoComplete="off"`, `spellCheck={false}`),
 - **reject-empty-confirm-value**: When `confirmValue` is empty the final delete
   button MUST stay disabled even with an empty input, so a blank identifier never
   arms the delete.
-- **call-onconfirm-once-enabled**: Activating the enabled "Permanently Delete"
-  button MUST call `onConfirm` exactly once and MUST show a busy ("Deleting…") state
-  while it is pending.
+- **call-onconfirm-once-enabled**: Activating the enabled confirm button MUST
+  call `onConfirm` exactly once and MUST show a busy state built from
+  `actionVerb.gerund` + "…" (e.g. "Deleting…", or "Archiving…" when
+  `actionVerb.reversible` is `true`) while it is pending.
 - **lock-dialog-while-busy**: While `onConfirm` is pending, the section MUST NOT
   allow the dialog to be dismissed (no close button, no Escape/outside close) until
   it settles.
+- **disable-actions-while-busy**: While `onConfirm` is pending, the confirm-phase
+  CTA and the Cancel button MUST both be disabled, so a double-click on the CTA
+  cannot fire a second `onConfirm` call and Cancel cannot abandon an in-flight
+  delete.
 - **surface-error-inline**: If `onConfirm` rejects, the section MUST show the
   error message inside the dialog, clear the busy state, and keep the dialog open so
-  the user can retry.
+  the user can retry. When the rejection is not an `Error` instance (so no
+  `.message` is available), the section MUST fall back to "Failed to {imperative}
+  {noun}." built from `actionVerb.imperative` and `entityNoun`, both lowercased —
+  e.g. "Failed to archive organization."
 - **reset-on-cancel-or-success**: Cancelling, or a successful delete, MUST reset
-  the dialog back to a closed, empty, warn-phase state.
+  the dialog back to a closed, empty, warn-phase state. This reset is scoped to
+  the dialog only — it MUST NOT collapse the `Disclosure`, whose `disclosed` state
+  is independent of the dialog's outcome. A stale error from a previous failed
+  attempt MUST persist while the user edits the confirm input; only the next
+  `onConfirm` attempt clears it, per surface-error-inline.
 - **avoid-permanence-claims-when-reversible**: When `actionVerb.reversible` is
   `true`, the blurb, the warn phase, and the confirm phase MUST NOT render
   "Permanently", "cannot be undone", or "deletion" anywhere — every phrase that
@@ -127,14 +151,14 @@ type-to-confirm field, `autoFocus`, `autoComplete="off"`, `spellCheck={false}`),
 │ ▾  ⚠ Danger Zone            ← title text turns apt-red when open     │
 │                                                                     │
 │  Permanently delete this {noun} and all of its data. Cannot be undone.
-│  [ 🗑 Delete {Entity} ]      ← destructive-ghost                     │
+│  [ 🗑 Delete {entityNoun} ]      ← destructive-ghost                     │
 └─────────────────────────────────────────────────────────────────────┘
 
 Dialog · phase "warn"                    Dialog · phase "confirm"
 ┌───────────────────────────┐            ┌────────────────────────────────┐
-│ Delete {Entity}?          │            │ Permanently delete this {Entity}│
+│ Delete {entityNoun}?      │            │ Permanently delete this {entityNoun}│
 │ …deletes all data,        │            │ Enter "{confirmValue}" below.  │
-│ including {childEntities}.│    Yes →   │ [ type the exact rdid…       ] │
+│ including {childEntities}.│    Yes →   │ [ type the exact identifier…  ] │
 │ Do you wish to proceed?   │            │ (inline error, if any)         │
 │        [Cancel] [Yes]     │            │   [Cancel] [Permanently Delete]│
 └───────────────────────────┘            └────────────────────────────────┘
@@ -153,17 +177,17 @@ every permanence-asserting phrase change:
 │ ▾  ⚠ Danger Zone            ← still turns apt-red when open          │
 │                                                                     │
 │  Archive this {noun}. This can be undone later.
-│  [ 📦 Archive {Entity} ]     ← destructive-ghost; Archive glyph, not 🗑│
+│  [ 📦 Archive {entityNoun} ]  ← destructive-ghost; Archive glyph, not 🗑│
 └─────────────────────────────────────────────────────────────────────┘
 
 Dialog · phase "warn"                    Dialog · phase "confirm"
 ┌───────────────────────────┐            ┌────────────────────────────────┐
-│ Archive {Entity}?         │            │ Archive this {Entity}          │
+│ Archive {entityNoun}?     │            │ Archive this {entityNoun}      │
 │ …affects {childEntities}. │    Yes →   │ Enter "{confirmValue}" below.  │
-│ Do you wish to proceed?   │            │ [ type the exact rdid…       ] │
-│        [Cancel] [Yes]     │            │   [Cancel] [Archive {Entity}]  │
+│ Do you wish to proceed?   │            │ [ type the exact identifier…  ] │
+│        [Cancel] [Yes]     │            │   [Cancel] [Archive {entityNoun}]│
 └───────────────────────────┘            └────────────────────────────────┘
-                                          Archive {Entity}: disabled until
+                                          Archive {entityNoun}: disabled until
                                           typed === confirmValue (exact); shows
                                           "Archiving…" while busy. No "Permanently" /
                                           "cannot be undone" / "deletion" anywhere,
@@ -196,7 +220,7 @@ Dialog · phase "warn"                    Dialog · phase "confirm"
 |---|---|---|---|
 | T1 | collapse-by-default, accent-red-only-when-disclosed, keep-warning-glyph-gold | Initial render | Disclosure closed, neutral (no red); the ⚠ glyph is gold |
 | T2 | accent-red-only-when-disclosed | Open the disclosure | Red border/tint appears and the title text turns red; the ⚠ glyph stays gold |
-| T3 | open-warn-phase-first | Click "Delete {Entity}" | Dialog opens on the warn phase naming the `childEntities` cascade and asking to proceed |
+| T3 | open-warn-phase-first | Click "Delete {entityNoun}" | Dialog opens on the warn phase naming the `childEntities` cascade and asking to proceed |
 | T4 | advance-to-confirm-on-yes | Click "Yes" on the warn phase | Dialog advances to type-to-confirm; `onConfirm` not yet called |
 | T5 | require-exact-identifier | Type a near-match (wrong case / trailing space) | "Permanently Delete" stays disabled |
 | T6 | require-exact-identifier, call-onconfirm-once-enabled | Type the exact `confirmValue`, click Permanently Delete | Button enables; `onConfirm` called once; label shows "Deleting…" |
@@ -204,31 +228,40 @@ Dialog · phase "warn"                    Dialog · phase "confirm"
 | T8 | lock-dialog-while-busy | While `onConfirm` pending, try Escape / close / outside | Dialog stays open; no close affordance is shown |
 | T9 | surface-error-inline | `onConfirm` rejects | Error message shows inside the dialog; busy clears; dialog stays open for retry |
 | T10 | reset-on-cancel-or-success | Cancel, or resolve `onConfirm` | Dialog closes and resets to empty, warn-phase state |
-| T11 | avoid-permanence-claims-when-reversible | `actionVerb={{ imperative: "Archive", gerund: "Archiving", reversible: true }}` with a caller `description`; open, click Yes | Blurb, warn body, and confirm-phase copy all read "Archive"/"Archiving"; no "delete", "permanently", or "cannot be undone" anywhere in the flow |
-| T12 | avoid-permanence-claims-when-reversible | Same reversible `actionVerb`, no `description` override | The built-in fallback blurb itself reads "Archive this organization. This can be undone later." — no "permanently" or "cannot be undone"; confirm phase shows "Type {confirmValue} to confirm" (no "deletion") |
+| T11 | avoid-permanence-claims-when-reversible | `actionVerb={{ imperative: "Archive", gerund: "Archiving", reversible: true }}` with a caller `description`; open, click Yes | Blurb, warn body, and confirm-phase copy all read "Archive"/"Archiving"; no "Permanently", "cannot be undone", or "deletion" anywhere in the flow |
+| T12 | avoid-permanence-claims-when-reversible | Same reversible `actionVerb`, `entityNoun="organization"`, no `description` override | The built-in fallback blurb itself reads "Archive this organization. This can be undone later." — no "permanently" or "cannot be undone"; confirm phase shows "Type {confirmValue} to confirm" (no "deletion") |
 | T13 | swap-trigger-glyph-when-reversible | Reversible `actionVerb`; open the disclosure | Trigger button renders the `Archive` glyph (`svg.lucide-archive`); no `Trash2` glyph present |
 | T14 | swap-trigger-glyph-when-reversible | Default (no `actionVerb`); open the disclosure | Trigger button renders the `Trash2` glyph (`svg.lucide-trash-2`); no `Archive` glyph present |
 | T15 | call-onconfirm-once-enabled | Reversible `actionVerb`; reach confirm phase, type the exact `confirmValue`, click the CTA while `onConfirm` is pending | Busy label reads "Archiving…" (from `actionVerb.gerund`), never "Deleting…" |
-| T16 | surface-error-inline | Reversible `actionVerb`; `onConfirm` rejects a non-`Error` value | Inline error falls back to "Failed to archive organization." (lowercase `actionVerb.imperative`), since `e.message` never runs for a non-`Error` rejection |
+| T16 | surface-error-inline | Reversible `actionVerb`; `entityNoun="organization"`; `onConfirm` rejects a non-`Error` value | Inline error falls back to "Failed to archive organization." (lowercase `actionVerb.imperative`), since `e.message` never runs for a non-`Error` rejection |
+| T17 | disable-actions-while-busy, call-onconfirm-once-enabled | Reach confirm phase with the exact `confirmValue` typed; double-click the confirm CTA in quick succession | `onConfirm` is called exactly once; once `busy` is true both the CTA and Cancel are disabled, so the second click has no enabled target to hit |
+| T18 | select-article-from-first-letter | `entityNoun="Ecosystem"`, reach the warn phase | Warn body reads "an ecosystem" |
+| T19 | select-article-from-first-letter | `entityNoun="Bucket"`, reach the warn phase | Warn body reads "a bucket" |
 
 ## Edge Cases
 
 - Empty `confirmValue` guard: because the enable check requires `confirmValue.length
-  > 0`, an empty rdid never matches the initially-empty input and never arms the
-  delete.
+  > 0`, an empty identifier never matches the initially-empty input and never arms
+  the delete.
 - Match is exact and untrimmed: leading/trailing whitespace or a case difference in
   the typed value keeps the delete disabled — the user must type the identifier
   verbatim.
 - Mid-delete dismissal: `onOpenChange` ignores close requests while `busy`, and
   `DialogContent` hides its close (`showClose={!busy}`), so the user cannot abandon a
-  running delete.
+  running delete. The CTA and Cancel buttons are also disabled while `busy` (see
+  disable-actions-while-busy), so a double-click cannot fire a second call.
 - Failure path: a rejected `onConfirm` sets an inline error, clears `busy`, and
   leaves the typed value and open dialog intact so the user can retry without
-  re-typing from the warn phase.
+  re-typing from the warn phase. Editing the input afterward does not itself clear
+  the stale error — it persists until the next `onConfirm` attempt (see
+  reset-on-cancel-or-success).
 - Success path: `onConfirm` typically navigates the parent away; the section still
-  resets defensively so a re-mounted pane starts closed and empty.
-- `entityNoun` article: the warn copy picks "an" vs "a" from the noun's first letter
-  (e.g. "an Ecosystem", "a Bucket").
+  resets defensively so a re-mounted pane starts closed and empty. This reset never
+  collapses the `Disclosure` — `disclosed` is independent state (see
+  reset-on-cancel-or-success).
+- `entityNoun` article: see select-article-from-first-letter — the warn copy picks
+  "an" vs "a" purely from the noun's first letter, so it also misreads phonetic
+  exceptions like "user" or "hour".
 - Optional `description` overrides only the disclosed-section blurb; the dialog copy
   is derived from `entityNoun`/`childEntities`/`confirmValue`.
 
@@ -274,19 +307,27 @@ Dialog · phase "warn"                    Dialog · phase "confirm"
   375 / 768 / 1440. Shared across every focused-topic-detail settings route
   (`agentictoolkit://recipes/focused-topic-detail`), usually as the final
   group in a settings pane below the `FieldGroup`s.
-- **AppKit/UIKit**: On macOS, build the disclosure from an `NSDisclosureButton`
-  (or a custom bezel-style `NSButton`) toggling a subview's `isHidden`,
-  recoloring only the title `NSTextField` with `NSColor.systemRed` while
-  expanded; chain two `NSAlert`s for the two phases, the second carrying an
-  accessory `NSTextField` whose delegate (`controlTextDidChange`) enables the
-  alert's default `NSButton` only on an exact `String` equality against
-  `confirmValue`. On iOS, use a collapsible `UIStackView` section and two
-  chained `UIAlertController` (`.alert`) instances, the second built with
-  `addTextField` and a `.textDidChangeNotification` observer that gates the
-  confirm `UIAlertAction`'s `isEnabled` the same way. Block dismissal while busy
-  by setting `isModalInPresentation = true` (iOS) or ignoring the sheet's close
-  control (macOS) until the async delete settles, and swap the trash
-  `UIImage`/`NSImage` (`systemName: "trash"`) for `"archivebox"` when
+- **AppKit/UIKit**: On macOS, build the disclosure from an `NSButton` with
+  `bezelStyle = .disclosure` (there is no `NSDisclosureButton` class) toggling a
+  subview's `isHidden`, recoloring only the title `NSTextField` with
+  `NSColor.systemRed` while expanded. Present the acknowledge phase as an
+  `NSAlert` (Cancel/Yes), but present the type-to-confirm phase as its own sheet
+  window (`NSWindow` shown via `beginSheet(_:completionHandler:)`) rather than a
+  second chained `NSAlert` — `NSAlert.runModal` cannot represent an async busy
+  state (a disabled CTA with a "Deleting…" label) or a suppressed close control,
+  which a sheet's own view controller can. The sheet carries an `NSTextField`
+  whose delegate (`controlTextDidChange`) enables the confirm `NSButton` only on
+  an exact `String` equality against `confirmValue`, and disables both that
+  button and its Cancel button while busy. The two dialogs are never open at
+  once: the acknowledge `NSAlert` must finish (and be dismissed) before the
+  confirm sheet is presented. On iOS, use a collapsible `UIStackView` section and
+  a chained `UIAlertController` (`.alert`) for the acknowledge phase, then a
+  second `UIAlertController` built with `addTextField` and a
+  `.textDidChangeNotification` observer that gates the confirm `UIAlertAction`'s
+  `isEnabled` the same way, disabling both actions while busy. Block dismissal
+  while busy by setting `isModalInPresentation = true` (iOS) or omitting the
+  sheet's close control (macOS) until the async delete settles, and swap the
+  trash `UIImage`/`NSImage` (`systemName: "trash"`) for `"archivebox"` when
   `actionVerb.reversible` is `true`.
 - **WinUI 3**: Use an `Expander` (`IsExpanded="{x:Bind Disclosed, Mode=TwoWay}"`)
   for the Danger Zone, collapsed by default. Bind the `Header` `TextBlock`'s
@@ -300,15 +341,20 @@ Dialog · phase "warn"                    Dialog · phase "confirm"
   whose `TextChanged` handler sets `IsPrimaryButtonEnabled` from
   `string.Equals(textBox.Text, confirmValue, StringComparison.Ordinal) &&
   confirmValue.Length > 0` (reproducing require-exact-identifier and
-  reject-empty-confirm-value). In the `PrimaryButtonClick` handler, call
+  reject-empty-confirm-value). The two `ContentDialog`s are never shown
+  concurrently: the acknowledge dialog's `Hide()` completes before the confirm
+  dialog is shown. In the `PrimaryButtonClick` handler, call
   `args.GetDeferral()` before awaiting the delete, set
   `IsPrimaryButtonEnabled = false` and swap the button content for a
-  `ProgressRing` plus "Deleting…" text while the call is pending, and call
-  `deferral.Complete()` only once the awaited call settles — a `ContentDialog`
-  otherwise stays light-dismissible during an async `PrimaryButtonClick`, so the
-  deferral is what reproduces lock-dialog-while-busy. On failure, bind a
-  `TextBlock` to the caught message and make it visible instead of completing
-  the deferral, leaving the dialog open for retry (surface-error-inline). Swap
+  `ProgressRing` plus "Deleting…" text while the call is pending — a
+  `ContentDialog` otherwise stays light-dismissible during an async
+  `PrimaryButtonClick`, so the deferral is what reproduces
+  lock-dialog-while-busy. On success, call `deferral.Complete()` to let the
+  dialog close. On failure, bind a `TextBlock` to the caught message and make it
+  visible, set `args.Cancel = true` to keep the dialog open, then call
+  `deferral.Complete()` — completing the deferral either way is required, since
+  leaving it pending wedges the dialog; `args.Cancel = true` is what actually
+  keeps it open for retry (surface-error-inline). Swap
   the `FontIcon` glyph from the Segoe Fluent Icons trash glyph (`\uE74D`) to the
   archive glyph (`\uE7B8`) when `actionVerb.reversible` is `true`.
 
@@ -326,7 +372,8 @@ most destructive control; the red accent is earned by the user opening it.
 double-click can never delete.
 **Approved**: pending
 
-**Decision**: Require an exact, case-sensitive, untrimmed match of the rdid.
+**Decision**: Require an exact, case-sensitive, untrimmed match of the entity's
+unique identifier.
 **Rationale**: The identifier is unique and unambiguous; a fuzzy match would
 weaken the guard, and guarding the empty-`confirmValue` case prevents arming
 with no input at all.
@@ -344,6 +391,16 @@ re-typing.
 recruiting the red destructive accent before the user commits.
 **Approved**: pending
 
+**Decision**: Support a reversible `actionVerb` variant (e.g. Archive) that
+swaps every permanence-asserting phrase and the trigger glyph, while keeping
+the Danger Zone's red palette unconditional regardless of `reversible`.
+**Rationale**: A reversible action still belongs in the Danger Zone — it is
+destructive-adjacent and deserves the same visual weight and two-phase confirm
+ceremony — but its copy must never claim an irreversibility it doesn't have;
+decoupling the palette from `reversible` keeps the section's visual language
+consistent no matter which verb a caller passes.
+**Approved**: pending
+
 ## Compliance
 
 | Check | Status | Category |
@@ -358,6 +415,7 @@ recruiting the red destructive accent before the user commits.
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 1.3.0 | 2026-09-23 | Mike Fullerton | Lint pass: added disable-actions-while-busy and select-article-from-first-letter requirements with new test vectors (T17-T19), and extended call-onconfirm-once-enabled/surface-error-inline/reset-on-cancel-or-success to spell out the gerund-based busy label, the non-Error fallback message, and that a reset never collapses the Disclosure nor auto-clears a stale error; aligned T11's banned-phrase list with avoid-permanence-claims-when-reversible and set explicit `entityNoun` inputs on T12/T16; replaced the ad hoc `{Entity}` placeholder with `{entityNoun}` throughout; replaced the undefined "rdid" jargon with "the entity's unique identifier"; added a Design Decision for the reversible `actionVerb` variant and a note on why `ingredients` points to sibling recipes; corrected the WinUI 3 failure path (`args.Cancel = true` then `deferral.Complete()`) and the AppKit notes (no `NSDisclosureButton`; a sheet, not a chained `NSAlert`, for the type-to-confirm phase). |
 | 1.2.0 | 2026-09-23 | Mike Fullerton | Migrated `domain` to `agentictoolkit://` and added `approved-by`/`approved-date`; set `status: review` (no unresolved gaps); renamed requirement identifiers to subject-only kebab-case (dropped the `must-` prefix) across Integration Requirements and Integration Test Vectors; filled in all five Platform Notes bullets (SwiftUI, Compose, React/Web, AppKit/UIKit, WinUI 3), including concrete `Expander`/`ContentDialog`/deferral guidance for WinUI 3; reformatted Design Decisions into Decision/Rationale/Approved lines and Compliance checks into linked `agenticdevelopercookbook://compliance/...` IDs. |
 | 1.1.0 | 2026-08-04 | Mike Fullerton | Documented the `actionVerb.reversible` copy variant (Archive-style, non-destructive wording) across Integration Requirements, Layout, and Test Vectors T11-T16; fixed the stale `websites/shared/ui/...` source path in Platform Notes to `packages/web/packages/ui/...`. |
 | 1.0.0 | 2026-07-03 | Mike Fullerton | Initial recipe for the Danger-zone DeleteEntitySection with two-phase confirm. |

@@ -3,11 +3,11 @@ id: 071e67a8-54a7-4f8b-b747-e6384713efde
 title: RdidEditor
 domain: agentictoolkit://recipes/rdid-editor
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
-created: '2026-09-23'
-modified: '2026-09-23'
+created: 2026-09-23
+modified: 2026-09-23
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -23,9 +23,9 @@ tags:
 - rdid
 - identifier
 depends-on: []
-related: []
-references:
+related:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -54,7 +54,7 @@ whatever the caller decides.
 It composes two lower-tier shared components rather than building its own field
 shell: `Input` from `@agenticdevelopertoolkit/ui` (the shared form-control shell —
 border, radius, focus/invalid styling) for the editable leaf, and `FieldFootnote`
-from `@agenticdevelopertoolkit/adh-ui` for the shared hint/error slot beneath it.
+from `@agenticdevelopertoolkit/ui` for the shared hint/error slot beneath it.
 The caption above the control uses the shared `fieldCaptionClass` typography
 token (an "uppercase-mono caption," per the component's own prop doc) rather than
 a bespoke label style.
@@ -97,25 +97,32 @@ a bespoke label style.
 
 ## Appearance
 
-- **Corner radius**: `rounded-lg` (0.5rem / 8px) on the input, from the shared
-  `fieldShellClass`.
-- **Padding**: input `px-3 py-2` (0.75rem horizontal × 0.5rem vertical); root
-  stack `gap-1.5` (0.375rem) between label, field row, and footnote; prefix row
-  `gap-1` (0.25rem) between the `<code>` prefix and the input.
+RdidEditor sets its own styling only for the caption, the prefix `<code>`, and
+the row/stack spacing; the field's corner radius, padding, colors, border, and
+size all come from the shared `Input` shell (`fieldShellClass` plus `Input`'s
+own classes) and the shared `FieldFootnote` component — see the Overview.
+
+- **Corner radius**: none set by RdidEditor; the input's `rounded-lg` comes from
+  the shared `Input` shell.
+- **Padding**: root stack `gap-1.5` (0.375rem) between label, field row, and
+  footnote; prefix row `gap-1` (0.25rem) between the `<code>` prefix and the
+  input. The input's own `px-3 py-2` padding comes from the shared `Input`
+  component.
 - **Font**: label `font-mono text-[0.7rem] uppercase tracking-wider`
-  (`fieldCaptionClass`); prefix and input both `text-sm`; footnote
-  `font-mono text-[0.7rem]`.
-- **Background**: input `bg-apt-bg`; label, prefix, and footnote have no
-  background of their own.
-- **Foreground/Text**: label `text-apt-text-muted`; prefix `text-apt-text-muted`;
-  input text `text-apt-text`; hint footnote `text-apt-text-dim`; error footnote
-  `text-apt-red`.
-- **Border**: input `border border-apt-border`; `focus-visible:border-apt-gold`;
-  `aria-invalid:border-apt-red`. No border on the label, prefix, or footnote.
+  (`fieldCaptionClass`); prefix `text-sm text-apt-text-muted`, set directly on
+  the `<code>` element by RdidEditor. The input's text size and the footnote's
+  font come from `Input` and `FieldFootnote` respectively.
+- **Background**: none set by RdidEditor; the input's `bg-apt-bg` comes from the
+  shared `Input` shell.
+- **Foreground/Text**: label `text-apt-text-muted` (`fieldCaptionClass`); prefix
+  `text-apt-text-muted`, set directly by RdidEditor. Input text color and
+  hint/error footnote colors come from `Input` and `FieldFootnote`.
+- **Border**: none set by RdidEditor; the input's border, focus ring, and
+  invalid-state border/ring come from the shared `Input` shell.
 - **Shadow**: none — no shadow utility appears anywhere in the source.
-- **Min/Max size**: input `h-9` (2.25rem / 36px) fixed height, `w-full`,
-  `min-w-0`; the prefix `<code>` is `shrink-0` so the input absorbs remaining row
-  width. No maximum width is set by this component.
+- **Min/Max size**: the prefix `<code>` is `shrink-0` so the input absorbs
+  remaining row width. The input's fixed height, full width, and `min-w-0`
+  come from the shared `Input` component. No maximum width is set by RdidEditor.
 
 ## States
 
@@ -123,10 +130,10 @@ a bespoke label style.
 |-------|------------------|
 | Default (no prefix) | Label + full-width input; no footnote |
 | Prefix mode | Static `<code>` prefix, `shrink-0`, before the input |
-| Hint shown | Footnote renders `hint` in `text-apt-text-dim` |
-| Error shown | Footnote renders `error` in `text-apt-red` in place of `hint`; input gains `aria-invalid`, `aria-invalid:border-apt-red`, `aria-invalid:ring-2 ring-apt-red/25` |
-| Focused | Input gains `focus-visible:border-apt-gold` and `focus-visible:ring-2 ring-apt-gold/25` |
-| Disabled | Input gains `disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50` |
+| Hint shown | Footnote renders `hint`, styled by the shared `FieldFootnote` component |
+| Error shown | Footnote renders `error` in place of `hint`, styled by `FieldFootnote`; input gains `aria-invalid`, with its invalid border/ring supplied by the shared `Input` shell |
+| Focused | Input gains its focus ring, supplied by the shared `Input` shell |
+| Disabled | Input gains its disabled styling, supplied by the shared `Input` shell |
 | Pressed | Not applicable: a text input has no discrete pressed visual state — pointer-down produces focus, not a press. |
 | Loading | Not applicable: the source contains no async operation or loading flag; `RdidEditor` is a synchronous, controlled view. |
 
@@ -155,7 +162,8 @@ a bespoke label style.
   `aria-describedby` to `Input`. A screen-reader user therefore hears
   `aria-invalid` but has no guaranteed programmatic link to the error message
   itself. This would be resolved by adding an `errorId`/`aria-describedby` pair
-  to the component (or by a reviewer confirming the omission is intentional).
+  to the component (or by a reviewer confirming the omission is intentional;
+  tracked as a pending Design Decision below).
 - Minimum contrast ratio: NEEDS REVIEW: Not implemented in source. The prefix
   text (`text-apt-text-muted` on `bg-apt-bg`) is authored directly in this
   component, but the actual color values behind the `apt-*` tokens are resolved
@@ -185,6 +193,8 @@ a bespoke label style.
 | rdid-editor-011 | omits-invalid-attribute-without-error | `error` omitted | The rendered input has no `aria-invalid` attribute at all |
 | rdid-editor-012 | disables-input-when-disabled | `disabled={true}` | The rendered input has the native `disabled` attribute and rejects typed input |
 | rdid-editor-013 | supports-native-keyboard-input | Component focused via `Tab` | The input receives focus and accepts typed characters with no custom key interception |
+| rdid-editor-014 | generates-stable-input-id | `id` omitted; component re-rendered with a new `value` | The rendered `<input>`'s generated `id` is identical before and after the re-render |
+| rdid-editor-015 | shows-hint-below-input, shows-error-in-place-of-hint | `hint` and `error` both omitted | No footnote element renders below the input |
 
 ## Edge Cases
 
@@ -202,9 +212,16 @@ a bespoke label style.
   — the component's only lever over invalid input is displaying what it is
   told).
 - **Mixed-case paste**: pasting `ACME-Org` into the input fires the same
-  `onInput` handler as typing, so the full pasted value is lowercased before
+  `onChange` handler as typing, so the full pasted value is lowercased before
   `onChange` is called, not just newly typed characters (MUST, per
   `lowercases-input-on-change`).
+- **Uppercase character typed mid-value**: typing an uppercase letter in the
+  middle of an already-lowercase value (e.g. inserting `A` into `acme` to get
+  `aAcme`) still lowercases the whole value on the same `onChange` event (per
+  `lowercases-input-on-change`); because the resulting controlled value differs
+  from what the browser just wrote into the DOM, React resyncs the input's DOM
+  value on the next render and the caret moves to the end of the field rather
+  than staying at the edit point.
 - **Concurrent access**: not applicable — `RdidEditor` is a stateless, purely
   controlled view. It holds no value state of its own and performs no I/O, so
   there is no shared state for concurrent renders or events to race on.
@@ -257,9 +274,20 @@ contains no routing or URL-handling code.
 
 ## Localization
 
-Not applicable: every piece of display text (`label`, `placeholder`, `hint`,
-`error`) is supplied by the caller as a prop. The component defines no string
-literals of its own to key or translate.
+Every piece of display text (`label`, `placeholder`, `hint`, `error`) is
+supplied by the caller as a prop; the component defines no string literals of
+its own to key or translate.
+
+The one text-processing operation the component performs itself —
+`lowercases-input-on-change`'s `.toLowerCase()` — is a casing transform, and
+casing transforms are locale-sensitive: the same character can lowercase
+differently depending on locale (e.g. Turkish `İ`/`I`). Here that
+locale-sensitivity is deliberately not honored: the value being transformed is
+an rdid leaf, a machine-readable identifier the backend re-parses with a fixed,
+locale-invariant grammar (`SEGMENT_RE`), not user-facing prose, so it needs to
+lowercase identically no matter the editing user's OS locale. Plain
+`.toLowerCase()` (as opposed to `.toLocaleLowerCase()`) already gives exactly
+that here, since it applies Unicode's locale-independent default case folding.
 
 ## Accessibility Options
 
@@ -296,8 +324,9 @@ import).
 
 - **React/Web**: Source at
   `packages/web/packages/adh-ui/src/components/rdid-editor.tsx`. Composes
-  `Input` from `@agenticdevelopertoolkit/ui` (`packages/web/packages/ui/src/components/input.tsx`)
-  for the field shell and `FieldFootnote` from `@agenticdevelopertoolkit/adh-ui`
+  `Input` from `@agenticdevelopertoolkit/ui`
+  (`external/agenticdevelopertoolkit/packages/web/packages/ui/src/components/input.tsx`)
+  for the field shell and `FieldFootnote` from `@agenticdevelopertoolkit/ui`
   for the hint/error slot, plus `fieldCaptionClass` from
   `@agenticdevelopertoolkit/ui`'s typography module for the caption. It never
   imports the rdid grammar (`prefixFor`, `validateLeaf`) itself — the caller
@@ -352,33 +381,48 @@ import).
   inherited scope can never change after creation — the component's own doc
   comment states this explicitly — so the UI never offers an edit the backend
   would reject.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: Lowercase every keystroke inside the `onChange` handler, rather
   than leaving casing to the caller or flagging it only via `error`.
   **Rationale**: The rdid grammar (`SEGMENT_RE` in `rdid.ts`) only accepts
   lowercase segments; normalizing at input time keeps the `error` slot reserved
   for genuinely invalid characters or format rather than surprising the user
   with a case-mismatch error on an otherwise valid leaf.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: Share one footnote slot for `hint` and `error` (via
   `FieldFootnote`) instead of rendering both at once.
   **Rationale**: Matches `FieldFootnote`'s own designed precedence — error
   replaces hint, they are never shown together — so `RdidEditor` composes that
   component's contract rather than re-implementing or duplicating it.
-  **Approved: pending**
+  **Approved**: pending
+- **Decision**: Leave `FieldFootnote`'s `errorId` unset, so the rendered error
+  text is not linked to the input via `aria-describedby`.
+  **Rationale**: `FieldFootnote` exposes `errorId` precisely so a caller can
+  wire this link, but `RdidEditor` does not thread one through today; a
+  screen-reader user hears `aria-invalid` on the input without a guaranteed
+  programmatic path to the error text itself (see Accessibility).
+  **Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [no-raw-hex](agentictoolkit://compliance/ui-tokens#no-raw-hex) | passed | ui-tokens |
-| [accessible-label](agentictoolkit://compliance/accessibility#accessible-label) | passed | accessibility |
-| [keyboard-navigation](agentictoolkit://compliance/accessibility#keyboard-navigation) | passed | accessibility |
-| [contrast-ratio](agentictoolkit://compliance/accessibility#contrast-ratio) | needs-review | accessibility |
-| [touch-target-size](agentictoolkit://compliance/accessibility#touch-target-size) | needs-review | accessibility |
-| [error-announcement](agentictoolkit://compliance/accessibility#error-announcement) | needs-review | accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | partial | Accessibility |
+
+`screen-reader-support` is partial because the input's label is
+programmatically associated but the error text is never linked via
+`errorId`/`aria-describedby`; `keyboard-navigable` passes because the source
+attaches no custom key handlers to the native `<input>`; `contrast-ratio` and
+`touch-target-size` are partial because the source authors color tokens and a
+fixed `h-9` height without resolving them against an actual theme or measured
+touch target.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: correct FieldFootnote's package attribution, deduplicate Appearance/States against the shared Input shell, correct the Input source path, align onChange/onInput naming, move the cookbook reference to related, use bare frontmatter dates, fix Design Decision approval formatting, rebuild Compliance against real catalog checks, add a stable-id re-render vector and a no-footnote vector, and document the mid-value lowercase caret jump |

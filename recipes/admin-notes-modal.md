@@ -3,7 +3,7 @@ id: 589babce-b66e-447f-8049-f81af380bbef
 title: AdminNotesModal
 domain: agentictoolkit://recipes/admin-notes-modal
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -25,6 +25,7 @@ depends-on:
 - agenticdevelopertoolkit://recipes/dialog
 - agenticdevelopertoolkit://recipes/list-with-details-pane
 - agenticdevelopertoolkit://recipes/button
+- agenticdevelopertoolkit://recipes/textarea
 related: []
 references: []
 approved-by: ''
@@ -43,7 +44,17 @@ private staged copy (`working`) from `notes`, lets the admin add, edit, and
 delete notes against that staged copy through a `ListWithDetailsPane` and a
 nested note editor, and only reports the result to the caller when Save is
 activated. React-query and the actual persistence mutation live in the caller,
-never in this component.
+never in this component. The "New note" control is supplied to
+`ListWithDetailsPane` via its `actions` prop
+(`{ id: "new", label: "New note", onClick: openNewNote }`); `ListWithDetailsPane`
+renders it and owns its placement — see
+`agenticdevelopertoolkit://recipes/list-with-details-pane`.
+
+`AdminNote` (imported from `../lib/invitations-types`, not defined in this
+file) is used here with exactly seven fields: `id`, `content`, `author`,
+`addedDate`, `modifiedDate`, `subjectTable`, and `subjectId`, all `string`.
+`addedDate` and `modifiedDate` are ISO 8601 calendar dates in `YYYY-MM-DD`
+form, produced by `new Date().toISOString().slice(0, 10)`.
 
 ## Behavioral Requirements
 
@@ -89,13 +100,22 @@ never in this component.
   MUST be disabled whenever the trimmed draft is empty.
 - **computes-dirty-by-structural-comparison**: The outer Save control's
   enabled state MUST be derived from a structural, order-sensitive comparison
-  of the working list against the current `notes` prop.
+  of the working list against the current `notes` prop, considering every
+  `AdminNote` field (`id`, `content`, `author`, `addedDate`, `modifiedDate`,
+  `subjectTable`, `subjectId`) of every note.
 - **disables-outer-save-when-not-dirty-or-busy**: The outer Save control MUST
   be disabled when the working list is not dirty relative to `notes`, or when
   `busy` is `true`.
 - **submits-id-and-content-only**: Activating the outer Save control MUST call
   `onSave` with one entry per note in the working list, each entry containing
-  only that note's `id` and `content`.
+  only that note's `id` and `content`. `onSave`'s type declares `id` optional,
+  but every entry this component submits always carries one: existing notes
+  keep their loaded `id`, and notes created during this session carry the
+  client-generated `note-`-prefixed `id` (see
+  **appends-new-note-on-editor-save**). A caller distinguishes an unpersisted
+  note from an existing one by testing for that `note-` prefix; the optional
+  type exists only to accommodate callers, not a case this component itself
+  produces.
 - **closes-without-confirmation**: Activating outer Cancel, or dismissing the
   outer dialog via Escape or its close control, MUST discard the staged
   working list and invoke `onClose`, regardless of whether the working list is
@@ -186,17 +206,21 @@ never in this component.
 | T6 | opens-edit-note-editor-seeded-with-content | Select a note, click "Edit" | Editor opens titled "Edit note" with the text field containing that note's content |
 | T7 | rejects-blank-editor-save | In the new-note editor, leave the field blank, click Save | Editor stays open; working list unchanged |
 | T8 | appends-new-note-on-editor-save | In the new-note editor, type "Hello", click Save | Working list gains one note with `content="Hello"`, `author` = the `author` prop, `addedDate`/`modifiedDate` = today, `subjectTable`/`subjectId` = `""` |
+| T8b | appends-new-note-on-editor-save | Open the new-note editor, wait, then click Save | The new note's `id` is generated at the moment Save is clicked, not when the editor was opened |
 | T9 | updates-existing-note-on-editor-save | Edit an existing note's content, click Save | That note's `content` and `modifiedDate` change; `id`, `author`, `addedDate`, `subjectTable`, `subjectId` are unchanged |
 | T10 | closes-editor-on-successful-save | Complete T8 or T9 | Editor closes; draft clears |
 | T11 | discards-draft-on-editor-cancel | Type into the editor, click Cancel | Editor closes; working list unchanged; no confirmation prompt appears |
+| T11b | discards-draft-on-editor-cancel | Type into the editor, dismiss via Escape or its close control | Editor closes; working list unchanged; no confirmation prompt appears |
 | T12 | removes-deleted-notes-from-working | Select a note, confirm delete | That note is absent from the working list |
 | T13 | disables-editor-save-when-draft-blank | Editor open, field empty or whitespace-only | Editor Save is disabled |
 | T14 | computes-dirty-by-structural-comparison | Stage an edit, then revert it back to the original value | Outer Save is disabled again (matches `notes`) |
 | T15 | disables-outer-save-when-not-dirty-or-busy | Working list unchanged from `notes` | Outer Save is disabled |
 | T15b | disables-outer-save-when-not-dirty-or-busy | Working list dirty, `busy=true` | Outer Save is disabled |
 | T16 | submits-id-and-content-only | Stage an add and an edit, click outer Save | `onSave` is called with an array of `{id, content}` entries only, one per working-list note |
+| T16b | submits-id-and-content-only | Add a new note, click outer Save | The new note's submitted `id` carries the `note-` prefix; a pre-existing note's submitted `id` is unchanged from its loaded value |
 | T17 | closes-without-confirmation | Stage edits, click outer Cancel | Working list resets to `notes`; `onClose` is called; no confirmation prompt appears |
 | T18 | ignores-busy-for-dismissal | `busy=true`, press Escape | Outer dialog closes via the normal discard path |
+| T18b | ignores-busy-for-dismissal | `busy=true`, click outer Cancel or the outer dialog's close control | Outer dialog closes via the normal discard path |
 | T19 | renders-note-list-columns | Any non-empty `notes` | Columns headed "Author", "Added", "Modified" are present |
 | T20 | renders-selected-note-detail | Select one note | Detail pane shows that note's content and an "Edit" button |
 | T21 | labels-outer-dialog-title | Open the modal | Title text reads "Admin notes" |
@@ -216,15 +240,20 @@ never in this component.
   the component MUST NOT truncate or otherwise limit note content itself.
 - Boundary values: The generated `id` (`note-${Date.now()}`) MUST be assigned
   once, at editor-Save time, not at editor-open time — two notes started in
-  the same session but saved at different times get distinct ids.
+  the same session but saved at different times get distinct ids. Because the
+  id is derived from `Date.now()` (millisecond resolution), two saves landing
+  in the same millisecond collide on the same id; this is a known,
+  pre-existing limitation of the source's id-generation scheme, not a
+  behavior another port needs to reproduce exactly.
 - Concurrent access: If another admin adds a note to the same subject while
-  this dialog is open and the local admin has staged edits, that concurrently
-  added note MUST be dropped by outer Save (the working list only ever
-  contains what was staged locally plus the seed it started from). This is a
-  documented, deliberate limitation in the source — a data-merge problem the
-  component's author explicitly scoped out of the staged-copy/save-gate
-  design, not an oversight — and SHOULD continue to be treated as a
-  known, pre-existing gap rather than papered over.
+  this dialog is open and the local admin has staged edits, outer Save drops
+  that concurrently added note — the working list only ever contains what was
+  staged locally plus the seed it started from. This is a documented,
+  deliberate limitation in the source, not an oversight: it is a data-merge
+  problem the component's author explicitly scoped out of the
+  staged-copy/save-gate design and left as a known, pre-existing gap rather
+  than papering over it with an unreviewed merge. See the matching Design
+  Decision below ("A concurrent edit made by another admin...").
 - Error states: The component defines no error prop and no failure UI of its
   own. Per its own documentation, the caller performs the save mutation and
   is responsible for closing the dialog only on success; this component's
@@ -256,9 +285,9 @@ deep-linking feature, which this component does not pass through.)
 ## Localization
 
 Not applicable: every user-facing string ("Admin notes", "New note", "Edit
-note", "Cancel", "Save", "Edit", "New note", "Note content", column headers)
-is a hardcoded English literal in the source; no i18n/translation mechanism
-is referenced.
+note", "Cancel", "Save", "Edit", "Note content", "No admin notes yet.",
+"Select a note to read it.", "Author", "Added", "Modified") is a hardcoded
+English literal in the source; no i18n/translation mechanism is referenced.
 
 ## Accessibility Options
 
@@ -347,49 +376,66 @@ Not applicable: the source contains no logging call.
   view-model property for the list view and to `Draft.Trim().Length > 0` for
   the editor view, mirroring the source's `disabled={busy || !dirty}` and
   `disabled={draft.trim() === ""}`. Rely on `ContentDialog`'s default
-  `CloseButtonCommand`/Escape handling for the no-confirmation discard path,
-  matching the source's unconfirmed Cancel/Escape/close.
+  `CloseButtonCommand`/Escape handling for the no-confirmation discard path
+  while in list-view content, matching the source's unconfirmed
+  Cancel/Escape/close. Because both views share the one `ContentDialog`, that
+  default Escape/`CloseButtonCommand` handling would dismiss the whole dialog
+  when it fires in editor-view content — discarding the staged working list,
+  not just the draft, which breaks **discards-draft-on-editor-cancel**.
+  Override Escape/`CloseButtonCommand` while in editor-view content to return
+  to list-view content (mirroring `cancelEditor`) instead of closing the
+  `ContentDialog`; see the matching Design Decision below.
 
 ## Design Decisions
 
-- Decision: Re-seed the staged working list from `notes` only when the
+- **Decision**: Re-seed the staged working list from `notes` only when the
   dialog is closed, or when it is open and the working list still equals the
   value it was last seeded from.
-  Rationale: A reopened dialog, or a background refetch landing on an
+  **Rationale**: A reopened dialog, or a background refetch landing on an
   untouched open dialog, must reflect the freshest loaded notes — but a
   background refetch must never silently overwrite an admin's in-progress
   edits. Comparing against the last-seeded value (rather than `notes`
   directly) is what lets the effect distinguish "the admin hasn't touched
   anything since the last seed" from "the incoming prop changed," per the
   source's own comment on this boundary.
-  Approved: pending
-- Decision: A concurrent edit made by another admin during a staged local
+  **Approved**: pending
+- **Decision**: A concurrent edit made by another admin during a staged local
   session is dropped by outer Save and left unresolved by this component.
-  Rationale: The source explicitly scopes this out as a data-merge problem,
+  **Rationale**: The source explicitly scopes this out as a data-merge problem,
   distinct from the save-gate problem this component solves, and calls a
   three-way merge here "a large, unreviewed behaviour change" to be
   addressed deliberately and separately, not incidentally.
-  Approved: pending
-- Decision: Both dialogs discard staged state on Cancel/Escape/close with no
+  **Approved**: pending
+- **Decision**: Both dialogs discard staged state on Cancel/Escape/close with no
   confirmation prompt.
-  Rationale: Not explained beyond the discard-and-reset implementation
+  **Rationale**: Not explained beyond the discard-and-reset implementation
   itself; recorded here as the literal, observed contract rather than an
   endorsed ideal, so implementations on other platforms match it exactly
   instead of assuming a confirm step exists.
-  Approved: pending
-- Decision: `busy` disables only the outer Save control; it does not block
+  **Approved**: pending
+- **Decision**: `busy` disables only the outer Save control; it does not block
   dismissal and drives no spinner or other visual indicator.
-  Rationale: Not explained in source; captured here as the literal contract
+  **Rationale**: Not explained in source; captured here as the literal contract
   so other-platform implementations do not add dismissal-blocking or a
   spinner that the source does not have.
-  Approved: pending
-- Decision: A new note's `id` is client-generated (`note-${Date.now()}`) and
+  **Approved**: pending
+- **Decision**: A new note's `id` is client-generated (`note-${Date.now()}`) and
   submitted to the caller inside the same `{id, content}` shape used for
   existing notes.
-  Rationale: Keeps the outer Save payload uniform for new and existing
+  **Rationale**: Keeps the outer Save payload uniform for new and existing
   notes; how the caller/backend treats a client-generated, not-yet-persisted
   id is outside this file and not observable here.
-  Approved: pending
+  **Approved**: pending
+- **Decision**: On WinUI 3, where both list and editor views share one
+  `ContentDialog`, Escape/`CloseButtonCommand` while in editor-view content
+  must return to list-view content rather than close the `ContentDialog`.
+  **Rationale**: The source's two-independent-dialogs structure lets Escape on
+  the note editor discard only the draft (**discards-draft-on-editor-cancel**),
+  leaving the outer working list untouched. A single shared `ContentDialog`
+  has no second dialog to dismiss independently, so its default Escape/close
+  handling would discard the whole working list instead — a structural
+  divergence from the source that this override corrects.
+  **Approved**: pending
 
 ## Compliance
 
@@ -399,11 +445,19 @@ Not applicable: the source contains no logging call.
 | [behavioral-requirements](agenticdevelopercookbook://compliance/recipe-quality#behavioral-requirements) | passed | recipe-quality |
 | [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | passed | recipe-quality |
 | [template-conformance](agenticdevelopercookbook://compliance/recipe-quality#template-conformance) | passed | recipe-quality |
-| [modal-dismissal-and-focus](agenticdevelopercookbook://compliance/accessibility#modal-dismissal-and-focus) | delegated | accessibility |
+| [modal-dismissal-and-focus](agenticdevelopercookbook://compliance/accessibility#modal-dismissal-and-focus) | passed | accessibility |
 | [no-raw-hex-tokens-only](agenticdevelopercookbook://compliance/ui#no-raw-hex-tokens-only) | passed | ui |
+
+The source shows no override of `Dialog`'s default focus-trap/dismissal
+handling on either dialog (no custom keydown handling, no manual `.focus()`
+calls), so `modal-dismissal-and-focus` passes on the strength of `Dialog`'s
+own unmodified behavior; the color-token and structural-fidelity/completeness
+checks pass because every color in the source is an `apt-*`/theme token and
+every requirement above is grounded directly in the `.tsx` file.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from source. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: rewrote the concurrent-access edge case as a non-normative documented limitation, clarified the `onSave` id contract and the id-collision risk, added the `AdminNote` shape and `New note` control location, listed all `AdminNote` fields in the dirty comparison, added a WinUI 3 Escape/close override for the shared-`ContentDialog` structure with a matching Design Decision, reformatted Design Decisions to the bold three-line form, added `textarea` to `depends-on`, completed the Localization string list, fixed the `modal-dismissal-and-focus` compliance status, and added test vectors for editor Escape/close dismissal, busy+dismissal, submitted-id-prefix, and Save-time id assignment. |

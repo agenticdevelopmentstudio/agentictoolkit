@@ -3,7 +3,7 @@ id: bd0d7595-f186-4aaf-bb45-5c733cfdb03d
 title: RdidPicker
 domain: agentictoolkit://recipes/rdid-picker
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -65,7 +65,8 @@ component interprets.
   immediately, before the debounce delay elapses.
 - **debounces-search-call**: The component MUST wait `debounceMs`
   milliseconds (default `200`) after the last `query` change before invoking
-  `search`.
+  `search` with the trimmed value of `query`, never the raw, untrimmed
+  string.
 - **aborts-superseded-search**: When `open`, `query`, or `debounceMs` changes
   while a previously scheduled or in-flight `search` call has not yet
   settled, the component MUST abort that call's `AbortSignal` and MUST cancel
@@ -86,6 +87,10 @@ component interprets.
 - **passes-full-option-to-onPick**: Selecting a result MUST invoke `onPick`
   with that result's complete option object (`rdid`, `entityType`,
   `entityId`), not the `rdid` string alone.
+- **closes-on-pick**: Selecting a result MUST close the picker. `RdidPicker`
+  triggers no close of its own on selection — closing is `CommandPalette`'s
+  `run()`, which calls `onOpenChange(false)` before invoking the item's
+  `onSelect` (and therefore `onPick`).
 - **labels-group-by-entity-type**: The single result group's label MUST read
   `<entityTypeLabel> addresses` when `entityTypeLabel` is supplied, and MUST
   read `Addresses` when it is not.
@@ -136,7 +141,7 @@ this component.
   `aria-selected`; arrow keys, Home/End, and Enter move and commit the
   highlight; Escape closes via the underlying `Dialog`'s own handling. These
   are `CommandPalette`'s contract, not `RdidPicker`'s own code, and
-  `CommandPalette` has no recipe of its own yet in this cookbook — this
+  `CommandPalette` has no ingredient of its own yet in this cookbook — this
   section describes what `RdidPicker` actually gets by composing it, traced
   to `command-palette.tsx`.
 - Each result's `entityType` badge is rendered as visible text (not a
@@ -150,31 +155,37 @@ this component.
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
 | T1 | renders-single-command-palette | mount with `open=true` | Exactly one `CommandPalette` rendered, receiving `open`, `onOpenChange`, `query`, `onQueryChange`, one group, `ariaLabel`, `placeholder`, `loading`, `error`, `emptyLabel` |
-| T2 | resets-on-close | type "abc", let it resolve, then set `open=false` | `query===""`, `options===[]`, `error===null`, `loading===false` |
-| T3 | skips-search-for-empty-query | `open=true`, `query=""` (also: `query="   "`) | `search` not called; `options===[]`, `loading===false`, `error===null` |
-| T4 | sets-loading-before-debounce-elapses | type "a"; inspect state before `debounceMs` elapses | `loading===true` |
+| T2 | resets-on-close | type "abc", let it resolve, then set `open=false` | `CommandPalette` receives `query===""`, `groups[0].items` equals `[]`, `error===null`, `loading===false` |
+| T3 | skips-search-for-empty-query | `open=true`, `query=""` (also: `query="   "`) | `search` not called; `CommandPalette` receives `groups[0].items` equal to `[]`, `loading===false`, `error===null` |
+| T4 | sets-loading-before-debounce-elapses | type "a"; inspect the props passed to `CommandPalette` before `debounceMs` elapses | `CommandPalette` receives `loading===true` |
 | T5 | debounces-search-call | type "a", "ab", "abc" within `debounceMs`, then wait past it | `search` called exactly once, with `"abc"` |
-| T6 | aborts-superseded-search | type "ab"; before it settles, type "abc" | the "ab" call's `AbortSignal.aborted===true`; its debounce timer never fires |
-| T7 | ignores-aborted-search-results | resolve the aborted "ab" call's promise after "abc" is in flight | `options`/`error`/`loading` are unaffected by the "ab" settlement |
-| T8 | populates-options-on-success | `search` resolves with `[{rdid:"r1",entityType:"ecosystem",entityId:"e1"}]` | `options` equals that array; `error===null`; `loading===false` |
-| T9 | surfaces-search-rejection | `search` rejects with `new Error("boom")` | `error==="boom"`; `options===[]`; `loading===false` |
-| T10 | surfaces-search-rejection | `search` rejects with a non-`Error` value | `error==="Search failed"` |
-| T11 | calls-latest-search-implementation | re-render with a new `search` function identity, `query` unchanged, then let the pending call fire | the most recently supplied `search` function is the one invoked |
-| T12 | passes-full-option-to-onPick | select the result `{rdid:"r1",entityType:"ecosystem",entityId:"e1"}` | `onPick` called with that whole object |
-| T13 | labels-group-by-entity-type | `entityTypeLabel="ecosystem"` | group label reads "ecosystem addresses" |
-| T14 | labels-group-by-entity-type | no `entityTypeLabel` | group label reads "Addresses" |
-| T15 | derives-default-placeholder | `entityTypeLabel="ecosystem"`, no `placeholder` | placeholder reads "Search ecosystem addresses…" |
-| T16 | derives-default-placeholder | no `entityTypeLabel`, no `placeholder` | placeholder reads "Search addresses…" |
-| T17 | derives-empty-label-from-query | `query=""` | `emptyLabel` reads "Start typing an address" |
-| T18 | derives-empty-label-from-query | non-empty `query`, zero results | `emptyLabel` reads "No matching address" |
-| T19 | defaults-title-and-aria-label | no `title` prop | `CommandPalette` receives `ariaLabel==="Choose an address"` |
-| T20 | renders-each-result-by-rdid-with-badge | option `{rdid:"r1",entityType:"ecosystem",entityId:"e1"}` | rendered item id is "r1", label is "r1", badge is "ecosystem" |
+| T6 | debounces-search-call | type `"  abc "` (leading and trailing whitespace) as the final value within `debounceMs`, then wait past it | `search` called exactly once, with `"abc"` (trimmed), never `"  abc "` |
+| T7 | aborts-superseded-search | type "ab"; before `debounceMs` elapses, type "abc" | the "ab" debounce timer is cleared and never invokes `search`; `search` is ultimately invoked once, for "abc" |
+| T8 | aborts-superseded-search | type "ab"; wait until its debounced call invokes `search` but before it settles; then type "abc" | the "ab" call's `AbortSignal.aborted===true` |
+| T9 | ignores-aborted-search-results | resolve the aborted "ab" call's promise from T8 after "abc" is in flight | the `loading`/`error`/`groups[0].items` props passed to `CommandPalette` are unaffected by the "ab" settlement |
+| T10 | populates-options-on-success | `search` resolves with `[{rdid:"r1",entityType:"ecosystem",entityId:"e1"}]` | `CommandPalette` receives `groups[0].items` containing one item with id `"r1"`, label `"r1"`, badge `"ecosystem"`; `error===null`; `loading===false` |
+| T11 | surfaces-search-rejection | `search` rejects with `new Error("boom")` | `CommandPalette` receives `error==="boom"`; `groups[0].items` equal to `[]`; `loading===false` |
+| T12 | surfaces-search-rejection | `search` rejects with a non-`Error` value | `CommandPalette` receives `error==="Search failed"` |
+| T13 | calls-latest-search-implementation | re-render with a new `search` function identity, `query` unchanged, then let the pending call fire | the most recently supplied `search` function is the one invoked |
+| T14 | passes-full-option-to-onPick | select the result `{rdid:"r1",entityType:"ecosystem",entityId:"e1"}` | `onPick` called with that whole object |
+| T15 | closes-on-pick | select any result | `onOpenChange(false)` is called (by `CommandPalette`'s `run()`) before/independent of `onPick` handling; the picker closes |
+| T16 | labels-group-by-entity-type | `entityTypeLabel="ecosystem"` | group label reads "ecosystem addresses" |
+| T17 | labels-group-by-entity-type | no `entityTypeLabel` | group label reads "Addresses" |
+| T18 | derives-default-placeholder | `entityTypeLabel="ecosystem"`, no `placeholder` | placeholder reads "Search ecosystem addresses…" |
+| T19 | derives-default-placeholder | no `entityTypeLabel`, no `placeholder` | placeholder reads "Search addresses…" |
+| T20 | derives-empty-label-from-query | `query=""` | `emptyLabel` reads "Start typing an address" |
+| T21 | derives-empty-label-from-query | non-empty `query`, zero results | `emptyLabel` reads "No matching address" |
+| T22 | defaults-title-and-aria-label | no `title` prop | `CommandPalette` receives `ariaLabel==="Choose an address"` |
+| T23 | renders-each-result-by-rdid-with-badge | option `{rdid:"r1",entityType:"ecosystem",entityId:"e1"}` | rendered item id is "r1", label is "r1", badge is "ecosystem" |
+| T24 | aborts-superseded-search, resets-on-close | open, type "ab", close before `debounceMs` elapses, then reopen before `debounceMs` (measured from the "ab" keystroke) elapses | `search` is never called with "ab"; no stale call from the first session reaches `search` in the reopened session |
 
 ## Edge Cases
 
 - **Null/empty input**: an empty or whitespace-only `query` is treated
   identically — trimmed to `""` and no `search` call is made (see
-  skips-search-for-empty-query, T3). `entityTypeLabel` and `placeholder` are
+  skips-search-for-empty-query, T3). A non-empty query with surrounding
+  whitespace is trimmed before it reaches `search`, never passed raw (see
+  debounces-search-call, T6). `entityTypeLabel` and `placeholder` are
   optional props; their absence falls through to the derived defaults rather
   than any null-handling logic.
 - **Boundary values**: `debounceMs=0` still schedules via `setTimeout(fn, 0)`
@@ -184,12 +195,14 @@ this component.
   (renders the "No matching address" empty label), not an error.
 - **Concurrent access**: rapid retyping produces overlapping `search` calls;
   each query change aborts whatever call was still pending and starts a new
-  debounce (aborts-superseded-search, T6/T7). The component's state is local
+  debounce (aborts-superseded-search, T7/T8). The component's state is local
   `React.useState` owned by one mounted instance, so there is no shared
-  mutable state across instances to race on.
+  mutable state across instances to race on. Closing and reopening before an
+  earlier debounce timer elapses does not let that stale timer reach
+  `search` in the new session (T24).
 - **Error states**: a `search` rejection — whether an `Error` or any other
   rejected value — surfaces as `error` and clears `options`
-  (surfaces-search-rejection, T9/T10). Source contains no retry or backoff
+  (surfaces-search-rejection, T11/T12). Source contains no retry or backoff
   loop of its own: a failed search is not retried automatically; the user
   retrigger is another keystroke, which starts a fresh debounced call.
 - **Offline / disconnected**: the component makes no network call directly —
@@ -201,7 +214,8 @@ this component.
 - A rejection that settles after the picker has since closed (and possibly
   reopened) is already aborted by the close-triggered effect cleanup, so it
   is ignored rather than corrupting the fresh session's state (see
-  resets-on-close and ignores-aborted-search-results).
+  resets-on-close and ignores-aborted-search-results, and T24 for the
+  reopen-before-elapsed case directly).
 
 ## Configuration
 
@@ -296,7 +310,7 @@ is surfaced only through the `error` state consumed by `CommandPalette`.
 - **Compose**: Host in a `ModalBottomSheet` or `AlertDialog` with a
   `LazyColumn`; bind the search `TextField` through a `Flow` using
   `.debounce(debounceMs)` and `.collectLatest { }`, which mirrors the
-  trailing-delay-plus-cancel-on-supersede this recipe implements by hand with
+  trailing-delay-plus-cancel-on-supersede this ingredient implements by hand with
   `setTimeout`/`AbortController`. Hoist `loading`/`error`/`options` as Compose
   state the same way `query`/`options` are hoisted here.
 - **AppKit/UIKit**: Present modally (`NSPanel` or a `UIViewController`) over
@@ -309,7 +323,7 @@ is surfaced only through the `error` state consumed by `CommandPalette`.
   `Popup`) as the direct analogue of `CommandPalette`'s combobox input +
   listbox pairing — `AutoSuggestBox` already binds a text box to a
   keyboard-navigable suggestion list with Enter-to-commit, matching the
-  type/arrow/Enter contract this recipe requires. Bind `ItemsSource` to a
+  type/arrow/Enter contract this ingredient requires. Bind `ItemsSource` to a
   small view-model list exposing `Rdid`/`EntityType` for the item template's
   primary text and badge (mirroring `renders-each-result-by-rdid-with-badge`).
   Debounce in the `TextChanged` handler with a `DispatcherTimer` that is
@@ -327,62 +341,103 @@ is surfaced only through the `error` state consumed by `CommandPalette`.
 
 - **Decision**: Build on `CommandPalette` rather than a bespoke search
   dialog.
-  **Rationale**: Per source comment, "the palette already IS this
-  interaction — a modal over one field, keyboard-driven, first result
-  preselected, Enter runs it and closes." A second dialog with its own search
-  box and result list would duplicate that shape under a different name.
-  Approved: pending
+  **Rationale**: Per source comment in `rdid-picker.tsx`'s top-of-file JSDoc,
+  "the palette already IS this interaction — a modal over one field,
+  keyboard-driven, first result preselected, Enter runs it and closes." A
+  second dialog with its own search box and result list would duplicate that
+  shape under a different name.
+  **Approved**: pending
 - **Decision**: No `scope` prop; a caller restricts results by closing over
   its own filter inside `search`.
-  **Rationale**: Per source comment, a `scope` prop would mean this component
-  owns the list of scopes, requiring every new entity type to come back and
-  edit it; closing over the filter keeps `RdidPicker` ignorant of what an
-  "ecosystem" (or any other entity type) is.
-  Approved: pending
+  **Rationale**: Per source comment in `rdid-picker.tsx`'s top-of-file JSDoc
+  ("SCOPING IS THE CALLER'S" paragraph), a `scope` prop would mean this
+  component owns the list of scopes, requiring every new entity type to come
+  back and edit it; closing over the filter keeps `RdidPicker` ignorant of
+  what an "ecosystem" (or any other entity type) is.
+  **Approved**: pending
 - **Decision**: Debouncing and abort-on-supersede live in `RdidPicker`, not
   in `CommandPalette`.
-  **Rationale**: Per source comment, `CommandPalette` is a controlled input
+  **Rationale**: Per source comment in `rdid-picker.tsx`'s top-of-file JSDoc
+  ("DEBOUNCING LIVES HERE" paragraph), `CommandPalette` is a controlled input
   with no opinion on when the host fetches; but this picker's list IS the
   fetch, so the trailing delay and the abort of a superseded request belong
   to it.
-  Approved: pending
+  **Approved**: pending
 - **Decision**: `onPick` receives the whole `RdidOption`, not just the
   `rdid` string.
-  **Rationale**: Per source comment, a caller that needs the entity id must
-  not have to re-resolve the address it just picked — a second lookup that
-  can disagree with the first.
-  Approved: pending
+  **Rationale**: Per source comment on the `onPick` prop in
+  `rdid-picker.tsx`, a caller that needs the entity id must not have to
+  re-resolve the address it just picked — a second lookup that can disagree
+  with the first.
+  **Approved**: pending
 - **Decision**: `search` is read through a ref (`searchRef`) inside the
   debounce effect instead of listing `search` itself as a dependency.
-  **Rationale**: Per source comment, `search` is usually an inline arrow
-  function with a new identity on every render; keying the effect on it
-  would restart the debounce on every parent re-render, and a steadily
-  typing user would never reach the trailing edge.
-  Approved: pending
+  **Rationale**: Per source comment above the `searchRef` effect in
+  `rdid-picker.tsx`, `search` is usually an inline arrow function with a new
+  identity on every render; keying the effect on it would restart the
+  debounce on every parent re-render, and a steadily typing user would never
+  reach the trailing edge.
+  **Approved**: pending
 - **Decision**: Closing the picker clears `query`, `options`, `error`, and
   `loading`.
-  **Rationale**: Per source comment, reopening onto a stale query and a
-  stale list would offer a result for a search the user has already moved on
-  from.
-  Approved: pending
+  **Rationale**: Per source comment above the close-triggered reset effect in
+  `rdid-picker.tsx`, reopening onto a stale query and a stale list would
+  offer a result for a search the user has already moved on from.
+  **Approved**: pending
 - **Decision**: A failed search clears `options` rather than leaving stale
   results in place.
-  **Rationale**: Per source comment, an empty list after a failed request
-  reads as "no such address," the one wrong conclusion available; clearing
-  `options` and setting `error` avoids that misreading.
-  Approved: pending
+  **Rationale**: Per source comment in the rejection handler in
+  `rdid-picker.tsx`, an empty list after a failed request reads as "no such
+  address," the one wrong conclusion available; clearing `options` and
+  setting `error` avoids that misreading.
+  **Approved**: pending
+- **Decision**: Only `title`, `placeholder`, and `entityTypeLabel` are
+  caller-overridable strings; the group label's "addresses" suffix, both
+  empty-state labels, and the non-`Error` rejection fallback ("Search
+  failed") are fixed English literals with no localization mechanism.
+  **Rationale**: `rdid-picker.tsx` exposes no other string-customization
+  prop and contains no localization key extraction or i18n call; this is the
+  component's current, deliberate string surface rather than an oversight,
+  and any broader localization would need to be added as new props.
+  **Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [built-on-shared-command-palette](agenticdevelopercookbook://compliance/ui-composition#built-on-shared-command-palette) | passed | ui-composition |
-| [caller-owns-search-scope](agenticdevelopercookbook://compliance/ui-composition#caller-owns-search-scope) | passed | ui-composition |
-| [async-abort-on-supersede](agenticdevelopercookbook://compliance/reliability#async-abort-on-supersede) | passed | reliability |
-| [state-reset-on-close](agenticdevelopercookbook://compliance/reliability#state-reset-on-close) | passed | reliability |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [dynamic-type-support](agenticdevelopercookbook://compliance/accessibility#dynamic-type-support) | partial | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | partial | Accessibility |
+| [focus-management](agenticdevelopercookbook://compliance/accessibility#focus-management) | passed | Accessibility |
+| [semantic-markup](agenticdevelopercookbook://compliance/accessibility#semantic-markup) | passed | Accessibility |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
+| [rtl-layout-support](agenticdevelopercookbook://compliance/internationalization#rtl-layout-support) | failed | Internationalization |
+| [text-expansion-tolerance](agenticdevelopercookbook://compliance/internationalization#text-expansion-tolerance) | failed | Internationalization |
+| [unicode-support](agenticdevelopercookbook://compliance/internationalization#unicode-support) | passed | Internationalization |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+| [data-minimization](agenticdevelopercookbook://compliance/privacy-and-data#data-minimization) | passed | Privacy & Data |
+| [error-recovery](agenticdevelopercookbook://compliance/reliability#error-recovery) | failed | Reliability |
+| [graceful-degradation](agenticdevelopercookbook://compliance/reliability#graceful-degradation) | passed | Reliability |
+| [fault-tolerance](agenticdevelopercookbook://compliance/reliability#fault-tolerance) | passed | Reliability |
+
+Statuses rest on `rdid-picker.tsx`'s composition of `CommandPalette`/`Dialog`
+(confirmed ARIA roles — `combobox`, `listbox`, `group`, `option` —, arrow/Home/End/Enter
+handling, and a base-ui `Dialog` that traps focus and auto-focuses the input,
+grounding the Accessibility passes, while the underlying color tokens and
+rendered pixel dimensions aren't determinable from source, grounding the
+`partial`s); its hardcoded English literals plus physical `left-`/`pl-`/`pr-`
+Tailwind positioning and `truncate`-based labels (grounding the
+Internationalization failures); its transient, in-memory-only, close-cleared
+state (grounding `data-minimization`); and its keystroke-only retry with no
+automatic recovery loop, versus its non-crashing handling of malformed
+rejections and whitespace input (grounding `error-recovery` failing while
+`graceful-degradation` and `fault-tolerance` pass).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0.0 | | | Initial recipe extracted from `rdid-picker.tsx`. |
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe extracted from `rdid-picker.tsx`. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: use "ingredient" consistently instead of "recipe"; rebuild the Compliance table from real catalog checks; add closes-on-pick and trimmed-query-to-search requirements with test vectors; split the superseded-search test vector into pending-timer and in-flight-abort cases and add a reopen-before-elapsed test vector; restate internal-state test vectors as `CommandPalette` props; cite the `rdid-picker.tsx` location for every Design Decision rationale; bold `**Approved**`; record the fixed-string localization surface as a Design Decision. |
