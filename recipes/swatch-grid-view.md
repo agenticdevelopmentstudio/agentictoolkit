@@ -3,7 +3,7 @@ id: f4740433-221c-4c89-b888-ee8da7aa4b3c
 title: SwatchGridView
 domain: agentictoolkit://recipes/swatch-grid-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -11,8 +11,8 @@ modified: '2026-09-23'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
-summary: A macOS ComposableSettings NSView that lays out an array of NSColor swatches
-  into fixed-width rows, fully rebuilding its swatch hierarchy on init and on setColors.
+summary: A macOS ComposableSettings NSView that displays an array of NSColor
+  values as a grid of fixed-size color swatches.
 platforms:
 - swift
 - macos
@@ -48,41 +48,44 @@ target-action, control, or user-interaction code of any kind.
 ## Behavioral Requirements
 
 - **clamps-column-count**: Component MUST clamp the initializer's `columns`
-  parameter to a minimum of 1 (`Swift.max(1, columns)`), so a caller-supplied
-  value of 0 or a negative number never produces a zero- or negative-width
-  row.
+  parameter to a minimum of 1, so a caller-supplied value of 0 or a
+  negative number never produces a zero- or negative-width row.
 - **arranges-swatches-in-rows**: Component MUST lay out `colors` into
   consecutive rows of at most `columns` swatches each, filling each row in
-  the order the colors appear in the array (`colors[index..<upper]` for
-  `upper = min(index + columns, colors.count)`) before starting the next
-  row.
+  the order the colors appear in the array before starting the next row.
 - **builds-hierarchy-on-init**: Component MUST build its full row/swatch
   view hierarchy once during initialization, from the `colors` and
   `columns` values supplied to that initializer.
 - **replaces-colors-and-rebuilds**: Component MUST, when `setColors(_:)` is
   called, replace its stored `colors` with the supplied array and MUST
-  remove every existing row and swatch from `container`
-  (`arrangedSubviews.forEach { $0.removeFromSuperview() }`) before
-  rebuilding rows from the new array, rather than reusing or diffing any
-  existing swatch view.
+  display exactly the new colors afterward, with no swatch from the
+  previous set remaining in the view hierarchy. See Design Decisions for
+  the full-rebuild strategy source uses to satisfy this.
 - **pins-container-to-edges**: Component MUST pin its internal vertical
-  stack view (`container`) to all four edges of itself with no additional
-  constant, via `Self.pinToEdges`.
+  stack view to all four edges of itself with no additional constant.
 - **uses-uniform-spacing**: Component MUST apply the single `spacing`
-  initializer parameter as both `container`'s row-to-row (vertical) spacing
-  and each row's swatch-to-swatch (horizontal) spacing, so the gap between
-  rows equals the gap between swatches within a row.
+  initializer parameter as both the internal vertical stack view's
+  row-to-row (vertical) spacing and each row's swatch-to-swatch
+  (horizontal) spacing, so the gap between rows equals the gap between
+  swatches within a row.
 - **sizes-swatch-fixed**: Each swatch MUST be constrained to the
   constructor-supplied `swatchSize` width and height via activated layout
   constraints (default `CGSize(width: 22, height: 22)`), independent of the
   swatch's color content.
-- **renders-swatch-style**: Each swatch MUST be a `wantsLayer`-backed view
-  with a 3pt corner radius, a `backgroundColor` set to the corresponding
-  `NSColor`'s `cgColor`, and a 0.5pt-wide border whose color is set, and
-  re-set on every theme change via `observeTheme`, to the active theme's
-  `.border` role color (`palette.nsColor(.border)`).
+- **renders-swatch-style**: Each swatch MUST render with a 3pt corner
+  radius, a background fill equal to the corresponding `NSColor` value, and
+  a 0.5pt-wide border whose color is set, and re-set on every theme change,
+  to the active theme's `.border` role color.
 - **traps-on-coder-init**: Component MUST NOT support construction via
   `init(coder:)`; that initializer MUST trigger a fatal error.
+- **renders-empty-grid**: Component MUST render zero rows when `colors` is
+  empty, rather than trapping or throwing.
+- **shortens-final-row**: Component MUST render a final row containing
+  fewer than `columns` swatches when `colors.count` is not evenly divisible
+  by `columns`.
+- **single-row-when-columns-exceeds-count**: Component MUST render all
+  colors in a single row shorter than `columns` when `columns` exceeds
+  `colors.count`.
 
 ## Appearance
 
@@ -139,15 +142,15 @@ target-action, control, or user-interaction code of any kind.
   elements at all. What would settle it: a VoiceOver pass over an
   instantiated grid, or an explicit design decision on which role(s) to
   assign.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. No swatch carries an `accessibilityLabel` or
-  `accessibilityValue` describing the color it shows (e.g., a color name or
-  hex value); a VoiceOver user landing on a swatch has no source-provided
-  way to learn which color it represents. What is missing: the specific
-  text each swatch's label should read. What would settle it: a decision on
-  a label format (e.g., a caller-supplied name per color, or a computed hex
-  string) plus the corresponding `setAccessibilityLabel`/`setAccessibilityValue`
-  call in `makeSwatch(_:)`.
+- **Label requirements**: NEEDS REVIEW: Not implemented in source. No
+  swatch carries an `accessibilityLabel` or `accessibilityValue` describing
+  the color it shows (e.g., a color name or hex value); a VoiceOver user
+  landing on a swatch has no source-provided way to learn which color it
+  represents. Default SHOULD, pending review: `makeSwatch(_:)` SHOULD call
+  `setAccessibilityLabel(_:)` with a caller-supplied name for that color
+  when one is available, falling back to a computed hex string (e.g.
+  `#RRGGBB`) when no name is supplied. What would settle it: review
+  approving this default, or specifying a different label format.
 - **Announce state changes (e.g., loading, disabled)**: Not applicable —
   the component has no loading state and never disables itself (see
   States); there is no state transition to announce.
@@ -155,6 +158,12 @@ target-action, control, or user-interaction code of any kind.
   trackpad-driven composition with no touch input path in source, and, per
   the States section, no interactive element exists at all to size a tap
   target for.
+- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
+  each swatch's 0.5pt border text color resolves from the active theme's border role against
+  the hosting background at runtime; the component performs no contrast
+  check, so whether a given theme's resolved pair meets 4.5:1 cannot be
+  determined from this file. This would be settled by a theme-level
+  contrast audit of border against the backgrounds it sits on.
 
 ## Conformance Test Vectors
 
@@ -163,29 +172,32 @@ target-action, control, or user-interaction code of any kind.
 | swatch-grid-view-001 | clamps-column-count | Construct with `columns: 0` | The component lays out swatches into rows of at most 1 swatch each (columns treated as 1) |
 | swatch-grid-view-002 | clamps-column-count | Construct with `columns: -3` | The component lays out swatches into rows of at most 1 swatch each (columns treated as 1) |
 | swatch-grid-view-003 | arranges-swatches-in-rows | Construct with 10 colors and `columns: 4` | 3 rows are produced: 4, 4, and 2 swatches, in the same order as the input array |
-| swatch-grid-view-004 | builds-hierarchy-on-init | Construct with 3 colors and `columns: 8` | Immediately after `init` returns, `container` has exactly 1 row containing exactly 3 swatches |
-| swatch-grid-view-005 | replaces-colors-and-rebuilds | Construct with 5 colors, then call `setColors([])` | `container.arrangedSubviews` is empty (0 rows) after the call; none of the original 5 swatch views remain in the view hierarchy |
-| swatch-grid-view-006 | replaces-colors-and-rebuilds | Construct with 2 colors, then call `setColors(_:)` with 6 new colors and `columns` unchanged at 8 | `container` has exactly 1 row containing exactly 6 swatches, none of which are the original 2 swatch view instances |
-| swatch-grid-view-007 | pins-container-to-edges | Construct the component and inspect its constraints | `container`'s top/leading/trailing/bottom anchors are each constrained equal to the corresponding anchor of `self`, with no constant offset |
-| swatch-grid-view-008 | uses-uniform-spacing | Construct with `spacing: 10` | `container.spacing == 10` and every row's `spacing == 10` |
+| swatch-grid-view-004 | builds-hierarchy-on-init | Construct with 3 colors and `columns: 8` | Immediately after `init` returns, the view's row/swatch hierarchy contains exactly 1 row with exactly 3 swatches |
+| swatch-grid-view-005 | replaces-colors-and-rebuilds | Construct with 5 colors, then call `setColors([])` | The view's row/swatch hierarchy is empty (0 rows, 0 swatches) after the call; none of the original 5 swatch views remain anywhere in it |
+| swatch-grid-view-006 | replaces-colors-and-rebuilds | Construct with 2 colors, then call `setColors(_:)` with 6 new colors and `columns` unchanged at 8 | The view's row/swatch hierarchy contains exactly 1 row with exactly 6 swatches, none of which are the original 2 swatch view instances |
+| swatch-grid-view-007 | pins-container-to-edges | Construct the component and inspect its internal stack view's constraints (found among `self.subviews`) | That stack view's top/leading/trailing/bottom anchors are each constrained equal to the corresponding anchor of `self`, with no constant offset |
+| swatch-grid-view-008 | uses-uniform-spacing | Construct with `spacing: 10` | The internal stack view's spacing and every row's spacing each equal 10 |
 | swatch-grid-view-009 | sizes-swatch-fixed | Construct with `swatchSize: CGSize(width: 40, height: 16)` and 1 color | The resulting swatch view has an active width constraint of 40 and an active height constraint of 16 |
 | swatch-grid-view-010 | renders-swatch-style | Construct with 1 color and inspect the resulting swatch's layer | `wantsLayer == true`, `layer.cornerRadius == 3`, `layer.backgroundColor == color.cgColor`, `layer.borderWidth == 0.5` |
-| swatch-grid-view-011 | renders-swatch-style | Trigger a theme change after construction | The swatch's `layer.borderColor` updates to the new theme's `.border` role color |
-| swatch-grid-view-012 | traps-on-coder-init | Attempt `SwatchGridView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
+| swatch-grid-view-011 | renders-swatch-style | Construct with 1 color, then call `ThemeManager.selectTheme(id:)` to switch the shared `ThemeManager` from one built-in theme (e.g. `solarizedDark`) to another (e.g. `dracula`) | The swatch's `layer.borderColor` changes from the old theme's `.border` role color to the new theme's `.border` role color; `layer.backgroundColor` (the fill) is unaffected |
+| swatch-grid-view-012 | traps-on-coder-init | Attempt `SwatchGridView(coder: someCoder)` | The call traps with a fatal error; no instance is returned. AppKit-specific: a fatal trap cannot be caught inside the normal test process, so this requires a subprocess/death-test harness, and has no analogue on platforms without a coder-based initializer. |
+| swatch-grid-view-013 | renders-empty-grid | Construct with `colors: []` | The view has zero rows and zero swatches immediately after `init` returns |
+| swatch-grid-view-014 | shortens-final-row | Construct with 10 colors and `columns: 4` | The final row contains exactly 2 swatches (`10 % 4`), fewer than a full row of 4 |
+| swatch-grid-view-015 | single-row-when-columns-exceeds-count | Construct with 3 colors and `columns: 8` | Exactly 1 row is produced, containing all 3 swatches, fewer than `columns` |
 
 ## Edge Cases
 
 - Null/empty input: `colors` defaults to `[]` and is a non-optional
-  `[NSColor]`. When empty, the `while index < self.colors.count` loop in
-  `rebuild()` never executes, so `container` ends up with zero rows and
-  zero swatches. This is a MUST: the component MUST render an empty grid
-  (no rows) rather than trap or throw when `colors` is empty.
+  `[NSColor]`. When empty, the row-building loop never executes, so the
+  view ends up with zero rows and zero swatches — the **renders-empty-grid**
+  requirement.
 - Boundary values — colors count not evenly divisible by columns: the last
   row contains `colors.count % columns` swatches rather than a full
-  `columns` (`upper = Swift.min(index + columns, colors.count)`). This is a
-  MUST, directly traceable to the `rebuild()` loop bounds.
+  `columns` — the **shortens-final-row** requirement, directly traceable to
+  the row-building loop's bounds.
 - Boundary values — `columns` exceeding `colors.count`: all colors render
-  in a single row shorter than `columns`. This is a MUST, following from
+  in a single row shorter than `columns` — the
+  **single-row-when-columns-exceeds-count** requirement, following from
   the same loop bounds as above.
 - Concurrent access: Not applicable — the class is `@MainActor`-isolated,
   so Swift's concurrency checker serializes all access to `colors`,
@@ -202,10 +214,11 @@ target-action, control, or user-interaction code of any kind.
   time, and never revisits that assignment. Only the swatch's *border*
   color is re-applied on a theme change, via `observeTheme`. If a caller
   passes a dynamic (appearance-adaptive) `NSColor` as a swatch color, the
-  swatch's fill will NOT update when the system appearance changes unless
-  the caller triggers a full rebuild by calling `setColors(_:)` again; this
-  is a MUST-level, source-traceable asymmetry between the border (theme-
-  reactive) and the fill (fixed at creation).
+  swatch's fill MAY remain visually stale after a system appearance change
+  until the caller triggers a full rebuild by calling `setColors(_:)`
+  again; this is current, source-traceable behavior — not a named MUST
+  requirement — and is recorded as a documented quirk in Design Decisions
+  rather than corrected here.
 
 ## Configuration
 
@@ -234,13 +247,11 @@ kind — no `Text`, `NSTextField`, or similar. `colors` is structured
   transition, or `NSAnimationContext` call; every rebuild replaces subviews
   instantaneously via `removeFromSuperview()`/`addArrangedSubview(_:)`.
 - **Increase Contrast**: Not applicable to the swatch fill — the fill is
-  the caller-supplied data color itself (`color.cgColor`), not a themed UI
-  color, so there is nothing for Increase Contrast to adjust without
-  changing the data being displayed. The swatch border's color already
-  comes from the theme's `.border` role and would follow the palette's own
-  Increase Contrast handling automatically if the palette responds to it;
-  no separate Increase Contrast code exists in `SwatchGridView.swift`
-  itself.
+  the caller-supplied data color itself, not a themed UI color, so there is
+  nothing for Increase Contrast to adjust without changing the data being
+  displayed. The swatch border's color comes from the theme's `.border`
+  semantic role (see **renders-swatch-style**); no separate Increase
+  Contrast handling exists in `SwatchGridView.swift` itself.
 - **Differentiate Without Color**: this component's entire purpose is
   conveying distinct colors as colors, with no accompanying label, pattern,
   or text differentiator in source — see the open question in
@@ -300,7 +311,7 @@ Not applicable: `SwatchGridView.swift` contains no logging call (no
   where `--border-color` is a CSS custom property the active theme
   updates, keeping the border reactive while the fill stays fixed to the
   color passed in, mirroring `renders-swatch-style`.
-- **AppKit/UIKit** (source platform): Source file
+- **AppKit / UIKit** (source platform): Source file
   `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/SwatchGridView.swift`.
   A macOS-only (`import AppKit`) `NSView` subclass, `@MainActor`, inside
   the `ComposableSettings` namespace, conforming to `SettingsViewProtocol`.
@@ -313,8 +324,17 @@ Not applicable: `SwatchGridView.swift` contains no logging call (no
   `minimumInteritemSpacing`/`minimumLineSpacing == spacing`, with each cell
   drawing the same corner-radius/fill/border styling on its
   `contentView.layer`, and re-applying the border color on
-  `traitCollectionDidChange(_:)` in place of `observeTheme`.
-- **WinUI 3** (the reason this recipe exists): Bind an `ItemsRepeater` (or
+  `traitCollectionDidChange(_:)` in place of `observeTheme`. Behind the
+  Behavioral Requirements above: `columns` is clamped with
+  `Swift.max(1, columns)`; the internal vertical stack view is the private
+  `container` property, pinned via `Self.pinToEdges`; each swatch is a
+  `wantsLayer`-backed plain `NSView` with `layer?.cornerRadius = 3`,
+  `layer?.backgroundColor = color.cgColor`, and `layer?.borderWidth = 0.5`,
+  with `layer?.borderColor` re-set on every theme change via `observeTheme`
+  to `palette.nsColor(.border).cgColor`; `setColors(_:)` rebuilds by
+  calling `container.arrangedSubviews.forEach { $0.removeFromSuperview() }`
+  before re-adding rows built from the new array.
+- **WinUI 3**: Bind an `ItemsRepeater` (or
   `ItemsControl`) using a `UniformGridLayout` — `MinItemWidth`/
   `MinItemHeight` set to `swatchSize`, `MinRowSpacing`/`MinColumnSpacing`
   set to `spacing` — to an `ObservableCollection<Color>` mirroring
@@ -336,35 +356,40 @@ Not applicable: `SwatchGridView.swift` contains no logging call (no
 
 ## Design Decisions
 
-- Decision: Document `SwatchGridView` with 9 behavioral requirements
-  against `ColorPickerView`'s 7.
-  Rationale: `SwatchGridView` genuinely does more distinct work than its
-  sibling — row-wrapping arithmetic, a full teardown-and-rebuild strategy
-  on every update, and its own custom `CALayer` styling (corner radius,
-  fill, theme-reactive border) — none of which `ColorPickerView` has, so
-  matching its sibling's requirement count would either omit real behavior
-  here or invent behavior there.
-  Approved: pending
-- Decision: Treat the swatch's border-repaints-on-theme-change /
+- **Decision**: Implement `setColors(_:)` by fully tearing down and
+  rebuilding the row/swatch view hierarchy — removing every existing
+  arranged subview before creating new rows — rather than reusing or
+  diffing existing swatch views.
+  **Rationale**: Source unconditionally clears the container's arranged
+  subviews at the start of the shared rebuild routine used by both `init`
+  and `setColors(_:)`. The only caller-observable contract is that
+  `setColors(_:)` displays exactly the new colors afterward
+  (**replaces-colors-and-rebuilds**); the full-rebuild strategy is how
+  source achieves that, not itself a caller-visible requirement.
+  **Approved**: pending
+- **Decision**: Treat the swatch's border-repaints-on-theme-change /
   fill-fixed-at-creation asymmetry (see Edge Cases) as a documented quirk
   rather than a defect to silently correct in this recipe.
-  Rationale: Source wraps only the border assignment in `observeTheme`;
+  **Rationale**: Source wraps only the border assignment in `observeTheme`;
   the background assignment in `makeSwatch(_:)` is a one-time
   `color.cgColor` write with no observer. The recipe describes this
   asymmetry as-is rather than assuming the fill should also be
   theme-reactive, since a data color (unlike a border) is not expected to
   shift with the theme.
-  Approved: pending
-- Decision: Leave both Accessibility bullets (Role/trait, Label
-  requirements) as open questions rather than assuming a specific role or
-  label format.
-  Rationale: Source sets no accessibility API of any kind on `container`,
-  its rows, or its swatches, and there is no comparable sibling row in
+  **Approved**: pending
+- **Decision**: Leave the Role/trait accessibility bullet as an open
+  question rather than assuming a specific role, and resolve the Label
+  requirements bullet with a default SHOULD recommendation that review may
+  override.
+  **Rationale**: Source sets no accessibility API of any kind on
+  `container`, its rows, or its swatches, and there is no comparable
+  sibling row in
   `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/`
-  that labels a color swatch for VoiceOver to pattern-match against, unlike
-  `ColorPickerView`'s single gap, which could be resolved by comparison
-  with `CheckboxView`/`NumberFieldView`/`PopupMenuChoiceView`.
-  Approved: pending
+  that labels a color swatch for VoiceOver to pattern-match against.
+  Recommending a default label (a caller-supplied name, falling back to a
+  hex string) keeps the recipe implementable without inventing a role that
+  source doesn't suggest.
+  **Approved**: pending
 
 ## Compliance
 
@@ -372,14 +397,17 @@ Not applicable: `SwatchGridView.swift` contains no logging call (no
 |-------|--------|----------|
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
 | [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [meaningful-labels](agenticdevelopercookbook://compliance/accessibility#meaningful-labels) | partial | accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | partial | accessibility |
-| [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | reliability |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | failed | accessibility |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
+
+Statuses rest on: `SwatchGridView.swift` uses only native
+`NSStackView`/`NSView` composition with no business logic mixed into its
+rendering code, but defines no accessibility label or non-color
+differentiator on any swatch.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for SwatchGridView, covering row-wrapping layout, full-rebuild update strategy, theme-reactive swatch border vs. fixed fill, and two open accessibility questions (role and per-swatch label) for review. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved AppKit implementation identifiers out of Behavioral Requirements into Platform Notes; relaxed replaces-colors-and-rebuilds and recorded the rebuild strategy as a Design Decision; reframed the fixed-fill edge case as current MAY behavior and dropped the unsupported Increase Contrast claim; removed the requirement-count Design Decision and reformatted Design Decisions to the bold Decision/Rationale/Approved form; promoted three Edge Case MUSTs to named requirements with test vectors; rephrased test vectors 004-007 and 011-012 to observable structure, a named theme-change mechanism, and a death-test note; added a default SHOULD recommendation for swatch accessibility labels; fixed Platform Notes formatting, shortened the summary, and cleaned up the Compliance table; records the unverified theme-token contrast as an open question. |

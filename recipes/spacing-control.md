@@ -3,7 +3,7 @@ id: f064de5a-b117-4147-96a9-c1ed11d5c976
 title: SpacingControl
 domain: agentictoolkit://recipes/spacing-control
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -23,13 +23,13 @@ tags:
 - form-control
 - range
 - appkit
-- macos
 depends-on: []
 related:
 - agentictoolkit://recipes/pane-spacing
 - agentictoolkit://recipes/composable-tabs-settings-view-controller
-references:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+- agentictoolkit://recipes/captioned-slider-view
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -88,9 +88,10 @@ column of unlabeled fields.
   with a valid number — the clamped typed number if any number could be
   parsed from it, otherwise the number already held for that field — so
   editing can always end.
-- **repeats-held-arrow**: An arrow button held down MUST repeat its
-  one-point adjustment, starting `0.45` seconds after the button is pressed
-  and then every `0.06` seconds while it is held.
+- **repeats-held-arrow**: An arrow button MUST adjust its value once
+  immediately on press, then MUST repeat that one-point adjustment starting
+  `0.45` seconds after the button is pressed and every `0.06` seconds while
+  it continues to be held.
 - **freezes-pressed-arrow-pair**: Component MUST NOT re-seat (move) an
   arrow pair while one of its own arrows is pressed, even when a layout pass
   is triggered by some other number changing.
@@ -100,8 +101,15 @@ column of unlabeled fields.
   (measured from the value at drag start, not accumulated step by step).
 - **drags-gutter-two-to-one-outward**: Dragging a gutter's handle MUST
   change that gutter's value by two points per point the pointer has
-  travelled away from the divider's centre since the drag began, on
-  whichever side of centre the drag started.
+  travelled along the divider's `dragAxis` since the drag began, measured
+  from the value and pointer position at drag start. The sign is fixed once,
+  by which side of the divider's centre the pointer's initial grab point
+  fell on: if the drag began on the negative side of centre, travel further
+  in the negative direction increases the value; if it began on the
+  positive side, travel further in the positive direction increases the
+  value. That sign does not flip if the pointer later crosses the centre —
+  travel back past centre continues to decrease the value using the same
+  fixed sign.
 - **arrow-points-in-line-travel-direction**: Each arrow MUST point in the
   direction the line it controls travels when pressed — the edge/pane-edge's
   `growing` direction for the arrow that adds room, and the opposite
@@ -119,8 +127,8 @@ column of unlabeled fields.
   value by one point (clamped to `range`); the Left and Right arrow keys
   MUST be left for caret movement within the field's text.
 - **preserves-other-fields-mid-edit**: Component MUST NOT overwrite the
-  on-screen text of a field that is currently being edited when a
-  different field's number changes as a result of that edit.
+  on-screen text of a field that is currently being edited when any other
+  field's number changes while this field is being edited.
 - **reflects-forced-field-after-commit**: After a field's typed value is
   committed, Component MUST re-display that field's number even when the
   clamped result equals the number already held, so a typed out-of-range
@@ -145,6 +153,21 @@ column of unlabeled fields.
 - **caps-displayed-inset-at-maximum**: The diagram MUST draw any single
   edge's or gutter's extent no larger than `maximumDisplayedInset` (`40`
   points), even when `value` holds a larger number for it.
+
+Per-edge drag axis, gain sign, and growing direction, so a port can implement
+`drags-edge-one-to-one` and `arrow-points-in-line-travel-direction` without
+reading `Spacing.swift`:
+
+| Edge | Drag axis | Gain sign | `growing` direction |
+|------|-----------|-----------|----------------------|
+| `top` | vertical | `-1` (dragging down grows the inset) | `.down` |
+| `bottom` | vertical | `+1` (dragging up grows the inset) | `.up` |
+| `leading` | horizontal | `+1` (dragging right grows the inset) | `.right` |
+| `trailing` | horizontal | `-1` (dragging left grows the inset) | `.left` |
+
+Both gutters use a fixed gain of `2` (not signed per gutter — the sign for a
+gutter drag instead comes from which side of the divider's centre the drag
+began, per `drags-gutter-two-to-one-outward`).
 
 ## Appearance
 
@@ -185,9 +208,9 @@ column of unlabeled fields.
   floors — three field groups across/down
   (`fieldGroupSize` `55×21pt` × 3, plus chrome), or the diagram's own floor
   for drawing the full range (`minimumDiagramSize`, tied to
-  `maximumDisplayedInset` = `40pt` per side, plus chrome). No maximum size
-  is enforced; the control grows if given more room than `bounds` provides,
-  since `diagramRect` is measured from `bounds` on every layout pass.
+  `maximumDisplayedInset` = `40pt` per side, plus chrome). The diagram
+  expands to fill `bounds` above the minimum; no maximum is enforced, since
+  `diagramRect` is measured from `bounds` on every layout pass.
 
 ## States
 
@@ -204,20 +227,21 @@ column of unlabeled fields.
 
 - **Role/trait**: The control sets `setAccessibilityElement(true)` and
   `setAccessibilityRole(.group)` on itself, so it is exposed to VoiceOver as
-  one group rather than as eight loose fields belonging to nothing (see the
-  type-level doc comment). Every field, stepper, arrow button, reset button,
-  and drag handle also carries an `accessibilityIdentifier` via the shared
-  `accessibilityID(_:)` helper (e.g. `spacing.top`,
-  `spacing.edge.top.more`, `spacing.gutter.betweenColumns.narrower.handle`)
-  — these are UI-test identifiers (`setAccessibilityIdentifier`), not
-  VoiceOver labels.
-- **Label requirements**: NEEDS REVIEW: the eight number fields
-  (`edgeFields`/`gutterFields`) and their steppers carry no
-  `setAccessibilityLabel`/`setAccessibilityTitleUIElement` call anywhere in
-  source — only a numeric value and a test identifier — so a VoiceOver user
-  landing on one hears its number with no indication of which edge or gutter
-  it belongs to. The arrow buttons are not part of this gap: each is built
-  from an `NSImage(systemSymbolName:accessibilityDescription:)` whose
+  one group rather than as four or two loose fields, depending on `style`,
+  belonging to nothing (see the type-level doc comment). Every field,
+  stepper, arrow button, reset button, and drag handle also carries an
+  `accessibilityIdentifier` via the shared `accessibilityID(_:)` helper
+  (e.g. `spacing.top`, `spacing.edge.top.more`,
+  `spacing.gutter.betweenColumns.narrower.handle`) — these are UI-test
+  identifiers (`setAccessibilityIdentifier`), not VoiceOver labels.
+- **Label requirements**: NEEDS REVIEW: Not implemented in source. The four or two number fields
+  (`edgeFields`/`gutterFields`, depending on `style`) and their steppers
+  carry no `setAccessibilityLabel`/`setAccessibilityTitleUIElement` call
+  anywhere in source — only a numeric value and a test identifier — so a
+  VoiceOver user landing on one hears its number with no indication of
+  which edge or gutter it belongs to. The arrow buttons are not part of
+  this gap: each is built from an
+  `NSImage(systemSymbolName:accessibilityDescription:)` whose
   `accessibilityDescription` is the same string as its tooltip (e.g. "More
   top space"), which VoiceOver reads as the button's label. What is
   missing: whether a field should announce something like "Top, 8" (the
@@ -226,8 +250,9 @@ column of unlabeled fields.
   `field.setAccessibilityLabel(edge.displayName)` (and the matching call for
   gutters and for each stepper) inside `buildEdgeControls`/
   `buildDividerControls`. This mirrors an open question already flagged on
-  the sibling ingredient `CaptionedSliderView`, where the same kind of
-  control-to-title linkage is missing.
+  the sibling ingredient `CaptionedSliderView`
+  (`agentictoolkit://recipes/captioned-slider-view#accessibility/label-requirements`),
+  where the same kind of control-to-title linkage is missing.
 - **Announce state changes (e.g., loading, disabled)**: Not applicable — the
   component has no loading or disabled state (see States) for a change to
   announce.
@@ -235,6 +260,19 @@ column of unlabeled fields.
   trackpad-driven `NSView`/`NSControl` composition with no touch input path
   in source; the 44×44pt minimum is iOS/touch guidance, not a macOS
   pointer-interface requirement.
+- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. Every
+  color this file draws for text or a tint comes from a `SemanticPalette`
+  role — field text (`palette.nsColor(.primaryText)`), arrow glyphs
+  (`palette.nsColor(.accent)`), the outer frame's stroke
+  (`palette.nsColor(.border)`) against `palette.projectPaneBackdrop`, and
+  each pane's stroke (`palette.projectPaneOutline`) against
+  `palette.nsColor(.windowBackground)`) — and no check anywhere in
+  `SpacingControl.swift` verifies any of those pairs against a minimum
+  contrast ratio. What is missing: whether `.primaryText`- and
+  `.accent`-on-field-background, and the two border/fill pairs, meet a
+  4.5:1 (text) / 3:1 (non-text) contrast floor; what would settle it: a
+  theme-level contrast audit of `SemanticPalette`'s roles (see also the
+  open question under **Accessibility Options: Increase Contrast**).
 
 ## Conformance Test Vectors
 
@@ -259,21 +297,21 @@ column of unlabeled fields.
 | spacing-control-017 | tab-order-is-picture-order | `style: .frame`; focus the top field, press Tab three times | Focus visits leading, then trailing, then bottom, in that order, never a stepper or arrow button |
 | spacing-control-018 | arrow-keys-adjust-focused-field | Focus the top field (`value.top == 5`), press the Up arrow key | `value.top == 6`; the Left/Right arrow keys instead move the caret and do not change `value.top` |
 | spacing-control-019 | preserves-other-fields-mid-edit | Begin typing `"1"` (uncommitted) into the leading field, then click the "more" arrow for `.top` | The leading field's on-screen, uncommitted text remains `"1"`; the top field's displayed number updates |
-| spacing-control-020 | reflects-forced-field-after-commit | Field holds `5`; type `"999"` (clamps to `40`) and press Return | The field displays `40` immediately after commit, even though `40 == range.upperBound` was already the clamp target on the previous keystroke |
+| spacing-control-020 | reflects-forced-field-after-commit | `value.top == 40`; type `"999"` into the top field (clamps to `40`, the value already held) and press Return | The field displays `40` immediately after commit, even though the clamped result equals the value already held |
 | spacing-control-021 | group-accessibility-container | Inspect the constructed view's accessibility properties | `isAccessibilityElement() == true` and `accessibilityRole() == .group` |
 | spacing-control-022 | rejects-coder-initialization | Call `SpacingControl(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
 | spacing-control-023 | reports-fixed-intrinsic-size | Construct with either `style` and any `value` | `intrinsicContentSize == NSSize(width: 420, height: 250)` |
-| spacing-control-024 | clips-below-minimum-size | Constrain the view's `bounds` to `100×100pt`, well under `minimumSize` | `diagramRect`'s size equals `minimumSize`, not `bounds`'s size; subviews are placed from that floor, not compressed further |
+| spacing-control-024 | clips-below-minimum-size | Constrain the view's `bounds` to `100×100pt`, well under `minimumSize` (`315×183pt`) | `diagramRect`'s size equals `minimumSize` minus `2 × diagramInset` (`315×183` − `2×(75×41)` = `165×101pt`), not `bounds`'s size (`100×100pt`); subviews are placed from that floor, not compressed further |
 | spacing-control-025 | repaints-on-theme-change | Change the active theme's palette after construction | The frame/pane fill and border colors, and the field/reset fonts, update to the new palette's values without reconstructing the view |
 | spacing-control-026 | caps-displayed-inset-at-maximum | `range = 0...100` (custom), `value.top = 100` | The diagram draws the top inset at the same displayed extent as `value.top = 40` |
+| spacing-control-027 | drags-gutter-two-to-one-outward | `style: .paneDividers`; begin a drag on `.betweenColumns`'s handle from the near side of centre, then move the pointer `20pt` toward and past the centre (a net displacement of `-20pt` along `dragAxis` from the grab point) | `value.betweenColumns` decreases by `40` points from its value at drag start — the sign stays fixed by the near-side start and does not flip when the pointer crosses the centre |
 
 ## Edge Cases
 
-- **Null/empty input**: `style` and `range` are non-optional, non-escaping
-  typed initializer parameters; Swift's type system rules out `nil` for
-  either. `value` defaults to `Spacing()` (all-zero) when omitted. This is a
-  MUST: the component needs no nil-handling path for any initializer
-  parameter.
+- **Null/empty input**: `style` and `range` are non-optional typed
+  initializer parameters; Swift's type system rules out `nil` for either,
+  so the component needs no nil-handling path for them. `value` defaults to
+  `Spacing()` (all-zero) when omitted.
 - **Boundary values — value at the range's floor or ceiling**: An arrow,
   stepper, drag, or committed field write MUST NOT move a value past
   `range.lowerBound` or `range.upperBound`; every write path clamps through
@@ -319,11 +357,11 @@ column of unlabeled fields.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `style` | `SpacingDiagram` (`.frame` \| `.paneDividers`) | — (required) | Selects which six-numbers-minus-four (`.frame`) or six-numbers-minus-two (`.paneDividers`) subset of `Spacing` the control builds fields, steppers, arrows, and handles for, and which diagram it draws. |
+| `style` | `SpacingDiagram` (`.frame` \| `.paneDividers`) | — (required) | Selects which subset of `Spacing` the control builds fields, steppers, arrows, and handles for, and which diagram it draws: the four edges (`.frame`) or the two gutters (`.paneDividers`). |
 | `value` | `Spacing` | `Spacing()` (all zero) | The numbers currently shown. Assigning it redraws the control but does not invoke `onChange`. |
 | `range` | `ClosedRange<Int>` | `0...40` | The floor and ceiling every user-driven edit is clamped to; also sets each stepper's `minValue`/`maxValue`. |
 | `onChange` | `((Spacing) -> Void)?` | `nil` | Invoked once per user-driven edit that changes `value` (see fires-onchange-only-on-user-edit / skips-redundant-onchange). Not invoked by assigning `value` directly. |
-| `SpacingControl.boundToSettings(style:edges:gutters:range:)` | static factory | — | Not a constructor parameter of `SpacingControl` itself, but the documented way every caller in this framework obtains one: builds a control, then attaches a `SpacingSettingsBinding` (a separate file) that seeds it from, and keeps it synced with, the given `UserSetting<Int>` values. `edges` (for `.frame`) or `gutters` (for `.paneDividers`) MUST be non-empty for the matching style, or the call traps. |
+| `SpacingControl.boundToSettings(style:edges:gutters:range:)` | static factory | — | Not a constructor parameter of `SpacingControl` itself, but the documented way every caller in this framework obtains one: builds a control, then attaches a `SpacingSettingsBinding` (a separate file, out of this recipe's scope) that seeds it from, and keeps it synced with, the given `UserSetting<Int>` values. `edges` (for `.frame`) or `gutters` (for `.paneDividers`) needs to be non-empty for the matching style; `SpacingSettingsBinding.swift`'s own `precondition` traps when it is empty. |
 
 ## Deep Linking
 
@@ -360,18 +398,14 @@ other user-facing AppKit string in the framework is externalized.
   layout pass (`needsDisplay`, `needsLayout`) is an instantaneous property
   assignment applied on the next display cycle, so there is no motion for a
   Reduce Motion substitute to replace.
-- **Increase Contrast**: NEEDS REVIEW: the diagram's fills and `1pt` borders
-  are drawn entirely from `SemanticPalette` tokens
-  (`palette.projectPaneBackdrop`, `.border`, `.windowBackground`,
-  `palette.projectPaneOutline`), and `SemanticPalette`
+- **Increase Contrast**: See the open question under **Accessibility:
+  Minimum contrast ratio** — `SemanticPalette`
   (`external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperToolkit/Sources/Theme/SemanticPalette.swift`)
-  exposes no Increase-Contrast-aware variant of those tokens. What is
-  missing: whether the drawn `1pt` borders and the backdrop/pane fill pairs
-  meet an increased-contrast bar with the system setting on; what would
-  settle it: measuring the rendered contrast of `.border`-on-
-  `.windowBackground` (and backdrop-on-pane) with Increase Contrast
-  enabled, or extending `SemanticPalette` to derive a higher-contrast
-  border/fill pair from `NSWorkspace.accessibilityDisplayShouldIncreaseContrast`.
+  exposes no Increase-Contrast-aware variant of the tokens this file draws
+  from, on top of the baseline contrast question raised there; extending
+  `SemanticPalette` to derive a higher-contrast border/fill pair from
+  `NSWorkspace.accessibilityDisplayShouldIncreaseContrast` would settle
+  both.
 - **Differentiate Without Color**: Not applicable — the only information
   this control conveys beyond its numbers (which way an arrow moves a line)
   is carried by arrow-glyph shape and screen position; every arrow shares
@@ -438,7 +472,12 @@ Not applicable: `SpacingControl.swift` contains no logging call (no
   `450`ms/`60`ms cadence. Use `BasicTextField` with numeric
   `KeyboardOptions`, committing on `ImeAction.Done` or focus loss to
   mirror commits-field-on-editing-end, and `Modifier.draggable` (per
-  handle, `Orientation.Horizontal`/`Vertical`) for the drag gains.
+  handle, `Orientation.Horizontal`/`Vertical`) recording the value at drag
+  start and accumulating each `onDelta` into a running total displacement —
+  never applying a delta straight to the value — then computing
+  `value = startValue + gain × totalDisplacement` on every callback, to
+  mirror "measured from the value at drag start, not accumulated step by
+  step".
 - **React/Web**: Render the diagram as absolutely-positioned elements (or
   inline SVG) inside a fixed `420×250px` container with a `min-width`/
   `min-height` floor mirroring clips-below-minimum-size. Represent each
@@ -448,8 +487,12 @@ Not applicable: `SpacingControl.swift` contains no logging call (no
   `pointerup`/`pointerleave`). Use an `<input>` that commits on `blur`/
   `Enter` (mirroring commits-field-on-editing-end) rather than on every
   `input` event, and a `pointerdown`-installed/`pointerup`-removed
-  `pointermove` listener per handle, converting `movementX`/`movementY`
-  with the same 1:1/2:1 gains.
+  `pointermove` listener per handle that records the pointer's client
+  position and the value at `pointerdown`, then on each `pointermove`
+  computes the total displacement from that start position — not
+  accumulated `movementX`/`movementY` deltas — and applies the same
+  1:1/2:1 gains to it, to mirror "measured from the value at drag start,
+  not accumulated step by step".
 - **AppKit / UIKit** (source platform): Source file
   `packages/apple/AgenticToolkit/macOS/UI/Controls/Spacing/SpacingControl.swift`,
   with two companions this recipe also draws from:
@@ -463,7 +506,7 @@ Not applicable: `SpacingControl.swift` contains no logging call (no
   (`UILongPressGestureRecognizer`/`UIPanGestureRecognizer`), since
   AppKit's `NSEvent`-loop-based tracking (`SpacingHandle.track(from:)`,
   `claimsPress`) has no UIKit equivalent.
-- **WinUI 3** (the reason this recipe exists): Build the diagram as a
+- **WinUI 3**: Build the diagram as a
   `Canvas` (or a `Grid` of `Border` elements for the container/panes)
   inside a `UserControl` with `Width="420" Height="250"` and a `MinWidth`/
   `MinHeight` floor mirroring clips-below-minimum-size. Draw the outer
@@ -479,10 +522,17 @@ Not applicable: `SpacingControl.swift` contains no logging call (no
   hand-rolled `DispatcherTimer`, and should replace it outright, configured
   to the same `450`ms delay / `60`ms interval. Bind each number to a
   `NumberBox` (`SpinButtonPlacementMode="Compact"` supplies the stepper for
-  free) with `Minimum`/`Maximum` bound to `range` and
-  `ValidationMode="InvalidInputOverwritten"` — the WinUI analog of
-  recovers-unparseable-field-text — committing via `ValueChanged` only
-  after `LostFocus`/Enter to mirror commits-field-on-editing-end.
+  free) with `Minimum`/`Maximum` bound to `range`, committing via
+  `ValueChanged` only after `LostFocus`/Enter to mirror
+  commits-field-on-editing-end. `NumberBox`'s built-in
+  `ValidationMode="InvalidInputOverwritten"` only reverts to the previous
+  value on any unparseable text, which is not the full analog of
+  recovers-unparseable-field-text: that requirement still wants the
+  *clamped* typed number when one can be parsed — even from an out-of-range
+  or partially-numeric string — and falls back to the held number only when
+  nothing parses at all. Closing that gap needs a custom `TextSubmitted`
+  handler that parses the typed text itself, clamps a successful parse to
+  `range`, and reverts to the held number only when parsing fails outright.
   Implement the drag handles with `ManipulationMode="TranslateX,TranslateY"`
   and a `ManipulationDelta` handler computing the same 1:1 (edge) / 2:1
   (gutter) gains, and route `KeyDown` (`VirtualKey.Up`/`Down`) plus
@@ -495,85 +545,78 @@ Not applicable: `SpacingControl.swift` contains no logging call (no
 
 ## Design Decisions
 
-- Decision: Keep the range's floor and ceiling out of the fields'
+- **Decision**: Keep the range's floor and ceiling out of the fields'
   `NumberFormatter` and clamp only inside `Spacing.setting(_:in:)`/
   `Spacing.adjusting(_:by:in:)`.
-  Rationale: the source comment on `makeField` explains that a
+  **Rationale**: the source comment on `makeField` explains that a
   `NumberFormatter` with a `maximum` refuses out-of-range text outright
   rather than clamping it, and AppKit answers that refusal by declining to
   end editing — trapping the caret in an emptied field. `Spacing` is the
   one place that can clamp instead of reject.
-  Approved: pending
-- Decision: Give arrow buttons and steppers `refusesFirstResponder = true`,
-  keeping Tab limited to the eight number fields.
-  Rationale: the source comments on `makeStepper`/`makeArrowButton` state
+  **Approved**: pending
+- **Decision**: Give arrow buttons and steppers `refusesFirstResponder = true`,
+  keeping Tab limited to the four or two number fields, depending on
+  `style`.
+  **Rationale**: the source comments on `makeStepper`/`makeArrowButton` state
   that a stepper or an arrow in the tab loop would put extra stops between
   two number fields — Tab is for the numbers.
-  Approved: pending
-- Decision: Intercept Tab explicitly inside `control(_:textView:doCommandBy:)`
+  **Approved**: pending
+- **Decision**: Intercept Tab explicitly inside `control(_:textView:doCommandBy:)`
   rather than relying on AppKit's inferred key-view loop, and only within
   the control — at either end, focus is handed back to whatever
   `nextKeyView` the panel wired up.
-  Rationale: the source comment explains that this control's subviews are
+  **Rationale**: the source comment explains that this control's subviews are
   frame-placed, not constraint-placed, so AppKit's inferred loop would
   thread the control's numbers in among whatever else the panel shows; a
   closed ring was considered and rejected as a focus trap.
-  Approved: pending
-- Decision: Bound `SpacingHandle.claimsPress`'s wait at `patience` (`0.3`s)
+  **Approved**: pending
+- **Decision**: Bound `SpacingHandle.claimsPress`'s wait at `patience` (`0.3`s)
   in addition to the per-event `grace` (`0.12`s).
-  Rationale: the source comment explains a resting trackpad delivers a
+  **Rationale**: the source comment explains a resting trackpad delivers a
   steady trickle of sub-`slop` jitter events that each restart an unbounded
   `grace` timer, making a held-still arrow's repeat unreachable on a
   trackpad (though reachable on a mouse, which is genuinely silent);
   bounding the total wait fixes the trackpad case without shortening the
   mouse case.
-  Approved: pending
-- Decision: Scale the diagram 1:1 with the value, capped at
+  **Approved**: pending
+- **Decision**: Scale the diagram 1:1 with the value, capped at
   `maximumDisplayedInset` (`40pt`), rather than compressing the whole range
   into a smaller diagram.
-  Rationale: the source comment on `maximumDisplayedInset` explains that an
+  **Rationale**: the source comment on `maximumDisplayedInset` explains that an
   arrow standing against the edge it moves travels with that edge; at a
   smaller display scale, a pressed arrow could slide most of its own length
   out from under a held pointer and stop repeating before the range ended.
   The 1:1 cap, paired with freezing a pressed pair's seat
   (freezes-pressed-arrow-pair), is what keeps a full-range hold under the
   pointer.
-  Approved: pending
+  **Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
-| [theme-token-only-colors](agenticdevelopercookbook://compliance/ui#theme-token-only-colors) | passed | ui |
+| [platform-theming](agenticdevelopercookbook://compliance/platform-compliance#platform-theming) | passed | platform-compliance |
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
 | [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [meaningful-labels](agenticdevelopercookbook://compliance/accessibility#meaningful-labels) | partial | accessibility |
-| [non-text-contrast](agenticdevelopercookbook://compliance/accessibility#non-text-contrast) | partial | accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
 | [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
-| [template-conformance](agenticdevelopercookbook://compliance/recipe-quality#template-conformance) | passed | recipe-quality |
-| [behavioral-requirements](agenticdevelopercookbook://compliance/recipe-quality#behavioral-requirements) | passed | recipe-quality |
-| [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | passed | recipe-quality |
-| [cookbook-compliance](agenticdevelopercookbook://compliance/recipe-quality#cookbook-compliance) | passed | recipe-quality |
-| [cross-recipe-consistency](agenticdevelopercookbook://compliance/recipe-quality#cross-recipe-consistency) | passed | recipe-quality |
-| [source-fidelity](agenticdevelopercookbook://compliance/recipe-quality#source-fidelity) | passed | recipe-quality |
 
-Main-actor-confined passes because `SpacingControl` is declared `@MainActor`.
 Separation-of-concerns passes because the control holds only a `Spacing`
 value and an `onChange` closure, with all settings/persistence concerns
 pushed to `SpacingSettingsBinding`, a separate type (per the type's own doc
-comment). Theme-token-only-colors passes because every color this file
-paints comes from `SemanticPalette` tokens, never a raw literal.
+comment). Platform-theming passes because every color this file paints
+comes from `SemanticPalette` tokens, never a raw literal.
 Native-controls-preference and platform-design-language pass because number
 entry uses stock `NSTextField`/`NSStepper`, and Reset uses a stock
 `NSButton` with the standard rounded/small bezel. Keyboard-navigable passes
 because every number is reachable and editable by Tab plus the arrow keys
 (tab-order-is-picture-order, arrow-keys-adjust-focused-field).
-Meaningful-labels is partial because the arrow buttons carry an accessible
-description but the number fields and steppers do not (see the open
-question under Accessibility). Non-text-contrast is partial because the
+Screen-reader-support is partial because the arrow buttons carry an
+accessible description but the number fields and steppers do not (see the
+open question under Accessibility). Contrast-ratio is partial because the
 diagram's borders and fills are theme-token-driven but have no verified or
 Increase-Contrast-aware path (see the open question under Accessibility
 Options). String-externalization fails because every user-facing string in
@@ -585,3 +628,4 @@ Localization).
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from `SpacingControl.swift` (with `Spacing.swift` and `SpacingControlLayout.swift` consulted for the value type, enums, and layout metrics it uses): behavioral requirements for both diagram styles, drag/keyboard/arrow-repeat interaction, appearance and states, and two open questions (number-field VoiceOver labeling, Increase Contrast support) for review. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: added a per-edge drag axis/gain/growing-direction table; cited the CaptionedSliderView accessibility fragment in `related`; reworded the `boundToSettings` Configuration row to drop its unscoped MUST; trimmed `tags` to five and moved `references` into `related`; reformatted Design Decisions to bold labels; cleaned up the Compliance table to real catalog checks, remapping `theme-token-only-colors` to `platform-theming` and renaming `meaningful-labels`/`non-text-contrast` to their catalog names; removed commentary from the WinUI Platform Notes bullet; fixed the `style` row's backwards field-count description and the eight-field miscount throughout; rewrote Conformance Test Vectors 020 and 024 for validity and added vector 027 for a gutter drag crossing centre; tightened `repeats-held-arrow`, `preserves-other-fields-mid-edit`, and `drags-gutter-two-to-one-outward` for precision; corrected the React and Compose Platform Notes to record drag-start position/value instead of accumulating deltas, and noted the WinUI NumberBox revert gap; clarified the diagram's min/max Appearance note and the Null/empty input Edge Case; and added an open question on minimum contrast ratio for the theme-token colors this control draws. |

@@ -3,11 +3,11 @@ id: 3dc693ab-28e4-4624-9b2d-8dc81f81e037
 title: CrudRecordForm
 domain: agentictoolkit://recipes/crud-record-form
 type: recipe
-version: 1.1.0
-status: draft
+version: 1.2.0
+status: review
 language: en
 created: '2026-07-03'
-modified: '2026-07-03'
+modified: '2026-09-23'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -49,8 +49,8 @@ disabled and skipped (the backend strips them from PUT). Submission runs through
 the shared `useAction` hook, which drives the busy/error state and disables the
 buttons while saving.
 
-It is the form behind the `/all-data` generic table editor and any surface that
-creates/edits one CRUD row without hand-authored fields.
+It powers any surface that creates/edits one CRUD row without hand-authored
+fields (see Platform Notes for its first consumer).
 
 ## Ingredients
 
@@ -80,7 +80,9 @@ orchestration). The metadata→payload logic (`writableColumns`, `toDraft`,
   editing (booleans as booleans, JSON columns pretty-printed, others as text) and
   MUST start create fields empty (booleans untouched/`undefined`).
 - **reject-empty-required**: On submit, the form MUST block submission and show
-  a "`<name>` is required" error when a required column is empty.
+  a "`<name>` is required" error when a required column is empty. A required
+  **boolean** column is exempt from this check: an untouched one sends `false`
+  instead of throwing (see **omit-untouched-optionals-on-create**).
 - **validate-numbers**: On submit, a non-finite number MUST be rejected with
   "`<name>` must be a number", and a non-integer in an integer column with
   "`<name>` must be an integer".
@@ -90,7 +92,13 @@ orchestration). The metadata→payload logic (`writableColumns`, `toDraft`,
   optional field MUST be omitted from the payload so the backend column default
   applies; an untouched required boolean MUST send `false`.
 - **disable-and-skip-create-only-on-edit**: On edit, a `createOnly` column MUST
-  be rendered disabled and MUST be excluded from the update payload.
+  be rendered disabled and MUST be excluded from the update payload — stripped
+  before required-field validation runs, so an empty, disabled `createOnly`
+  column never blocks submission.
+- **clear-field-by-type-on-edit**: On edit, clearing an optional field MUST
+  send `null` for a nullable column, `''` for a plain (non-enum) string
+  column, and MUST omit every other column type from the payload (its prior
+  value survives the partial PUT).
 - **run-submit-through-useaction**: On submit the form MUST call
   `onSubmit(payload)` via `useAction`, disabling Cancel/Save and showing "Saving…"
   while the promise is pending, and MUST surface a thrown error inline without
@@ -112,12 +120,15 @@ orchestration). The metadata→payload logic (`writableColumns`, `toDraft`,
 - Root `<form className="flex flex-col gap-3">`; one row per writable column.
 - Non-boolean: `Field` (stacked label above the control); required labels get ` *`,
   object/array/unknown get a `JSON` hint. Boolean: a `<label className="flex
-  items-center gap-2">` with the `Checkbox` then a `fieldCaptionClass` caption.
+  items-center gap-2">` with the `Checkbox` then a caption styled with
+  `fieldCaptionClass` (the shared uppercase-mono caption class from
+  `@agenticdevelopertoolkit/ui/lib/typography`).
 - Footer: right-aligned `flex justify-end gap-2` — a ghost `Cancel` (`type="button"`)
   and a primary `Save` (`type="submit"`), both `size="sm"`, disabled while saving;
   Save reads "Saving…" while pending.
 - `ErrorText` renders between the fields and the footer.
-- No raw hex; no `!important` (color/typography via `apt-*` tokens + shared classes).
+- No raw hex; no `!important` (color/typography via the toolkit's `apt-*` design
+  tokens — e.g. `text-apt-text-muted` — plus shared classes).
 
 ## Shared State
 
@@ -144,9 +155,17 @@ orchestration). The metadata→payload logic (`writableColumns`, `toDraft`,
 | T7 | validate-numbers | number column = "abc" | Blocked; "`<name>` must be a number" |
 | T8 | validate-json | object column = "{bad" | Blocked; "`<name>` must be valid JSON" |
 | T9 | omit-untouched-optionals-on-create | create; leave an optional string empty | Payload omits that key (DB default applies) |
-| T10 | disable-and-skip-create-only-on-edit | edit; a `createOnly` rdid column | Its control is disabled; payload excludes it |
+| T10 | disable-and-skip-create-only-on-edit | edit; a `createOnly` column holding a client-supplied `rdid` (a caller-chosen id, not server-generated) | Its control is disabled; payload excludes it |
 | T11 | run-submit-through-useaction | valid submit; `onSubmit` pending | Cancel/Save disabled; Save shows "Saving…" until resolve |
 | T12 | run-submit-through-useaction | `onSubmit` rejects | Error shown via `ErrorText`; draft values retained |
+| T13 | seed-draft-from-initial | edit; `initial` has an object/array column value | Draft is prefilled with the pretty-printed (`JSON.stringify(value, null, 2)`) JSON text |
+| T14 | omit-untouched-optionals-on-create, reject-empty-required | create; leave a required boolean untouched | Payload sends `false` for that column |
+| T15 | omit-untouched-optionals-on-create | create; leave an optional boolean untouched | Payload omits that key |
+| T16 | validate-numbers | number column = "1e999" | Blocked; "`<name>` must be a number" (`Number.isFinite` is false) |
+| T17 | clear-field-by-type-on-edit | edit; clear a nullable optional column | Payload sends `null` for that column |
+| T18 | clear-field-by-type-on-edit | edit; clear a plain (non-enum) optional string column | Payload sends `''` for that column |
+| T19 | clear-field-by-type-on-edit | edit; clear an optional enum/integer/JSON column | Column omitted from the payload; its old value survives |
+| T20 | disable-and-skip-create-only-on-edit | edit; a required, empty `createOnly` column | Submission succeeds — no "is required" error; column excluded from the payload |
 
 ## Edge Cases
 
@@ -156,18 +175,20 @@ orchestration). The metadata→payload logic (`writableColumns`, `toDraft`,
 - Edit clearing an optional field: nullable columns send `null`, plain (non-enum)
   strings send `''`; other types can't represent "cleared", so the column is
   omitted (its old value survives — the honest option for a partial PUT).
-- `createOnly` columns (client-supplied rdids): rendered disabled on edit and
-  stripped from the PUT payload before any required-validation runs.
+- `createOnly` columns (client-supplied `rdid`s — a caller-chosen identifier,
+  e.g. a slug, rather than a server-generated one): rendered disabled on edit
+  and stripped from the PUT payload before any required-validation runs.
 - `1e999` in a number field: rejected (`Number.isFinite` is false) rather than
   silently serialized to `null`.
 - A validation throw (required/number/JSON) surfaces inline via `useAction`'s error
   and leaves the draft intact so the user can fix and resubmit.
 - Object/array/unknown columns round-trip as JSON text (pretty-printed when seeded);
-  `unknown` is treated as JSON because the spec types jsonb columns that way.
+  `unknown` is treated as JSON because the backend OpenAPI spec (surfaced via
+  `gen_table_metadata.py`) types jsonb columns that way.
 
 ## Platform Notes
 
-- **React / Web (TypeScript):** `websites/shared/crud/src/CrudRecordForm.tsx`,
+- **React / Web (TypeScript):** `packages/web/packages/crud/src/CrudRecordForm.tsx`,
   exported from `@agentic-toolkit/crud`. Composes the shared `Field`, `Button`,
   `useAction` (from `@agenticdevelopertoolkit/ui`) and the package-local `CrudFieldInput` +
   `ErrorText`. Note it lives in `@agentic-toolkit/crud`, not `@agenticdevelopertoolkit/ui`.
@@ -177,43 +198,89 @@ orchestration). The metadata→payload logic (`writableColumns`, `toDraft`,
   `gen_table_metadata.py`); `onSubmit` typically maps to `useCrudResource`'s
   `create`/`update`.
 - Demo: `ui-showcase` Topic `crud-record-form` (static `meta`; logs the payload).
+- First consumer: the `/all-data` generic table editor (`AllDataPane`).
 - **Responsive:** Fields stack in a single column; verify at 375 / 768 / 1440 via
   Playwright.
-- **SwiftUI / Compose:** Not applicable — web-only shared component.
+- **SwiftUI / Compose:** No native implementation in this repo; the same
+  `CrudTableMeta`-driven mapping would render `Picker` (SwiftUI) /
+  `DropdownMenu` (Compose) for enum columns, `Toggle` / `Switch` for booleans, a
+  multi-line `TextEditor` / `OutlinedTextField` for JSON columns, and
+  `TextField` / `OutlinedTextField` for everything else, following the same
+  required/`serverManaged`/`createOnly` rules above.
+- **AppKit / UIKit:** No native implementation in this repo; the same mapping
+  would render `NSPopUpButton` / `UIPickerView` for enum columns, `NSSwitch` /
+  `UISwitch` for booleans, a plain multi-line text view for JSON columns, and
+  `NSTextField` / `UITextField` for everything else, following the same
+  required/`serverManaged`/`createOnly` rules above.
+- **WinUI 3:** No native implementation in this repo; the same mapping would
+  render `ComboBox` for enum columns, `ToggleSwitch` for booleans, a multi-line
+  `TextBox` for JSON columns, and `TextBox` for everything else, following the
+  same required/`serverManaged`/`createOnly` rules above.
 
 ## Design Decisions
 
-- **Decision**: Fields are generated from `CrudTableMeta`, not hand-authored.
-  **Rationale**: one form serves every generic-CRUD table; new tables need no new
-  form code.
-- **Decision**: `serverManaged` columns are skipped; `createOnly` columns are
-  disabled + stripped on edit. **Rationale**: the form only ever offers what the
-  backend will actually accept, so a save can't silently no-op.
-- **Decision**: Untouched optional fields are omitted on create rather than sent as
-  empty. **Rationale**: the spec carries no defaults, so sending `''`/`false` would
-  override a DB default; omission lets the backend default win.
-- **Decision**: Validation throws field-named errors surfaced inline via `useAction`.
-  **Rationale**: the message names the offending column and the draft is retained, so
-  the fix is obvious and non-destructive.
-- **Decision**: Object/array/unknown columns use a JSON textarea and round-trip via
-  `JSON.parse`/`stringify`. **Rationale**: jsonb columns must survive edit without a
-  plain-text path corrupting an object to "[object Object]".
-- **Decision**: The draft is a flat text/boolean buffer coerced only at submit.
-  **Rationale**: controls stay simple (all text/checkbox), and type coercion +
-  validation live in one place (`buildPayload`).
+**Decision**: Fields are generated from `CrudTableMeta`, not hand-authored.
+**Rationale**: one form serves every generic-CRUD table; new tables need no new
+form code.
+**Approved**: pending
+
+**Decision**: `serverManaged` columns are skipped; `createOnly` columns are
+disabled + stripped on edit.
+**Rationale**: the form only ever offers what the backend will actually accept,
+so a save can't silently no-op.
+**Approved**: pending
+
+**Decision**: Untouched optional fields are omitted on create rather than sent
+as empty.
+**Rationale**: the backend OpenAPI spec (surfaced via `gen_table_metadata.py`)
+carries no column defaults, so sending `''`/`false` would override a DB
+default; omission lets the backend default win.
+**Approved**: pending
+
+**Decision**: Validation throws field-named errors surfaced inline via
+`useAction`.
+**Rationale**: the message names the offending column and the draft is
+retained, so the fix is obvious and non-destructive.
+**Approved**: pending
+
+**Decision**: Object/array/unknown columns use a JSON textarea and round-trip
+via `JSON.parse`/`stringify`.
+**Rationale**: jsonb columns must survive edit without a plain-text path
+corrupting an object to "[object Object]".
+**Approved**: pending
+
+**Decision**: The draft is a flat text/boolean buffer coerced only at submit.
+**Rationale**: controls stay simple (all text/checkbox), and type coercion +
+validation live in one place (`buildPayload`).
+**Approved**: pending
+
+**Decision**: Create vs. edit mode is inferred from whether `initial` is
+supplied (`mode = initial ? 'edit' : 'create'`), with no separate mode prop.
+**Rationale**: a single source of truth for mode rules out a caller passing a
+row and a conflicting mode flag out of sync with each other.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |---|---|---|
-| Artifact formatting (recipe) | passed | artifact-formatting |
-| No raw hex / arbitrary colors / `!important` | passed | project-guidelines UI |
-| Components sourced from `@agentic-toolkit` (no bespoke UI) | passed | project-guidelines UI |
-| Labeled fields (via `Field`) + keyboard-operable controls | passed | accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [platform-theming](agenticdevelopercookbook://compliance/platform-compliance#platform-theming) | passed | Platform Compliance |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+
+`screen-reader-support` and `keyboard-navigable` rest on `Field`'s label
+wrapping and the native `<label>`/`<input>`/`<button>` elements in
+`CrudRecordForm.tsx`. `platform-theming` rests on `fieldCaptionClass` and the
+shared classes drawing every color from `apt-*` tokens (no raw hex).
+`no-hardcoded-strings` fails because the `Cancel`/`Save`/`Saving…`/`Close`
+labels and the required/number/JSON error messages in `CrudRecordForm.tsx` are
+literal English strings with no localization call.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 1.2.0 | 2026-09-23 | Mike Fullerton | Lint pass: added a Design Decision for the `initial`-presence mode inference; named the backend OpenAPI spec (`gen_table_metadata.py`) in place of "the spec" in two places; added the boolean exception to reject-empty-required and the createOnly-before-validation ordering to disable-and-skip-create-only-on-edit; added clear-field-by-type-on-edit with test vectors T17-T19 and T20 for the createOnly/validation ordering; added T13-T16 for JSON pretty-printing, untouched booleans, and `1e999`; defined `rdid`, `fieldCaptionClass`, and `apt-*` on first use; moved the `/all-data` reference out of Overview into a Platform Notes consumer note; added AppKit/UIKit and WinUI 3 Platform Notes bullets and rewrote the SwiftUI/Compose one so none reads "Not applicable"; reformatted every Design Decision into the three-line form with `**Approved**: pending`; rewrote Compliance to link real catalog checks (accessibility, platform-compliance, internationalization), dropping the two rows with no catalog equivalent; fixed the stale source path and the `@agentic-toolkit`/`@agenticdevelopertoolkit/ui` scope mismatch. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Renamed every requirement to subject-only kebab-case, dropping the old prefix everywhere it is cited. |
 | 1.0.0 | 2026-07-03 | Mike Fullerton | Initial recipe; documents the metadata-driven CrudRecordForm from @adh-shared/crud. |

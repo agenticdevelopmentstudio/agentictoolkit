@@ -3,7 +3,7 @@ id: c1787e74-2485-4d7b-a219-feb4c07cf97c
 title: TextEditView
 domain: agentictoolkit://recipes/text-edit-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -63,11 +63,12 @@ behavior every row built from it — plain or secure — inherits.
   field in a single horizontal row (`label`, then `textField`), and MUST
   pin that row to the edges of the view.
 - **expands-text-field-to-fill-row**: Component MUST give `textField` a
-  horizontal content-hugging priority (`NSLayoutConstraint.Priority(1)`)
-  lower than the row spacer's, so the field — not the gap between it and
-  the label — takes the width left over after the label.
-- **wires-text-field-action**: Component MUST set `textField.target` to
-  itself and `textField.action` to its `textFieldChanged(_:)` selector.
+  horizontal content-hugging priority lower than the row spacer's, so the
+  field — not the gap between it and the label — takes the width left over
+  after the label (see Design Decisions for the specific priority value).
+- **wires-text-field-action**: Component MUST route `textField`'s
+  target/action commit to itself, so a committed edit reaches
+  `settingObserver` (see Platform Notes for the specific selector).
 - **initializes-from-view-model**: Component MUST, during initialization,
   set the label's text to `viewModel.title` and construct `textField` with
   `viewModel.value` as its initial value.
@@ -105,6 +106,11 @@ behavior every row built from it — plain or secure — inherits.
   (`.../Views/SettingsViewProtocol.swift`) that `ComposableSettings` uses
   to type its row views; the protocol adds no requirements of its own
   beyond `NSView` conformance.
+- **claims-sole-onchange-observer**: Component MUST assign its own handler
+  to `viewModel.onChange` during initialization
+  (`viewModel.onChange = { [weak self] _ in ... }`), superseding any
+  handler already registered on that view model instance (see
+  **overwritten external observer** in Edge Cases).
 
 ## Appearance
 
@@ -191,15 +197,16 @@ behavior every row built from it — plain or secure — inherits.
   path in source); the 44×44pt minimum is iOS/touch guidance, not a macOS
   pointer-interface requirement. No `controlSize` is set on `textField`,
   so it keeps `NSTextField`'s regular system click-target metrics.
-- **Contrast**: Not set independently by this component — `label` and
-  `textField`'s typed-text color both resolve to the theme's
+- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. `label`
+  and `textField`'s typed-text color both resolve to the theme's
   `primaryText` role (theme foreground, unchanged; no minimum contrast is
   computed for this role), and placeholder text resolves to
   `placeholderText`, which the theme layer dims toward the background with
-  only a `minContrast: 1.6` floor (see Design Decisions). Whether an
-  active theme's actual resolved colors clear WCAG 2.1 SC 1.4.3's 4.5:1
-  threshold for body text is a property of the chosen `ColorTheme`, not of
-  `TextEditView.swift`.
+  only a `minContrast: 1.6` floor (see Design Decisions). What is missing is
+  any check that the resolved colors clear WCAG 2.1 SC 1.4.3's 4.5:1
+  threshold for body text. Settling it needs the text-to-background ratio
+  measured for both roles under every shipped `ColorTheme`, or a raised
+  `placeholderText` floor in the theme layer.
 
 ## Conformance Test Vectors
 
@@ -208,28 +215,28 @@ behavior every row built from it — plain or secure — inherits.
 | text-edit-view-001 | constructs-plain-text-field | Construct `TextEditView` with any `viewModel` | `textField` is an instance of `NSTextField` whose `stringValue` equals `viewModel.value` |
 | text-edit-view-002 | supports-text-field-substitution | Declare a subclass of `TextEditView` overriding `makeTextField(initialValue:)` to return an `NSSecureTextField` | The subclass compiles and constructing it produces a `textField` of the overridden type, with the row layout, theming, and commit wiring unchanged |
 | text-edit-view-003 | arranges-row-layout | Construct `TextEditView` with any `viewModel` | `label` and `textField` are both subviews of a single row view that is pinned to the component's edges; no other layout container appears |
-| text-edit-view-004 | expands-text-field-to-fill-row | Inspect `textField`'s horizontal content-hugging priority after construction | Equals `NSLayoutConstraint.Priority(1)`, lower than the row spacer's hugging priority |
-| text-edit-view-005 | wires-text-field-action | Any initialized `TextEditView` | `textField.target === view`; `textField.action == Selector("textFieldChanged:")` |
+| text-edit-view-004 | expands-text-field-to-fill-row | Inspect `textField`'s horizontal content-hugging priority relative to the row spacer's after construction | `textField`'s priority is lower than the row spacer's hugging priority, so the field absorbs the row's leftover width (see Design Decisions for the exact value) |
+| text-edit-view-005 | wires-text-field-action | Any initialized `TextEditView` | `textField.target` is the view itself; invoking `textField`'s registered commit action reaches the view's edit-commit handler, which can write to `settingObserver` (see Platform Notes for the specific selector name) |
 | text-edit-view-006 | initializes-from-view-model | `viewModel.title = "Server Name"`, `viewModel.value = "prod-1"` | After init, `label.stringValue == "Server Name"` and `textField.stringValue == "prod-1"` |
 | text-edit-view-007 | commits-value-on-change | `viewModel.settingObserver.value = "old"`; set `textField.stringValue = "new"` and invoke `textFieldChanged(textField)` | `viewModel.settingObserver.value == "new"` after the call |
-| text-edit-view-008 | skips-redundant-commits | `viewModel.settingObserver.value = "same"`; set `textField.stringValue = "same"` and invoke `textFieldChanged(textField)` | `settingObserver.value`'s setter is not invoked a second time (no additional write/observer notification is recorded) |
+| text-edit-view-008 | skips-redundant-commits | `viewModel.settingObserver.value = "same"`; set `textField.stringValue = "same"` and invoke `textFieldChanged(textField)`, observing writes via a recording spy or observer registered on `settingObserver` | The spy/observer records zero additional writes to `settingObserver.value` after the call |
 | text-edit-view-009 | syncs-on-external-change | After construction, externally change `viewModel.title` and `viewModel.value`, then invoke `viewModel.onChange(newValue)` | `label.stringValue` and `textField.stringValue` both update to reflect the new `viewModel` state |
 | text-edit-view-010 | applies-theme-styling | Construct the view, then trigger a theme change | `textField.font` equals the theme's `.body`-role font and `textField.textColor` equals the theme's `primaryText` color, both immediately after construction and again after the theme change |
 | text-edit-view-011 | restyles-existing-placeholder | After construction, set `textField.placeholderString = "Enter value"`, then trigger a theme change | `textField.placeholderAttributedString`'s color attribute equals the theme's `placeholderText` color and its font equals the theme's `.body`-role font |
 | text-edit-view-012 | exposes-constituent-views | Construct the component, then access `.label` and `.textField` from outside the type | Both properties are accessible and return the same `NSTextField` instances built during init |
 | text-edit-view-013 | requires-designated-initializer | Attempt `TextEditView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
 | text-edit-view-014 | rejects-frame-only-initialization | Attempt `TextEditView(frame: .zero)` | The call traps with a fatal error; no instance is returned |
-| text-edit-view-015 | confines-to-main-actor | Attempt to construct or mutate a `TextEditView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
+| text-edit-view-015 | confines-to-main-actor | (Static/compile-time check, not a runtime assertion) Attempt to construct or mutate a `TextEditView` from off the main actor | The call fails to compile under Swift's `@MainActor` isolation checking; there is no runtime behavior to observe |
 | text-edit-view-016 | conforms-to-settings-view-protocol | Any `TextEditView` instance | `view is SettingsViewProtocol` evaluates `true` |
+| text-edit-view-017 | claims-sole-onchange-observer | Register an observer closure on `viewModel.onChange`, then construct a `TextEditView` against that same `viewModel` | `viewModel.onChange` now points at `TextEditView`'s own handler; invoking it no longer calls the previously registered closure |
 
 ## Edge Cases
 
 - Null/empty input: `viewModel` (`ComposableSettings.ViewModel<String>`) is
-  a non-optional, typed constructor parameter; Swift's type system rules
-  out `nil`. An empty `viewModel.title` or `viewModel.value` produces an
-  empty label or field with no crash. This is a MUST: the component
-  provides, and needs, no nil-handling path for its one initializer
-  parameter.
+  a non-optional, typed constructor parameter, so Swift's type system rules
+  out `nil` entirely; the component needs no nil-handling path for its one
+  initializer parameter. An empty `viewModel.title` or `viewModel.value`
+  produces an empty label or field with no crash.
 - Boundary values: Not applicable — the bound value is `String` with no
   minimum or maximum length enforced anywhere in `TextEditView.swift`; any
   length is accepted and displayed as-is.
@@ -246,13 +253,10 @@ behavior every row built from it — plain or secure — inherits.
 - Overwritten external observer: `viewModel.onChange` is a single closure
   property. `TextEditView.init` unconditionally assigns
   `viewModel.onChange = { [weak self] _ in ... }`, replacing whatever
-  handler, if any, was previously registered on that `viewModel`. This is
-  a MUST-level, source-traceable consequence of plain closure-property
-  assignment: the component MUST NOT be assumed to coexist with another
-  `onChange` observer already registered on the same view-model instance —
-  constructing a second `TextEditView` (or `SecureTextEditView`, or any
-  other observer) against the same view model silently drops the earlier
-  handler.
+  handler (if any) was previously registered on that `viewModel` (see
+  **claims-sole-onchange-observer**). Constructing a second `TextEditView`
+  (or `SecureTextEditView`, or any other observer) against the same view
+  model silently drops the earlier handler.
 
 ## Configuration
 
@@ -323,29 +327,40 @@ Not applicable: `TextEditView.swift` contains no logging call (no
 ## Platform Notes
 
 - **SwiftUI**: Replace with an `HStack` pairing `Text(viewModel.title)`
-  leading and a trailing `TextField("", text: $value)`, writing the
-  binding's setter back into the underlying setting with an equality
-  guard before assigning, mirroring skips-redundant-commits. Give the
-  field an explicit `.accessibilityLabel(viewModel.title)` — the fix this
-  recipe's Accessibility section flags as missing from the AppKit source
-  — and drive its font/color from the same semantic theme tokens (`.body`,
+  leading and a trailing `TextField("", text: $value)`, tracked through a
+  local editing state. Commit the value back into the underlying setting
+  on `.onSubmit` (Return) or when a `@FocusState` boolean bound to the
+  field transitions from `true` to `false` (focus loss) — not on every
+  keystroke via the binding setter — with an equality guard before
+  assigning, mirroring skips-redundant-commits and `NSTextField`'s
+  target/action commit points. Give the field an explicit
+  `.accessibilityLabel(viewModel.title)` — the fix this recipe's
+  Accessibility section flags as missing from the AppKit source — and
+  drive its font/color from the same semantic theme tokens (`.body`,
   `primaryText`, `placeholderText`) rather than fixed literals, mirroring
   applies-theme-styling/restyles-existing-placeholder.
 - **Compose**: Use a `Row` with `Text(title)` leading and a trailing
-  `OutlinedTextField(value = value, onValueChange = { ... }, singleLine =
-  true)`. Give it `Modifier.semantics { contentDescription = title }` (the
-  missing accessibility link's Compose analog), and commit to the backing
-  state/view model inside `onValueChange` with an equality check before
-  writing, mirroring skips-redundant-commits.
+  `OutlinedTextField(value = value, onValueChange = { value = it },
+  singleLine = true)` backed by local text state. Commit to the backing
+  state/view model only on focus loss (`Modifier.onFocusChanged`) or
+  `ImeAction.Done`, not on every `onValueChange` call — `onValueChange`
+  fires per keystroke — comparing against the previous value before
+  writing, mirroring skips-redundant-commits and `NSTextField`'s
+  target/action commit points. Give it `Modifier.semantics {
+  contentDescription = title }` (the missing accessibility link's Compose
+  analog).
 - **React/Web**: A flex row (`display: flex; align-items: center;
   justify-content: space-between`) containing a `<label>` for the title
   and an `<input type="text">` whose `aria-labelledby` points at the
   title `<label>`'s `id` — the web analog of the accessibility link this
-  recipe flags as missing from the source. Commit the new value on the
-  input's `onChange` handler, comparing against the previous value before
-  calling the parent's setter, mirroring skips-redundant-commits; style
-  the input's font/color and any placeholder from theme tokens equivalent
-  to `.body`/`primaryText`/`placeholderText`, mirroring
+  recipe flags as missing from the source. Track the typed value locally
+  and commit the new value to the parent's setter only on the input's
+  `blur` handler or Enter via `onKeyDown`, not on every `onChange` call —
+  an `<input>` fires `onChange` per keystroke — comparing against the
+  previous value before calling the parent's setter, mirroring
+  skips-redundant-commits and `NSTextField`'s target/action commit points;
+  style the input's font/color and any placeholder from theme tokens
+  equivalent to `.body`/`primaryText`/`placeholderText`, mirroring
   applies-theme-styling.
 - **AppKit/UIKit** (source platform): Source file
   `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/TextEditView.swift`:
@@ -353,17 +368,25 @@ Not applicable: `TextEditView.swift` contains no logging call (no
   `ComposableSettings` namespace, `open` to subclassing through its
   `makeTextField(initialValue:)` factory — the mechanism
   `SecureTextEditView.swift` (in the same directory) uses to substitute
-  `NSSecureTextField`. The file is macOS-only (`import AppKit`); there is
-  no UIKit code path in source. A UIKit port would replace `NSTextField`
-  with a `UITextField` and the target/action pattern with
-  `.addTarget(_:action:for: .editingDidEndOnExit)`.
-- **WinUI 3** (the reason this recipe exists): Build the row as a `Grid`
-  with column definitions `*,Auto`: a `TextBlock` for the title in column
-  0 (the `*` column claims the row's leading space, the WinUI analog of
-  `makeRow`'s flexible spacer between the label and the control), and a
-  `TextBox` — the direct analog of the plain `NSTextField` this class
-  constructs — in column 1, `HorizontalAlignment="Stretch"` so it takes
-  the leftover width the way expands-text-field-to-fill-row does. Set
+  `NSSecureTextField`. `textField.target` is set to the view itself and
+  `textField.action` to `Selector("textFieldChanged:")`, its private
+  `@objc` handler that performs the commit (see wires-text-field-action).
+  The file is macOS-only (`import AppKit`); there is no UIKit code path in
+  source. A UIKit port would replace `NSTextField` with a `UITextField`
+  and the target/action pattern with
+  `.addTarget(_:action:for: .editingDidEndOnExit)`. Known source bug: the
+  frame-only initializer's fatal-error message string is malformed
+  (`fatalError("init(frame frameRect: NSRect")`, missing its closing
+  parenthesis) — the trap still fires correctly (see
+  rejects-frame-only-initialization); only the printed message text is
+  wrong.
+- **WinUI 3**: Build the row as a `Grid` with column definitions `Auto,*`:
+  a `TextBlock` for the title in column 0 (`Auto`, sized to its content,
+  the WinUI analog of `makeRow`'s label), and a `TextBox` — the direct
+  analog of the plain `NSTextField` this class constructs — in column 1
+  (the `*` column, which claims the row's leftover space), with
+  `HorizontalAlignment="Stretch"` so the field, not the title, takes the
+  leftover width the way expands-text-field-to-fill-row does. Set
   `AutomationProperties.LabeledBy` on the `TextBox` to the `TextBlock` —
   the WinUI analog of the `setAccessibilityTitleUIElement` link this
   recipe flags as missing from the AppKit source; add it in the port even
@@ -382,35 +405,36 @@ Not applicable: `TextEditView.swift` contains no logging call (no
 
 ## Design Decisions
 
-- Decision: Give `textField` a horizontal content-hugging priority
+- **Decision**: Give `textField` a horizontal content-hugging priority
   (`NSLayoutConstraint.Priority(1)`) one step below the row spacer's,
   rather than leaving it at its default hugging.
-  Rationale: per the source's own inline comment, this is "below the row
-  spacer's hugging, so the field — not the gap — takes the width left
+  **Rationale**: per the source's own inline comment, this is "below the
+  row spacer's hugging, so the field — not the gap — takes the width left
   over after the label. An empty field sized to its own content is a few
   points wide and unclickable." Without it, an empty `NSTextField` would
   shrink to its own tiny intrinsic width and the spacer would absorb the
   row's slack instead.
-  Approved: pending
-- Decision: Declare `makeTextField(initialValue:)` as an `open class func`
-  factory instead of returning a fixed `NSTextField` inline in `init`.
-  Rationale: this is the one seam `TextEditView` designs in for variation
-  — `SecureTextEditView` overrides only this method to substitute
-  `NSSecureTextField`, reusing every other line of `init` (row layout,
-  content-hugging, theme observation, commit wiring) unmodified.
-  Approved: pending
-- Decision: Attach `observeTheme` styling inside `init` rather than by
+  **Approved**: pending
+- **Decision**: Declare `makeTextField(initialValue:)` as an
+  `open class func` factory instead of returning a fixed `NSTextField`
+  inline in `init`.
+  **Rationale**: this is the one seam `TextEditView` designs in for
+  variation — `SecureTextEditView` overrides only this method to
+  substitute `NSSecureTextField`, reusing every other line of `init` (row
+  layout, content-hugging, theme observation, commit wiring) unmodified.
+  **Approved**: pending
+- **Decision**: Attach `observeTheme` styling inside `init` rather than by
   returning an already-themed field type from the factory.
-  Rationale: per the source's own inline comment, "subclasses substitute
-  their own field ... so the theme is attached here rather than by
-  returning a `ThemedTextField` from the factory" — keeping theming in one
-  place regardless of which `NSTextField` subclass `makeTextField`
+  **Rationale**: per the source's own inline comment, "subclasses
+  substitute their own field ... so the theme is attached here rather than
+  by returning a `ThemedTextField` from the factory" — keeping theming in
+  one place regardless of which `NSTextField` subclass `makeTextField`
   returns.
-  Approved: pending
-- Decision: Restyle an existing `textField.placeholderString` only on a
-  theme change that occurs *after* construction, never on the initial
+  **Approved**: pending
+- **Decision**: Restyle an existing `textField.placeholderString` only on
+  a theme change that occurs *after* construction, never on the initial
   apply.
-  Rationale: `ThemePaletteObserver.init`
+  **Rationale**: `ThemePaletteObserver.init`
   (`external/agenticdevelopertoolkit/.../Theme/ThemeBinding.swift`)
   applies its closure immediately upon registration, which happens inside
   `TextEditView.init` before any caller can reach the newly-created
@@ -420,10 +444,10 @@ Not applicable: `TextEditView.swift` contains no logging call (no
   ever styled by a later, caller-triggered theme change. This is a
   non-obvious consequence of the two files' evaluation order, not a bug
   being idealized away.
-  Approved: pending
-- Decision: Accept that placeholder text is guaranteed only a 1.6:1
+  **Approved**: pending
+- **Decision**: Accept that placeholder text is guaranteed only a 1.6:1
   contrast floor against the background.
-  Rationale: the theme layer's `SemanticPalette` derivation for
+  **Rationale**: the theme layer's `SemanticPalette` derivation for
   `placeholderText` dims the theme's foreground toward its background
   with `minContrast: 1.6` — below WCAG 2.1 SC 1.4.3's 4.5:1 floor for
   normal text. This is a theme-layer choice inherited by every themed
@@ -431,30 +455,56 @@ Not applicable: `TextEditView.swift` contains no logging call (no
   override it. Recorded here as technical debt affecting accessibility
   correctness, per source-fidelity's requirement to document such debt
   rather than idealize it away.
-  Approved: pending
-- Decision: Trap the frame-only initializer with a fatal-error message
-  string that is missing its closing parenthesis
-  (`fatalError("init(frame frameRect: NSRect")` rather than
-  `"init(frame frameRect: NSRect)"`).
-  Rationale: this is a literal, traceable quirk in the source line itself
-  — the trap still fires correctly (the string content has no effect on
-  whether the fatal error triggers), but the printed message is malformed.
-  Documented here per source-fidelity's requirement to record known
-  quirks rather than smooth them over.
-  Approved: pending
+  **Approved**: pending
+- **Decision**: Whether `TextEditView` should call
+  `setAccessibilityTitleUIElement(label)` to link `textField` to `label`
+  for VoiceOver, the way sibling `CheckboxView` links its switch's
+  accessibility title.
+  **Rationale**: Not implemented in source (see Accessibility's Label
+  requirements gap) — `TextEditView.swift` never calls
+  `setAccessibilityTitleUIElement` or otherwise links `textField` to
+  `label`, so VoiceOver announces `textField` as an unnamed text field
+  rather than by the row's title. Recording the proposal here lets a port
+  choose to copy the gap or fix it, since the Platform Notes already
+  direct every port besides the AppKit source to add the link.
+  **Approved**: pending
+- **Decision**: Unconditionally overwrite `viewModel.onChange` with the
+  component's own handler during initialization, rather than chaining it
+  after any previously registered handler.
+  **Rationale**: `ComposableSettings.ViewModel<String>`'s `onChange` is a
+  single closure property with no built-in multicast support; chaining
+  would require a broader change to the shared view-model type, which is
+  out of scope for this row view. The source accepts the tradeoff that one
+  `TextEditView` (or other observer, including `SecureTextEditView`) per
+  view model instance is the supported usage (see
+  **claims-sole-onchange-observer**).
+  **Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
-| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
-| [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | reliability |
-| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
+| [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
+| [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | Platform Compliance |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+| [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | Reliability |
+| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
+
+`native-controls-preference` and `platform-design-language` rest on
+`textField` being an unmodified `NSTextField` with AppKit's default bezel
+styling; `keyboard-navigable` rests on the field's inherited, unmodified
+`NSControl` tab order (no custom key handling in source); `screen-reader-
+support` is `partial` because the accessibility title link to `label` is
+missing (see the open question in Accessibility above); `idempotent-
+operations` rests on skips-redundant-commits's equality check before
+writing to `settingObserver.value`; `separation-of-concerns` rests on the
+view holding no persistence or business logic of its own — commits pass
+straight through to the caller-supplied `settingObserver`.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: promote the onChange-overwrite edge case to a named claims-sole-onchange-observer requirement with a test vector and a pending design decision; reword the null-input edge case to drop normative language; state committed-edit routing and the field's content-hugging priority as observable outcomes instead of a private selector/literal, moving the selector name to Platform Notes; correct SwiftUI/Compose/React commit timing to submit-or-focus-loss instead of per-keystroke, matching NSTextField's target/action semantics; fix the WinUI Grid column order (Auto,*) so the TextBox actually stretches; remove the malformed fatalError decision and log it as a known source bug in Platform Notes instead; drop the "(the reason this recipe exists)" filler; reformat Design Decisions to the bold convention and add a pending accessibility-label decision; clarify test vectors 008 (spy-based write count) and 015 (compile-time check); title-case Compliance categories and add a supporting sentence; backfill the initial Change History row; records the unverified theme-token contrast as an open question. |

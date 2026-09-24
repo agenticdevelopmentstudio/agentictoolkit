@@ -3,11 +3,11 @@ id: 21cbbc1c-38a0-4e7a-8ca0-06e2f29429f5
 title: SiteWordmark
 domain: agentictoolkit://recipes/site-wordmark
 type: ingredient
-version: 1.1.0
-status: draft
+version: 1.2.0
+status: review
 language: en
 created: '2026-06-26'
-modified: '2026-06-26'
+modified: '2026-09-23'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -46,7 +46,8 @@ It lives in `@agentic-toolkit/adh` — the **vocabulary** package — not in a g
 toolkit package, because it resolves the ADH site registry: `getSite` +
 `splitSiteTitle` from `@agentic-toolkit/adh-registry` turn a `siteId` into this
 family's brand string. The placement rule is mechanism → the generic packages
-(`ui`, `themes`, `controls`, …), vocabulary → `@agentic-toolkit/adh`. (Only the
+(`@agenticdevelopertoolkit/ui`, `@agenticdevelopertoolkit/themes`,
+`@agenticdevelopertoolkit/controls`, …), vocabulary → `@agentic-toolkit/adh`. (Only the
 `HubMark` glyph inside it is registry-free, so that one piece comes from
 `@agentic-toolkit/adh/header`.) It ships on its OWN subpath
 (`@agentic-toolkit/adh/marketing/SiteWordmark`), importing only the pure registry,
@@ -65,10 +66,12 @@ so a `'use client'` consumer can pull just the wordmark without co-bundling
 - **honor-explicit-tagline**: The SiteWordmark MUST render a provided
   `tagline` node as the identity line in place of the description.
 - **omit-identity-when-null**: The SiteWordmark MUST render no identity line
-  when `tagline` is `null` (or when neither a tagline nor a description exists).
-- **fall-back-on-unknown-site**: The SiteWordmark MUST still render
-  (accenting the whole label) when the `siteId` resolves to no registry entry,
-  never throwing.
+  when `tagline` is `null` or an empty string, or when neither a tagline nor a
+  description exists — the render check (`identity ? … : null`) is truthy-based,
+  so `null`, `undefined` and `''` are all treated as "omit".
+- **fall-back-on-unknown-site**: The SiteWordmark MUST still render — accenting
+  the `siteId` value itself, since there is no registry entry to derive a label
+  from — when the `siteId` resolves to no registry entry, never throwing.
 
 ## Appearance
 
@@ -94,17 +97,26 @@ STORE & REVIEW RESEARCH           <- font-mono, uppercase, tracked, apt-text-dim
 |---|---|
 | Known site, default | Brand name (gold-italic accent) + description identity line |
 | Known site, explicit `tagline` | Identity line shows the provided node |
-| Identity omitted (`tagline={null}` or no description) | Wordmark line only |
-| Unknown `siteId` | Whole label rendered as the accent; no identity line if no description |
+| Identity omitted (`tagline={null}`, `tagline=""`, or no description) | Wordmark line only |
+| Unknown `siteId` | The `siteId` value itself is rendered as the accent, with no lead segment |
 
 ## Accessibility
 
 - Text-only and non-interactive; the brand and identity are read in document
   order by assistive tech.
-- Color is conveyed by token classes that meet the theme's contrast; the accent
-  word carries meaning through text, not color alone (it is the site name).
+- Color MUST come from theme token roles (`text-apt-gold`, `text-apt-text`,
+  `text-apt-text-dim`), never a hardcoded value, so contrast tracks the active
+  theme's Material 3 roles (`--color-primary`, `--color-on-surface`, …) rather
+  than a value this component owns; the accent word carries meaning through
+  text, not color alone (it is the site name).
 - Carries no landmark role of its own — the consumer places it within its own
   `<header>` / heading structure (e.g. above the page `<h1>`).
+- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
+  the wordmark and tagline text color resolves from the active theme's apt-gold/apt-text/apt-text-dim role against
+  the hosting background at runtime; the component performs no contrast
+  check, so whether a given theme's resolved pair meets 4.5:1 cannot be
+  determined from this file. This would be settled by a theme-level
+  contrast audit of apt-gold/apt-text/apt-text-dim against the backgrounds it sits on.
 
 ## Conformance Test Vectors
 
@@ -114,7 +126,9 @@ STORE & REVIEW RESEARCH           <- font-mono, uppercase, tracked, apt-text-dim
 | T2 | default-identity-to-description | `siteId="research"` (no `tagline`) | Identity line reads "Store & review research" (the registry description) |
 | T3 | honor-explicit-tagline | `siteId="research" tagline="Published research"` | Identity line reads "Published research" |
 | T4 | omit-identity-when-null | `siteId="research" tagline={null}` | No identity line is rendered |
-| T5 | fall-back-on-unknown-site | `siteId` not in the registry | Component renders the label as the accent without throwing |
+| T5 | fall-back-on-unknown-site | `siteId={'not-a-real-site' as SiteId}` | No lead segment; renders `not-a-real-site` as the accent; no identity line; does not throw |
+| T6 | accent-trailing-word | `siteId="bitbag"` | `fullLabel` "Bitbag" does not start with "Agentic Developer "; no lead segment, whole label "Bitbag" is the accent; identity line reads "The Agentic Developer persona" |
+| T7 | omit-identity-when-null | `siteId="research" tagline=""` | No identity line is rendered (`''` is falsy, same as `null`) |
 
 ## Edge Cases
 
@@ -125,6 +139,9 @@ STORE & REVIEW RESEARCH           <- font-mono, uppercase, tracked, apt-text-dim
   the accent and omits the identity line.
 - `tagline` accepts any `ReactNode`, so a consumer may pass a link or styled span;
   `undefined` means "use the description", `null` means "omit".
+- `tagline=""` also omits the identity line, the same as `null`: the render
+  check (`identity ? … : null`) is truthy-based, not a strict `!== null`
+  comparison, so an empty string is treated as "omit" too.
 
 ## Configuration
 
@@ -151,48 +168,68 @@ Presentational and static; emits no log events.
 
 ## Platform Notes
 
+- **SwiftUI**: Not applicable — web-only shared component.
+- **Compose**: Not applicable — web-only shared component.
 - **React / Web (TypeScript):** Component at
   `packages/web/packages/adh/src/marketing/SiteWordmark.tsx`, exported on its own subpath
   `@agentic-toolkit/adh/marketing/SiteWordmark` (with a dedicated `tsup` entry +
   `exports` key). Reuses `getSite` + `splitSiteTitle` from the registry. Demoed in
   `ui-showcase` (Chrome group); first consumer is the research site's
   `AuthorPapersIndex`.
-- **SwiftUI / Compose:** Not applicable — web-only shared component.
+- **AppKit / UIKit**: Not applicable — web-only shared component.
+- **WinUI 3**: Not applicable — web-only shared component.
 
 ## Design Decisions
 
-- **Decision**: Reuse `splitSiteTitle` for the lead/accent split rather than
-  re-deriving it. **Rationale**: dry — the brand split has one authoritative
-  representation (shared with the landing hero and the concept graph), so the
-  wordmark can never drift from the rest of the brand system.
-- **Decision**: Place the component in `@agentic-toolkit/adh` — the vocabulary
-  package — not in a generic toolkit package. **Rationale**: separation-of-concerns —
-  it resolves the ADH site registry to produce the brand string, and the boundary is
-  mechanism → the generic packages, vocabulary → `@agentic-toolkit/adh`; a
-  registry-bound component in `ui` or `themes` would make a generic package depend on
-  one consumer's site list. (Two namespaces ago it sat in `@adh-shared/adh` for a
-  Tailwind reason — marketing apps `@source`d the `adh` package but not `ui`, so a
-  ui-package wordmark rendered unstyled. That reason has since expired: those apps
-  `@source` `@agentic-toolkit/adh` too, and `@agenticdevelopertoolkit/ui` self-registers its
-  own sources. The vocabulary rule is what governs now.)
-- **Decision**: Ship on its own subpath, importing only the pure registry.
-  **Rationale**: separation-of-concerns — keeps `MarketingLanding`'s heavy
-  concepts/content-prose graph out of a `'use client'` consumer's bundle.
-- **Decision**: `tagline` is a `ReactNode` with `undefined`/`null` distinguished.
-  **Rationale**: explicit-over-implicit — "use the default" and "omit entirely"
-  are different intents and get different values.
+**Decision**: Reuse `splitSiteTitle` for the lead/accent split rather than re-deriving it.
+**Rationale**: dry — the brand split has one authoritative representation (shared with the
+landing hero and the concept graph), so the wordmark can never drift from the rest of the
+brand system.
+**Approved**: pending
+
+**Decision**: Place the component in `@agentic-toolkit/adh` — the vocabulary package —
+not in a generic toolkit package.
+**Rationale**: separation-of-concerns — it resolves the ADH site registry to produce the
+brand string, and the boundary is mechanism → the generic packages, vocabulary →
+`@agentic-toolkit/adh`; a registry-bound component in `@agenticdevelopertoolkit/ui` or
+`@agenticdevelopertoolkit/themes` would make a generic package depend on one consumer's
+site list.
+**Approved**: pending
+
+*History*: two namespaces ago this component sat in `@adh-shared/adh` for a Tailwind
+reason — marketing apps `@source`d the `adh` package but not `ui`, so a ui-package
+wordmark rendered unstyled. That reason has since expired: those apps `@source`
+`@agentic-toolkit/adh` too, and `@agenticdevelopertoolkit/ui` self-registers its own
+sources. The vocabulary rule above is what governs now.
+
+**Decision**: Ship on its own subpath, importing only the pure registry.
+**Rationale**: separation-of-concerns — keeps `MarketingLanding`'s heavy
+concepts/content-prose graph out of a `'use client'` consumer's bundle.
+**Approved**: pending
+
+**Decision**: `tagline` is a `ReactNode` with `undefined`/`null` distinguished.
+**Rationale**: explicit-over-implicit — "use the default" and "omit entirely"
+are different intents and get different values.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |---|---|---|
-| Artifact formatting (ingredient) | passed | artifact-formatting |
-| UI guidelines — apt-* tokens only, no raw hex, no `!important` | passed | adh-ui-guidelines |
-| Accessibility — text-only, meaning not color-only | passed | a11y |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+
+These statuses rest on `SiteWordmark.tsx`: the brand and identity lines are plain
+`<p>`/`<span>` text nodes with no ARIA suppression, read in document order
+(screen-reader-support); `text-apt-gold`/`text-apt-text`/`text-apt-text-dim` resolve to
+runtime Material 3 theme roles (`@agenticdevelopertoolkit/themes`' `tailwind.css`:
+`--color-apt-gold: var(--color-primary)`, …) whose actual rendered contrast is a
+property of the active theme, not measured or asserted by this component (contrast-ratio).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---|---|---|---|
+| 1.2.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded the unknown-`siteId` fallback and the empty-tagline case for consistency across Requirements/States/Edge Cases/vectors; reworded the contrast claim in Accessibility to what the source controls (theme token roles) instead of an unverified contrast assertion; added concrete T5 input/output, an off-pattern-brand vector (T6), and an empty-`tagline` vector (T7); filled in all five Platform Notes bullets; reformatted Design Decisions to the three-line form with `Approved: pending` and moved the superseded Tailwind `@source` history into a note; named the `@agenticdevelopertoolkit/*` scope for `ui`/`themes`/`controls`; rebuilt the Compliance table onto real catalog checks (screen-reader-support, contrast-ratio); records the unverified theme-token contrast as an open question. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Renamed every requirement to subject-only kebab-case, dropping the old prefix everywhere it is cited. |
 | 1.0.0 | 2026-06-26 | Mike Fullerton | Initial recipe — shared brand wordmark, first used on the research author index. |
