@@ -8,7 +8,7 @@ import {
   addressesKey,
   PRIVACY_KEY,
 } from "@agentic-toolkit/data/profile";
-import { useReportBusy } from "@agentic-toolkit/resource";
+import { SettingsBody, useReportBusy } from "@agentic-toolkit/resource";
 import { AddressesSection } from "./AddressesSection";
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -38,17 +38,16 @@ export function AddressesPanel({
   useReportBusy(addressesQuery.isFetching || privacyQuery.isFetching);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-      <div className="max-w-3xl">
-        <AddressesSection
-          addresses={addressesQuery.data ?? []}
-          isLoading={addressesQuery.isLoading}
-          grants={grants}
-          hideSectionTitle
-          workspaceSlug={workspaceSlug}
-          hidePrivacy={hidePrivacy}
-        />
-      </div>
-    </div>
+    <SettingsBody width="full">
+      <AddressesSection
+        addresses={addressesQuery.data ?? []}
+        isLoading={addressesQuery.isLoading}
+        error={addressesQuery.error}
+        grants={grants}
+        hideSectionTitle
+        workspaceSlug={workspaceSlug}
+        hidePrivacy={hidePrivacy}
+      />
+    </SettingsBody>
   );
 }

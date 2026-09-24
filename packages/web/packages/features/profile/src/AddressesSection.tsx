@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { MapPin, Pencil, Trash2, Plus } from "lucide-react";
 
 import {
   Dialog,
@@ -14,8 +13,12 @@ import {
 import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import { DialogErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { UnsavedChangesAlert } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-alert";
-import { List, ListItem } from "@agenticdevelopertoolkit/ui/components/list";
-import { Field } from "@agenticdevelopertoolkit/ui/blocks";
+import {
+  EditableList,
+  Field,
+  useEditableList,
+  type EditableListColumn,
+} from "@agenticdevelopertoolkit/ui/blocks";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import {
@@ -28,7 +31,7 @@ import {
   type AddressWrite,
   type PrivacyGrant,
 } from "@agentic-toolkit/data/profile";
-import { DetailSection, useReportSettingsDirty } from "@agentic-toolkit/resource";
+import { DetailSection, ListBarActions, useReportSettingsDirty } from "@agentic-toolkit/resource";
 import { PrivacyLevelControl } from "./PrivacyLevelControl";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -50,6 +53,13 @@ const EMPTY_DRAFT: AddressWrite = {
 
 function addressSummary(a: Address): string {
   return [a.line1, a.line2, a.city, a.country].filter(Boolean).join(", ");
+}
+
+/** How a row names itself — to the row checkbox ("Select Home") and the delete confirm. The
+ *  label when the user gave one, since that is the word they chose; the address otherwise,
+ *  because an unlabelled row has nothing else to be told apart by. */
+function describeAddress(a: Address): string {
+  return a.label || addressSummary(a);
 }
 
 /** The editable fields, in one place — the diff below and `handleSave`'s body agree by
@@ -108,6 +118,8 @@ export interface AddressesSectionProps {
   workspaceSlug?: string;
   /** When true, hides the per-item privacy tier control (orgs have no public card). */
   hidePrivacy?: boolean;
+  /** The list read's failure — handed to the table so a failed load never reads as "no addresses yet". */
+  error?: unknown;
 }
 
 export function AddressesSection({
@@ -117,12 +129,14 @@ export function AddressesSection({
   hideSectionTitle = false,
   workspaceSlug,
   hidePrivacy = false,
+  error,
 }: AddressesSectionProps) {
   const qc = useQueryClient();
   const [dialogState, setDialogState] = useState<DialogState>({ mode: "closed" });
   const [draft, setDraft] = useState<AddressWrite>(EMPTY_DRAFT);
   const [formError, setFormError] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Address | null>(null);
+  // The rows the bar's Delete was pressed for — every ticked address, not one row's trash can.
+  const [deleteTargets, setDeleteTargets] = useState<Address[] | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   // The unsaved-changes alert raised by a close attempt on a dirty draft.
   const [confirmingClose, setConfirmingClose] = useState(false);
@@ -158,14 +172,17 @@ export function AddressesSection({
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteAddress(id, wsOpts),
+    mutationFn: (ids: string[]) => Promise.all(ids.map((id) => deleteAddress(id, wsOpts))),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: listKey });
-      setDeleteTarget(null);
+      list.clearSelection();
+      setDeleteTargets(null);
       setDeleteError(null);
     },
     onError: (err: unknown) => {
-      // Keep the dialog open so the user sees the failure.
+      // Keep the dialog open so the user sees the failure. Re-read anyway: in a multi-row
+      // delete some rows may already be gone, and the table must not keep showing them.
+      qc.invalidateQueries({ queryKey: listKey });
       setDeleteError(
         err instanceof Error ? err.message : "Could not delete. Try again.",
       );
@@ -254,96 +271,111 @@ export function AddressesSection({
   // dirty && valid ONLY — the in-flight term is applied at the button below.
   const canSave = dirty && blockedReason === null;
 
-  // ── Shared content ─────────────────────────────────────────────────────────
+  // ── Table ──────────────────────────────────────────────────────────────────
 
-  const addButton = (
-    <Button
-      variant="ghost"
-      size="sm"
-      onClick={openAdd}
-      aria-label="Add address"
-    >
-      <Plus data-icon="inline-start" />
-      Add
-    </Button>
-  );
+  // The same table admin's Users page draws: one-line rows, sortable resizable columns, a search
+  // box, and every verb on the BAR above it. No pencil and trash can per row — a verb repeated on
+  // every row is two competing models (one row vs. the ticked ones). The one control a row keeps
+  // is its own audience menu, which means nothing across a selection.
+  const columns: EditableListColumn<Address>[] = useMemo(() => {
+    const cols: EditableListColumn<Address>[] = [
+      {
+        key: "label",
+        header: "Label",
+        width: "10rem",
+        value: (address) => address.label,
+        render: (address) =>
+          address.label ? (
+            <span className="truncate font-medium text-apt-text">{address.label}</span>
+          ) : (
+            <span className="text-apt-text-dim">—</span>
+          ),
+      },
+      {
+        key: "address",
+        header: "Address",
+        value: (address) => addressSummary(address),
+        render: (address) => (
+          <span className="truncate text-sm text-apt-text">{addressSummary(address)}</span>
+        ),
+      },
+      {
+        key: "postalCode",
+        header: "Postal code",
+        width: "8rem",
+        value: (address) => address.postalCode,
+        render: (address) =>
+          address.postalCode ? (
+            <span className="truncate font-mono text-xs text-apt-text-muted">
+              {address.postalCode}
+            </span>
+          ) : (
+            <span className="text-apt-text-dim">—</span>
+          ),
+      },
+    ];
+    if (!hidePrivacy) {
+      cols.push({
+        key: "visibility",
+        header: "Visibility",
+        width: "10rem",
+        resizable: false,
+        render: (address) => (
+          <PrivacyLevelControl
+            targetTable="addresses"
+            targetId={address.id}
+            level={resolvePrivacyLevel(grants, "addresses", address.id)}
+            ariaLabel={`Address visibility${address.label ? ` — ${address.label}` : ""}`}
+          />
+        ),
+      });
+    }
+    return cols;
+  }, [grants, hidePrivacy]);
 
-  const listContent = isLoading ? (
-    <p className="py-2 text-sm text-apt-text-muted">Loading…</p>
-  ) : addresses.length === 0 ? (
-    <p className="py-2 text-sm text-apt-text-muted">
-      No addresses yet. Add one to show it on your card.
-    </p>
-  ) : (
-    <List>
-      {addresses.map((address) => {
-        const level = hidePrivacy ? "only-me" : resolvePrivacyLevel(grants, "addresses", address.id);
-        return (
-          <ListItem key={address.id} className="flex-wrap gap-2 py-2">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <MapPin
-                className="size-3.5 shrink-0 text-apt-text-muted"
-                aria-hidden="true"
-              />
-              <div className="min-w-0">
-                {address.label && (
-                  <div className="font-mono text-[0.65rem] uppercase tracking-wide text-apt-text-dim">
-                    {address.label}
-                  </div>
-                )}
-                <div className="truncate text-sm text-apt-text">
-                  {addressSummary(address)}
-                </div>
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5">
-              {!hidePrivacy && (
-                <PrivacyLevelControl
-                  targetTable="addresses"
-                  targetId={address.id}
-                  level={level}
-                  ariaLabel={`Address visibility${address.label ? ` — ${address.label}` : ""}`}
-                />
-              )}
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => openEdit(address)}
-                aria-label={`Edit address${address.label ? ` — ${address.label}` : ""}`}
-              >
-                <Pencil className="size-3.5" aria-hidden="true" />
-              </Button>
-              <Button
-                variant="destructive-ghost"
-                size="icon-sm"
-                onClick={() => setDeleteTarget(address)}
-                aria-label={`Delete address${address.label ? ` — ${address.label}` : ""}`}
-              >
-                <Trash2 className="size-3.5" aria-hidden="true" />
-              </Button>
-            </div>
-          </ListItem>
-        );
-      })}
-    </List>
+  const list = useEditableList<Address>({
+    rows: isLoading ? undefined : addresses,
+    getRowId: (address) => address.id,
+    columns,
+  });
+  const selected = list.selectedRows;
+
+  const table = (
+    <EditableList
+      list={list}
+      ariaLabel="Addresses"
+      loading={isLoading}
+      error={error}
+      errorTitle="Couldn't load addresses"
+      columnWidthsKey="settings-addresses"
+      describeRow={describeAddress}
+      onRowActivate={(id) => {
+        const address = addresses.find((a) => a.id === id);
+        if (address) openEdit(address);
+      }}
+      searchPlaceholder="Label, address or postal code"
+      emptyLabel="No addresses yet. Add one to show it on your card."
+      emptyFilteredLabel="No addresses match this search."
+      actions={
+        <ListBarActions
+          noun="address"
+          selectedCount={selected.length}
+          onAdd={openAdd}
+          onEdit={() => selected[0] && openEdit(selected[0])}
+          onDelete={() => {
+            setDeleteError(null);
+            setDeleteTargets(selected);
+          }}
+        />
+      }
+    />
   );
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <>
-      {hideSectionTitle ? (
-        <div className="flex flex-col gap-4">
-          <div className="flex min-h-8 items-center justify-end">
-            {addButton}
-          </div>
-          {listContent}
-        </div>
-      ) : (
-        <DetailSection title="Addresses" action={addButton}>
-          {listContent}
-        </DetailSection>
-      )}
+      {hideSectionTitle ? table : <DetailSection title="Addresses">{table}</DetailSection>}
 
       {/* Add/Edit dialog */}
       <Dialog
@@ -501,16 +533,22 @@ export function AddressesSection({
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirm */}
+      {/* Delete confirm — for every ticked row the bar's Delete was pressed with. */}
       <AlertModal
-        open={deleteTarget != null}
+        open={deleteTargets != null}
         tone="error"
-        title="Remove address?"
+        title={
+          deleteTargets && deleteTargets.length > 1
+            ? `Remove ${deleteTargets.length} addresses?`
+            : "Remove address?"
+        }
         description={
-          deleteTarget ? (
+          deleteTargets ? (
             <>
               <span>
-                {`Remove ${deleteTarget.label || addressSummary(deleteTarget)} from your card?`}
+                {/* "; " not ", " — an unlabelled row names itself by its summary, which is
+                    itself comma-joined, so a comma list would run two addresses together. */}
+                {`Remove ${deleteTargets.map(describeAddress).join("; ")} from your card?`}
               </span>
               <DialogErrorText error={deleteError} />
             </>
@@ -521,13 +559,13 @@ export function AddressesSection({
         cancelLabel="Cancel"
         busy={deleteMutation.isPending}
         onConfirm={() => {
-          if (deleteTarget) {
+          if (deleteTargets) {
             setDeleteError(null);
-            deleteMutation.mutate(deleteTarget.id);
+            deleteMutation.mutate(deleteTargets.map((a) => a.id));
           }
         }}
         onCancel={() => {
-          setDeleteTarget(null);
+          setDeleteTargets(null);
           setDeleteError(null);
         }}
       />

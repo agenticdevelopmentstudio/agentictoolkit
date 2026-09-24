@@ -468,11 +468,9 @@ export function SocialLinksSection({
           deleteTargets ? (
             <>
               <span>
-                {deleteTargets.length === 1
-                  ? `Remove ${PLATFORM_LABELS[deleteTargets[0].platform] ?? deleteTargets[0].platform} from your card?`
-                  : `Remove ${deleteTargets
-                      .map((l) => PLATFORM_LABELS[l.platform] ?? l.platform)
-                      .join(", ")} from your card?`}
+                {`Remove ${deleteTargets
+                  .map((l) => PLATFORM_LABELS[l.platform] ?? l.platform)
+                  .join(", ")} from your card?`}
               </span>
               <DialogErrorText error={deleteError} />
             </>

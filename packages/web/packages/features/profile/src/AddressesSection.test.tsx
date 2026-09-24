@@ -15,7 +15,7 @@ import {
   addressBlockedReason,
   ADDRESS_LINE1_REQUIRED_MESSAGE,
 } from "./AddressesSection";
-import { createAddress, updateAddress, type Address, type AddressWrite } from "@agentic-toolkit/data/profile";
+import { createAddress, updateAddress, deleteAddress, type Address, type AddressWrite } from "@agentic-toolkit/data/profile";
 
 // The section calls useMutation/useQueryClient directly (no wrapper hook to swap), so a
 // real QueryClient context is required; only the three network functions are stubbed.
@@ -32,6 +32,7 @@ vi.mock("@agentic-toolkit/data/profile", async (importOriginal) => {
 
 const createAddressMock = vi.mocked(createAddress);
 const updateAddressMock = vi.mocked(updateAddress);
+const deleteAddressMock = vi.mocked(deleteAddress);
 
 // A stored row: every required field already filled, which is what makes the "no reason
 // while pristine" assertions meaningful.
@@ -52,6 +53,7 @@ afterEach(() => {
   cleanup();
   createAddressMock.mockReset();
   updateAddressMock.mockReset();
+  deleteAddressMock.mockReset();
 });
 
 function renderSection() {
@@ -65,8 +67,10 @@ function renderSection() {
   );
 }
 
+/** Edit is a BAR verb now, like admin's tables: tick the row, then press Edit. */
 function openEdit() {
-  fireEvent.click(screen.getByRole("button", { name: "Edit address — Home" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select Home" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 }
 
 function openAdd() {
@@ -299,6 +303,34 @@ describe("AddressesSection dialog — Escape on a dirty draft asks before discar
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByText("Edit address")).not.toBeNull();
     expect(screen.getByRole("button", { name: "Discard" })).toBeTruthy();
+  });
+});
+
+// Delete is a BAR verb over the whole selection: one confirm that names every ticked row, and
+// one delete call per row — not a trash can that only ever reaches the row it sits on.
+describe("AddressesSection — deleting from the bar", () => {
+  const WORK = { ...HOME, id: "addr_2", label: "Work", line1: "1 Office Pk" } as unknown as Address;
+
+  it("confirms every ticked address by name and deletes each of them", async () => {
+    deleteAddressMock.mockResolvedValue(undefined as never);
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <AddressesSection addresses={[HOME, WORK]} isLoading={false} grants={[]} hidePrivacy hideSectionTitle />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Home" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Work" }));
+    // Edit opens ONE record; with two ticked it must not guess which.
+    expect((screen.getByRole("button", { name: "Edit" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByText("Remove 2 addresses?")).toBeTruthy();
+    expect(screen.getByText("Remove Home; Work from your card?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(deleteAddressMock).toHaveBeenCalledTimes(2));
+    expect(deleteAddressMock.mock.calls.map((c) => c[0]).sort()).toEqual(["addr_1", "addr_2"]);
   });
 });
 
