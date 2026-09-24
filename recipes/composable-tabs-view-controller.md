@@ -3,11 +3,11 @@ id: 0640ca96-95c5-4234-925e-386425cc4435
 title: ComposableTabsViewController
 domain: agentictoolkit://recipes/composable-tabs-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -420,32 +420,16 @@ the live `NSSplitViewItem`s.
   label or identifier is assigned to the split view, a divider, or an item in
   this source; a pane's own accessible content is that pane's own concern
   (each pane is a separately hosted child view controller with its own view).
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. A zoom, a minimize/restore, a split, a remove, or a move
-  all change which panes are visible and how much space each has, but nothing
-  in this source posts an `NSAccessibility.post(element:notification:)` call
-  (or any other accessibility notification) when any of these happen; the
-  refusal path even for a genuinely-blocked action is a plain audible beep
-  (`RefusalFeedback.announce()`), not a VoiceOver-readable message. What is
-  missing: whether a VoiceOver user is told a pane appeared, disappeared, or
-  changed size, or hears nothing until navigating back into the split. What
-  would settle it: a VoiceOver pass over a live project window while
-  splitting, closing, zooming, and minimizing panes, or an explicit decision
-  to post layout-changed/element-created/destroyed notifications from
-  `persistTreeToDocument()` and the zoom/minimize paths.
-- **Minimum tap target / non-pointer resize**: NEEDS REVIEW: Not implemented
-  in source. Behavior undefined. A divider's thickness is resized only by a
-  mouse drag (`NSSplitView`'s own dragging plus the widened hit-test rect from
-  `widen-divider-grab-area`); no method in this source lets a keyboard-only or
-  switch-control user change a `thicknessFraction` without a pointer. What is
-  missing: whether AppKit's default `NSSplitView` keyboard-accessibility
-  behavior (if any) is considered sufficient here, or whether a keyboard
-  resize command should be added. What would settle it: a keyboard-only /
-  VoiceOver pass attempting to resize a pane, or an explicit design decision
-  that divider resize is mouse-only and out of scope for this component. The
-  44×44pt (iOS) / 48×48dp (Android) tap-target minimum does not apply directly
-  to this AppKit, pointer-driven desktop control; it applies to the
-  touch-platform translations in Platform Notes.
+- **Announce state changes**: Not implemented in source. A zoom, a
+  minimize/restore, a split, a remove, or a move all change which panes are
+  visible and how much space each has, but nothing in this source posts an
+  `NSAccessibility.post(element:notification:)` call (or any other
+  accessibility notification) when any of these happen; the refusal path even
+  for a genuinely-blocked action is a plain audible beep
+  (`RefusalFeedback.announce()`), not a VoiceOver-readable message. A
+  VoiceOver user is not told a pane appeared, disappeared, or changed size,
+  and hears nothing until navigating back into the split.
+- **non-pointer-resize**: NEEDS REVIEW: Not implemented in source. A divider's thickness changes only via a mouse drag (`NSSplitView`'s own dragging plus the widened hit-test rect from `widen-divider-grab-area`); no method here lets a keyboard-only or switch-control user change a `thicknessFraction` without a pointer, and whether AppKit's default `NSSplitView` keyboard-accessibility behavior (if any) is sufficient, or a keyboard resize command should be added, needs a keyboard-only/VoiceOver pass over a live project window to settle. The 44×44pt (iOS) / 48×48dp (Android) touch tap-target minimum does not apply to this AppKit, pointer-driven desktop control.
 
 ## Conformance Test Vectors
 
@@ -841,15 +825,15 @@ or `ComposableTabsPaneHost.swift`).
 | [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | failed | Accessibility |
 
 Keyboard-navigable is failed because no keyboard path exists in
-source for resizing a divider (see the open question about non-pointer
-divider resize in Accessibility) — arrow-key pane *movement* is a real
+source for resizing a divider (see the open question on non-pointer-resize
+in Accessibility) — arrow-key pane *movement* is a real
 feature, but it is dispatched from elsewhere (out of this source) into
 `move(_:_:)`, not implemented here. Screen-reader-support is failed because
 no accessibility role, label, or announcement is set anywhere in this source;
 the divider, split view, and zoom/minimize transitions rely entirely on
 AppKit's unmodified defaults — a zoom, minimize, split, remove, or move
-changes what's on screen with no accessibility notification posted (see the
-open question about announcing state changes in Accessibility). No other
+changes what's on screen with no accessibility notification posted (see
+**Announce state changes** in Accessibility). No other
 category's checks apply: this is a pointer/keyboard-driven macOS desktop
 control, not a touch surface, drawing no user-facing text and performing no
 networking, telemetry, or logging of its own.
@@ -860,3 +844,4 @@ networking, telemetry, or logging of its own.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from `ComposableTabsViewController.swift` and `ComposableTabsPaneHost.swift`. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: restated private-symbol requirements/vectors in observable terms; split a garbled move requirement into three and promoted two implicit edge cases to named requirements with vectors; added missing opposite-branch test vectors; fixed an untestable vector; resolved the conflicting SwiftUI platform note; renamed a non-kebab-case requirement; reformatted Design Decisions; fixed the Compliance table's invalid statuses and undefined checks; renumbered a broken test-vector ID sequence; trimmed tags to 5; populated `related`. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

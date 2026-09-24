@@ -3,11 +3,11 @@ id: aea5e7b2-00d2-4f23-bfc5-8dc64e8d0d2a
 title: ComposableTabsAddPaneViewController
 domain: agentictoolkit://recipes/composable-tabs-add-pane-view-controller
 type: ingredient
-version: 1.1.1
+version: 1.1.2
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -177,18 +177,12 @@ without invoking it.
   VoiceOver's spoken label. Cancel and OK derive their spoken label from
   their own visible titles ("Cancel", "OK"). Each `choices` entry with a
   `symbolName` gets an explicit accessibility description (the entry's
-  `displayName`) on its popup-item image. NEEDS REVIEW: Not implemented in
-  source. Per **associates-popup-with-row-caption**, neither popup is
-  associated with its row caption ("Add:" / "Where:") via
-  `setAccessibilityTitleUIElement` or an
-  explicit `accessibilityLabel` override, so VoiceOver announces only the
-  popup's current value (e.g. "Right") without the "Where" context a
-  sighted user gets from the adjacent label. What is missing: whether a
-  VoiceOver user can distinguish the two popups without first exploring the
-  visual layout. What would settle it: a VoiceOver pass over an
-  instantiated sheet, or an explicit decision to wire
-  `setAccessibilityTitleUIElement` from each popup to its row's
-  `ThemedLabel`.
+  `displayName`) on its popup-item image. Per
+  **associates-popup-with-row-caption**, neither popup is associated with
+  its row caption ("Add:" / "Where:") via `setAccessibilityTitleUIElement`
+  or an explicit `accessibilityLabel` override anywhere in source, so
+  VoiceOver announces only the popup's current value (e.g. "Right")
+  without the "Where" context a sighted user gets from the adjacent label.
 - **Announce state changes**: Not applicable — the sheet has no dynamic
   reload or asynchronous state; the only state changes are direct results
   of the user's own popup selections and button activations, which AppKit
@@ -293,14 +287,12 @@ presents it programmatically.
 | n/a (literal) | "Cancel" | Cancel button title |
 | n/a (literal) | "OK" | OK button title |
 
-NEEDS REVIEW: Not implemented in source. Every string above is a plain AppKit
-`String` literal (for example `NSButton(title: "Cancel", …)` and
-`NSButton(title: "OK", …)` at ComposableTabsAddPaneViewController.swift:70
-and :75, and the `"Add:"`/`"Where:"` captions at :82–83), none routed through
-`String(localized:)` or `NSLocalizedString`, so none reaches a string catalog.
-What is missing: localization keys and catalog entries for the captions,
-direction names, and button titles. What would settle it: routing the
-literals through `String(localized:)` in source.
+Every string above is a plain AppKit `String` literal (for example
+`NSButton(title: "Cancel", …)` and `NSButton(title: "OK", …)` at
+ComposableTabsAddPaneViewController.swift:70 and :75, and the
+`"Add:"`/`"Where:"` captions at :82–83), none routed through
+`String(localized:)` or `NSLocalizedString`, so none reaches a string
+catalog.
 
 Not applicable beyond the table above: each `choices` entry's own
 `displayName` shown in the "Add" popup is supplied by the caller, not
@@ -498,3 +490,4 @@ English literal with no localization key.
 | 1.0.0 | 2026-09-23 | Claude Sonnet 5 | Initial ingredient recipe for ComposableTabsAddPaneViewController: two-popup Add/Where sheet, fixed direction order and Right default, dismiss-before-invoke confirm ordering, fixed-at-load OK enablement, and one open accessibility question (popup-to-caption label association) for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded the confirm-dismisses-before-invoking-onadd requirement and its vector to assert that `dismiss(_:)` is invoked rather than completed; added a SHOULD requirement for popup-to-caption accessibility association, cited by the existing open-question marker; reformatted all Design Decisions into the canonical three-line block and trimmed the unreachable-fallback rationale to an observed path; added the ComposableTabsViewController recipe to depends-on; removed the inapplicable touch-target-size compliance row and reconciled the contrast-ratio/Increase Contrast cross-reference; fixed the AppKit / UIKit platform-note label and removed the WinUI 3 aside; clarified the Compose note's empty-choices seeding; relabeled two unreachable boundary-value edge cases as observations; gave literal key-equivalent values for add-pane-012/013; and named the confirm-action selector for add-pane-017. |
 | 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog, remapped modal-dismissal-and-focus to focus-management |
+| 1.1.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

@@ -3,11 +3,11 @@ id: 4d75a371-181e-4d80-a16b-022d37dc0d48
 title: ComposableTabsPaneViewController
 domain: agentictoolkit://recipes/composable-tabs-pane-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -127,7 +127,7 @@ It is a subclass of `PaneViewController` (`packages/apple/AgenticToolkit/macOS/U
 
 ### Appearance fact
 
-- **active-pane-cue-is-color-only**: As built, the pane's backdrop distinguishes the active pane from an inactive one by border color alone (`projectActivePaneOutline` vs. `projectPaneOutline`), with a constant 2pt border width in both states. This describes the current implementation; it is not a constraint against adding a secondary cue — see the open question under Differentiate Without Color in Accessibility Options.
+- **active-pane-cue-is-color-only**: As built, the pane's backdrop distinguishes the active pane from an inactive one by border color alone (`projectActivePaneOutline` vs. `projectPaneOutline`), with a constant 2pt border width in both states. This describes the current implementation; it is not a constraint against adding a secondary cue — see Differentiate Without Color in Accessibility Options, which records that no such cue is implemented.
 
 ## Appearance
 
@@ -157,7 +157,7 @@ It is a subclass of `PaneViewController` (`packages/apple/AgenticToolkit/macOS/U
 
 - **Role/trait**: The container view carries an accessibility identifier equal to `paneAccessibilityIdentifier` (set by the base class's `loadView()`); it is a plain `NSView` with no explicit AX role override in this file. The gear's "Move" menu item carries the identifier `pane.options.move`; each of its four submenu items carries `pane.options.move.<direction-name-lowercased>` (`left`, `right`, `up`, `down`). The arrange overlay's own controls (`composable-tabs.arrange.*`) are identified inside `ComposableTabsArrangeOverlayView`, which this class installs but does not itself label.
 - **Label requirements**: Each move-menu item's image carries `accessibilityDescription` equal to the direction's movement name ("Left", "Right", "Up", "Down"), from `ComposableTabsMoveMenu.makeItems`. The overlay's Add/Remove/Done buttons carry `accessibilityDescription`s equal to their titles ("Add", "Remove", "Done"), from `ComposableTabsArrangeOverlayView.makeButton`. The gear button's own "Pane Options" label is set by the inherited `PaneViewController`, not by this subclass.
-- **Announce state changes**: The only explicit state-change announcement this component performs is `RefusalFeedback.announce()` (default: a system beep) on every refused action — a blocked move, an Add with no choices, a Remove that is not currently legal. NEEDS REVIEW: Not implemented in source. Behavior undefined. Neither an active-pane change (`ComposableTabsActivePane.activate(nodeID:in:)`) nor arrange mode turning on or off posts an `NSAccessibility` notification (e.g. `.layoutChanged` or an announcement), so a VoiceOver user has no non-visual cue that the active pane changed or that arrange mode started or stopped. Resolution requires an accessibility audit deciding which notification(s) to post and where, and sign-off from whoever owns VoiceOver support for this app.
+- **Announce state changes**: The only explicit state-change announcement this component performs is `RefusalFeedback.announce()` (default: a system beep) on every refused action — a blocked move, an Add with no choices, a Remove that is not currently legal. Neither an active-pane change (`ComposableTabsActivePane.activate(nodeID:in:)`) nor arrange mode turning on or off posts an `NSAccessibility` notification (e.g. `.layoutChanged` or an announcement), so a VoiceOver user has no non-visual cue that the active pane changed or that arrange mode started or stopped.
 - **Minimum tap target**: Not overridden in this file. The gear button and the overlay's Add/Remove/Move/Done buttons are standard `NSButton`s with a `.rounded` bezel, sized by AppKit's intrinsic content size; macOS's pointer-driven HIG does not carry the 44×44pt minimum that applies to iOS touch targets, and this source sets no explicit minimum of its own.
 
 ## Conformance Test Vectors
@@ -257,7 +257,7 @@ Not applicable: a pane is chrome inside a project window's layout tree, built en
 | (none — literal string) | "Remove this pane?" | Confirmation alert title in `confirmAndRemove()`. |
 | (none — literal string) | "Remove" / "Cancel" | Confirmation alert button titles. |
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined. No localization key or `String(localized:)`/`.strings`-catalog mechanism exists for any user-facing string in this file or its `ComposableTabsMoveMenu` / `ComposableTabsArrangeOverlayView` collaborators — every string above is a hardcoded English literal. Resolution requires the app team deciding whether AgenticToolkit chrome strings should be localized, and updating all three files together if so.
+No localization key or `String(localized:)`/`.strings`-catalog mechanism exists for any user-facing string in this file or its `ComposableTabsMoveMenu` / `ComposableTabsArrangeOverlayView` collaborators — every string above is a hardcoded English literal.
 
 ## Accessibility Options
 
@@ -267,7 +267,7 @@ Document which accessibility display options this component responds to:
 |--------|----------|
 | Reduce Motion | Not applicable: overlay install/removal and content dim/undim are immediate `NSView` add/remove calls; no `NSAnimationContext`, layer animation, or transition appears anywhere in this file. |
 | Increase Contrast | Not observed in this file: pane border and fill colors are resolved through `SemanticPalette`/theme lookup (e.g. `NSColor(palette.projectActivePaneOutline)`), so any contrast adaptation belongs to the theme system, out of this ingredient's scope. |
-| Differentiate Without Color | NEEDS REVIEW: Not implemented in source. Behavior undefined. Differentiate Without Color applies here — the active/inactive distinction is carried by border color alone (`projectActivePaneOutline` vs. `projectPaneOutline`; see the `active-pane-cue-is-color-only` requirement), with no accompanying change in border width, shape, or label, and the source never queries `NSWorkspace.shared.accessibilityDisplayShouldDifferentiateWithoutColor`. Resolution requires a design decision on what secondary cue (width, icon, or label) should appear when the setting is on. |
+| Differentiate Without Color | Not implemented: the active/inactive distinction is carried by border color alone (`projectActivePaneOutline` vs. `projectPaneOutline`; see the `active-pane-cue-is-color-only` requirement), with no accompanying change in border width, shape, or label, and the source never queries `NSWorkspace.shared.accessibilityDisplayShouldDifferentiateWithoutColor`. |
 
 ## Feature Flags
 
@@ -311,7 +311,7 @@ Not applicable: no logging call (`Logger`, `os_log`, or otherwise) appears anywh
 **Approved**: pending
 
 **Decision**: The active/inactive pane cue is color-only; border width stays a constant 2pt in both states.
-**Rationale**: The source's own comment states the intent — outlining only the active pane would read as one pane with a seam down the middle — but implements no additional cue (width, icon, or pattern) for a person who cannot rely on color alone; this is the open question flagged under Accessibility Options.
+**Rationale**: The source's own comment states the intent — outlining only the active pane would read as one pane with a seam down the middle — but implements no additional cue (width, icon, or pattern) for a person who cannot rely on color alone; see Differentiate Without Color in Accessibility Options.
 **Approved**: pending
 
 ## Compliance
@@ -335,3 +335,4 @@ Accessibility statuses rest on the explicit `accessibilityDescription` labels al
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: rebuilt Compliance with real accessibility/internationalization catalog checks, defined the border inset once and referenced it by name elsewhere, restated the color-only active-pane cue as a descriptive fact rather than a foreclosing MUST, listed all four arrow-key codes, split and sharpened several test vectors, reformatted Design Decisions, moved the cookbook reference into `related`, added `depends-on`/`related` for sibling artifacts, and trimmed tags |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

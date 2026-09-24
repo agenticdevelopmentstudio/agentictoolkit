@@ -3,11 +3,11 @@ id: 52e34f70-c3d8-4ec6-a753-d9d3cea11789
 title: ComposableTabsViewRegistry
 domain: agentictoolkit://recipes/composable-tabs-view-registry
 type: ingredient
-version: 1.1.1
+version: 1.1.2
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -208,18 +208,7 @@ consume this registry but are out of scope for this recipe.
 - **Minimum tap target**: Not applicable. The container and title are not
   tappable controls; the source treats both as inert display content, not a
   button or a control with a hit target.
-- **Contrast**: NEEDS REVIEW: `palette.chartSeriesNSColors` and
-  `palette.nsColor(.primaryText)` are theme-derived tokens (see
-  `SemanticPalette+NSColor.swift` in `agenticdevelopertoolkit`); their actual
-  RGB values are chosen per theme, not fixed in this source file, so whether
-  the primary-text title reaches a sufficient contrast ratio against a
-  chart-series tint at 0.15 alpha cannot be computed from
-  `ComposableTabsViewRegistry.swift` alone, and depends on which theme is
-  active and which series index a given pane number lands on. Resolvable only
-  by auditing each shipped theme's chart-series and primary-text token values
-  against a numeric contrast threshold (e.g. WCAG 1.4.3, 4.5:1 for text) for
-  this text-over-tint pairing; this file has no mechanism to enforce a minimum
-  contrast on an arbitrary theme.
+- **contrast**: NEEDS REVIEW: Not implemented in source. `palette.chartSeriesNSColors` and `palette.nsColor(.primaryText)` are theme-derived tokens (see `SemanticPalette+NSColor.swift` in `agenticdevelopertoolkit`) whose actual RGB values are chosen per theme, so whether the primary-text title reaches a sufficient contrast ratio (WCAG 1.4.3, 4.5:1) against a chart-series tint at 0.15 alpha cannot be computed from `ComposableTabsViewRegistry.swift` alone; resolvable only by auditing each shipped theme's chart-series and primary-text token values against that threshold.
 
 ## Conformance Test Vectors
 
@@ -325,12 +314,10 @@ The source contains no localization mechanism for this string — no
 `NSLocalizedString`, string catalog lookup, or similar — so it renders as the
 literal English text "Pane N" regardless of the device's locale.
 
-NEEDS REVIEW: Not implemented in source. `"Pane \(paneNumber)"`
-(ComposableTabsViewRegistry.swift:279) and the `"Placeholder"`/`"Unknown"`
-display names (:114, :118) are plain `String` literals, none routed through
-`String(localized:)` or `NSLocalizedString`, so none reaches a string catalog.
-What is missing: localization keys and catalog entries for the three strings.
-What would settle it: routing them through `String(localized:)` in source.
+`"Pane \(paneNumber)"` (ComposableTabsViewRegistry.swift:279) and the
+`"Placeholder"`/`"Unknown"` display names (:114, :118) are plain `String`
+literals, none routed through `String(localized:)` or `NSLocalizedString`,
+so none reaches a string catalog.
 
 ## Accessibility Options
 
@@ -527,3 +514,4 @@ fails because `PlaceholderPaneViewController`'s title is the literal
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from source. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: replace the uncited HIG root reference with the two pages the contrast and containment claims actually rely on; drop the unsupported WinUI "reason this recipe exists" line; rename every requirement to a subject-only name and update every citation; fix the `text-contrast` status to `partial` and add a `no-hardcoded-strings` internationalization row marked `failed`; remove the leftover template instruction line from Accessibility Options; add a `stale-tint-persistence` requirement, edge case, and CTVR-25 for the non-empty-to-empty series transition; correct CTVR-06's expected sort order against `.placeholder`'s actual `"whippet.placeholder"` `rawValue`; rewrite CTVR-17/18 to test only this file's protocol shape instead of pane discard/close behavior owned elsewhere; fix the fractioned-holding-priority requirement's type to `NSLayoutConstraint.Priority(rawValue:)`; correct the WinUI member count to six and its retint bullet to the app's own theme-store event; and resolve the SwiftUI port's placeholder font from the environment's `.heading` token instead of a hardcoded `.font(.title)`. |
 | 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog, remapped meaningful-labels to screen-reader-support, remapped text-contrast to contrast-ratio |
+| 1.1.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

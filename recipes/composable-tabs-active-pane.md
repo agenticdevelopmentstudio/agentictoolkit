@@ -3,11 +3,11 @@ id: 08bfb299-851b-4b01-a84a-6a2a13e07c12
 title: ComposableTabsActivePane
 domain: agentictoolkit://recipes/composable-tabs-active-pane
 type: ingredient
-version: 1.1.1
+version: 1.1.2
 status: review
 language: en
 created: 2026-09-23
-modified: 2026-09-23
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -295,17 +295,7 @@ is out of scope for this ingredient.
   is a full-bleed backdrop sized by its enclosing pane's own layout; it is
   not a discrete tappable control with an independently sized hit target, and
   the source treats it as neither a button nor a control.
-- **Contrast**: NEEDS REVIEW: `palette.projectPaneBackdrop`,
-  `palette.projectPaneOutline`, and `palette.projectActivePaneOutline` are
-  theme-overridable roles — their actual color values are chosen per theme
-  (see the Theme Editor's Project topic, `ThemeProjectTopicPanel`), not fixed
-  in this source file, so the contrast between the active border and its
-  adjacent backdrop cannot be computed from `ComposableTabsActivePane.swift`
-  alone, and depends on which theme is active. Resolvable only by whoever
-  audits each shipped theme's actual token values against a numeric contrast
-  threshold (e.g. WCAG 1.4.11 non-text contrast, 3:1) for this
-  border-against-backdrop pairing; this file has no mechanism to enforce a
-  minimum contrast on an arbitrary theme.
+- **contrast**: NEEDS REVIEW: Not implemented in source. `palette.projectPaneBackdrop`, `palette.projectPaneOutline`, and `palette.projectActivePaneOutline` are theme-overridable roles whose actual color values are chosen per theme (see the Theme Editor's Project topic, `ThemeProjectTopicPanel`), not fixed in this source file, so the contrast between the active border and its adjacent backdrop cannot be computed from `ComposableTabsActivePane.swift` alone; resolvable only by whoever audits each shipped theme's actual token values against a numeric contrast threshold (e.g. WCAG 1.4.11 non-text contrast, 3:1) for this border-against-backdrop pairing.
 
 ## Conformance Test Vectors
 
@@ -431,15 +421,14 @@ localize.
 - **Increase Contrast**: Not applicable in the sense of a distinct code path
   — the component performs no Increase-Contrast-specific branching of its
   own; all color comes from theme tokens whose values are outside this file
-  (see Accessibility > Contrast for the open question on those tokens'
-  actual contrast).
-- **Differentiate Without Color**: NEEDS REVIEW: Not implemented in source.
-  The active/inactive distinction is conveyed by outline color alone
-  (`projectActivePaneOutline` vs. `projectPaneOutline`); the source defines
-  no secondary, non-color cue (outline width, an icon, a pattern, a label)
-  and does not read the Differentiate Without Color setting. A non-color cue,
-  if one is added, is a change to `applyTheme(_:)`'s drawing, not to the
-  tracking logic this ingredient otherwise specifies.
+  (see Accessibility > the open question on contrast).
+- **Differentiate Without Color**: The active/inactive distinction is
+  conveyed by outline color alone (`projectActivePaneOutline` vs.
+  `projectPaneOutline`); the source defines no secondary, non-color cue
+  (outline width, an icon, a pattern, a label) and does not read the
+  Differentiate Without Color setting. A non-color cue, if one is added, is
+  a change to `applyTheme(_:)`'s drawing, not to the tracking logic this
+  ingredient otherwise specifies.
 
 ## Feature Flags
 
@@ -632,7 +621,7 @@ paired with a standard `NSResponder` focus change, with no private
 accessibility-bypassing mechanism. `contrast-ratio` is `partial` because
 the actual color values behind `projectPaneBackdrop`, `projectPaneOutline`,
 and `projectActivePaneOutline` are chosen per theme, outside this file, per
-the marker in Accessibility > Contrast.
+the open question on contrast.
 
 ## Change History
 
@@ -641,3 +630,4 @@ the marker in Accessibility > Contrast.
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: cited specific APIs and WCAG 1.4.11 instead of the HIG landing page; defined "live" pane and cross-referenced it from the arrival/departure requirements; added five untested behaviors (key-window blindness, nil-window and nil-content-view guards, the local-not-global monitor, and the main-queue dispatch for close/highlight changes) as MUST requirements with conformance vectors; clarified that `applyTheme` compares `activeNodeID(in:)` directly rather than calling `isInActivePane` and added a vector for an unclaimed window; corrected the SwiftUI platform note's per-scene/app-wide contradiction and its `RoundedRectangle(cornerRadius: 0)` stroke; corrected the WinUI 3 note's strong-dictionary lifecycle; tightened CTA-27 and CTA-31 to concrete, reproducible setups; named the `elevatedSurface` fallback for the pane backdrop color; moved the vendored-submodule gap out of Design Decisions, named the upstream commit that supplies it, and marked `source-fidelity`/`completeness`/`non-text-contrast` `partial` accordingly; populated `depends-on`/`related` with the sibling ingredients this file actually composes and observes; and fixed the frontmatter date quoting. |
 | 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog, remapped keyboard-focus-routing to focus-management, remapped non-text-contrast to contrast-ratio |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from source. |
+| 1.1.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

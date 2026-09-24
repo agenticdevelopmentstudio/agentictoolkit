@@ -3,11 +3,11 @@ id: 92d66361-a16d-4c35-a0d3-4c1c8bbd5f52
 title: ComposableTabsSettingsViewController
 domain: agentictoolkit://recipes/composable-tabs-settings-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -238,20 +238,17 @@ staged state, no commit, and no cancel.
   list's sidebar; whatever name each exposes is `SpacingControl`'s and
   `ComposableSettings.SplitViewController`'s own responsibility, outside
   this file.
-- **Announce state changes (e.g., loading, disabled)**: NEEDS REVIEW: Not
-  implemented in source. Behavior undefined. When a checkbox click is
-  refused because it would disable the window's last enabled edge, this
-  file changes the checkbox's `state` a second time within the same action
-  handler (**reverts-checkbox-to-authoritative-state**), but no
+- **Announce state changes (e.g., loading, disabled)**: Not implemented in
+  source. When a checkbox click is refused because it would disable the
+  window's last enabled edge, this file changes the checkbox's `state` a
+  second time within the same action handler
+  (**reverts-checkbox-to-authoritative-state**), but no
   `NSAccessibility.post(element:notification:)` call, or any other explicit
   accessibility notification, accompanies that correction anywhere in
-  source. A sighted user sees the checkbox spring back to checked; nothing
-  in this file confirms whether VoiceOver announces the reversal the same
-  way, since AppKit does not guarantee a fresh announcement for a
-  same-handler state write the way it does for a user-initiated toggle.
-  What would settle this: a VoiceOver-attached run of `toggleEdge(_:)` on
-  the last enabled edge, checked for whether the corrected value is
-  announced.
+  source. A sighted user sees the checkbox spring back to checked; this
+  file itself emits no notification of the reversal to VoiceOver, relying
+  entirely on whatever announcement AppKit's own automatic accessibility
+  observation of the state change produces, if any.
 - **Minimum tap target**: Not applicable — this is a macOS, pointer/
   trackpad-driven composition of `NSButton`/`NSViewController` (no touch
   input path anywhere in this file); the 44×44pt minimum is iOS/touch
@@ -362,17 +359,13 @@ file.
 
 ## Localization
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined. Every
-user-facing string in this file is a hardcoded English literal with no
+Every user-facing string in this file is a hardcoded English literal with no
 `NSLocalizedString` call or String Catalog lookup: the Done button's title
 ("Done"), the panel titles ("Tabs", "Spacing"), the sidebar title
 ("Project"), the group titles ("Tab Bars", "Frame Spacing", "Pane Divider
 Spacing"), and every help-topic title and body paragraph in both panels'
-`helpContent`. Localization plainly applies to a user-facing settings sheet,
-and the source has no mechanism to supply a translated string for any of
-them. What would settle this: confirmation from the app's localization
-owner on whether this sheet is in scope for translation, and if so, a pass
-that moves each literal into a String Catalog key.
+`helpContent`. This file has no mechanism to supply a translated string for
+any of them.
 
 ## Accessibility Options
 
@@ -601,3 +594,4 @@ literal (see **Localization**).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: populated depends-on with composed ingredients (split-view-controller, group-view, spacing-control); trimmed tags to five; decoupled three requirements from private implementation details (moved to Platform Notes); replaced restated GroupView metrics in Appearance with citations to its recipe; downgraded keyboard-navigable and screen-reader-support to partial and added a failed string-externalization check, with a sentence explaining both; renamed the AppKit platform-notes bullet to AppKit / UIKit; tightened three conformance test vectors (coder-init traps as compile-time checks, applies-changes-live as call-order assertion) and split/added divider-binding vectors; expanded WinUI 3 notes for ContentDialog width and checkbox re-entrancy; removed descriptive MUST usage from Edge Cases. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

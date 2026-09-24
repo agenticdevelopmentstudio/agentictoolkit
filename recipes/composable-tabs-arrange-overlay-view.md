@@ -3,11 +3,11 @@ id: bfc2dcde-d905-4923-bff2-577c85f17d5f
 title: ComposableTabsArrangeOverlayView
 domain: agentictoolkit://recipes/composable-tabs-arrange-overlay-view
 type: ingredient
-version: 1.1.1
+version: 1.1.2
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -193,17 +193,13 @@ window, and re-reads `canAdd`/`canRemove`/`availableDirections` through
   each Move item's movement name), and each control's own visible title text
   is otherwise the label AppKit exposes to VoiceOver by default; source sets
   no separate `accessibilityLabel` override beyond that.
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. `refreshAvailability()` changes the enabled state of
-  the Add, Remove, and Move controls (e.g. disabling Remove because the
-  pane is now the last one, or disabling a Move direction because the pane
-  reached the top of the window) with no
-  `NSAccessibility.post(element:notification:)` call anywhere in this file.
-  What is missing: whether a VoiceOver user is told an arrange control just
-  became unavailable, or hears nothing until they navigate back onto that
-  control. What would settle it: a VoiceOver pass over an active arrange
-  session while removing panes down to one, or an explicit decision to post
-  an accessibility notification from `refreshAvailability()`.
+- **Announce state changes**: Not implemented. `refreshAvailability()`
+  changes the enabled state of the Add, Remove, and Move controls (e.g.
+  disabling Remove because the pane is now the last one, or disabling a
+  Move direction because the pane reached the top of the window) without
+  any `NSAccessibility.post(element:notification:)` call anywhere in this
+  file, so a VoiceOver user hears nothing about the change until they
+  navigate back onto the affected control.
 - **Minimum tap target**: Each button uses AppKit's `.rounded` bezel style
   with no explicit frame set in source, so its height comes from AppKit's
   default intrinsic content size rather than a literal point value in this
@@ -324,7 +320,11 @@ Not applicable beyond the table above: the pane-name text shown by
 `paneName` is supplied by the caller (an already-resolved display name from
 elsewhere in the app), not a literal string this file owns.
 
-NEEDS REVIEW: Not implemented in source. The `"Add"`, `"Remove"`, and `"Done"` button titles (ComposableTabsArrangeOverlayView.swift:53–55) and the `"Move"` pull-down title are — plain `String` literals, none routed through `String(localized:)` or `NSLocalizedString`, so none reaches a string catalog. What is missing: localization keys and catalog entries for the four titles. What would settle it: routing the literals through `String(localized:)` in source.
+The `"Add"`, `"Remove"`, and `"Done"` button titles
+(ComposableTabsArrangeOverlayView.swift:53–55) and the `"Move"`
+pull-down title are plain `String` literals, none routed through
+`String(localized:)` or `NSLocalizedString`, so none reaches a string
+catalog.
 
 ## Accessibility Options
 
@@ -541,3 +541,4 @@ directly under **Accessibility Options** below.
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: fixed scrim-opacity wording, removed unverified keystroke-blocking claim, restated source-comment citations as direct claims, qualified the Direction type, corrected the accessibility-prefix and test-vector-029 API mismatch, fixed compose/swiftui/winui/web platform-note errors, replaced "Tapping" with "clicking or activating", reformatted Design Decisions, corrected the Compliance table to only cite checks defined in the catalog, and fixed frontmatter tags/related/change-history |
 | 1.1.1 | 2026-09-23 | Mike Fullerton | Recorded the unlocalized Add/Remove/Done/Move button literals as an open question |
+| 1.1.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
