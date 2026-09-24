@@ -216,7 +216,7 @@ currently reads that state (see Design Decisions).
   height on the button or on a picker row; the 44×44pt (iOS) / 48×48dp
   (Android) minimum described in Platform Notes applies to the touch-
   platform translations, not to this AppKit-hosted SwiftUI control.
-- **icon-grouping**: Neither the `"server.rack"` icon (`MCPChipsBarView.swift:99`) nor the `"chevron.down"` icon in the button's label (`MCPChipsBarView.swift:107`) is marked `.accessibilityHidden(true)` or folded into the button's label via `.accessibilityElement(children: .combine)`, so each remains its own, separately-spoken image element to VoiceOver.
+- **icon-grouping**: Neither the `"server.rack"` icon (`MCPChipsBarView.swift`) nor the `"chevron.down"` icon in the button's label (`MCPChipsBarView.swift`) is marked `.accessibilityHidden(true)` or folded into the button's label via `.accessibilityElement(children: .combine)`, so each remains its own, separately-spoken image element to VoiceOver.
 
 ## Conformance Test Vectors
 

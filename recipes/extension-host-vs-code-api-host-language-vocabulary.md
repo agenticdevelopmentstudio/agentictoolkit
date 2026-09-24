@@ -41,7 +41,7 @@ approved-date: ''
 ## Overview
 
 `HostLanguageVocabulary` is `AgenticToolkitMacOS`'s production conformer of
-the `ExtensionLanguageVocabulary` seam (`MainThreadLanguages.swift:522`),
+the `ExtensionLanguageVocabulary` seam (`MainThreadLanguages.swift`),
 which `MainThreadLanguages.getLanguages` calls to answer
 `vscode.languages.getLanguages()`. It composes two already-deterministic
 halves into one deterministic list: every built-in identifier from the
@@ -238,7 +238,7 @@ Not applicable: `HostLanguageVocabulary.swift` contains no logging call.
 
 - **SwiftUI**: the source (`HostLanguageVocabulary.swift`, alongside
   `LanguageContributionPoint.swift` for the contributed half and
-  `MainThreadLanguages.swift:522` for the `ExtensionLanguageVocabulary`
+  `MainThreadLanguages.swift` for the `ExtensionLanguageVocabulary`
   protocol it conforms to) is a plain `@MainActor` Foundation type with no
   dependency on SwiftUI or any view-layer framework; it imports only
   `CodeEditLanguages` and `Foundation`. A port that keeps this component in

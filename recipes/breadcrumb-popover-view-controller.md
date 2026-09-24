@@ -292,7 +292,7 @@ it programmatically as an `NSPopover`'s content view controller.
 | n/a (literal) | "Filter" | Search field placeholder text |
 
 `"Filter"` is assigned to `searchField.placeholderString` as a plain AppKit
-`String` literal (BreadcrumbPopoverViewController.swift:65), not through
+`String` literal (BreadcrumbPopoverViewController.swift), not through
 `String(localized:)` or `NSLocalizedString`, so it never reaches a string
 catalog; there is no localization key or catalog entry for the placeholder.
 

@@ -179,7 +179,7 @@ Not applicable: the source contains no logging call of any kind — it imports o
 **Approved**: pending
 
 **Decision**: `nil` means the picker was dismissed; `[]` (only reachable when `canPickMany` is `true`) means the user explicitly accepted a selection of nothing. The two MUST NOT be conflated.
-**Rationale**: upstream's `handle.map(...)` of an empty handle array resolves `[]` rather than `undefined` (`extHostQuickOpen.ts:128-129`); a conformer that answered `[]` for a dismissal would tell the extension the user accepted an empty selection, a different, observable answer to code doing `if (result === undefined)`.
+**Rationale**: upstream's `handle.map(...)` of an empty handle array resolves `[]` rather than `undefined` (`extHostQuickOpen.ts`); a conformer that answered `[]` for a dismissal would tell the extension the user accepted an empty selection, a different, observable answer to code doing `if (result === undefined)`.
 **Approved**: pending
 
 **Decision**: single-select and multi-select both answer through the same `[Int]?` return type — a one-element array for single-select — rather than two overloads (a bare `Int?` for single-select, `[Int]?` for multi-select).
@@ -191,7 +191,7 @@ Not applicable: the source contains no logging call of any kind — it imports o
 **Approved**: pending
 
 **Decision**: constructing an `ExtensionQuickPickItem` for a separator row (`isSeparator == true`) MUST set `description`, `detail`, `isPicked`, and `alwaysShow` to their defaults regardless of what the extension supplied for them.
-**Rationale**: quoting the source's own doc comment on `isSeparator`, "The only property that applies is `QuickPickItem.label`. All other properties on `QuickPickItem` will be ignored and have no effect," per `vscode.d.ts:1881-1884`.
+**Rationale**: quoting the source's own doc comment on `isSeparator`, "The only property that applies is `QuickPickItem.label`. All other properties on `QuickPickItem` will be ignored and have no effect," per `vscode.d.ts`.
 **Approved**: pending
 
 **Decision**: `isPicked` and `alwaysShow` are carried truthfully regardless of `canPickMany` or the current filter text; applying VS Code's own conditions for honoring them ("only honored when the picker allows multiple selections" for `picked`; keeping a row visible despite the filter for `alwaysShow`) is deferred to the presenting conformer or, for `alwaysShow`, to `ExtensionQuickPickModel.matches(_:filter:)`.

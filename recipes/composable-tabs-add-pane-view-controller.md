@@ -289,7 +289,7 @@ presents it programmatically.
 
 Every string above is a plain AppKit `String` literal (for example
 `NSButton(title: "Cancel", …)` and `NSButton(title: "OK", …)` at
-ComposableTabsAddPaneViewController.swift:70 and :75, and the
+ComposableTabsAddPaneViewController.swift and :75, and the
 `"Add:"`/`"Where:"` captions at :82–83), none routed through
 `String(localized:)` or `NSLocalizedString`, so none reaches a string
 catalog.

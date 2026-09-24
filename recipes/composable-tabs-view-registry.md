@@ -314,7 +314,7 @@ The source contains no localization mechanism for this string — no
 `NSLocalizedString`, string catalog lookup, or similar — so it renders as the
 literal English text "Pane N" regardless of the device's locale.
 
-`"Pane \(paneNumber)"` (ComposableTabsViewRegistry.swift:279) and the
+`"Pane \(paneNumber)"` (ComposableTabsViewRegistry.swift) and the
 `"Placeholder"`/`"Unknown"` display names (:114, :118) are plain `String`
 literals, none routed through `String(localized:)` or `NSLocalizedString`,
 so none reaches a string catalog.

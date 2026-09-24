@@ -271,7 +271,7 @@ appears anywhere in `PathView.swift`.
 
 `path` and `caption` are entirely caller-supplied at the call site as
 `String`/`String?` parameters, not literals owned by this type. But
-`PathView.swift:35` (`caption.map { "\($0): \(path)" }`) hardcodes the `": "`
+`PathView.swift` (`caption.map { "\($0): \(path)" }`) hardcodes the `": "`
 separator as a literal, user-visible glue string, not routed through
 `String(localized:)`/`NSLocalizedString`. Its punctuation is locale-sensitive
 — French convention inserts a space before the colon (`" : "`), and an RTL
@@ -464,7 +464,7 @@ minimum-contrast-ratio in Accessibility above); the caption-prefixed visible
 text versus the raw-`path`-only accessibility value, with no accessibility
 label filling the gap (`screen-reader-support`, per the Accessibility
 section's Label requirements above); and the hardcoded `": "`
-separator literal at `PathView.swift:35` (`no-hardcoded-strings`, per
+separator literal at `PathView.swift` (`no-hardcoded-strings`, per
 Localization above).
 
 ## Change History

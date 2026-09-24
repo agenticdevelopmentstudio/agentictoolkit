@@ -238,7 +238,7 @@ Not applicable: no logging call appears anywhere in `ContentViewerView.swift`.
 ## Design Decisions
 
 - **Decision**: The header icon's color maps file-extension "brand" associations onto the theme's status roles: `swift`/`json` land on `warning`, `md`/`markdown` on `accent`.
-  **Rationale**: `headerIconColor`'s own source comment (`ContentViewerView.swift:199-204`) draws this as an analogy to `SwiftUIPalette.color(named:)`'s conventional-color-to-role mapping used elsewhere in the toolkit (orange/yellow → `warning`, blue → `accent`) — `headerIconColor` itself switches directly on the file extension rather than calling that mapping function, so `swift`/`json` landing on `warning` and `md`/`markdown` landing on `accent` mirrors, but does not literally reuse, that shared mapping.
+  **Rationale**: `headerIconColor`'s own source comment (`ContentViewerView.swift`) draws this as an analogy to `SwiftUIPalette.color(named:)`'s conventional-color-to-role mapping used elsewhere in the toolkit (orange/yellow → `warning`, blue → `accent`) — `headerIconColor` itself switches directly on the file extension rather than calling that mapping function, so `swift`/`json` landing on `warning` and `md`/`markdown` landing on `accent` mirrors, but does not literally reuse, that shared mapping.
   **Approved**: pending
 
 - **Decision**: A stale "Items:" row — showing a `children` count that no longer matches the node's current, asynchronously-updated value — is treated as a known limitation of this SwiftUI implementation (see the **Concurrent access** edge case), not a contract other platform implementations are required to reproduce.

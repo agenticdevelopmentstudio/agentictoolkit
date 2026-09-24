@@ -230,7 +230,7 @@ Not applicable: `ChatView` contains no URL scheme or deep-link handling in sourc
 | n/a (literal) | `Type a message...` | Composer placeholder text shown while the field is empty |
 | n/a (literal) | `Send` | Accessibility description on the send button's SF Symbol image |
 
-Both listed strings are plain `String` literals in source — the composer placeholder `"Type a message..."` (ChatView.swift:253) and the send image's accessibility description `"Send"` (:292) — and neither is routed through `String(localized:)` or `NSLocalizedString`, so neither reaches a string catalog.
+Both listed strings are plain `String` literals in source — the composer placeholder `"Type a message..."` (ChatView.swift) and the send image's accessibility description `"Send"` (:292) — and neither is routed through `String(localized:)` or `NSLocalizedString`, so neither reaches a string catalog.
 
 ## Accessibility Options
 

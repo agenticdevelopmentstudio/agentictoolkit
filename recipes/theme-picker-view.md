@@ -152,8 +152,8 @@ never told about that write directly; it is driven independently by a
 - **Min/Max size**: Not applicable — no explicit min/max width or height
   constraint is set in `ThemePickerView.swift`; sizing comes entirely from
   the popup's and preview's own intrinsic/explicit sizing (the preview's own
-  cards enforce a `>= 280`pt width, `ThemePreviewView.swift:366`, reasserted
-  for the terminal card at `ThemePreviewView.swift:312`) composed inside the
+  cards enforce a `>= 280`pt width, `ThemePreviewView.swift`, reasserted
+  for the terminal card at `ThemePreviewView.swift`) composed inside the
   vertical stack.
 
 ## States
@@ -197,11 +197,11 @@ never told about that write directly; it is driven independently by a
 | theme-picker-view-003 | stacks-popup-above-preview | Construct `ThemePickerView` | The popup and the preview are arranged, in that order, top-to-bottom, inside one leading-aligned vertical `NSStackView` with 10pt spacing |
 | theme-picker-view-004 | pins-stack-to-view-edges | Construct `ThemePickerView` | The stack view's top/leading/trailing/bottom constraints equal `ThemePickerView`'s own edges with a 0pt constant |
 | theme-picker-view-005 | derives-choices-from-injected-store | `store.allThemes == [ColorTheme(id: "a", name: "Alpha"), ColorTheme(id: "b", name: "Beta")]` | The popup's `viewModel.choices == [Choice(label: "Alpha", value: "a"), Choice(label: "Beta", value: "b")]` and `viewModel.title == "Theme"` |
-| theme-picker-view-006 | defaults-to-the-persisted-theme-store | Construct `ThemePickerView()` with no `store` argument | The popup's choices equal `BuiltInThemes.all` followed by `UserSettings.customThemes.value` (in that order), each mapped to `Choice(label: $0.name, value: $0.id)` — the same composition `ThemeStore.allThemes` computes (`ThemeStore.swift:41`) |
+| theme-picker-view-006 | defaults-to-the-persisted-theme-store | Construct `ThemePickerView()` with no `store` argument | The popup's choices equal `BuiltInThemes.all` followed by `UserSettings.customThemes.value` (in that order), each mapped to `Choice(label: $0.name, value: $0.id)` — the same composition `ThemeStore.allThemes` computes (`ThemeStore.swift`) |
 | theme-picker-view-007 | renders-initial-preview-synchronously | Construct `ThemePickerView` | Immediately after `init` returns, the preview's subviews are already non-empty and reflect the current palette's theme — no further call is needed |
 | theme-picker-view-008 | resyncs-preview-on-theme-change | Post `ThemeManager.didChangeNotification` after construction | The preview's `show(_:)` is invoked again with the newly current palette's theme |
 | theme-picker-view-009 | resyncs-preview-on-matching-scope-change | Post `ThemeScope.didChangeNotification` with `object` set to the exact `ThemeScope` instance the view's own `resolvedThemeScope` returns | The preview's `show(_:)` is invoked again |
-| theme-picker-view-010 | ignores-non-matching-scope-change | Post `ThemeScope.didChangeNotification` with `object` set to a `ThemeScope` instance other than the one `resolvedThemeScope` returns — a distinct `ObjectIdentifier`, since `ThemeScope` has no `Equatable` conformance and `ThemePaletteObserver` compares scopes by `ObjectIdentifier` identity (`ThemeBinding.swift:90`) | The preview's `show(_:)` is NOT invoked as a result of that notification |
+| theme-picker-view-010 | ignores-non-matching-scope-change | Post `ThemeScope.didChangeNotification` with `object` set to a `ThemeScope` instance other than the one `resolvedThemeScope` returns — a distinct `ObjectIdentifier`, since `ThemeScope` has no `Equatable` conformance and `ThemePaletteObserver` compares scopes by `ObjectIdentifier` identity (`ThemeBinding.swift`) | The preview's `show(_:)` is NOT invoked as a result of that notification |
 | theme-picker-view-011 | commits-selection-through-the-active-theme-setting | Select a different item in the popup | `UserSettings.activeThemeID.value` equals the selected item's represented theme id |
 | theme-picker-view-012 | decouples-preview-refresh-from-selection-commit | Select a different item in the popup | No call from the popup's selection handler invokes `preview.show` directly; the preview is refreshed only by a `ThemePaletteObserver` subscription firing |
 | theme-picker-view-013 | keeps-constituent-views-private | Attempt to access `.popup`, `.preview`, or `.observer` from outside `ThemePickerView` | Compiler rejects each access; no public API exposes any of the three |
@@ -243,11 +243,11 @@ never told about that write directly; it is driven independently by a
   item writes synchronously to `UserSettings.activeThemeID` (via
   `UserSetting.value`'s setter), but every downstream observer of that
   setting — including `UserSettingsThemeStorage`'s internal
-  `UserSettingObserver` (`UserSettingsThemeStorage.swift:51-56`), which calls
-  `ThemeManager.reload()` on external change (`ThemeManager.swift:103`) —
+  `UserSettingObserver` (`UserSettingsThemeStorage.swift`), which calls
+  `ThemeManager.reload()` on external change (`ThemeManager.swift`) —
   fires asynchronously, hopped to the next main-dispatch-queue turn
   (`UserSettingObserver`'s own `.receive(on: DispatchQueue.main)`,
-  `UserSetting.swift:77`). `ThemeManager.reload()` then posts
+  `UserSetting.swift`). `ThemeManager.reload()` then posts
   `didChangeNotification` synchronously within that later turn, which is
   what finally triggers `preview.show`. This is current, source-traceable
   behavior across `ThemePickerView.swift`, `UserSetting.swift`,
@@ -257,11 +257,11 @@ never told about that write directly; it is driven independently by a
   that.
 - **Reload no-ops when the theme id round-trips to the same theme**:
   `ThemeManager.reload()` guards with `guard theme != currentTheme else {
-  return }` (`ThemeManager.swift:137`) before rebuilding the palette or
+  return }` (`ThemeManager.swift`) before rebuilding the palette or
   posting the notification, so selecting the item that is already active
   produces no preview re-render
   and no second notification — current, source-traceable behavior in
-  `ThemeManager.swift:137`, which this recipe's
+  `ThemeManager.swift`, which this recipe's
   **resyncs-preview-on-theme-change** requirement depends on.
 
 ## Configuration
@@ -282,7 +282,7 @@ appears anywhere in `ThemePickerView.swift`.
 it passes no `title` argument to `ThemeChoiceViewModel` at all, so it has no
 call site of its own to localize. But the popup title it composes is not
 inert: `ThemeChoiceViewModel.init`'s `title: String = "Theme"` default
-(`ThemeChoiceViewModel.swift:10`) is a plain `String`, not routed through
+(`ThemeChoiceViewModel.swift`) is a plain `String`, not routed through
 `String(localized:)`/`NSLocalizedString`, and because `ThemePickerView`
 supplies no title of its own, every `ThemePickerView` shows that unlocalized
 `"Theme"` default; no localization key exists for the popup's title, and
@@ -453,7 +453,7 @@ Localization) and the row itself offers no disable path (see States,
 Disabled), so this file's own compliance can't be called a full pass.
 `idempotent-operations` is `partial` for the same reason: it holds only
 because `ThemeManager.reload()`'s `theme != currentTheme` guard
-(`ThemeManager.swift:137`) makes repeated selections of the same theme a
+(`ThemeManager.swift`) makes repeated selections of the same theme a
 no-op for the preview (see Edge Cases) — a property of `ThemeManager`, not
 of anything `ThemePickerView.swift` itself guarantees. `separation-of-concerns`
 passes because the preview refresh path is fully decoupled from the

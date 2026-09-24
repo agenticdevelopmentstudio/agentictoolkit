@@ -64,88 +64,88 @@ curated `modelDetails`, and a local server's live-fetched blurb).
 - **facet-cases**: `ModelUseFacet` MUST define exactly these ten cases, in
   this declaration order: `coding`, `conversation`, `problemSolving`,
   `research`, `writing`, `vision`, `agents`, `translation`, `speech`,
-  `economy` (`ModelUseFacet.swift:19-29`). Each case's `rawValue` MUST equal
+  `economy` (`ModelUseFacet.swift`). Each case's `rawValue` MUST equal
   its Swift case name verbatim (no custom raw-value strings are declared),
   e.g. `ModelUseFacet.problemSolving.rawValue == "problemSolving"`.
 - **facet-title**: `title` MUST return the exact non-empty display string
   listed for each case — `"Coding"`, `"Conversation"`, `"Problem solving"`,
   `"Research"`, `"Writing"`, `"Vision"`, `"Agents & tools"`, `"Translation"`,
   `"Speech & audio"`, `"Fast & low cost"` — for use as a menu or checkbox
-  label (`ModelUseFacet.swift:32-45`).
+  label (`ModelUseFacet.swift`).
 - **facet-detail**: `detail` MUST return the exact non-empty tooltip string
   listed for each case (e.g. `.coding` → `"Writing, reviewing and debugging
   code"`, `.economy` → `"Fast, cheap, high-volume work"`) for use as a menu
-  item's tooltip (`ModelUseFacet.swift:48-61`).
+  item's tooltip (`ModelUseFacet.swift`).
 - **capability-implied-facets**: `facets(text:capabilities:)` MUST insert
   `.agents` when the reported capabilities include `tools` (per
   `ModelCapability.reports(.tools, in:)`), `.vision` when they include
   `vision`, and `.problemSolving` when they include `reasoning` — regardless
   of what the text says — because `impliedByCapability` maps only those three
-  facets to a `ModelCapability` (`ModelUseFacet.swift:109-116,143-147`). No
+  facets to a `ModelCapability` (`ModelUseFacet.swift`). No
   other facet MUST be implied by a reported capability.
 - **capability-evidence-checked-first**: For each facet, `facets(text:
   capabilities:)` MUST check capability-implied evidence before word-prefix
   evidence, and word-prefix evidence before phrase evidence, short-circuiting
   (`continue`) on the first match found for that facet
-  (`ModelUseFacet.swift:142-154`).
+  (`ModelUseFacet.swift`).
 - **capability-string-matching-is-delegated**: Whether a capability string is
   "reported" MUST be decided by `ModelCapability.reports(_:in:)`, which
   matches case-insensitively against every known spelling for that capability
   (e.g. `tool_use`, `function_calling`, `functions` all count as `tools`) —
   `ModelUseFacet` itself performs no string comparison against capability
-  values (`ModelUseFacet.swift:144`, `ModelCapability.swift:50-69`).
+  values (`ModelUseFacet.swift`, `ModelCapability.swift`).
 - **word-tokenization**: `facets(text:capabilities:)` MUST lowercase `text`
   and split it into words on every run of characters that is neither a
   Unicode letter nor a Unicode number, discarding the separators
-  (`ModelUseFacet.swift:139-140`).
+  (`ModelUseFacet.swift`).
 - **word-prefix-anchoring**: A facet's word-prefix evidence MUST match only
   when a whole tokenized word has one of that facet's prefixes as its
   starting substring (`word.hasPrefix(prefix)`); a prefix occurring inside a
   word but not at its start (e.g. `"cod"` inside `"encoded"`) MUST NOT count
-  as evidence (`ModelUseFacet.swift:148-151`).
+  as evidence (`ModelUseFacet.swift`).
 - **phrase-matching-on-raw-text**: A facet's phrase evidence MUST be tested
   as a substring of the full lowercased text (not of the tokenized word
   list), so phrases that span whitespace or a hyphen (`"long-context"`,
   `"step-by-step"`, `"function calling"`) are matched even though
   tokenization would otherwise split them into separate words
-  (`ModelUseFacet.swift:153`).
+  (`ModelUseFacet.swift`).
 - **per-facet-evidence-lists-are-fixed**: `wordPrefixes` and `phrases` MUST
   return the fixed literal lists given in the source for each case (e.g.
   `.economy` prefixes `["fast", "efficient", "lightweight", "cheap",
   "inexpensive"]`, phrases `["low cost", "low-cost", "high volume",
   "high-volume", "cost-effective", "cost effective", "high throughput",
   "high-throughput"]`); `.conversation` MUST have an empty phrase list
-  (`ModelUseFacet.swift:69-101`).
+  (`ModelUseFacet.swift`).
 - **resolved-model-evidence-sources**: `facets(for:extraText:)` MUST derive
   its text input by joining, in order, `model.description`, `model.goodFor`,
   and `extraText` — dropping any of the three that is `nil` — with a single
   space separator, and MUST pass `model.capabilities` through unchanged as
-  the capabilities input (`ModelUseFacet.swift:129-135`).
+  the capabilities input (`ModelUseFacet.swift`).
 - **model-id-excluded-from-evidence**: `facets(for:extraText:)` MUST NOT use
   `model.id` (the model's name) as evidence for any facet — only
   `description`, `goodFor`, `extraText`, and `capabilities` MUST be
-  considered (`ModelUseFacet.swift:124-135`).
+  considered (`ModelUseFacet.swift`).
 - **empty-evidence-yields-empty-set**: `facets(text:capabilities:)` called
   with an empty string and empty (or default `[]`) capabilities MUST return
   an empty `Set<ModelUseFacet>`; no case MUST ever be present without at
   least one of capability, word-prefix, or phrase evidence for it
-  (`ModelUseFacet.swift:138-156`).
+  (`ModelUseFacet.swift`).
 - **facets-are-a-set**: `facets(text:capabilities:)` and `facets(for:
   extraText:)` MUST return a `Set<ModelUseFacet>` — a model MUST be able to
   carry more than one facet simultaneously, with no defined ordering and no
-  duplicate entries for the same case (`ModelUseFacet.swift:129-138`).
+  duplicate entries for the same case (`ModelUseFacet.swift`).
 - **filter-empty-selection-passes-all**: `matches(facets:selected:)` MUST
   return `true` for every `facets` value when `selected.isEmpty` — an empty
-  filter selection excludes nothing (`ModelUseFacet.swift:169`).
+  filter selection excludes nothing (`ModelUseFacet.swift`).
 - **filter-unknown-model-passes**: `matches(facets:selected:)` MUST return
   `true` whenever `facets.isEmpty`, regardless of `selected`, because no
   evidence is treated as "unknown," never as "fails every use"
-  (`ModelUseFacet.swift:169`).
+  (`ModelUseFacet.swift`).
 - **filter-any-of-semantics**: When both `facets` and `selected` are
   non-empty, `matches(facets:selected:)` MUST return `true` if and only if
   the two sets are not disjoint (at least one facet in common) — selecting
   several uses MUST behave as "any of these," never "all of these"
-  (`ModelUseFacet.swift:170`).
+  (`ModelUseFacet.swift`).
 - **value-type-concurrency-safety**: `ModelUseFacet` MUST be a `Sendable`
   value type with no stored instance state beyond its `rawValue`, and its
   `title`, `detail`, `wordPrefixes`, `phrases`, and `impliedByCapability`
@@ -153,16 +153,16 @@ curated `modelDetails`, and a local server's live-fetched blurb).
   `facets` overloads and `matches` MUST be pure static functions with no
   side effects, so any number of callers on any thread or actor MAY call
   them concurrently on the same or different inputs without synchronization
-  (`ModelUseFacet.swift:19,69,109,129,138,168`).
+  (`ModelUseFacet.swift`).
 - **codable-round-trip**: `ModelUseFacet` MUST encode to and decode from its
   `rawValue` string (via its compiler-synthesized `String`-backed `Codable`
   conformance), so `Set<ModelUseFacet>` round-trips through JSON as an array
-  of the raw case-name strings (`ModelUseFacet.swift:19`).
+  of the raw case-name strings (`ModelUseFacet.swift`).
 - **exhaustive-derivation-switches**: The `title`, `detail`, `wordPrefixes`,
   and `phrases` switches MUST cover every case with no `default:` branch, so
   adding a facet without extending all four is a compile error; only
   `impliedByCapability` MUST use `default: return nil` for the seven cases it
-  does not map to a capability (`ModelUseFacet.swift:33,49,70,88,110-115`).
+  does not map to a capability (`ModelUseFacet.swift`).
 
 ## Appearance
 
@@ -182,7 +182,7 @@ Requirements).
 Not applicable — this is a keyword-derivation heuristic and a set filter, not
 a visual component. `title`/`detail` supply label and tooltip text that a
 *caller's* menu or checkbox control renders (e.g.
-`ModelChooserViewController.swift:59`'s `MultiChoiceFilterButton`); this file
+`ModelChooserViewController.swift`'s `MultiChoiceFilterButton`); this file
 defines no control, role, trait, or tap target of its own.
 
 ## Conformance Test Vectors
@@ -207,7 +207,7 @@ defines no control, role, trait, or tap target of its own.
 | MUF-016 | filter-any-of-semantics | `matches(facets: [.coding], selected: [.coding, .writing])`, `matches(facets: [.writing], selected: [.coding, .writing])`, `matches(facets: [.vision], selected: [.coding, .writing])` | `true`, `true`, `false` — `ModelUseFacetTests.orSemantics` |
 | MUF-017 | filter-unknown-model-passes | `matches(facets: [], selected: [.coding])` | `true` — `ModelUseFacetTests.unknownPasses` |
 | MUF-018 | facet-title, facet-detail | For every case in `ModelUseFacet.allCases`, read `.title` and `.detail` | Every `.title` and `.detail` is a non-empty string — `ModelUseFacetTests.labels` |
-| MUF-019 | facet-cases, codable-round-trip | `ModelUseFacet.allCases.count` | `10`, and `ModelUseFacet(rawValue: "problemSolving") == .problemSolving` — not exercised by a named test in the given suite; traced directly to the `enum` declaration (`ModelUseFacet.swift:19-29`) |
+| MUF-019 | facet-cases, codable-round-trip | `ModelUseFacet.allCases.count` | `10`, and `ModelUseFacet(rawValue: "problemSolving") == .problemSolving` — not exercised by a named test in the given suite; traced directly to the `enum` declaration (`ModelUseFacet.swift`) |
 | MUF-020 | value-type-concurrency-safety | Call `ModelUseFacet.facets(text:capabilities:)` from many concurrent `Task`s in a `TaskGroup` with different inputs | Every task returns the result for its own input with no crash, data race, or need for a lock — not exercised by a dedicated concurrency test in the given suite; enforced statically by the `Sendable` conformance and the absence of any mutable stored state |
 
 ## Edge Cases
@@ -266,7 +266,7 @@ defines no control, role, trait, or tap target of its own.
 | `capabilities` | `[String]` | `[]` | Reported capability strings passed alongside `text`; matched via `ModelCapability.reports(_:in:)` for the three capability-implied facets. |
 | `model` | `AIModelCatalog.ResolvedModel` | required | Input to `facets(for:extraText:)`; its `description`, `goodFor`, and `capabilities` fields are read, its `id` is deliberately not. |
 | `extraText` | `String?` | `nil` | Additional description text not carried by the catalog (e.g. a local server's live-fetched blurb for a model the catalog has never seen), appended to `model.description`/`goodFor` before derivation. |
-| `selected` | `Set<ModelUseFacet>` | caller-supplied | The set of uses a filter control has checked, passed to `matches(facets:selected:)`; an empty set is the default, unfiltered state of the "Good for" menu (`ModelChooserViewController.swift:57-59`). |
+| `selected` | `Set<ModelUseFacet>` | caller-supplied | The set of uses a filter control has checked, passed to `matches(facets:selected:)`; an empty set is the default, unfiltered state of the "Good for" menu (`ModelChooserViewController.swift`). |
 
 ## Deep Linking
 
@@ -277,19 +277,19 @@ navigation surface of its own.
 ## Localization
 
 `title` and `detail` are hardcoded, English-only `String` literals returned
-directly from a `switch` over `self` (`ModelUseFacet.swift:32-61`) — there is
+directly from a `switch` over `self` (`ModelUseFacet.swift`) — there is
 no `String(localized:)`, string-catalog lookup, or `NSLocalizedString` call
 anywhere in this file, so these ten menu labels and ten tooltips MUST ship in
 English regardless of the host app's locale. The derivation's own evidence
 vocabulary (`wordPrefixes`, `phrases`) is likewise a fixed, English-only
-token and phrase list (`ModelUseFacet.swift:69-101`); a model described only
+token and phrase list (`ModelUseFacet.swift`); a model described only
 in another language derives no facets from that description text (see Edge
 Cases). This is a stated fact about the source, not a gap to resolve here.
 
 | String Key | Default (en) | Context |
 |-----------|---------------|---------|
-| *(none — inline literal)* | `Coding` / `Conversation` / `Problem solving` / `Research` / `Writing` / `Vision` / `Agents & tools` / `Translation` / `Speech & audio` / `Fast & low cost` | `title`: menu/checkbox label per facet (`ModelUseFacet.swift:32-45`) |
-| *(none — inline literal)* | `Writing, reviewing and debugging code` / … (one per case, `ModelUseFacet.swift:50-59`) | `detail`: tooltip text per facet |
+| *(none — inline literal)* | `Coding` / `Conversation` / `Problem solving` / `Research` / `Writing` / `Vision` / `Agents & tools` / `Translation` / `Speech & audio` / `Fast & low cost` | `title`: menu/checkbox label per facet (`ModelUseFacet.swift`) |
+| *(none — inline literal)* | `Writing, reviewing and debugging code` / … (one per case, `ModelUseFacet.swift`) | `detail`: tooltip text per facet |
 
 ## Accessibility Options
 
@@ -369,7 +369,7 @@ Not applicable: `ModelUseFacet.swift` contains no `Logger`, `os_log`, or
   matching `title`/`detail`. Reproduce `wordPrefixes`/`phrases` as
   `IReadOnlyList<string>` returned from a `switch` on the enum, and
   `impliedByCapability` as a `ModelCapability?` (nullable enum) switch
-  mirroring `ModelUseFacet.swift:109-116`. Port `facets(text, capabilities)`
+  mirroring `ModelUseFacet.swift`. Port `facets(text, capabilities)`
   using `text.ToLowerInvariant()`, `System.Globalization`-aware tokenizing
   (split on runs where `!char.IsLetterOrDigit(c)`) for `word-tokenization`,
   `word.StartsWith(prefix, StringComparison.Ordinal)` for
@@ -424,7 +424,7 @@ Not applicable: `ModelUseFacet.swift` contains no `Logger`, `os_log`, or
   comment — `"large language model"` is "the boilerplate opener of half the
   catalog's blurbs" and previously caused every model's description to
   falsely register as translation evidence; the fixed prefix/phrase lists in
-  `ModelUseFacet.swift:79,96` (`"translat"`, `"multiling"`, `"localization"`,
+  `ModelUseFacet.swift` (`"translat"`, `"multiling"`, `"localization"`,
   `"language pairs"`, `"cross-language"`) are the result of removing that
   false-positive term, not an oversight.
   **Approved**: pending

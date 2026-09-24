@@ -415,9 +415,9 @@ reliable proxy for the screen the user is currently looking at.
 
 `focus-management` rests on `show()` calling `showWindow(nil)` then
 `window.makeKeyAndOrderFront(nil)` before `takeInitialFocus()` runs
-(`FloatingChooserPanelController.swift:174-176`), guaranteeing the window is
+(`FloatingChooserPanelController.swift`), guaranteeing the window is
 already key when a subclass assigns first responder, and on
-`windowDidResignKey`/`close()` (lines 244-247, 190-195) tearing the panel
+`windowDidResignKey`/`close()` tearing the panel
 down in a single guarded path on focus loss. No other catalog category
 applies: the file renders no text, collects or transmits no data, performs
 no moderation-relevant function, and has no user-facing string for

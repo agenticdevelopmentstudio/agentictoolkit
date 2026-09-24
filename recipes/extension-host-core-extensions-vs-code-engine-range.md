@@ -69,8 +69,8 @@ Four production call sites consume it today, all in
 `AgenticToolkitCore`: `ActivationEventMatcher.init(manifest:)` reads
 `minimumVersion` and `isUnconstrained` to decide whether a manifest's engine
 grants VS Code 1.74's implicit-activation-from-`contributes.commands` rule;
-`ExtensionRegistry.load(from:)` (`ExtensionRegistry.swift:544`) and
-`VSIXInstaller`'s install path (`VSIXInstaller.swift:218`) each parse the
+`ExtensionRegistry.load(from:)` (`ExtensionRegistry.swift`) and
+`VSIXInstaller`'s install path (`VSIXInstaller.swift`) each parse the
 manifest's declared engine and call `accepts(_:)` against
 `ExtensionRegistry.declaredVSCodeVersion` (1.138.0) to decide whether the
 extension may load at all, reporting `.engineRangeUnparsable`/

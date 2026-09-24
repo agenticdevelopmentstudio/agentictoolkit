@@ -321,7 +321,7 @@ Not applicable beyond the table above: the pane-name text shown by
 elsewhere in the app), not a literal string this file owns.
 
 The `"Add"`, `"Remove"`, and `"Done"` button titles
-(ComposableTabsArrangeOverlayView.swift:53–55) and the `"Move"`
+(ComposableTabsArrangeOverlayView.swift) and the `"Move"`
 pull-down title are plain `String` literals, none routed through
 `String(localized:)` or `NSLocalizedString`, so none reaches a string
 catalog.

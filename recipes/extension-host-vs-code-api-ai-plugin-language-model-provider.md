@@ -157,7 +157,7 @@ Not applicable — this is the extension host's production `ExtensionLanguageMod
 | `pluginManager` | `AIPluginManager` | none (required) | Supplied to `init(pluginManager:)`; the sole source of plugin descriptors, templates, and loaded plugin instances. |
 | `model` | `LanguageModelChatDescriptor` | none (required) | The descriptor `streamResponse` is asked to route; only its `id` field is consulted. |
 | `messages` | `[ExtensionLanguageModelMessage]` | none (required) | The conversation history to send; mapped verbatim (minus `name`) to `[AIChatMessage]`. |
-| `justification` | `String?` | none (optional) | Free text from `options.justification` (`vscode.d.ts:20392`); recorded to the log only, per **justification-recorded-only**. |
+| `justification` | `String?` | none (optional) | Free text from `options.justification` (`vscode.d.ts`); recorded to the log only, per **justification-recorded-only**. |
 | `extensionIdentifier` | `String` | none (required) | Identifies the calling extension for the justification log line; passed straight through with no validation. |
 | `UserSettings.aiProviderConfigurations` | `UserSetting<[AIProviderConfiguration]>`, settings key `"aiplugin.configurations"` | `[]` | Read by `availableChatModels` and `resolveConfiguration(for:)`; observed by the `configurationsObserver` set up in `init`. |
 | `AIModelCatalog.shared` | `AIModelCatalog` (singleton) | the loaded shared catalog | Consulted by `descriptor(for:configuration:template:)` for `contextWindow`; falls back to `defaultMaxInputTokens` (`4096`) when the model/template pair is unlisted. |

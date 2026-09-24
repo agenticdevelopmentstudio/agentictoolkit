@@ -193,7 +193,7 @@ The three user-facing strings in this file are hardcoded English literals with n
 | n/a (literal) | "Go to this conversation in {appIdentity}" | Tooltip on the app icon when `attribution.appIdentity` is non-empty |
 | n/a (literal) | "Go to {attribution.headerLine}" | Accessibility label on the app icon, set only when `actions.onJump` is wired |
 
-None of the three literals — the two app-icon tooltips or `setAccessibilityLabel("Go to \(attribution.headerLine)")` (`ChatTranscriptRowView.swift:340`–`343`) — is routed through `String(localized:)` or `NSLocalizedString`, so none reaches a string catalog.
+None of the three literals — the two app-icon tooltips or `setAccessibilityLabel("Go to \(attribution.headerLine)")` (`ChatTranscriptRowView.swift`–`343`) — is routed through `String(localized:)` or `NSLocalizedString`, so none reaches a string catalog.
 
 ## Accessibility Options
 

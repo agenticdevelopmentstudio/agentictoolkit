@@ -529,7 +529,7 @@ screen, leaving the real, visible help button unthemed and unreported
 `override func makeSettingsPanels() -> [ComposableSettings.SettingsPanelViewController]`)
 to describe `settingPanels`, or to restore a `makeSettingsPanels()` override
 point, is not yet settled.
-**Rationale**: `SettingsWindow.swift` lines 13–21 illustrate subclassing
+**Rationale**: `SettingsWindow.swift` illustrates subclassing
 through a `makeSettingsPanels()` override that does not exist anywhere in
 the class — the only subclass-facing configuration surface this version
 actually exposes is the `settingPanels` property (see Overview and

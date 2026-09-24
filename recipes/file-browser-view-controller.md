@@ -499,7 +499,7 @@ callback.
 
 **Decision**: Normalize every root and every `GitStatusProvider.repoRoot`
 comparison with `resolvingSymlinksInPath()`, not `standardizedFileURL`.
-**Rationale**: the source comment (citing `ProjectCheckout.swift:12`) states an
+**Rationale**: the source comment (citing `ProjectCheckout.swift`) states an
 injected provider's `repoRoot` is a resolved checkout directory while a root
 handed to this controller may be an unresolved path the user picked; a
 lexical comparison would silently fail whenever a symlink stands between

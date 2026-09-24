@@ -162,7 +162,7 @@ chrome and feeds it the active panel's `HelpContent`.
   which AppKit exposes to assistive technology as static text by default;
   `titleLabel` is never given `setAccessibilityRole(.staticText)` with a
   heading subrole, nor any other heading designation
-  (`HelpContentView.swift:20`, `:31-32`), so AppKit's default static-text
+  (`HelpContentView.swift`, `:31-32`), so AppKit's default static-text
   role does not by itself announce to VoiceOver's rotor that "Help" is a
   section heading over the topic list below it. The topic titles/bodies
   inherit whatever `GroupView`/`ExplanationView` expose on their own.

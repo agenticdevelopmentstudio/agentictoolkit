@@ -298,7 +298,7 @@ No other event in this file is logged: every `createWebviewPanel`, `registerWebv
 **Approved**: pending
 
 **Decision**: `webview.options`'s getter answers only the roots the extension explicitly declared (omitting the field when nothing was declared), while `webview.localResourceRoots`'s getter answers the live, resolved roots.
-**Rationale**: `options` is the read-modify-write surface (`vscode.d.ts:11667`) — an extension reads it, flips a field, and writes it back, and if the getter answered the *resolved* defaults, that write-back would freeze the extension directory and the workspace folders open at read time into an explicit declaration, so a workspace folder opened afterward would stop reaching the page. `localResourceRoots` has no such round trip to protect and exists specifically to answer what the panel can read from right now.
+**Rationale**: `options` is the read-modify-write surface (`vscode.d.ts`) — an extension reads it, flips a field, and writes it back, and if the getter answered the *resolved* defaults, that write-back would freeze the extension directory and the workspace folders open at read time into an explicit declaration, so a workspace folder opened afterward would stop reaching the page. `localResourceRoots` has no such round trip to protect and exists specifically to answer what the panel can read from right now.
 **Approved**: pending
 
 **Decision**: `webview.localResourceRoots`'s setter refuses the whole assignment when the value cannot be parsed as a list of `Uri`s at all, while `resourceRootsField`'s array-element parsing drops only the unparseable entries of a value that *is* a list.
