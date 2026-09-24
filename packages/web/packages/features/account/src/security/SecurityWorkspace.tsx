@@ -26,7 +26,12 @@ import {
   type EditableListColumn,
 } from "@agenticdevelopertoolkit/ui/blocks";
 import { formatDate } from "@agenticdevelopertoolkit/ui/lib/timestamps";
-import { DetailSection, ListBarActions, SettingsBody } from "@agentic-toolkit/resource";
+import {
+  DetailSection,
+  ListBarActions,
+  SettingsBody,
+  useBulkRemove,
+} from "@agentic-toolkit/resource";
 import {
   confirmTotp,
   enrollTotp,
@@ -168,9 +173,6 @@ function PasskeysSection(): ReactElement {
   const { data, isLoading, error } = useQuery({ queryKey: WEBAUTHN_KEY, queryFn: listWebauthn });
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
-  // The rows the bar's Remove was pressed for — every ticked credential, not one row's button.
-  const [removeTargets, setRemoveTargets] = useState<WebauthnCredential[] | null>(null);
-  const [removeError, setRemoveError] = useState<string | null>(null);
   // Both lists move on a credential change: the MFA status's `webauthn` flag (and so the
   // Two-factor summary and the preferred-method choices) is derived from whether any exist.
   const invalidate = () => {
@@ -185,20 +187,15 @@ function PasskeysSection(): ReactElement {
       invalidate();
     },
   });
-  const remove = useMutation({
-    mutationFn: (ids: string[]) => Promise.all(ids.map((id) => removeWebauthn(id))),
-    onSuccess: () => {
-      invalidate();
-      list.clearSelection();
-      setRemoveTargets(null);
-      setRemoveError(null);
-    },
-    onError: (err: unknown) => {
-      // Keep the dialog open so the user sees the failure. Re-read anyway: in a multi-row
-      // removal some credentials may already be gone, and the table must not keep showing them.
-      invalidate();
-      setRemoveError(extractErrorMessage(err, "Could not remove. Try again."));
-    },
+  // The rows the bar's Remove was pressed for — every ticked credential, not one row's button. A
+  // partial failure keeps the confirm open on just the credentials still registered; the re-read
+  // runs either way, so the table never keeps showing one that is gone.
+  const remove = useBulkRemove<WebauthnCredential>({
+    getId: (c) => c.id,
+    remove: removeWebauthn,
+    onSettled: invalidate,
+    onDone: () => list.clearSelection(),
+    errorMessage: (err) => extractErrorMessage(err, "Could not remove. Try again."),
   });
 
   const columns: EditableListColumn<WebauthnCredential>[] = useMemo(
@@ -285,14 +282,22 @@ function PasskeysSection(): ReactElement {
             noun="passkey"
             selectedCount={selected.length}
             onAdd={openAdd}
-            onDelete={() => {
-              setRemoveError(null);
-              setRemoveTargets(selected);
-            }}
+            onDelete={() => remove.open(selected)}
             deleteLabel="Remove"
           />
         }
       />
+      {/* A failed read with nothing to show REPLACES the list, bar and all (EditableList's
+          rule: no actions over rows that cannot exist). Add is the one verb that needs no row,
+          and registering a device is a separate endpoint from listing them — so a listing outage
+          must not also take away the only way to add a second factor. */}
+      {error != null && !isLoading && (data?.items ?? []).length === 0 && (
+        <div>
+          <Button type="button" size="sm" variant="outline" onClick={openAdd}>
+            Add passkey or security key
+          </Button>
+        </div>
+      )}
 
       {/* Add: name the device, then pick which ceremony to run — the kind decides which
           authenticators the browser offers, so it is the submit, not a field. */}
@@ -346,38 +351,30 @@ function PasskeysSection(): ReactElement {
 
       {/* Remove confirm — for every ticked credential the bar's Remove was pressed with. */}
       <AlertModal
-        open={removeTargets != null}
+        open={remove.targets != null}
         tone="error"
         title={
-          removeTargets && removeTargets.length > 1
-            ? `Remove ${removeTargets.length} sign-in methods?`
+          remove.targets && remove.targets.length > 1
+            ? `Remove ${remove.targets.length} sign-in methods?`
             : "Remove sign-in method?"
         }
         description={
-          removeTargets ? (
+          remove.targets ? (
             <>
               <span>
-                Remove {removeTargets.map(credentialName).join(", ")}? You won’t be able to sign
-                in with {removeTargets.length > 1 ? "them" : "it"} any more.
+                Remove {remove.targets.map(credentialName).join(", ")}? You won’t be able to sign
+                in with {remove.targets.length > 1 ? "them" : "it"} any more.
               </span>
-              <DialogErrorText error={removeError} />
+              <DialogErrorText error={remove.error} />
             </>
           ) : undefined
         }
         confirmLabel="Remove"
         confirmVariant="destructive"
         cancelLabel="Cancel"
-        busy={remove.isPending}
-        onConfirm={() => {
-          if (removeTargets) {
-            setRemoveError(null);
-            remove.mutate(removeTargets.map((c) => c.id));
-          }
-        }}
-        onCancel={() => {
-          setRemoveTargets(null);
-          setRemoveError(null);
-        }}
+        busy={remove.pending}
+        onConfirm={remove.confirm}
+        onCancel={remove.cancel}
       />
     </DetailSection>
   );

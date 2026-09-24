@@ -69,14 +69,16 @@ export function ArchivedPanel() {
       const failures = results.flatMap((r) =>
         r.status === "rejected" ? [errMsg(r.reason, "Couldn't restore that organization.")] : [],
       );
-      // Everything that did come back leaves the selection; a failed row stays ticked so a
-      // second press retries exactly it.
-      const failedIds = new Set(
-        targets.filter((_, i) => results[i]?.status === "rejected").map((r) => r.id),
+      // Everything that did come back leaves the selection, and ONLY that: a failed row stays
+      // ticked so a second press retries exactly it, and so does everything the restore never
+      // touched — a ticked row skipped as not restorable, or one ticked while the requests were
+      // in flight. The updater form reads the selection as it is NOW; `list.selectedIds` here is
+      // the one captured when Restore was pressed, and rebuilding from it silently un-ticked
+      // whatever the user had ticked since.
+      const restoredIds = new Set(
+        targets.filter((_, i) => results[i]?.status === "fulfilled").map((r) => r.id),
       );
-      list.setSelectedIds(
-        new Set([...list.selectedIds].filter((id) => failedIds.has(id))),
-      );
+      list.setSelectedIds((prev) => new Set([...prev].filter((id) => !restoredIds.has(id))));
       if (failures.length > 0) setError(failures.join(" "));
       // All three invalidations together, not awaited one after another: sequential, each
       // refetch only STARTS once the previous has come back, so between them the row is gone
@@ -90,13 +92,16 @@ export function ArchivedPanel() {
       // entry is in this very cache and a restored org is a row that belongs back in it. The
       // prefix invalidates every workspace's copy, which is right: the restored org may be
       // owned by any of them. On the other sites there is no such entry and this costs nothing.
-      if (failures.length < targets.length) {
-        await Promise.all([
-          qc.invalidateQueries({ queryKey: ARCHIVED_WORKSPACES_QUERY_KEY }),
-          qc.invalidateQueries({ queryKey: WORKSPACES_QUERY_KEY }),
-          qc.invalidateQueries({ queryKey: ORGANIZATIONS_QUERY_KEY }),
-        ]);
-      }
+      //
+      // Unconditional, even when every restore failed: a failure is itself news about the server
+      // — the handle that was free when the list loaded has been taken, the org was restored or
+      // purged from another tab — and the rows' badges only learn that from a re-read. Gating
+      // this on "something succeeded" left a row offering a Restore that could never work.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ARCHIVED_WORKSPACES_QUERY_KEY }),
+        qc.invalidateQueries({ queryKey: WORKSPACES_QUERY_KEY }),
+        qc.invalidateQueries({ queryKey: ORGANIZATIONS_QUERY_KEY }),
+      ]);
     } catch (e) {
       setError(errMsg(e, "Couldn't restore that organization."));
     } finally {

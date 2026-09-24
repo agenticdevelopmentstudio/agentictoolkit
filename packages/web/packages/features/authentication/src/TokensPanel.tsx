@@ -27,6 +27,7 @@ import { tokensApi, type ApiToken } from "@agentic-toolkit/data/security";
 import {
   ListBarActions,
   SettingsBody,
+  useBulkRemove,
   useReportBusy,
   useReportSettingsDirty,
 } from "@agentic-toolkit/resource";
@@ -51,9 +52,8 @@ export function TokensPanel(): ReactElement {
   // The unsaved-changes alert raised by a close attempt on a half-filled create form.
   const [confirmingClose, setConfirmingClose] = useState(false);
   const [minted, setMinted] = useState<string | null>(null);
-  // The rows the bar's Revoke was pressed for — every ticked token, not one row's button.
-  const [revokeTargets, setRevokeTargets] = useState<ApiToken[] | null>(null);
-  const [revokeError, setRevokeError] = useState<string | null>(null);
+  // The "close without copying?" confirm, raised by a dismissal (Escape, backdrop, ×) of the reveal.
+  const [confirmingDropSecret, setConfirmingDropSecret] = useState(false);
 
   // ── Server state ───────────────────────────────────────────────────────────
   const tokensQuery = useQuery({
@@ -88,20 +88,15 @@ export function TokensPanel(): ReactElement {
     },
   });
 
-  const revokeMutation = useMutation({
-    mutationFn: (ids: string[]) => Promise.all(ids.map((id) => tokensApi.revoke(id))),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["api-tokens"] });
-      list.clearSelection();
-      setRevokeTargets(null);
-      setRevokeError(null);
-    },
-    onError: (err: unknown) => {
-      // Keep the confirm open so the failure is seen. Re-read anyway: in a multi-row revoke some
-      // tokens may already be gone, and the table must not keep showing them as live.
-      qc.invalidateQueries({ queryKey: ["api-tokens"] });
-      setRevokeError(err instanceof Error ? err.message : "Couldn’t revoke. Please try again.");
-    },
+  // The rows the bar's Revoke was pressed for — every ticked token, not one row's button. A partial
+  // failure keeps the confirm open on just the tokens still live; the re-read runs either way, so
+  // the table never keeps showing a revoked token as live.
+  const revoke = useBulkRemove<ApiToken>({
+    getId: (t) => t.id,
+    remove: (id) => tokensApi.revoke(id),
+    onSettled: () => void qc.invalidateQueries({ queryKey: ["api-tokens"] }),
+    onDone: () => list.clearSelection(),
+    errorMessage: (err) => (err instanceof Error ? err.message : "Couldn’t revoke. Please try again."),
   });
 
   function toggle(prefix: string): void {
@@ -147,6 +142,13 @@ export function TokensPanel(): ReactElement {
 
   function requestCloseCreate(): void {
     if (mintMutation.isPending) return;
+    // A dismissal of the REVEAL asks first: Escape or a stray backdrop click would otherwise throw
+    // away the only copy of a secret the server will never show again. Done is the deliberate
+    // close and skips this; it calls `closeCreate` directly.
+    if (minted !== null) {
+      setConfirmingDropSecret(true);
+      return;
+    }
     if (draftDirty) {
       setConfirmingClose(true);
       return;
@@ -246,10 +248,7 @@ export function TokensPanel(): ReactElement {
               deleteLabel="Revoke"
               selectedCount={selected.length}
               onAdd={openCreate}
-              onDelete={() => {
-                setRevokeError(null);
-                setRevokeTargets(selected);
-              }}
+              onDelete={() => revoke.open(selected)}
             />
           }
         />
@@ -381,44 +380,49 @@ export function TokensPanel(): ReactElement {
             }}
             onStay={() => setConfirmingClose(false)}
           />
+          <AlertModal
+            open={confirmingDropSecret}
+            tone="error"
+            title="Close without copying?"
+            description="This token won’t be shown again. If you haven’t copied it, you’ll have to revoke it and create another."
+            confirmLabel="Close"
+            cancelLabel="Keep open"
+            onConfirm={() => {
+              setConfirmingDropSecret(false);
+              closeCreate();
+            }}
+            onCancel={() => setConfirmingDropSecret(false)}
+          />
         </DialogContent>
       </Dialog>
 
       {/* Revoke confirm — for every ticked token the bar's Revoke was pressed with. */}
       <AlertModal
-        open={revokeTargets != null}
+        open={revoke.targets != null}
         tone="error"
         title={
-          revokeTargets && revokeTargets.length > 1
-            ? `Revoke ${revokeTargets.length} tokens?`
+          revoke.targets && revoke.targets.length > 1
+            ? `Revoke ${revoke.targets.length} tokens?`
             : "Revoke token?"
         }
         description={
-          revokeTargets ? (
+          revoke.targets ? (
             <>
               <span>
-                {`Revoke ${revokeTargets.map((t) => t.name).join(", ")}? Anything still using ${
-                  revokeTargets.length === 1 ? "it" : "them"
+                {`Revoke ${revoke.targets.map((t) => t.name).join(", ")}? Anything still using ${
+                  revoke.targets.length === 1 ? "it" : "them"
                 } will stop working immediately.`}
               </span>
-              <DialogErrorText error={revokeError} />
+              <DialogErrorText error={revoke.error} />
             </>
           ) : undefined
         }
         confirmLabel="Revoke"
         confirmVariant="destructive"
         cancelLabel="Cancel"
-        busy={revokeMutation.isPending}
-        onConfirm={() => {
-          if (revokeTargets) {
-            setRevokeError(null);
-            revokeMutation.mutate(revokeTargets.map((t) => t.id));
-          }
-        }}
-        onCancel={() => {
-          setRevokeTargets(null);
-          setRevokeError(null);
-        }}
+        busy={revoke.pending}
+        onConfirm={revoke.confirm}
+        onCancel={revoke.cancel}
       />
     </>
   );

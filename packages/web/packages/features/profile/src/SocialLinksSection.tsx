@@ -32,7 +32,12 @@ import {
   type SocialLink,
   type PrivacyGrant,
 } from "@agentic-toolkit/data/profile";
-import { DetailSection, ListBarActions, useReportSettingsDirty } from "@agentic-toolkit/resource";
+import {
+  DetailSection,
+  ListBarActions,
+  useBulkRemove,
+  useReportSettingsDirty,
+} from "@agentic-toolkit/resource";
 import { PrivacyLevelControl } from "./PrivacyLevelControl";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -117,9 +122,6 @@ export function SocialLinksSection({
   const [dialogState, setDialogState] = useState<DialogState>({ mode: "closed" });
   const [draft, setDraft] = useState<FormDraft>(emptyDraft());
   const [formError, setFormError] = useState<string | null>(null);
-  // The rows the bar's Delete was pressed for — every ticked link, not one row's trash can.
-  const [deleteTargets, setDeleteTargets] = useState<SocialLink[] | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
   // The unsaved-changes alert raised by a close attempt on a dirty draft.
   const [confirmingClose, setConfirmingClose] = useState(false);
 
@@ -153,22 +155,15 @@ export function SocialLinksSection({
     },
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (ids: string[]) => Promise.all(ids.map((id) => deleteSocialLink(id, wsOpts))),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: linksKey });
-      list.clearSelection();
-      setDeleteTargets(null);
-      setDeleteError(null);
-    },
-    onError: (err: unknown) => {
-      // Keep the dialog open so the user sees the failure. Re-read anyway: in a multi-row
-      // delete some rows may already be gone, and the table must not keep showing them.
-      qc.invalidateQueries({ queryKey: linksKey });
-      setDeleteError(
-        err instanceof Error ? err.message : "Could not delete. Try again.",
-      );
-    },
+  // The rows the bar's Delete was pressed for — every ticked link, not one row's trash can. A
+  // partial failure keeps the confirm open on just the rows still there; the re-read runs either
+  // way, so the table never keeps showing one that is gone.
+  const bulkDelete = useBulkRemove<SocialLink>({
+    getId: (l) => l.id,
+    remove: (id) => deleteSocialLink(id, wsOpts),
+    onSettled: () => void qc.invalidateQueries({ queryKey: linksKey }),
+    onDone: () => list.clearSelection(),
+    errorMessage: (err) => (err instanceof Error ? err.message : "Could not delete. Try again."),
   });
 
   // ── Handlers ───────────────────────────────────────────────────────────────
@@ -341,10 +336,7 @@ export function SocialLinksSection({
           selectedCount={selected.length}
           onAdd={openAdd}
           onEdit={() => selected[0] && openEdit(selected[0])}
-          onDelete={() => {
-            setDeleteError(null);
-            setDeleteTargets(selected);
-          }}
+          onDelete={() => bulkDelete.open(selected)}
         />
       }
     />
@@ -457,39 +449,31 @@ export function SocialLinksSection({
 
       {/* Delete confirm — for every ticked row the bar's Delete was pressed with. */}
       <AlertModal
-        open={deleteTargets != null}
+        open={bulkDelete.targets != null}
         tone="error"
         title={
-          deleteTargets && deleteTargets.length > 1
-            ? `Remove ${deleteTargets.length} social links?`
+          bulkDelete.targets && bulkDelete.targets.length > 1
+            ? `Remove ${bulkDelete.targets.length} social links?`
             : "Remove social link?"
         }
         description={
-          deleteTargets ? (
+          bulkDelete.targets ? (
             <>
               <span>
-                {`Remove ${deleteTargets
+                {`Remove ${bulkDelete.targets
                   .map((l) => PLATFORM_LABELS[l.platform] ?? l.platform)
                   .join(", ")} from your card?`}
               </span>
-              <DialogErrorText error={deleteError} />
+              <DialogErrorText error={bulkDelete.error} />
             </>
           ) : undefined
         }
         confirmLabel="Remove"
         confirmVariant="destructive"
         cancelLabel="Cancel"
-        busy={deleteMutation.isPending}
-        onConfirm={() => {
-          if (deleteTargets) {
-            setDeleteError(null);
-            deleteMutation.mutate(deleteTargets.map((l) => l.id));
-          }
-        }}
-        onCancel={() => {
-          setDeleteTargets(null);
-          setDeleteError(null);
-        }}
+        busy={bulkDelete.pending}
+        onConfirm={bulkDelete.confirm}
+        onCancel={bulkDelete.cancel}
       />
     </>
   );

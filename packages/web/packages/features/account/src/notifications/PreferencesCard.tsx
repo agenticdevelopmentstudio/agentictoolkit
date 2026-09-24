@@ -164,6 +164,9 @@ export function PreferencesCard({ children }: PreferencesCardProps = {}): ReactE
         aria-label={`${p.title} ${spoken}`}
         checked={valueOf(p, ch)}
         onCheckedChange={(v) => toggle(p.category, ch, v)}
+        // Frozen while a save is in flight: the save's success clears EVERY override, so a flip
+        // made now — not in the request being saved — would be shown and then silently undone.
+        disabled={save.isPending}
       />
     ),
   });

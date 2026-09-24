@@ -165,6 +165,42 @@ describe("AssistantsPanel", () => {
     expect(setAllowed.mock.calls[0]).toEqual(["a1", []]);
   });
 
+  it('with a search typed, "All shown off" flips only the rows on screen', async () => {
+    // Both on, so a whole-list All off would PUT [] — the search must keep web.search allowed.
+    const BOTH_ON = TOOLS.map((t) => ({ ...t, allowed: true }));
+    listTools.mockResolvedValue(structuredClone(BOTH_ON));
+    await renderAndPick("a1");
+
+    fireEvent.change(screen.getByPlaceholderText("Tool, name or source"), {
+      target: { value: "searchThreads" },
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("checkbox", { name: "Allow web.search" })).toBeNull(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "All shown off" }));
+
+    await waitFor(() => expect(setAllowed).toHaveBeenCalledTimes(1));
+    expect(setAllowed.mock.calls[0]).toEqual(["a1", ["web.search"]]);
+  });
+
+  it("clears the search when another assistant is picked", async () => {
+    const TWO: UserActablePersona[] = [
+      { id: "a1", slug: "bit", name: "Bitbag" },
+      { id: "a2", slug: "baz", name: "Bazbag" },
+    ];
+    listActable.mockResolvedValue(structuredClone(TWO));
+    await renderAndPick("a1");
+    const search = screen.getByPlaceholderText("Tool, name or source") as HTMLInputElement;
+    fireEvent.change(search, { target: { value: "web" } });
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "a2" } });
+    await screen.findByRole("checkbox", { name: "Allow searchThreads" });
+    expect(
+      (screen.getByPlaceholderText("Tool, name or source") as HTMLInputElement).value,
+    ).toBe("");
+    expect(screen.getByRole("button", { name: "All on" })).not.toBeNull();
+  });
+
   it("reverts the checkbox when the PUT rejects", async () => {
     setAllowed.mockRejectedValueOnce(new Error("nope"));
     await renderAndPick("a1");

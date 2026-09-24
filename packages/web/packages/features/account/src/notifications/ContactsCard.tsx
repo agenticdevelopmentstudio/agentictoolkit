@@ -33,7 +33,12 @@ import {
   type ContactMethod,
 } from "../api/account";
 import { extractErrorMessage } from "@agentic-toolkit/auth/client";
-import { DetailSection, ListBarActions, useReportSettingsDirty } from "@agentic-toolkit/resource";
+import {
+  DetailSection,
+  ListBarActions,
+  useBulkRemove,
+  useReportSettingsDirty,
+} from "@agentic-toolkit/resource";
 
 const CONTACTS_KEY = ["account", "contacts"] as const;
 
@@ -48,10 +53,16 @@ function isRemovable(contact: ContactMethod): boolean {
 }
 
 /**
- * A row's verification state, and the one verb that stays IN the row: sending and entering a
- * code. It cannot move to the bar with Add and Remove, because the code the user types belongs to
- * exactly one contact — a bar-level "Verify" over a selection would have no single field to read.
- * Its own component so each row keeps its own code/verifying state across re-renders.
+ * A row's verification state, and the one verb that stays IN the row: verifying it. It cannot
+ * move to the bar with Add and Remove, because the code the user types belongs to exactly one
+ * contact — a bar-level "Verify" over a selection would have no single field to read.
+ *
+ * The code itself is entered in a DIALOG, not inline. The inline form (field + Verify + Resend)
+ * was wider than the Status column, so the table truncated it — Verify and Resend were clipped out
+ * of reach on an ordinary laptop width — and its field had no visible label, only an aria-label,
+ * so a sighted user saw a bare "123456" box with nothing saying what code or where it went. The
+ * cell now holds only the badge and one button, which fits; the dialog has room for a real label.
+ * Its own component so each row keeps its own dialog state across re-renders.
  */
 function ContactStatusCell({
   contact,
@@ -60,76 +71,105 @@ function ContactStatusCell({
   contact: ContactMethod;
   onChanged: () => void;
 }) {
+  const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
-  const [verifying, setVerifying] = useState(false);
 
   const start = useMutation({
     mutationFn: () => startContactVerification(contact.id),
-    onSuccess: () => setVerifying(true),
+    onSuccess: () => setOpen(true),
   });
   const confirm = useMutation({
     mutationFn: () => confirmContactVerification(contact.id, code.trim()),
     onSuccess: () => {
-      setVerifying(false);
-      setCode("");
+      close();
       onChanged();
     },
   });
 
+  function close() {
+    setOpen(false);
+    setCode("");
+    confirm.reset();
+  }
+
   if (contact.verified) return <Badge variant="success">Verified</Badge>;
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       <Badge variant="orange">Unverified</Badge>
-      {verifying ? (
-        <form
-          className="flex items-center gap-1"
-          onSubmit={(e: FormEvent) => {
-            e.preventDefault();
-            confirm.mutate();
-          }}
-        >
-          <Input
-            id={`code-${contact.id}`}
-            aria-label={`6-digit code sent to ${contact.value}`}
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            placeholder="123456"
-            className="h-7 w-24 font-mono"
-            required
-          />
-          <Button type="submit" size="sm" disabled={confirm.isPending || code.trim().length === 0}>
-            {confirm.isPending ? "Verifying…" : "Verify"}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={() => start.mutate()}
-            disabled={start.isPending}
+      <Button
+        size="sm"
+        variant="outline"
+        aria-label={`Send code to ${contact.value}`}
+        // Sending first, THEN opening: the dialog asks for a code, so it must not appear before
+        // one is on its way. A send that fails says so here, in the row it was pressed in.
+        onClick={() => start.mutate()}
+        disabled={start.isPending}
+      >
+        {start.isPending && !open ? "Sending…" : "Send code"}
+      </Button>
+      {start.isError && !open && (
+        <ErrorText
+          error={extractErrorMessage(start.error, "Couldn’t send a code.")}
+          className="truncate text-xs"
+        />
+      )}
+
+      <Dialog open={open} onOpenChange={(o) => { if (!o && !confirm.isPending) close(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Verify {contact.type === "email" ? "email" : "phone"}</DialogTitle>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(e: FormEvent) => {
+              e.preventDefault();
+              if (confirm.isPending || code.trim() === "") return;
+              confirm.mutate();
+            }}
           >
-            Resend
-          </Button>
-        </form>
-      ) : (
-        <Button
-          size="sm"
-          variant="outline"
-          aria-label={`Send code to ${contact.value}`}
-          onClick={() => start.mutate()}
-          disabled={start.isPending}
-        >
-          {start.isPending ? "Sending…" : "Send code"}
-        </Button>
-      )}
-      {start.isError && (
-        <ErrorText error={extractErrorMessage(start.error, "Couldn’t send a code.")} className="text-xs" />
-      )}
-      {confirm.isError && (
-        <ErrorText error={extractErrorMessage(confirm.error, "That code didn’t match.")} className="text-xs" />
-      )}
+            {/* `Field` wraps the input in its Label, so the caption IS the field's accessible
+                name — seen and announced as one string. */}
+            <Field label={`Enter the 6-digit code we sent to ${contact.value}`}>
+              <Input
+                id={`code-${contact.id}`}
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="123456"
+                className="w-32 font-mono"
+                autoFocus
+                required
+              />
+            </Field>
+            {start.isError && (
+              <DialogErrorText error={extractErrorMessage(start.error, "Couldn’t send a code.")} />
+            )}
+            {confirm.isError && (
+              <DialogErrorText error={extractErrorMessage(confirm.error, "That code didn’t match.")} />
+            )}
+            <DialogFooter>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => start.mutate()}
+                disabled={start.isPending || confirm.isPending}
+                className="sm:mr-auto"
+              >
+                {start.isPending ? "Sending…" : "Resend"}
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={close} disabled={confirm.isPending}>
+                Cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={confirm.isPending || code.trim() === ""}>
+                {confirm.isPending ? "Verifying…" : "Verify"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -159,9 +199,6 @@ export function ContactsCard({ rowExtra, hideSectionTitle = false }: ContactsCar
   const [value, setValue] = useState("");
   // The unsaved-changes alert raised by a close attempt on a typed address.
   const [confirmingClose, setConfirmingClose] = useState(false);
-  // The rows the bar's Remove was pressed for — every ticked contact, not one row's trash can.
-  const [removeTargets, setRemoveTargets] = useState<ContactMethod[] | null>(null);
-  const [removeError, setRemoveError] = useState<string | null>(null);
 
   // The address itself is the typed work; `type` is a two-option selector with a default, so
   // flipping it loses nothing and arming the guard on it would prompt on a free exit. Withdraws
@@ -178,20 +215,15 @@ export function ContactsCard({ rowExtra, hideSectionTitle = false }: ContactsCar
     },
   });
 
-  const remove = useMutation({
-    mutationFn: (ids: string[]) => Promise.all(ids.map((id) => deleteContact(id))),
-    onSuccess: () => {
-      invalidate();
-      list.clearSelection();
-      setRemoveTargets(null);
-      setRemoveError(null);
-    },
-    onError: (err: unknown) => {
-      // Keep the confirm open so the failure is seen. Re-read anyway: in a multi-row remove some
-      // contacts may already be gone, and the table must not keep showing them.
-      invalidate();
-      setRemoveError(extractErrorMessage(err, "Couldn’t remove this contact."));
-    },
+  // The rows the bar's Remove was pressed for — every ticked contact, not one row's trash can. A
+  // partial failure keeps the confirm open on just the contacts still there; the re-read runs
+  // either way, so the table never keeps showing one that is gone.
+  const remove = useBulkRemove<ContactMethod>({
+    getId: (c) => c.id,
+    remove: deleteContact,
+    onSettled: () => void invalidate(),
+    onDone: () => list.clearSelection(),
+    errorMessage: (err) => extractErrorMessage(err, "Couldn’t remove this contact."),
   });
 
   function openAdd() {
@@ -253,6 +285,9 @@ export function ContactsCard({ rowExtra, hideSectionTitle = false }: ContactsCar
       {
         key: "status",
         header: "Status",
+        // Sized for its widest content — the Unverified badge beside Send code — so the button is
+        // never truncated out of reach.
+        width: "14rem",
         value: (c) => (c.verified ? "Verified" : "Unverified"),
         searchable: false,
         render: (c) => <ContactStatusCell contact={c} onChanged={invalidate} />,
@@ -304,10 +339,7 @@ export function ContactsCard({ rowExtra, hideSectionTitle = false }: ContactsCar
             // dark rather than opening a confirm for a delete the server will refuse.
             selectedCount={removable.length}
             onAdd={openAdd}
-            onDelete={() => {
-              setRemoveError(null);
-              setRemoveTargets(removable);
-            }}
+            onDelete={() => remove.open(removable)}
             deleteLabel="Remove"
           />
         }
@@ -403,40 +435,35 @@ export function ContactsCard({ rowExtra, hideSectionTitle = false }: ContactsCar
 
       {/* Remove confirm — for every ticked, removable row the bar's Remove was pressed with. */}
       <AlertModal
-        open={removeTargets != null}
+        open={remove.targets != null}
         tone="error"
         title={
-          removeTargets && removeTargets.length > 1
-            ? `Remove ${removeTargets.length} contact methods?`
+          remove.targets && remove.targets.length > 1
+            ? `Remove ${remove.targets.length} contact methods?`
             : "Remove contact method?"
         }
         description={
-          removeTargets ? (
+          remove.targets ? (
             <>
               <span>
-                Remove {removeTargets.map((c) => c.value).join(", ")}? Notifications will no
+                Remove {remove.targets.map((c) => c.value).join(", ")}? Notifications will no
                 longer be sent there.
-                {selected.length > removeTargets.length &&
+                {/* Asked of the SELECTION, not by comparing counts: after a partial failure the
+                    confirm narrows to the failed rows, and a count comparison would then claim a
+                    primary email was held back when none was ticked. */}
+                {selected.some((c) => !isRemovable(c)) &&
                   " Your primary email stays — it is the address you sign in with."}
               </span>
-              <DialogErrorText error={removeError} />
+              <DialogErrorText error={remove.error} />
             </>
           ) : undefined
         }
         confirmLabel="Remove"
         confirmVariant="destructive"
         cancelLabel="Cancel"
-        busy={remove.isPending}
-        onConfirm={() => {
-          if (removeTargets) {
-            setRemoveError(null);
-            remove.mutate(removeTargets.map((c) => c.id));
-          }
-        }}
-        onCancel={() => {
-          setRemoveTargets(null);
-          setRemoveError(null);
-        }}
+        busy={remove.pending}
+        onConfirm={remove.confirm}
+        onCancel={remove.cancel}
       />
     </>
   );

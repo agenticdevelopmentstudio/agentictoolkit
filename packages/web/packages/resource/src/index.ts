@@ -39,6 +39,8 @@ export { RecordSettingsPane } from "./record-settings-pane";
 export { SettingsBody } from "./settings-body";
 // The Add / Edit / Delete strip every settings list carries in its EditableList bar.
 export { ListBarActions } from "./list-bar-actions";
+// …and the confirm-and-remove state behind that strip's Delete, partial failures included.
+export { useBulkRemove, type BulkRemove } from "./use-bulk-remove";
 
 // The rail-host contract + the publisher hooks a feature uses to feed a host's stack.
 export {

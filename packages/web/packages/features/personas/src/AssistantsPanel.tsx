@@ -104,13 +104,20 @@ export function AssistantsPanel() {
     );
   }
 
+  /** All on / All off — over the rows ON SCREEN. With a search typed, the user is looking at a
+   *  narrowed list and the button sits right above it; flipping tools the search had hidden too
+   *  granted (or revoked) permissions they never saw. Unfiltered, the shown rows are all of them. */
   function setAll(allowed: boolean) {
     if (!tools) return;
-    applyAllowed(tools, tools.map((t) => ({ ...t, allowed })));
+    const shown = new Set(list.rows.map((t) => t.toolName));
+    applyAllowed(
+      tools,
+      tools.map((t) => (shown.has(t.toolName) ? { ...t, allowed } : t)),
+    );
   }
 
   // The same table admin's Users page draws, with selection OFF: the one control a row carries is
-  // its own allow switch — inherently per-row state — and "All on / All off" act on every row, so
+  // its own allow switch — inherently per-row state — and "All on / All off" act on every SHOWN row, so
   // there is nothing for a tick box to select FOR. Provenance used to be bespoke group headings;
   // it is now the Source column the list OPENS sorted by — the same built-ins-then-each-source
   // reading, but one the user can re-sort or search. `sourceLabel` stays the one home of the
@@ -184,7 +191,8 @@ export function AssistantsPanel() {
     initialSort: { key: "source", dir: "asc" },
   });
 
-  const noTools = !tools || tools.length === 0;
+  // Keyed on the SHOWN rows: a search that matches nothing leaves the bulk buttons nothing to act on.
+  const noTools = list.rows.length === 0;
 
   return (
     <SettingsBody width="full">
@@ -217,7 +225,15 @@ export function AssistantsPanel() {
               full-width pane. */}
           <div className="max-w-sm">
             <Field label="Assistant">
-              <Select value={personaId} onChange={(e) => setPersonaId(e.target.value)}>
+              <Select
+                value={personaId}
+                onChange={(e) => {
+                  // A search typed for one assistant's tools means nothing against another's, and
+                  // left in place it silently hides rows — and narrows what All on/off acts on.
+                  list.setSearch("");
+                  setPersonaId(e.target.value);
+                }}
+              >
                 <option value="">Choose an assistant…</option>
                 {personas.map((persona) => (
                   <option key={persona.id} value={persona.id}>
@@ -260,7 +276,7 @@ export function AssistantsPanel() {
                     disabled={busy || noTools}
                     onClick={() => setAll(true)}
                   >
-                    All on
+                    {list.filtered ? "All shown on" : "All on"}
                   </Button>
                   <Button
                     type="button"
@@ -269,7 +285,7 @@ export function AssistantsPanel() {
                     disabled={busy || noTools}
                     onClick={() => setAll(false)}
                   >
-                    All off
+                    {list.filtered ? "All shown off" : "All off"}
                   </Button>
                 </>
               }
