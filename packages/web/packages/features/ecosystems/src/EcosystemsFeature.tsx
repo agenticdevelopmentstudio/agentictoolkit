@@ -31,7 +31,7 @@ import {
 } from "@agentic-toolkit/data/ecosystems";
 import { heldTopics } from "./heldTopics";
 import { EcosystemSettingsPane } from "./EcosystemSettingsPane";
-import { FeaturesToolMenu } from "./FeaturesToolMenu";
+import { ManageFeaturesButton } from "./ManageFeaturesButton";
 import {
   EcosystemDetail,
   ecoBlank,
@@ -93,7 +93,7 @@ export interface RenderTopicPaneCtx {
  * The topic rows for the topics this package renders ENTIRELY in-package (the entity
  * Settings pane and the Child Ecosystems rail). What an ecosystem is provisioned with is not
  * a topic: the topics list IS its features, so managing them lives in that list's own title
- * row (`FeaturesToolMenu`) rather than as one more row inside it. The package is the SSoT
+ * row (`ManageFeaturesButton`) rather than as one more row inside it. The package is the SSoT
  * for what it renders:
  * a host composing only these (a feature-site mount) spreads them instead of hand-copying
  * ids/labels/icons that would silently drift; the hub builds its fuller rail from its own
@@ -501,12 +501,15 @@ export function EcosystemsFeature({
     </div>
   );
 
-  // The topics list's tool menu, scoped to the ecosystem those topics belong to. Withheld where
-  // the pane would be the not-manageable notice: a menu whose one verb would fail is worse
-  // than no menu.
-  const featuresToolMenu = (ecoId: string): ReactNode =>
+  // The topics list's Manage features button, scoped to the ecosystem those topics belong to.
+  // Withheld where the pane would be the not-manageable notice: a button whose one action would
+  // fail is worse than no button.
+  const manageFeaturesButton = (ecoId: string): ReactNode =>
     canManageScoped(ecoId) ? (
-      <FeaturesToolMenu ecosystemId={ecoId} label={`${singular} features tools`} />
+      <ManageFeaturesButton
+        ecosystemId={ecoId}
+        label={`Manage ${singular.toLowerCase()} features`}
+      />
     ) : null;
 
   // Only the topics the scoped ecosystem holds. Read only when some row is feature-keyed, so a
@@ -845,7 +848,7 @@ export function EcosystemsFeature({
           // The selected entity's topics are the features it holds, so the list is headed
           // "Features" — the entity's own name still reads in the breadcrumb.
           topicsTitle="Features"
-          topicsTitleActions={featuresToolMenu}
+          topicsTitleActions={manageFeaturesButton}
           renderDialog={(onClose, onCreated) => (
             // The workspace New Product form: Display Name + Slug are typed; the
             // identifier is READ-ONLY, derived as <the workspace's home ecosystem>.<slug>
@@ -910,7 +913,7 @@ export function EcosystemsFeature({
         topics={topics}
         topicAliases={GROUP_MEMBER_GROUP}
         newLabel={`New ${singular}…`}
-        topicsTitleActions={featuresToolMenu}
+        topicsTitleActions={manageFeaturesButton}
       />
       {createDialog}
     </>
