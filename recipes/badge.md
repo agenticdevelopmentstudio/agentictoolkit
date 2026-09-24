@@ -3,7 +3,7 @@ id: 2cfe57f0-cdd4-4723-a6e0-2ce4f136ce7f
 title: Badge
 domain: agentictoolkit://recipes/badge
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -23,8 +23,10 @@ tags:
 depends-on: []
 related:
 - agentictoolkit://recipes/badge
-references:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references:
+- https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html
+- https://developer.apple.com/design/human-interface-guidelines/color
 approved-by: ''
 approved-date: ''
 ---
@@ -57,7 +59,10 @@ the app's theme changes.
 - **computes-contrasting-text-color**: In `.filled` style, Badge MUST set the
   label's text color to black when the background color's luminance
   (`0.299·R + 0.587·G + 0.114·B` in the sRGB color space) is greater than 0.6,
-  and to white otherwise.
+  and to white otherwise. This heuristic does not compute a WCAG contrast
+  ratio and is not guaranteed to meet any minimum numeric ratio against an
+  arbitrary caller-supplied `color` — see the open contrast question under
+  Accessibility and the related Design Decision.
 - **falls-back-to-white-on-unconvertible-color**: Badge MUST use white as the
   filled-style label text color when the caller-supplied `color` cannot be
   converted to the sRGB color space (`NSColor.usingColorSpace(.sRGB)` returns
@@ -72,7 +77,10 @@ the app's theme changes.
   `update(text:color:)` without an explicit `style` argument MUST reset the
   badge to `.filled`, regardless of the badge's current style, because
   `update`'s `style` parameter defaults to `.filled` independently of any
-  stored state.
+  stored state. This is a documented footgun (see Design Decisions): callers
+  SHOULD NOT rely on `update` preserving the badge's current style, and
+  SHOULD pass `style` explicitly on every call where a non-default style must
+  be kept.
 - **applies-fixed-content-padding**: Badge MUST inset its label by 6pt from
   the leading and trailing edges and 2pt from the top and bottom edges.
 - **centers-label-text**: Badge MUST center-align the label's text within the
@@ -159,17 +167,23 @@ the app's theme changes.
 
 ## Conformance Test Vectors
 
+Vectors that reference dynamic system colors (`.systemGreen`, `.systemRed`,
+`.systemGray`, `.systemBlue`) assume tests run under a fixed `NSAppearance`
+(e.g. `.aqua`), since these colors resolve to different `CGColor` values under
+light vs. dark appearance.
+
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
 | badge-001 | renders-rounded-pill | Any `init(text:color:)` call | The badge's layer has `cornerRadius == 5` |
 | badge-002 | displays-caller-text | `init(text: "dev", color: .systemGreen)` | The label's `stringValue` is exactly `"dev"` |
-| badge-003 | defaults-to-filled-style | `init(text: "dev", color: .systemGreen)` (no `style`) | Background is `.systemGreen`; border width is 0 |
-| badge-004 | paints-filled-background | `init(text: "dev", color: .systemGreen, style: .filled)` | `layer.backgroundColor == NSColor.systemGreen.cgColor`; `layer.borderWidth == 0` |
-| badge-005 | computes-contrasting-text-color | `color` with luminance 0.9 (e.g. white) | Label text color is black |
-| badge-005b | computes-contrasting-text-color | `color` with luminance 0.1 (e.g. dark navy) | Label text color is white |
+| badge-003 | defaults-to-filled-style | `init(text: "dev", color: .systemGreen)` (no `style`), under a fixed `NSAppearance` | Background is `.systemGreen`; border width is 0 |
+| badge-004 | paints-filled-background | `init(text: "dev", color: .systemGreen, style: .filled)`, under a fixed `NSAppearance` | `layer.backgroundColor == NSColor.systemGreen.cgColor`; `layer.borderWidth == 0` |
+| badge-005 | computes-contrasting-text-color | `color` = light gray, RGB (230, 230, 230) i.e. (0.902, 0.902, 0.902) in sRGB 0–1 — luminance ≈ 0.902 | Label text color is black |
+| badge-005b | computes-contrasting-text-color | `color` = dark navy, RGB (0, 0, 128) i.e. (0, 0, 0.502) in sRGB 0–1 — luminance ≈ 0.057 | Label text color is white |
+| badge-005c | computes-contrasting-text-color | `color` = mid-gray, RGB (153, 153, 153) i.e. (0.6, 0.6, 0.6) in sRGB 0–1 — luminance exactly 0.6 (boundary: the comparison is `>` 0.6, not `>=`) | Label text color is white |
 | badge-006 | falls-back-to-white-on-unconvertible-color | `color` for which `usingColorSpace(.sRGB)` returns `nil` (e.g. a pattern-image `NSColor`), `style: .filled` | Label text color is white |
-| badge-007 | paints-outlined-appearance | `init(text: "3", color: .systemRed, style: .outlined)` | `layer.backgroundColor == NSColor.clear.cgColor`; `layer.borderWidth == 1`; `layer.borderColor == NSColor.systemRed.cgColor`; label text color equals `.systemRed` |
-| badge-008 | supports-in-place-restyle | Existing badge, then `update(text: "stopped", color: .systemGray, style: .outlined)` | Label reads `"stopped"`; background/border/text reflect `.outlined` with `.systemGray` |
+| badge-007 | paints-outlined-appearance | `init(text: "3", color: .systemRed, style: .outlined)`, under a fixed `NSAppearance` | `layer.backgroundColor == NSColor.clear.cgColor`; `layer.borderWidth == 1`; `layer.borderColor == NSColor.systemRed.cgColor`; label text color equals `.systemRed` |
+| badge-008 | supports-in-place-restyle | Existing badge, then `update(text: "stopped", color: .systemGray, style: .outlined)`, under a fixed `NSAppearance` | Label reads `"stopped"`; background/border/text reflect `.outlined` with `.systemGray` |
 | badge-009 | resets-style-to-filled-by-default-on-update | Badge currently `.outlined`, then `update(text: "3", color: .systemBlue)` (no `style`) | Badge renders `.filled` (solid `.systemBlue` background, border width 0), not `.outlined` |
 | badge-010 | applies-fixed-content-padding | Any badge | Label's leading/trailing constraints resolve to 6pt insets; top/bottom resolve to 2pt insets |
 | badge-011 | centers-label-text | Any badge | `label.alignment == .center` |
@@ -177,6 +191,12 @@ the app's theme changes.
 | badge-013 | sizes-to-fit-content | Badge placed with no explicit width constraint | Badge's fitting width equals the label's intrinsic width plus 12pt (6pt × 2) horizontal padding; badge does not stretch to fill a wider container |
 | badge-014 | confines-mutation-to-main-actor | Attempt to call `Badge.init`/`update` from a non-main-actor context | Code does not compile (Swift concurrency checker rejects the call) |
 | badge-015 | rejects-storyboard-instantiation | `Badge(coder:)` invoked (e.g. via nib/storyboard unarchiving) | Process traps with a fatal error |
+
+`badge-014` is a static, compile-time check (the Swift concurrency checker
+rejects the offending code at build time), not a vector observed by running
+the program; a port on a platform without an equivalent compile-time
+enforcement should verify this as a build-verification note rather than a
+runtime test.
 
 `prefers-semantic-palette-colors` has no test vector: it is a SHOULD
 constraining what colors a caller chooses to pass in, not an observable
@@ -187,26 +207,28 @@ Design Decisions).
 
 - **Empty `text`** (`""`): renders an empty label; the badge still lays out
   with its fixed 6pt/2pt padding around a zero-width label, producing a small
-  pill (MUST, per `displays-caller-text` — the source has no guard against an
-  empty string).
+  pill (see `#requirements/displays-caller-text` — the source has no guard
+  against an empty string).
 - **Very long `text`**: no maximum width, line-wrap mode, or truncation is
   configured in the source. Because both the label and the badge carry
   required horizontal content-hugging, the badge grows to fit the full string
   unless a caller externally constrains its width (e.g. inside a stack view)
-  (MUST, per `sizes-to-fit-content`).
+  (see `#requirements/sizes-to-fit-content`).
 - **Non-sRGB-convertible `color`** (e.g. a pattern-image `NSColor`, or one
   from a color space `usingColorSpace(.sRGB)` cannot represent):
   `contrastingTextColor(on:)` falls back to white in `.filled` style; in
   `.outlined` style the same color is still assigned directly to the border
   and text regardless of convertibility, since that path never calls
-  `usingColorSpace(.sRGB)` (MUST, per `falls-back-to-white-on-unconvertible-color`
-  and `paints-outlined-appearance`).
+  `usingColorSpace(.sRGB)` (see
+  `#requirements/falls-back-to-white-on-unconvertible-color` and
+  `#requirements/paints-outlined-appearance`).
 - **Repeated `update` calls**: each call fully re-evaluates `applyStyle()`
   from the just-assigned `color`/`style`, so no stale visual state persists
-  between calls (MUST, per `supports-in-place-restyle`).
+  between calls (see `#requirements/supports-in-place-restyle`).
 - **Omitting `style` on `update`**: silently resets a previously `.outlined`
-  badge back to `.filled` (MUST, per
-  `resets-style-to-filled-by-default-on-update`) — see also Design Decisions.
+  badge back to `.filled` (see
+  `#requirements/resets-style-to-filled-by-default-on-update`) — see also
+  Design Decisions.
 - **Concurrent access**: not applicable — `Badge` is `@MainActor`-isolated;
   the Swift compiler rejects construction or mutation from off the main
   actor, so there is no concurrent-access surface for this component to
@@ -286,8 +308,9 @@ or `print`).
 
 - **SwiftUI**: Start from a small container view (or `ViewModifier`) wrapping
   a `Text`, applying `.padding(.horizontal, 6).padding(.vertical, 2)` and
-  `.clipShape(RoundedRectangle(cornerRadius: 5))` for the `.filled`
-  background, or `.overlay(RoundedRectangle(cornerRadius: 5).stroke(color,
+  `.background(color, in: RoundedRectangle(cornerRadius: 5))` for the
+  `.filled` background — `.clipShape(RoundedRectangle(cornerRadius: 5))`
+  alone only clips, it paints no fill — or `.overlay(RoundedRectangle(cornerRadius: 5).stroke(color,
   lineWidth: 1))` for `.outlined`. SwiftUI has no built-in equivalent of
   `contrastingTextColor(on:)`, so port the same luminance formula as a small
   helper function, and reconcile the caption font with SwiftUI's Dynamic Type
@@ -346,7 +369,7 @@ or `print`).
   flips it back to `.filled`. There is no state read-back in `update` to
   preserve the existing style, so callers that want to keep `.outlined` MUST
   pass `style: .outlined` explicitly on every `update` call.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: `contrastingTextColor(on:)` returns white, rather than
   throwing or reusing the current text color, when the background cannot be
   converted to sRGB.
@@ -354,7 +377,7 @@ or `print`).
   passes in (never crashes on an exotic color space, such as a pattern
   image), at the cost of a potentially poor contrast choice for those
   unusual colors.
-  **Approved: pending**
+  **Approved**: pending
 - **Decision**: The caller supplies `color` directly instead of Badge
   deriving it from a semantic status enum of its own.
   **Rationale**: Per the type's own doc comment, Badge is "theme-agnostic:
@@ -362,7 +385,29 @@ or `print`).
   padding, and text styling" — this keeps Badge reusable across apps with
   different `SemanticPalette`s rather than baking one app's status vocabulary
   into the shared component.
-  **Approved: pending**
+  **Approved**: pending
+- **Decision**: `contrastingTextColor(on:)` picks black or white using the
+  perceptual-luminance formula `0.299·R + 0.587·G + 0.114·B` (the ITU-R
+  BT.601 luma weights) against a 0.6 threshold, rather than the WCAG 2.x
+  relative-luminance formula (which linearizes sRGB and weights channels
+  0.2126/0.7152/0.0722) or a full WCAG contrast-ratio computation.
+  **Rationale**: The BT.601 weights are a cheap, well-known heuristic for
+  perceived brightness that needs no gamma-linearization step, so a black/
+  white choice can be computed inline for any arbitrary caller-supplied
+  color. The tradeoff is that, unlike a WCAG contrast-ratio check, this
+  heuristic makes no guarantee about a specific minimum numeric contrast
+  ratio against the chosen color — see the open contrast question under
+  Accessibility.
+  **Approved**: pending
+- **Decision**: Badge exposes no accessibility role or label context beyond
+  AppKit's default static-text exposure of its `NSTextField` label — there is
+  no code in the source that would let VoiceOver announce, for example, that
+  a badge reading "3" is a count versus a badge reading "dev" being a status.
+  **Rationale**: Badge is a plain, non-interactive label; the surrounding
+  call site (e.g. a list row's other accessible elements) is expected to
+  supply that context, consistent with Badge owning only pill shape, padding,
+  and text styling and not caller semantics.
+  **Approved**: pending
 
 ## Compliance
 
@@ -372,10 +417,21 @@ or `print`).
 | [theme-driven-typography](agenticdevelopercookbook://compliance/ui-tokens#theme-driven-typography) | passed | ui-tokens |
 | [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
 | [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | needs-review | accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
+
+These statuses rest on `Badge.swift`: colors are caller-supplied `NSColor`
+values with no raw hex literals (`no-raw-hex`); the label's font is kept in
+sync with the theme via `observeTheme`/`palette.font(.caption)`
+(`theme-driven-typography`); the class and its public API are `@MainActor`
+(`main-actor-confined`); every badge pairs its `color` with a `text` label
+(`differentiate-without-color`); and `contrastingTextColor(on:)` uses an
+unverified perceptual-luminance heuristic rather than a WCAG contrast-ratio
+computation, so a specific minimum ratio cannot be confirmed from the source
+alone (`contrast-ratio`).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `Badge` (AppKit, macOS) source. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: qualify the luminance-based contrasting-text-color and update-style-reset requirements against their open questions; fix `**Approved**:` formatting and edge-case `(MUST, per …)` tags to `#requirements/<name>` citations; correct badge-005/005b RGB values and add a luminance-0.6 boundary vector; note fixed-appearance test assumption and mark badge-014 as a compile-time check; fix the SwiftUI `.background`/`.clipShape` note; move the cookbook guideline citation from `references` to `related` and add external WCAG/HIG references; set `contrast-ratio` compliance status to `partial`; add Design Decisions for the luminance-heuristic choice and the lack of a distinguishing accessibility role. |

@@ -3,7 +3,7 @@ id: 4d0c6859-ed34-46ca-bfe4-ca87234ad684
 title: ChatView
 domain: agentictoolkit://recipes/chat-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -11,8 +11,7 @@ modified: '2026-09-23'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
-summary: macOS AppKit chat view combining a scrollable transcript (day banners, typing
-  indicator) with a composer, send button, row selection, and keyboard navigation.
+summary: 'macOS AppKit chat view: transcript with day banners/typing indicator, composer, send button, and row selection.'
 platforms:
 - swift
 - macos
@@ -22,9 +21,12 @@ tags:
 - ui-component
 - composer
 - transcript
-depends-on: []
-related:
+depends-on:
 - agentictoolkit://recipes/chat-day-banner-view
+- agentictoolkit://recipes/chat-transcript-row-view
+- agentictoolkit://recipes/ai-chat-bubble-view
+- agentictoolkit://recipes/typing-indicator-view
+related: []
 references: []
 approved-by: ''
 approved-date: ''
@@ -43,7 +45,7 @@ approved-date: ''
 - **renders-initial-transcript-synchronously**: The component MUST rebuild and render the transcript synchronously during `init`, before the view model's asynchronous bindings deliver their first values, so a view model already holding a conversation draws it on the very first frame.
 - **transcript-above-footer**: The component MUST pin the scrollable transcript to the view's top, leading, and trailing edges, and MUST pin a footer to the view's leading, trailing, and bottom edges directly below the transcript, with no gap between them.
 - **transcript-minimum-height**: The component MUST constrain the transcript's scroll view to a height of at least 200pt.
-- **transcript-explicit-width**: The component MUST set the transcript content's width to an explicit constant equal to the visible clip width on every layout pass, rather than an equality constraint between the content and the scroll view (see Design Decisions).
+- **transcript-explicit-width**: The component MUST NOT let a bubble's measured width become a floor under the window's minimum width; after the window is dragged wider, it MUST still be resizable narrower again (see Design Decisions for how this is achieved).
 - **transcript-rebuild-on-width-change**: The component MUST rebuild the transcript whenever the transcript's visible width changes by more than 1pt from the width it was last rebuilt for.
 - **transcript-content-insets**: The component MUST inset the transcript's contents 20pt from the top and bottom and 16pt from the leading and trailing edges, with 12pt of spacing between adjacent transcript items.
 - **footer-full-width-rows**: The component MUST stretch the status row, the divider, and the input row to the footer's full width.
@@ -72,7 +74,7 @@ approved-date: ''
 - **notice-messages-centered**: The component MUST center a settled, unattributed message with role `.notice` between two spacers of equal width.
 - **assistant-error-left-aligned**: The component MUST leave a settled, unattributed message with role `.assistant` or `.error` at the transcript's natural leading alignment, with no spacer.
 - **role-differentiated-by-position**: The component MUST convey a message's role through horizontal position (right for `.user`, left for `.assistant`/`.error`, centered for `.notice`) in addition to whatever color the bubble fill itself uses.
-- **plain-bubble-width-cap**: The component MUST cap a plain (non-row) bubble's width at 75% of the transcript's visible width.
+- **plain-bubble-width-cap**: The component MUST cap a plain (non-row) bubble's width at 75% of the transcript's visible width, with a 200pt floor below which the cap does not shrink further (`max(visibleWidth * 0.75, 200)`).
 - **row-bubble-width-derivation**: The component MUST derive a transcript row's bubble-width cap from the row's own available width (the transcript's visible width minus 32pt), not from the 75% plain-bubble fraction.
 - **plain-bubbles-not-line-limited**: The component MUST NOT apply `bubbleLineLimit` to a plain (non-row) bubble; only a transcript row (an attributed or in-flight message) receives it.
 - **typing-indicator-while-responding**: The component MUST append an animated typing indicator to the end of the transcript, and start its animation, whenever the view model's `state` is `.responding`, and MUST NOT show one otherwise.
@@ -90,7 +92,7 @@ approved-date: ''
 - **select-reveal-flag**: The component MUST scroll the selected row into view, from the row's own top edge, when `reveal` is `true` (the default, used for a keyboard move), and MUST NOT scroll when `reveal` is `false` (used for a row already visible under a click).
 - **accepts-first-responder-only-when-selectable**: The component MUST report `acceptsFirstResponder` as `true` only while `isRowSelectionEnabled` is `true`.
 - **arrow-key-selection**: The component MUST move the selection to the next or previous row in transcript order on the down or up arrow key, MUST select the first row on down (or the last row on up) when nothing is selected, and MUST NOT wrap past either end.
-- **return-opens-shift-return-jumps**: The component MUST invoke the selected row's "open" action on a plain Return key press, and its "jump to source" action on Shift-Return.
+- **return-opens-shift-return-jumps**: When the chat view itself (not the composer field) holds keyboard focus, the component MUST invoke the selected row's "open" action on a plain Return key press, and its "jump to source" action on Shift-Return; **return-key-sends** governs Return while the composer field holds focus instead.
 - **letter-shortcuts-unmodified-only**: The component MUST treat the bare letters `c` (open), `g` (jump to source), and `m` (toggle expansion) as row-selection shortcuts only when no Command, Control, or Option modifier is held, and MUST hand the key event to the system otherwise.
 - **letter-m-requires-expandable**: The component MUST ignore the `m` shortcut on a row whose message does not exceed the current line limit.
 - **keydown-falls-through**: The component MUST forward an unhandled key event — row selection off, or a key that is none of the handled arrow/Return/letter cases — to `super.keyDown(with:)`.
@@ -99,7 +101,6 @@ approved-date: ''
 - **background-fill-toggle**: The component MUST fill the view with the theme's chat-surface color while `drawsBackground` is `true`, and MUST leave it transparent while `drawsBackground` is `false`.
 - **accessibility-identifiers**: The component MUST assign the accessibility identifiers `ai-chat.prompt`, `ai-chat.status`, `ai-chat.input`, and `ai-chat.send-button` to the prompt label, status label, composer field, and send button respectively.
 - **theme-responsive-controls**: The component MUST re-derive the composer field's font, text, and placeholder colors, the prompt and status labels' fonts and colors, the send button's tint, and the view's own background fill from the active theme palette whenever it changes.
-- **failed-session-state-not-specially-rendered**: The component MUST NOT render any distinct banner, alert, or composer state for a view-model `state` of `.failed`, beyond what `.responding` already governs (the composer's enablement is otherwise unaffected).
 
 ## Appearance
 
@@ -138,7 +139,7 @@ approved-date: ''
 | chat-view-001 | viewmodel-required-at-init, renders-initial-transcript-synchronously | A view model already holding 3 messages, used to construct `ChatView` | The view's first drawn frame already shows 3 rows/bubbles, not an empty transcript |
 | chat-view-002 | coder-init-unavailable | Attempt `ChatView(coder:)` (e.g. storyboard/XIB unarchiving) | Compile error (`@available(*, unavailable)`); if reached at runtime regardless, the process terminates via `fatalError` |
 | chat-view-003 | transcript-above-footer, transcript-minimum-height | View given a 400×400 frame | The transcript scroll view's frame sits directly above the footer's frame with no gap; its height is ≥ 200pt |
-| chat-view-004 | transcript-explicit-width, transcript-rebuild-on-width-change | View resized from 400pt to 600pt wide | The transcript content's width constant becomes the new clip width, and the transcript rebuilds (bubbles reflow to the new proportional width) |
+| chat-view-004 | transcript-explicit-width, transcript-rebuild-on-width-change | View resized from 400pt to 600pt wide | The transcript rebuilds and bubbles reflow to the new proportional width; the window remains resizable narrower afterward (no bubble's measured width raises the window's minimum) |
 | chat-view-005 | transcript-content-insets | A transcript with at least one item | The first/last item sits 20pt from the scroll content's top/bottom and 16pt from its leading/trailing edges; adjacent items are 12pt apart |
 | chat-view-006 | footer-full-width-rows, footer-divider | Any view width | The status row, divider, and input row each span the footer's full width; the divider is a 1pt-tall hairline in the theme's divider color |
 | chat-view-007 | input-row-insets-and-spacing | Any view | The input row's content insets and inter-item spacing match the specified point values |
@@ -187,17 +188,18 @@ approved-date: ''
 | chat-view-050 | background-fill-toggle | `drawsBackground = true`, then `false` | The view's layer background is the theme's chat-surface color, then transparent |
 | chat-view-051 | accessibility-identifiers | Any constructed `ChatView` | The four named subviews carry exactly the four specified accessibility identifiers |
 | chat-view-052 | theme-responsive-controls | The active theme changes | Composer field colors/font, prompt/status label colors/fonts, send-button tint, and background fill all update without the view being re-created |
-| chat-view-053 | failed-session-state-not-specially-rendered | `state = .failed(ChatError(...))` | No banner or alert appears; the composer's enabled state is governed only by `isComposerEnabled`, exactly as in `.ready` |
+| chat-view-054 | letter-shortcuts-unmodified-only | A row selected; `g` pressed plain, then Cmd-G | Plain `g` invokes `onJump`; Cmd-G is not intercepted (handed to the system) |
+| chat-view-055 | letter-shortcuts-unmodified-only, letter-m-requires-expandable | A row selected whose message exceeds the line limit; `m` pressed with Option held | The modified `m` is not intercepted as the expansion shortcut (handed to the system); no expansion toggle occurs |
 
 ## Edge Cases
 
 - **Null/empty input (empty transcript)**: When `viewModel.messages` is empty, the transcript stack contains only its leading spacer — no day banner, no rows or bubbles. MUST.
 - **Null/empty input (empty composer text)**: Whitespace-only or empty composer text disables the send button, and both Return and a send-button click are no-ops (see **send-ignored-when-empty**). MUST.
 - **Boundary values (zero/negative transcript width)**: While the transcript's clip width is 0 or less (the view is off-screen or mid-teardown), `layout()`'s `width > 0` guard skips both the width-constant update and any rebuild; the transcript keeps whatever width it last had until the width turns positive again. MUST.
-- **Boundary values (narrow window, plain-bubble floor)**: The 200pt floor on a plain bubble's max width (`max(scrollWidth * 0.75, 200)`) can exceed the transcript's own available width once that width drops below roughly 267pt; the source applies the floor unconditionally, with no special-casing below that point. MUST.
+- **Boundary values (narrow window, plain-bubble floor)**: The 200pt floor on a plain bubble's max width (`max(scrollWidth * 0.75, 200)`) can exceed the transcript's own available width once that width drops below roughly 267pt; the source applies the floor unconditionally, with no special-casing below that point (see the Design Decision on the plain-bubble floor).
 - **Boundary values ("at the bottom" threshold)**: "At the bottom" is exactly `distanceFromNewest() < 30`; a reader exactly 30pt from the newest message counts as *not* at the bottom and takes the anchor-preservation path rather than the follow-newest path. MUST.
 - **Concurrent access**: Not applicable in the strict sense — this source carries no explicit `@MainActor` annotation on `ChatView` itself, but as an `NSView` subclass its AppKit-driven entry points (`layout()`, `keyDown(with:)`, the `NSTextFieldDelegate` callbacks) run on the main thread by platform contract, and both Combine subscriptions that trigger rebuilds are explicitly received on the main queue or run loop (`.receive(on: DispatchQueue.main)`, `.receive(on: RunLoop.main)`). Nothing in this source mutates `expandedMessageIDs`, `isRebuilding`, `rendered`, or the transcript stack from any other thread.
-- **Error states (session-level failure)**: A view-model `state` of `.failed(ChatError)` produces no distinct UI in this file (see **failed-session-state-not-specially-rendered**); the source neither displays the failure's message nor offers a retry from `ChatView` itself. MUST (this documents the source's actual behavior, not an idealized one).
+- **Error states (session-level failure)**: A view-model `state` of `.failed(ChatError)` produces no distinct UI in this file (see the Design Decision on failed-session-state rendering); the source neither displays the failure's message nor offers a retry from `ChatView` itself.
 - **Error states (per-message failure)**: A message with `delivery = .failed(String)` is always routed to the transcript-row path (see **inflight-or-attributed-uses-row**); what that row draws for the failure reason is that row's own concern and is not specified in this source.
 - **Offline/disconnected state**: Not applicable — `ChatView` performs no networking of its own; it only reflects whatever `ChatMessage`/`ChatSessionState` values its `AIChatViewModel` publishes. Connectivity handling belongs to the `ChatSession` behind that view model.
 - **Rapid message arrival**: Several deltas to `viewModel.messages` arriving within one run-loop tick collapse into a single rebuild (see **rebuild-coalesced-per-tick**); a rebuild already deferred for an active text selection accumulates no further work beyond "rebuild once, the next time the selection clears." MUST.
@@ -225,8 +227,8 @@ Not applicable: `ChatView` contains no URL scheme or deep-link handling in sourc
 
 | String Key | Default (en) | Context |
 |-----------|-------------|---------|
-| — (hardcoded literal, no key) | `Type a message...` | Composer placeholder text shown while the field is empty |
-| — (hardcoded literal, no key) | `Send` | Accessibility description on the send button's SF Symbol image |
+| `chat.composer.placeholder` (proposed; source hardcodes the literal with no key) | `Type a message...` | Composer placeholder text shown while the field is empty |
+| `chat.send.accessibility` (proposed; source hardcodes the literal with no key) | `Send` | Accessibility description on the send button's SF Symbol image |
 
 ## Accessibility Options
 
@@ -257,11 +259,11 @@ Not applicable: the source contains no logging calls (no `os_log`, `Logger`, or 
 
 ## Platform Notes
 
-- **SwiftUI**: Compose a `VStack` of a `ScrollViewReader`-wrapped `ScrollView` (transcript) over a footer `VStack` (status line, a `Divider()`, and an `HStack` for prompt/`TextField`/send `Button`). Drive the day-banner insertion and role-based alignment (`.frame(maxWidth: ..., alignment: .trailing/.leading)`, or a centered `HStack` with two `Spacer()`s for `.notice`) from a view model computed property rather than from view-layer state, since SwiftUI already diffs its own tree — the equality-guarded rebuild and scroll-anchor bookkeeping this AppKit source hand-rolls (`TranscriptInputs`, `ScrollAnchor`) are largely what SwiftUI's own diffing and `ScrollViewReader.scrollTo(_:anchor:)` replace. Reproduce row selection with a `List`/`ForEach` selection binding and `.onMoveCommand`/`.onKeyPress` for the arrow/Return/letter shortcuts, and a Reduce-Motion check via `@Environment(\.accessibilityReduceMotion)` before animating the typing indicator (see the Accessibility Options gap).
-- **Compose**: Use a `Column` of a `LazyColumn` (transcript, driven by a single `LazyListState` that plays the role of `isAtBottom`/`scrollAnchor`) over a footer `Column` (status `Text`, a `HorizontalDivider`, and a `Row` for prompt/`TextField`/send `IconButton`). Alignment by role maps to `Arrangement.End`/`Arrangement.Start`/`Arrangement.Center` on each message's row. Coalesce transcript updates the way this source's `TranscriptInputs` equality guard does, using `derivedStateOf` or a `distinctUntilChanged()` flow operator, so a merged feed's frequent polling does not force a recomposition (and a blink) on every unchanged emission. Respect `LocalAccessibilityManager`'s reduce-motion equivalent before starting the typing indicator's pulse.
-- **React/Web**: Render a flex column: a scrollable transcript `<div>` (tracking its own "at bottom" scroll-distance threshold, mirroring the 30pt constant) over a footer containing a status line, an `<hr>`-style divider, and a composer row (prompt span, `<input>`, send `<button>`). Role alignment maps to `justify-content: flex-end/flex-start/center` per message row. Implement the "defer rebuild while the reader is selecting text" rule with the `Selection` API (`document.getSelection()`) guarding a re-render, and gate the typing indicator's CSS animation behind `@media (prefers-reduced-motion: reduce)` — the concrete fix for the Reduce Motion gap noted above.
+- **SwiftUI**: Compose a `VStack` of a `ScrollViewReader`-wrapped `ScrollView` (transcript) over a footer `VStack` (status line, a `Divider()`, and an `HStack` for prompt/`TextField`/send `Button`). Drive the day-banner insertion and role-based alignment (`.frame(maxWidth: ..., alignment: .trailing/.leading)`, or a centered `HStack` with two `Spacer()`s for `.notice`) from a view model computed property rather than from view-layer state, since SwiftUI already diffs its own tree — the equality-guarded rebuild-skip and scroll-anchor bookkeeping this AppKit source hand-rolls are largely what SwiftUI's own diffing and `ScrollViewReader.scrollTo(_:anchor:)` replace. Reproduce row selection with a `List`/`ForEach` selection binding and `.onMoveCommand`/`.onKeyPress` for the arrow/Return/letter shortcuts, and a Reduce-Motion check via `@Environment(\.accessibilityReduceMotion)` before animating the typing indicator (the indicator's own concern, delegated per Accessibility Options; see agentictoolkit://recipes/typing-indicator-view).
+- **Compose**: Use a `Column` of a `LazyColumn` (transcript, driven by a single `LazyListState` that plays the role of `isAtBottom`/`scrollAnchor`) over a footer `Column` (status `Text`, a `HorizontalDivider`, and a `Row` for prompt/`TextField`/send `IconButton`). Alignment by role maps to `Arrangement.End`/`Arrangement.Start`/`Arrangement.Center` on each message's row. Coalesce transcript updates the way this source's equality-guarded rebuild-skip does, using `derivedStateOf` or a `distinctUntilChanged()` flow operator, so a merged feed's frequent polling does not force a recomposition (and a blink) on every unchanged emission. `LocalAccessibilityManager` has no reduce-motion property of its own; read the system animator duration scale (`Settings.Global.ANIMATOR_DURATION_SCALE`) or an app-level reduce-motion setting before starting the typing indicator's pulse.
+- **React/Web**: Render a flex column: a scrollable transcript `<div>` (tracking its own "at bottom" scroll-distance threshold, mirroring the 30pt constant) over a footer containing a status line, an `<hr>`-style divider, and a composer row (prompt span, `<input>`, send `<button>`). Role alignment maps to `justify-content: flex-end/flex-start/center` per message row. Implement the "defer rebuild while the reader is selecting text" rule with the `Selection` API (`document.getSelection()`) guarding a re-render, and gate the typing indicator's CSS animation behind `@media (prefers-reduced-motion: reduce)` — mirroring how `TypingIndicatorView` itself should honor Reduce Motion (see agentictoolkit://recipes/typing-indicator-view), not a gap in this view's own behavior.
 - **AppKit / UIKit**: Source: `packages/apple/AgenticToolkit/macOS/Features/AIChatWindow/ChatView.swift`. Implemented as a `final` `NSView` subclass (no explicit `@MainActor`) composing an `NSScrollView`/`NSStackView` transcript with an `NSStackView` footer, using `NSTextFieldDelegate` for the composer and manual `keyDown(with:)` handling for row navigation — see Design Decisions for why the transcript's width is set as an explicit constant rather than an equality constraint. This file is macOS-only (`NSView`, `NSTextField`, `NSScrollView`); an iOS port has no direct equivalent here and would need its own composition of `UIScrollView`/`UIStackView`, `UITextField`/`UITextView`, and `UIKeyCommand`-based row navigation, plus its own Reduce-Motion check (`UIAccessibility.isReduceMotionEnabled`).
-- **WinUI 3**: Compose a root `Grid` with two `RowDefinition`s (`*` for the transcript, `Auto` for the footer). The transcript is a `ScrollViewer` wrapping an `ItemsRepeater` (or `ListView` with `SelectionMode="Single"` if row selection is wanted, giving `arrow-key-selection` and `return-opens-shift-return-jumps` almost for free via `ListView`'s own keyboard handling) bound to the message collection, with a `DataTemplateSelector` choosing a plain bubble template vs. a "feed row" template per **inflight-or-attributed-uses-row**, and a day-banner header inserted via `CollectionViewSource.IsSourceGrouped="True"` grouped by calendar day (WinUI's native analogue of **day-banner-per-calendar-day**, replacing this source's manual `shownDay` tracking). Role alignment maps to `HorizontalAlignment="Right"/"Left"/"Center"` on each item's container, mirroring **role-differentiated-by-position**. The footer is a `StackPanel` with a status `TextBlock`, a `muxc:Divider` (thin, theme-brush-bound, mirroring **footer-divider**), and a `Grid` composer row (prompt `TextBlock`, a `TextBox` with `PlaceholderText="Type a message..."`, and an `AppBarButton`/`Button` with a `FontIcon` glyph for send, `IsEnabled` bound to `!string.IsNullOrWhiteSpace(ComposerText)` for **send-button-requires-text**). Bind `TextBox.KeyDown` to submit on `VirtualKey.Enter` (**return-key-sends**) without `Shift` held. Drive the "follow newest vs. preserve scroll position" behavior with `ScrollViewer.ViewChanging`/`ChangeView(...)` rather than this source's manual `ScrollAnchor` struct — WinUI's `ItemsRepeater`/`ScrollViewer` combination exposes bring-into-view APIs (`UIElement.StartBringIntoView`) that cover **follow-newest-when-at-bottom** and **preserve-scroll-position-otherwise** without hand-rolled offset math. For the typing indicator, use a `Storyboard` on three `Ellipse`s gated by `!SystemAnimationsAreEnabled` or the app's own "reduce motion" setting, closing the Reduce Motion gap this source leaves open. Bind all colors (accent, divider, primary/secondary/placeholder text, chat surface) to `ThemeResource`s in a resource dictionary that mirrors this source's `ThemeRole` cases, updated on the app's theme-changed event, matching **theme-responsive-controls**.
+- **WinUI 3**: Compose a root `Grid` with two `RowDefinition`s (`*` for the transcript, `Auto` for the footer). The transcript is a `ScrollViewer` wrapping an `ItemsRepeater` (or `ListView` with `SelectionMode="Single"` if row selection is wanted, giving `arrow-key-selection` and `return-opens-shift-return-jumps` almost for free via `ListView`'s own keyboard handling) bound to the message collection, with a `DataTemplateSelector` choosing a plain bubble template vs. a "feed row" template per **inflight-or-attributed-uses-row**, and a day-banner header inserted via `CollectionViewSource.IsSourceGrouped="True"` grouped by calendar day (WinUI's native analogue of **day-banner-per-calendar-day**, replacing this source's manual per-message day-boundary tracking). Role alignment maps to `HorizontalAlignment="Right"/"Left"/"Center"` on each item's container, mirroring **role-differentiated-by-position**. The footer is a `StackPanel` with a status `TextBlock`, a 1px `Border`/`Rectangle` filled with a theme brush (thin, theme-brush-bound, mirroring **footer-divider** — WinUI 3 has no built-in `Divider` control), and a `Grid` composer row (prompt `TextBlock`, a `TextBox` with `PlaceholderText="Type a message..."`, and an `AppBarButton`/`Button` with a `FontIcon` glyph for send, `IsEnabled` bound to `!string.IsNullOrWhiteSpace(ComposerText)` for **send-button-requires-text**). Bind `TextBox.KeyDown` to submit on `VirtualKey.Enter` (**return-key-sends**) without `Shift` held. Drive the "follow newest vs. preserve scroll position" behavior with `ScrollViewer.ViewChanging`/`ChangeView(...)` rather than this source's manual anchor-message bookkeeping — WinUI's `ItemsRepeater`/`ScrollViewer` combination exposes bring-into-view APIs (`UIElement.StartBringIntoView`) that cover **follow-newest-when-at-bottom** and **preserve-scroll-position-otherwise** without hand-rolled offset math. For the typing indicator, use a `Storyboard` on three `Ellipse`s gated by `UISettings.AnimationsEnabled` or the app's own "reduce motion" setting — mirroring how `TypingIndicatorView` itself should honor Reduce Motion (see agentictoolkit://recipes/typing-indicator-view), not a gap in this view's own behavior. Bind all colors (accent, divider, primary/secondary/placeholder text, chat surface) to `ThemeResource`s in a resource dictionary that mirrors this source's `ThemeRole` cases, updated on the app's theme-changed event, matching **theme-responsive-controls**.
 
 ## Design Decisions
 
@@ -289,6 +291,14 @@ Not applicable: the source contains no logging calls (no `os_log`, `Logger`, or 
 **Rationale**: Per the class's own doc comment on `expandedMessageIDs`, a watched feed rebuilds its whole transcript every few seconds, and a message written under one id can arrive back under a different one once it settles. Matching on normalized text is what lets a message the reader opened out stay open through that id change; a message that disappears without a matching replacement simply loses its expanded state.
 **Approved: pending**
 
+**Decision**: A plain bubble's width cap floors at 200pt (`max(scrollWidth * 0.75, 200)`) with no special-casing once the transcript's own available width drops below that floor (roughly 267pt of scroll width).
+**Rationale**: Not documented in source beyond the formula itself; below that width the floor can make a bubble's cap exceed the space actually available, which reads as a narrow-window bug rather than an intended minimum. Left open rather than assumed: whether the floor should shrink to fit, or the source is fine leaving it as is, is not decided here.
+**Approved: pending**
+
+**Decision**: A `.failed` session state renders no distinct banner, alert, or composer state of its own; the composer's enablement is governed only by `isComposerEnabled` and whether `state == .responding`, exactly as in `.ready`.
+**Rationale**: The source conditions composer enablement solely on `.responding` (`applyComposerEnablement`); no other branch in this file reads `.failed`. Whether a failure state should surface its own affordance (a banner, a retry action) is left open rather than assumed here.
+**Approved: pending**
+
 ## Compliance
 
 | Check | Status | Category |
@@ -310,3 +320,5 @@ Statuses rest on: the accessibility identifiers present throughout but the two s
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: recast the plain-bubble floor and failed-session-state behavior as pending Design Decisions instead of MUSTs; rephrased transcript-explicit-width as observable resize behavior; stated the 200pt floor in plain-bubble-width-cap; filled depends-on with the composed child recipes; trimmed the summary; clarified Return's composer-vs-selection ambiguity; added modifier-guard test vectors for `g` and modified `m`; corrected WinUI 3 (`Divider`, `SystemAnimationsAreEnabled`) and Compose (`LocalAccessibilityManager`) platform-note inaccuracies; removed internal-symbol leakage from the SwiftUI, Compose, and WinUI 3 notes; reconciled the Reduce Motion cross-references with the delegated status in Accessibility Options; and proposed localization keys |

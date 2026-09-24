@@ -3,7 +3,7 @@ id: f8e734aa-f401-4218-9f1e-56ed98c28d3d
 title: Button View
 domain: agentictoolkit://recipes/button-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -34,13 +34,18 @@ approved-date: ''
 
 `ButtonView` is an AppKit `NSView` from the ComposableSettingsWindow system integration (`packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/ButtonView.swift`) that wraps a single `NSButton` as one settings row and conforms to `SettingsViewProtocol`. Its title and the action performed on press are both driven entirely by a caller-supplied `ButtonViewModel`, not configured on the view itself. A nested `Placement` enum controls how the button sits in the row it is given: stretched across the whole row (`.fill`, the default), sized to its own title at the row's leading edge (`.leading`), or sized to its own title and centered in the row (`.centered`).
 
+`ButtonViewModel` (`ComposableSettingsWindow/ViewModels/ButtonViewModel.swift`) is a `class` subclassing `AbstractViewModel`. It exposes `title: String` (immutable — declared `let` on `AbstractViewModel`) and `wasPressedCallback: (() -> Void)?` (mutable, `internal`, default `nil`); `AbstractViewModel` also carries `explanation: String?` (immutable), which `ButtonView` never reads.
+
 ## Behavioral Requirements
 
 - **creates-button-with-viewmodel-title**: The component MUST initialize its `button` property as an `NSButton` whose title is `viewModel.title`, with no target or action set at creation time.
+- **reads-title-once-at-init**: The component MUST read `viewModel.title` only once, at initialization, to construct `button`'s title; it never re-reads `viewModel.title` afterward. `ButtonViewModel.title` (inherited from `AbstractViewModel`) is declared `let`, so there is no later point at which a changed value could exist to re-read.
+- **retains-view-model-strongly**: The component MUST hold `viewModel` as a strong reference (`private let viewModel: ButtonViewModel`) for its own lifetime, keeping `viewModel` — and any closure it holds, including `wasPressedCallback` — alive at least as long as the view itself.
 - **exposes-button-publicly**: The component MUST expose the underlying `NSButton` as a public, read-only `button` property.
 - **disables-autoresizing-mask-translation**: The component MUST set `translatesAutoresizingMaskIntoConstraints = false` on both itself and `button`.
 - **adds-button-as-subview**: The component MUST add `button` as a subview of itself.
 - **defaults-placement-to-fill**: The component MUST default its `placement` initializer parameter to `.fill` when the caller supplies none.
+- **placement-fixed-at-init**: The component MUST fix `placement`'s effect on `button`'s constraints at initialization; it exposes no property or method to change `placement`, or to re-run the placement logic, after construction.
 - **fills-view-in-fill-placement**: WHEN `placement` is `.fill`, the component MUST pin all four edges of `button` to the corresponding edges of the view, so `button` occupies the view's full bounds.
 - **constrains-vertical-edges-in-non-fill-placement**: WHEN `placement` is `.leading` or `.centered`, the component MUST constrain `button`'s top and bottom edges to equal the view's top and bottom edges.
 - **caps-trailing-edge-in-non-fill-placement**: WHEN `placement` is `.leading` or `.centered`, the component MUST constrain `button`'s trailing edge to be less than or equal to the view's trailing edge, so `button` never extends past the view.
@@ -81,7 +86,7 @@ approved-date: ''
 - **Label**: The accessible name is `button`'s title, set from `viewModel.title` at construction (see **creates-button-with-viewmodel-title**); `ButtonView` sets no separate accessibility label.
 - **Announce state changes**: Not applicable: `ButtonView` defines no disabled or loading state of its own (see States); if a caller disables `button` directly, the enabled/disabled announcement is `NSButton`'s native behavior, not something `ButtonView` implements.
 - **Keyboard navigation**: Inherited from `NSButton` — Tab/Shift-Tab move focus onto and off the button, and Space or Return activates it through the target/action wired in **wires-button-action**. `ButtonView` adds no custom key handling.
-- **Minimum tap target**: `ButtonView` keeps AppKit's system metrics for `button` — no `controlSize`, width or height override — so the click target is the regular-size push-button bezel sized to its title, as the macOS Human Interface Guidelines prescribe for pointer-driven controls. Ports to touch platforms MUST give the equivalent control at least the platform minimum (44×44 pt on iOS, 48×48 dp on Android, 40×40 epx on WinUI 3).
+- **Minimum tap target**: `ButtonView` keeps AppKit's system metrics for `button` — no `controlSize`, width or height override — so the click target is the regular-size push-button bezel sized to its title, as the macOS Human Interface Guidelines prescribe for pointer-driven controls. A port to touch platforms would need to give the equivalent control at least the platform minimum (44×44 pt on iOS, 48×48 dp on Android, 40×40 epx on WinUI 3); this is porting guidance, not a behavior of the AppKit source.
 
 ## Conformance Test Vectors
 
@@ -101,10 +106,21 @@ approved-date: ''
 | button-view-012 | centers-button-in-centered-placement | `placement: .centered`, host view laid out at 200×40 | `button`'s horizontal center equals the host view's horizontal center (x == 100) |
 | button-view-013 | wires-button-action | Any initialized `ButtonView` | `button.target === view`; `button.action == Selector("buttonWasPressed:")` |
 | button-view-014 | invokes-pressed-callback | `viewModel.wasPressedCallback` set to a closure that flips a flag; simulate a click on `button` | The flag is `true` after the click |
-| button-view-015 | takes-no-action-without-callback | `viewModel.wasPressedCallback == nil`; simulate a click on `button` | No exception is thrown; no observable effect occurs beyond `button`'s own native press feedback |
+| button-view-015 | takes-no-action-without-callback | `viewModel.wasPressedCallback == nil`; simulate a click on `button` | No exception is thrown; `button.target` and `button.action` are unchanged from **wires-button-action**; no call is observed on a spy substituted for any other collaborator |
 | button-view-016 | rejects-frame-initializer | Construct via `ButtonView(frame: .zero)` | Execution traps via `fatalError` with message `init(frame frameRect: NSRect` |
 | button-view-017 | rejects-coder-initializer | Construct via `ButtonView(coder:)` with any `NSCoder` | Execution traps via `fatalError` with message `init(coder:) has not been implemented` |
 | button-view-018 | confines-to-main-actor | Attempt to construct or mutate a `ButtonView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
+| button-view-019 | placement-fixed-at-init | Any initialized `ButtonView` | `ButtonView`'s public interface exposes no property or method that reads or changes `placement`; the only code that consults `placement` runs once, inside `init` |
+| button-view-020 | reads-title-once-at-init | Any initialized `ButtonView` | `button.title` was set from `viewModel.title` during `init` and by no other code path; `ButtonViewModel.title` is `let`, so no later value could exist for the component to re-read |
+| button-view-021 | retains-view-model-strongly | Construct `let view = ButtonView(viewModel: ButtonViewModel(title: "Save") { flag = true })` in a scope where no other strong reference to the view model is kept; after the scope exits (only `view` remains reachable), simulate a click on `view.button` | The callback still fires and `flag` becomes `true`, showing `view` alone kept `viewModel` (and its closure) alive after every other reference was dropped |
+
+`button-view-018` and `button-view-019` are static, code-inspection checks
+(Swift's `@MainActor` isolation checking rejects an off-actor call at compile
+time; `placement` having no reachable getter/setter is a fact about the
+type's public interface), not vectors observed by running the program; a
+port on a platform without the equivalent compile-time enforcement should
+verify these as build-verification or API-surface review notes rather than
+runtime tests.
 
 ## Edge Cases
 
@@ -119,7 +135,7 @@ approved-date: ''
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `viewModel` | `ButtonViewModel` | (required) | Supplies `button`'s title and the optional `wasPressedCallback` closure invoked when `button` is pressed. |
+| `viewModel` | `ButtonViewModel` | (required) | A `class` (subclass of `AbstractViewModel`) supplying `button`'s title (`title: String`, immutable) and the optional `wasPressedCallback: (() -> Void)?` closure invoked when `button` is pressed (mutable, default `nil`). |
 | `placement` | `ButtonView.Placement` | `.fill` | Where `button` sits in its row: `.fill` stretches it across the whole row, `.leading` sizes it to its title at the row's leading edge, `.centered` sizes it to its title and centers it in the row. |
 
 ## Deep Linking
@@ -162,7 +178,7 @@ Not applicable: the source contains no logging calls.
 ## Platform Notes
 
 - **SwiftUI**: Replace with `Button(viewModel.title) { viewModel.wasPressedCallback?() }`. Map `.fill` to `.frame(maxWidth: .infinity)` on the button (with a full-width button style so the tap target itself stretches, not just its label); map `.leading` to placing the button first in an `HStack` followed by a `Spacer()`, or `.frame(maxWidth: .infinity, alignment: .leading)`; map `.centered` to `.frame(maxWidth: .infinity, alignment: .center)`. No `fatalError`-guarded initializer is needed — SwiftUI views have no counterpart to `init(frame:)`/`init?(coder:)`.
-- **Compose**: Replace with `Button(onClick = { viewModel.wasPressedCallback?.invoke() }) { Text(viewModel.title) }`. Map `.fill` to `Modifier.fillMaxWidth()` on the `Button`; map `.leading` to the button's default start alignment inside a `Row` with `Arrangement.Start`; map `.centered` to `Modifier.align(Alignment.CenterHorizontally)` in a `Column`, or `Arrangement.Center` in a `Row`.
+- **Compose**: Replace with `Button(onClick = { viewModel.wasPressedCallback?.invoke() }) { Text(viewModel.title) }`. Map `.fill` to `Modifier.fillMaxWidth()` on the `Button`; map `.leading` to `Modifier.fillMaxWidth().wrapContentWidth(Alignment.Start)` on the `Button` inside a `Row`, so the button occupies the row's width but sizes and aligns its own tap target to its label at the start (mirroring the trailing-capped, leading-pinned constraints); map `.centered` to `Modifier.align(Alignment.CenterHorizontally)` in a `Column`, or `Arrangement.Center` in a `Row`.
 - **React/Web**: Replace with `<button onClick={() => viewModel.wasPressedCallback?.()}>{viewModel.title}</button>`. Map `.fill` to `width: 100%` (or `display: block`) on the button; map `.leading` to `justify-content: flex-start` on a flex row containing the button; map `.centered` to `justify-content: center` on that row, or `margin-inline: auto` on the button itself.
 - **AppKit / UIKit (source)**: `ButtonView.swift` is macOS-only (`import AppKit`) — there is no iOS/UIKit counterpart in this file. It is an `NSView` wrapping one `NSButton`, computing its three Auto Layout placements once at `init` time (placement cannot change after construction), with `init(frame:)` and `init?(coder:)` fatal-erroring rather than being usable, and the whole type isolated to `@MainActor`. A UIKit port to `UIView`/`UIButton` would need to add the enabled/highlighted/selected state handling that `NSButton`'s bezel already provides on macOS but `UIButton` requires more explicit configuration for.
 - **WinUI 3**: Use a `Button` control with `Content` bound to `viewModel.Title` and `Click` wired to the equivalent of `buttonWasPressed`. Map `.fill` to `HorizontalAlignment="Stretch"` with `HorizontalContentAlignment="Stretch"`, placed in the row's `Grid` cell so it spans the row's width (mirroring `pinToEdges`); map `.leading` to `HorizontalAlignment="Left"` in that same cell (mirroring the top/bottom-pinned, trailing-capped constraints); map `.centered` to `HorizontalAlignment="Center"` (mirroring the leading-floored, center-x-pinned constraints). WinUI has no `fatalError`-style initializer guard, so enforce "always construct with a view model" through a required constructor parameter or a `required` property instead of a runtime crash on an unused inherited initializer. `Button`'s built-in `CommonStates` (`Normal`, `PointerOver`, `Pressed`, `Disabled`) via `VisualStateManager` already cover pressed/disabled visuals without custom state XAML, matching the source's own lack of custom pressed/disabled styling.
@@ -182,11 +198,11 @@ Not applicable: the source contains no logging calls.
 **Approved**: pending
 
 **Decision**: This recipe calls `ButtonView`'s container a "row" throughout, even though the source's own comments use both "row" (in the `Placement` doc comment: "where the button sits in the row it is given") and "card" (in the `.fill` and `.leading` case comments: "stretched across the whole card"; "the row is as wide as the card").
-**Rationale**: The two words refer to the same concept in this file; "row" is kept as the single term for consistency with how a `SettingsViewProtocol` view's container is described elsewhere in the cookbook, and the source's own inconsistency is recorded here rather than silently smoothed over.
+**Rationale**: The two words refer to the same concept in this file; "row" is kept as the single term for consistency with how a `SettingsViewProtocol` view's container is described elsewhere in the cookbook — `agentictoolkit://recipes/header-view` and `agentictoolkit://recipes/horizontal-stack-view` both describe `SettingsViewProtocol` as "the marker protocol every settings-row view in this system adopts" — and the source's own inconsistency is recorded here rather than silently smoothed over.
 **Approved**: pending
 
 **Decision**: This recipe describes `Self.pinToEdges(button, of: self)` (used in **fills-view-in-fill-placement**) as pinning all four edges of `button` to the corresponding edges of `self`.
-**Rationale**: `pinToEdges` is not defined in `ButtonView.swift`; this description is inferred from its call site and the accompanying `.fill` case comment ("Stretched across the whole card"), not from inspecting the helper's own body, which is outside the given source.
+**Rationale**: `pinToEdges` is not defined in `ButtonView.swift`, but its implementation was read directly: `static func pinToEdges(_ view: NSView, of container: NSView)` in `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/ViewLayout.swift` activates exactly four equal constraints — `view`'s top, leading, trailing, and bottom anchors to `container`'s corresponding anchors — confirming the `.fill` case comment ("Stretched across the whole card") describes the same behavior this recipe asserts.
 **Approved**: pending
 
 ## Compliance
@@ -203,3 +219,8 @@ Not applicable: the source contains no logging calls.
 The `passed` statuses rest on `ButtonView` using an unmodified `NSButton` for its role, label, keyboard handling, and system-chrome contrast, and on `ButtonView` defining no string literals of its own. `dynamic-type-support` is `failed` because `button.font` is never set to a text-style-based font (e.g. `NSFont.preferredFont(forTextStyle:)`), so its title does not scale with the system text-size setting. `touch-target-size` is `passed` on macOS: the button keeps the system control metrics (see **Minimum tap target** under Accessibility).
 
 ## Change History
+
+| Version | Date | Author | Summary |
+|---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: verified the `.fill`-placement `pinToEdges` behavior against its actual source and cited it; grounded the "row" vs "card" wording in sibling recipes; added named requirements and test vectors for title-read timing, view-model retention, and placement immutability; reworded the touch-target porting guidance to drop its RFC 2119 keyword; defined `ButtonViewModel`'s shape; tightened test vectors 015 and 018 and marked 018/019 as static checks; and made the Compose `.leading` mapping concrete. |

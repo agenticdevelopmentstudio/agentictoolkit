@@ -3,7 +3,7 @@ id: 64825f85-8b4d-4406-befc-aa08ce55cc8b
 title: CaptionedSliderView
 domain: agentictoolkit://recipes/captioned-slider-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -23,7 +23,11 @@ tags:
 - macos
 - appkit
 depends-on: []
-related: []
+related:
+- agentictoolkit://recipes/slider-view
+- agentictoolkit://recipes/checkbox-view
+- agentictoolkit://recipes/number-field-view
+- agentictoolkit://recipes/popup-menu-choice-view
 references: []
 approved-by: ''
 approved-date: ''
@@ -51,6 +55,10 @@ back into the view model's `settingObserver`.
 - **sets-slider-range**: Component MUST set the slider's `minValue` and
   `maxValue` from `viewModel.minValue` and `viewModel.maxValue` at
   initialization.
+- **does-not-validate-range**: Component MUST NOT validate or correct
+  `viewModel.minValue`/`viewModel.maxValue` before assigning them to the
+  slider's `minValue`/`maxValue`; an inverted or zero-width range is passed
+  through unmodified.
 - **slider-hugs-loosely**: Component MUST set the slider's horizontal
   content-hugging priority to `1` — below the row spacer's `defaultLow`
   priority — so the slider, not the inter-item spacing, takes the width
@@ -79,6 +87,10 @@ back into the view model's `settingObserver`.
   label's text, the slider's value, and the caption label's text —
   re-reading `viewModel.title` and `viewModel.value` — whenever
   `viewModel.onChange` fires.
+- **overwrites-view-model-onchange**: Component MUST overwrite
+  `viewModel.onChange` with its own sync handler
+  (`{ [weak self] _ in self?.sync() }`) during initialization, replacing
+  whatever handler, if any, was previously registered on that view model.
 - **exposes-constituent-views**: Component MUST expose `label`, `slider`,
   and `captionLabel` as public, directly-accessible properties.
 - **requires-designated-initializer**: Component MUST NOT support
@@ -95,34 +107,44 @@ back into the view model's `settingObserver`.
   instances into a row.
 - **Padding**: `ComposableSettings.makeRow` inserts a flexible spacer
   between the label and the remaining views (`[label, spacer, slider,
-  captionLabel]`) and sets the `NSStackView`'s `spacing` to
-  `SettingsLayout.default[.rowSpacing]` = 8pt; that 8pt gap applies
-  between label→spacer and slider→captionLabel, while `makeRow`
-  explicitly zeroes the spacer→slider gap
-  (`setCustomSpacing(0, after: spacer)`) so the spacer's own width is the
-  only thing between the label and the slider. `pinToEdges` pins the
-  row's top/leading/trailing/bottom directly to `CaptionedSliderView`'s
-  edges with no additional constant, so the component contributes 0pt of
-  its own outer padding beyond that internal 8pt / 0pt / 8pt spacing.
-- **Font**: Title label (`makeRowLabel`, `textRole: .button`) resolves to
-  `ThemeTypography.defaultStyle(.button)`: 13pt, medium weight,
-  proportional system font. Caption label
-  (`makeValueLabel(monospacedDigits: true)`, `textRole: .code`) resolves
-  to `ThemeTypography.defaultStyle(.code)`: 12pt, regular weight,
-  monospaced. Both sizes scale with the active theme's `sizeScale`
-  (`1.0` by default) and both labels repaint automatically on a theme
-  change via `ThemePaletteObserver`.
+  captionLabel]`) and sets the `NSStackView`'s `spacing` to the
+  `SettingsLayout.rowSpacing` token — owned and currently set to 8pt by
+  `ComposableSettings.SettingsLayout.default` in
+  `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/ViewLayout.swift`,
+  not by `CaptionedSliderView.swift`. That gap applies between
+  label→spacer and slider→captionLabel, while `makeRow` explicitly zeroes
+  the spacer→slider gap (`setCustomSpacing(0, after: spacer)`) so the
+  spacer's own width is the only thing between the label and the slider.
+  `pinToEdges` pins the row's top/leading/trailing/bottom directly to
+  `CaptionedSliderView`'s edges with no additional constant, so the
+  component contributes 0pt of its own outer padding beyond that internal
+  token-driven / 0pt / token-driven spacing.
+- **Font**: Title label (`ComposableSettings.makeRowLabel`) uses text role
+  `.button`; caption label (`ComposableSettings.makeValueLabel
+  (monospacedDigits: true)`) uses text role `.code`. Neither role's size
+  or weight is set in `CaptionedSliderView.swift`: `SettingsLabels.swift`
+  (same directory as the source file) only picks the role, and
+  `ThemeTypography.defaultStyle(_:)` in
+  `external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperToolkit/Sources/Theme/ThemeTypography.swift`
+  owns the resolved point size and weight per role — currently 13pt
+  medium, proportional system font for `.button`, and 12pt regular,
+  monospaced for `.code`. Both sizes scale with the active theme's
+  `sizeScale` (`1.0` by default) and both labels repaint automatically on
+  a theme change via `ThemePaletteObserver`.
 - **Background**: None (transparent) — `ThemedLabel.init` sets
   `drawsBackground = false`, `isBordered = false`, and `isBezeled =
   false` on both the title and caption labels, and neither
   `CaptionedSliderView` nor the row `NSStackView` sets `wantsLayer` or a
   background color of its own.
-- **Foreground/Text**: Title label (`role: .primaryText`) resolves to
-  the active theme's foreground color at full strength
-  (`SemanticPalette.derive(.primaryText)` returns `theme.foreground`
-  unchanged). Caption label (`role: .secondaryText`) resolves to that
-  same foreground dimmed 32% toward the background color, with a
-  minimum contrast ratio of 3.0 enforced
+- **Foreground/Text**: Title label uses `SemanticPalette` role
+  `.primaryText`; caption label uses role `.secondaryText`. Neither
+  color is computed in `CaptionedSliderView.swift`:
+  `SemanticPalette.derive(_:)` in
+  `external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperToolkit/Sources/Theme/SemanticPalette.swift`
+  owns both — `.primaryText` currently resolves to the active theme's
+  foreground color at full strength, and `.secondaryText` currently
+  resolves to that same foreground dimmed 32% toward the background
+  color with a minimum contrast ratio of 3.0 enforced
   (`foreground.dimmed(towards: background, by: 0.32, minContrast:
   3.0)`). Both recompute live on a theme change via
   `ThemePaletteObserver`.
@@ -182,14 +204,16 @@ back into the view model's `settingObserver`.
 |----|-------------|-------|----------|
 | captioned-slider-view-001 | arranges-row-layout | Construct `CaptionedSliderView` with any `viewModel`/`formatter` | `label`, `slider`, and `captionLabel` are all subviews of a single row view that is pinned to the component's edges; no other layout container appears |
 | captioned-slider-view-002 | sets-slider-range | `viewModel.minValue = 0`, `viewModel.maxValue = 1` | After init, `slider.minValue == 0` and `slider.maxValue == 1` |
+| captioned-slider-view-014 | does-not-validate-range | `viewModel.minValue = 10`, `viewModel.maxValue = 5` (inverted) | After init, `slider.minValue == 10` and `slider.maxValue == 5`, unmodified — no validation or correction is applied |
 | captioned-slider-view-003 | slider-hugs-loosely | Construct the component | After init, `slider.contentHuggingPriority(for: .horizontal).rawValue == 1` |
 | captioned-slider-view-004 | caption-resists-compression | Construct the component | After init, `captionLabel.contentCompressionResistancePriority(for: .horizontal) == .required` |
 | captioned-slider-view-005 | caption-uses-monospaced-digits | Construct the component | `captionLabel`'s font descriptor includes the monospaced-digit font-feature trait |
 | captioned-slider-view-006 | initializes-from-view-model | `viewModel.title = "Volume"`, `viewModel.value = 42`, `formatter = { "\(Int($0))" }` | After init, `label.stringValue == "Volume"`, `slider.doubleValue == 42`, `captionLabel.stringValue == "42"` |
 | captioned-slider-view-007 | updates-caption-live | Set `slider.doubleValue = 75` and invoke `sliderChanged(slider)` (the slider's target-action), with `formatter = { "\(Int($0))%" }` | `captionLabel.stringValue` becomes `"75%"` immediately, without any `viewModel.onChange` firing |
 | captioned-slider-view-008 | commits-slider-value | `viewModel.settingObserver.value = 10`; set `slider.doubleValue = 30` and invoke `sliderChanged(slider)` | `viewModel.settingObserver.value == 30` after the call |
-| captioned-slider-view-009 | skips-redundant-commits | `viewModel.settingObserver.value = 50`; set `slider.doubleValue = 50` (same value) and invoke `sliderChanged(slider)` | `viewModel.settingObserver.value`'s setter is not invoked a second time (e.g. no additional write/observer notification is recorded) |
+| captioned-slider-view-009 | skips-redundant-commits | `viewModel.settingObserver.value = 50`; set `slider.doubleValue = 50` (same value) and invoke `sliderChanged(slider)` | Using a spy/counting `SettingObserver` in place of the real one, the write count recorded before the call equals the write count recorded after — `settingObserver.value`'s setter is not invoked a second time |
 | captioned-slider-view-010 | syncs-on-external-change | After construction, externally change `viewModel.title` and `viewModel.value`, then invoke `viewModel.onChange(newValue)` | `label.stringValue`, `slider.doubleValue`, and `captionLabel.stringValue` all update to reflect the new `viewModel` state |
+| captioned-slider-view-015 | overwrites-view-model-onchange | Register a counting closure on `viewModel.onChange` before constructing `CaptionedSliderView(viewModel:formatter:)`, then invoke `viewModel.onChange(value)` after construction | The pre-registered closure is never invoked; only the component's own `sync()`-calling handler runs |
 | captioned-slider-view-011 | exposes-constituent-views | Construct the component, then access `.label`, `.slider`, `.captionLabel` from outside the type | All three properties are accessible and return the same `NSTextField`/`NSSlider`/`NSTextField` instances built during init |
 | captioned-slider-view-012 | requires-designated-initializer | Attempt `CaptionedSliderView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
 | captioned-slider-view-013 | rejects-frame-only-initialization | Attempt `CaptionedSliderView(frame: .zero)` | The call traps with a fatal error; no instance is returned |
@@ -197,17 +221,16 @@ back into the view model's `settingObserver`.
 ## Edge Cases
 
 - Null/empty input: `viewModel` (`RangeViewModel<Double>`) and `formatter`
-  are non-optional, non-escaping-typed constructor parameters; Swift's
-  type system rules out `nil` for either. This is a MUST: the component
-  provides, and needs, no nil-handling path for its two initializer
-  parameters.
+  are non-optional constructor parameters — `formatter` is additionally
+  `@escaping`, since the initializer stores it on the instance for later
+  calls from `sync()` and `sliderChanged(_:)`. Swift's type system rules
+  out `nil` for either parameter, so the component needs no nil-handling
+  path for its two initializer parameters.
 - Boundary values — inverted/zero-width range: source performs no
   `minValue < maxValue` validation before assigning `slider.minValue`/
-  `slider.maxValue` from `viewModel`. If `viewModel.minValue >=
-  viewModel.maxValue`, `CaptionedSliderView` adds no guard of its own; the
-  resulting slider behavior is whatever `NSSlider` does for an
-  equal-or-inverted range. This is a MUST: the component MUST NOT
-  validate or correct `viewModel`'s bounds itself.
+  `slider.maxValue` from `viewModel` (see **does-not-validate-range**). If
+  `viewModel.minValue >= viewModel.maxValue`, the resulting slider
+  behavior is whatever `NSSlider` does for an equal-or-inverted range.
 - Concurrent access: Not applicable — the class and the `formatter`
   closure are both `@MainActor`-isolated, so Swift's concurrency checker
   serializes all access to the main actor; there is no code path by which
@@ -220,15 +243,12 @@ back into the view model's `settingObserver`.
   networking of its own; it only reads from and writes to an in-process
   `RangeViewModel`.
 - Overwritten external observer: `viewModel.onChange` is a single closure
-  property. `CaptionedSliderView`'s initializer unconditionally assigns
-  `viewModel.onChange = { [weak self] _ in self?.sync() }`, replacing
-  whatever handler (if any) was previously registered on that
-  `viewModel`. This is a MUST-level, source-traceable consequence of
-  plain closure-property assignment: the component MUST NOT be assumed to
-  coexist with another `onChange` observer already registered on the
-  same `RangeViewModel` instance — constructing a second
+  property, and the component's initializer unconditionally overwrites it
+  (see **overwrites-view-model-onchange**). Constructing a second
   `CaptionedSliderView` (or any other observer) against the same view
-  model silently drops the earlier handler.
+  model silently drops the earlier handler; the component MUST NOT be
+  assumed to coexist with another `onChange` observer already registered
+  on the same `RangeViewModel` instance.
 - Caption can change a second time after release: `sliderChanged(_:)`
   sets the caption optimistically from `newValue` before writing to
   `settingObserver.value`. If that write causes `settingObserver` to
@@ -260,17 +280,29 @@ appears anywhere in `CaptionedSliderView.swift`.
 Not applicable: the file contains no user-facing string literals of its
 own. The row's title comes from `viewModel.title` and its caption text
 comes from the caller-supplied `formatter`; both are values the caller
-provides, so there is nothing for this component to localize itself.
+provides, so there is nothing for this component to localize itself. The
+example formatters in Overview (`{ "\(Int($0 * 100))%" }`,
+`{ "\(Int($0))s" }`) are illustrative, source-quoted examples and are not
+locale-aware; a caller building a locale-correct caption should format
+`formatter`'s output with `NumberFormatter`/`FormatStyle` (e.g. `.percent`)
+rather than raw string interpolation — this component neither performs
+nor enforces that choice.
 
 ## Accessibility Options
 
 - **Reduce Motion**: Not applicable — source contains no animation,
   transition, or `NSAnimationContext` call; every state change is an
   instantaneous property assignment.
-- **Increase Contrast**: Not applicable — `CaptionedSliderView.swift` sets
-  no custom `NSColor` anywhere; whatever coloring the row has comes
-  entirely from AppKit's default control rendering, which follows system
-  Increase Contrast automatically.
+- **Increase Contrast**: `CaptionedSliderView.swift` itself sets no custom
+  `NSColor`; both labels get their color from `SemanticPalette` roles
+  (`.primaryText` for the title, `.secondaryText` for the caption) via
+  `ThemedLabel`, not from AppKit's unstyled control defaults (see
+  Appearance → Foreground/Text). `SemanticPalette.derive(_:)`
+  (`external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperToolkit/Sources/Theme/SemanticPalette.swift`)
+  does not read `NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast`
+  or any other system Increase Contrast signal, so the row's contrast
+  does not change when a user turns that system setting on; whatever the
+  active theme's colors resolve to is what both labels show either way.
 - **Differentiate Without Color**: Not applicable — the current value is
   communicated through the slider's thumb position and the caption's
   text, not through any color-only signal; no color-coded state exists in
@@ -315,9 +347,12 @@ Not applicable: `CaptionedSliderView.swift` contains no logging call (no
   as raw numbers; give the `Slider` no fixed frame (it already expands to
   fill the `HStack`'s remaining space, mirroring slider-hugs-loosely) and
   apply `.fixedSize()` (or `.layoutPriority(1)`) to the caption `Text` to
-  mirror caption-resists-compression. Update the caption's bound value on
-  the `Slider`'s live drag (`onEditingChanged`/a `Binding` setter) rather
-  than only on commit, to mirror updates-caption-live.
+  mirror caption-resists-compression. Drive the caption from the
+  `Binding`'s setter — called on every drag tick as the `Slider` writes
+  through it — to mirror updates-caption-live; `onEditingChanged` fires
+  only at the start and end of a drag, so it is the analog of the commit
+  step (mirroring commits-slider-value/skips-redundant-commits), not of
+  the live update.
 - **Compose**: Use a `Row` with `Modifier.weight(1f)` on the `Slider` (the
   Compose analog of the low hugging priority) between a leading
   `Text(title)` and a trailing `Text(formatter(value))` styled with a
@@ -352,7 +387,7 @@ Not applicable: `CaptionedSliderView.swift` contains no logging call (no
   — UIKit has no `NSCoder`-vs-frame initializer split to fatal-error on
   both the way `requires-designated-initializer` and
   `rejects-frame-only-initialization` do.
-- **WinUI 3** (the reason this recipe exists): Build the row as a `Grid`
+- **WinUI 3**: Build the row as a `Grid`
   with column definitions `Auto,*,Auto`: a `TextBlock` for the title in
   column 0; a `Slider Minimum="{min}" Maximum="{max}"
   Value="{x:Bind Value, Mode=TwoWay}" HorizontalAlignment="Stretch"` in
@@ -372,38 +407,55 @@ Not applicable: `CaptionedSliderView.swift` contains no logging call (no
 
 ## Design Decisions
 
-- Decision: Update the caption label from the slider's raw `newValue`
+- **Decision**: Update the caption label from the slider's raw `newValue`
   inside `sliderChanged(_:)`, ahead of writing to
   `viewModel.settingObserver.value`, rather than waiting for `sync()` to
   run off the round-tripped `viewModel.value`.
-  Rationale: This gives the caption an immediate, per-tick update while
-  dragging instead of a value that lags one `onChange` cycle behind the
-  slider's own position.
-  Approved: pending
-- Decision: Set the slider's horizontal content-hugging priority to `1`
-  and the caption label's horizontal compression-resistance priority to
-  `.required`.
-  Rationale: The source comment states this priority is "below the row
-  spacer's `defaultLow` so the slider, not the gap, takes the width left
-  over after the label and caption" — this makes the slider, rather than
-  inter-item spacing or the caption, absorb any extra row width, while
-  guaranteeing the caption is never truncated.
-  Approved: pending
-- Decision: Guard `viewModel.settingObserver.value`'s assignment with
+  **Rationale**: This gives the caption an immediate, per-tick update
+  while dragging instead of a value that lags one `onChange` cycle behind
+  the slider's own position.
+  **Approved**: pending
+- **Decision**: Set the slider's horizontal content-hugging priority to
+  `1` and the caption label's horizontal compression-resistance priority
+  to `.required`.
+  **Rationale**: The source comment states this priority is "below the
+  row spacer's `defaultLow` so the slider, not the gap, takes the width
+  left over after the label and caption" — this makes the slider, rather
+  than inter-item spacing or the caption, absorb any extra row width,
+  while guaranteeing the caption is never truncated.
+  **Approved**: pending
+- **Decision**: Guard `viewModel.settingObserver.value`'s assignment with
   `if viewModel.settingObserver.value != newValue` before writing.
-  Rationale: Avoids redundant writes to the observer (and any
+  **Rationale**: Avoids redundant writes to the observer (and any
   observer-driven feedback loop) when the slider reports a value that
   hasn't actually changed.
-  Approved: pending
-- Decision: Force a fatal error from both `init(coder:)` and the
+  **Approved**: pending
+- **Decision**: Force a fatal error from both `init(coder:)` and the
   frame-only `init(frame:)`, leaving `init(viewModel:formatter:)` as the
   only usable initializer.
-  Rationale: The view has no meaningful default state — it cannot render
-  a title, range, or caption without a `viewModel` and a `formatter` — so
-  both inherited `NSView` initializers that could construct it without
-  those are intentionally disabled rather than left to produce a
-  half-configured row.
-  Approved: pending
+  **Rationale**: The view has no meaningful default state — it cannot
+  render a title, range, or caption without a `viewModel` and a
+  `formatter` — so both inherited `NSView` initializers that could
+  construct it without those are intentionally disabled rather than left
+  to produce a half-configured row.
+  **Approved**: pending
+- **Decision**: Overwrite `viewModel.onChange` unconditionally in `init`,
+  rather than composing with or preserving any handler already registered
+  on that view model.
+  **Rationale**: `RangeViewModel.onChange` is a single closure property;
+  giving the row exclusive ownership of it avoids ambiguity about
+  ordering multiple observers, at the cost of silently dropping any
+  handler registered before construction (see
+  **overwrites-view-model-onchange**).
+  **Approved**: pending
+- **Decision**: Assign `viewModel.minValue`/`viewModel.maxValue` straight
+  to the slider's `minValue`/`maxValue` with no `minValue < maxValue`
+  check.
+  **Rationale**: Bounds validation is the view model's responsibility, if
+  anywhere; adding a second check in the view would duplicate that
+  concern and could silently mask a caller bug instead of surfacing it
+  (see **does-not-validate-range**).
+  **Approved**: pending
 
 ## Compliance
 
@@ -411,13 +463,26 @@ Not applicable: `CaptionedSliderView.swift` contains no logging call (no
 |-------|--------|----------|
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
 | [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
-| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [semantic-markup](agenticdevelopercookbook://compliance/accessibility#semantic-markup) | partial | accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | partial | accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
 | [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | reliability |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
+
+`keyboard-navigable` and `screen-reader-support` are `partial` because
+source sets no custom focus-ring or accessibility-linkage code at all:
+Tab-order and arrow-key behavior come from `NSSlider`/`NSControl`'s
+un-verified default AppKit handling, and the slider carries no
+`setAccessibilityTitleUIElement(label)` (or equivalent) link to its title
+— see Accessibility → Label requirements. The remaining checks rest on
+`CaptionedSliderView.swift`'s use of stock `NSSlider`/`ThemedLabel`
+instances via `ComposableSettings.makeRow` and `makeRowLabel`/
+`makeValueLabel`, the `settingObserver.value != newValue` guard before
+every write, and the file's single responsibility (row composition and
+value sync, with rendering and formatting delegated elsewhere).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for CaptionedSliderView, covering row layout/priority behavior, live-versus-committed value sync, and one open accessibility question (slider/title label association) for review. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: add named requirements and test vectors for the unvalidated range and the overwritten `onChange` observer; decouple Appearance's font/color values from the theme files that own them; fix the Increase Contrast contradiction, the formatter-escaping claim, and the SwiftUI `onEditingChanged` guidance; drop RFC 2119 misuse and an editorial aside from Edge Cases and Platform Notes; correct the Compliance table and add related sibling-recipe links; note that the example formatters aren't locale-aware. |

@@ -3,7 +3,7 @@ id: c2417a5c-953b-458e-856b-2c4f7e3a6fde
 title: Breadcrumb View
 domain: agentictoolkit://recipes/breadcrumb-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -21,7 +21,8 @@ tags:
 - navigation
 - breadcrumb
 depends-on: []
-related: []
+related:
+- agentictoolkit://recipes/breadcrumb-popover-view-controller
 references: []
 approved-by: ''
 approved-date: ''
@@ -31,26 +32,27 @@ approved-date: ''
 
 ## Overview
 
-`BreadcrumbView` is a VS Code-style breadcrumb strip shown above a document editor: a horizontal row of buttons, one per path segment between the project root and the open file, separated by chevrons, so a user can see where the current file sits and jump to any ancestor directory. Setting `fileURL` rebuilds the strip; clicking a crumb opens a popover listing that directory's siblings (handled by `BreadcrumbPopoverViewController`), and choosing an entry there — or calling `selectCrumb(at:)` directly — reports a directory URL back through `onSelect`. The view itself is limited to path arithmetic and layout; it performs no filesystem access of its own.
+`BreadcrumbView` is a VS Code-style breadcrumb strip shown above a document editor: a horizontal row of buttons, one per path segment between the project root and the open file, separated by chevrons, so a user can see where the current file sits and jump to any ancestor directory. Setting `fileURL` rebuilds the strip; clicking a crumb opens a popover listing that directory's siblings (handled by `BreadcrumbPopoverViewController`), and choosing an entry there — or calling `selectCrumb(at:)` directly — reports a URL back through `onSelect`: the file chosen in the popover, or the crumb's own directory when `selectCrumb(at:)` is called directly. The view itself is limited to path arithmetic and layout; it performs no filesystem access of its own.
 
 ## Behavioral Requirements
 
 - **render-one-crumb-per-title**: The component MUST render exactly one button for each entry in the current crumb-title list, in the same left-to-right order as that list (root first, leaf last).
 - **chevron-between-crumbs**: The component MUST insert a chevron separator between each pair of adjacent crumb buttons, and MUST NOT place a chevron before the first crumb.
 - **clear-strip-when-file-nil**: The component MUST remove every crumb and chevron, leaving the strip empty, when `fileURL` is set to `nil`.
-- **rebuild-on-every-file-assignment**: The component MUST recompute the crumb titles, recompute the crumb directories, and rebuild the displayed crumbs every time `fileURL` is assigned, including when the newly assigned value is unchanged from the previous one.
+- **rebuild-on-every-file-assignment**: The component MAY recompute the crumb titles, recompute the crumb directories, and rebuild the displayed crumbs every time `fileURL` is assigned, including when the newly assigned value is unchanged from the previous one — the current implementation does this unconditionally, since `fileURL`'s `didSet` observer runs on every assignment with no equality check against the previous value (see the corresponding Design Decision).
 - **relative-titles-inside-root**: The component MUST derive the crumb titles from `fileURL`'s path components with `rootURL`'s path components removed from the front, when `fileURL`'s standardized path begins with `rootURL`'s standardized path.
-- **single-crumb-outside-root**: The component MUST derive a single crumb whose title is `fileURL`'s last path component when `fileURL`'s standardized path does not begin with `rootURL`'s standardized path (including when `fileURL` equals `rootURL`).
+- **single-crumb-outside-root**: The component MUST derive a single crumb whose title is `fileURL`'s last path component when `fileURL`'s standardized path does not have strictly more path components than `rootURL`'s standardized path, or when `rootURL`'s path components are not a prefix of `fileURL`'s path components — checked component-wise, not as a raw string prefix, so a path like `/Users/x/project2/...` is correctly treated as outside `/Users/x/project` even though it shares a string prefix with it. This includes the case where `fileURL` equals `rootURL`.
 - **crumb-directory-cumulative**: For every crumb before the last, the component MUST associate it with the absolute directory formed by the file's path components from the root up to and including that crumb's own segment.
 - **last-crumb-directory-is-containing-folder**: The component MUST associate the last crumb (the file's own crumb) with the directory that contains the file, not with the file's own path.
 - **crumb-truncates-middle**: The component MUST truncate a crumb button's displayed title in the middle, not at the end, when the title does not fit the available width.
-- **crumb-yields-width-before-container**: The component MUST give every crumb button the lowest horizontal content compression resistance priority, so a crumb's text shrinks before the containing view is forced to grow.
+- **crumb-yields-width-before-container**: The component MUST give every crumb button a horizontal content compression resistance priority of `.defaultLow` (250), so a crumb's text shrinks before the containing view is forced to grow.
 - **crumb-borderless-inline-style**: The component MUST render every crumb as a borderless button using the inline bezel style.
 - **crumb-small-system-font**: The component MUST render crumb title text in the system font at the small system font size.
 - **crumb-accessibility-identifier**: The component MUST assign each crumb button the accessibility identifier `breadcrumb.crumb.<index>`, where `<index>` is the crumb's zero-based position in the strip.
 - **chevron-decorative**: The component MUST render each chevron separator with no accessibility description, so it is not announced as a distinct element.
 - **chevron-fallback-image**: The component MUST substitute an empty image for a chevron when the `chevron.right` symbol cannot be resolved, rather than leaving the image view without an image.
 - **click-opens-popover**: The component MUST open a popover, anchored to the clicked crumb button, listing the contents of that crumb's directory, when a crumb button is clicked.
+- **popover-transient**: The component MUST configure every popover it presents with `.transient` behavior, so the popover dismisses itself when the user clicks outside it.
 - **single-popover-at-a-time**: The component MUST close any popover that is already open before presenting a new one.
 - **popover-selection-invokes-callback**: The component MUST close the popover and invoke `onSelect` with the chosen file when the popover reports a chosen file.
 - **popover-cancel-closes-without-callback**: The component MUST close the popover without invoking `onSelect` when the popover is cancelled.
@@ -58,7 +60,7 @@ approved-date: ''
 - **select-crumb-by-index**: The component MUST invoke `onSelect` with the directory of the crumb at a given index when `selectCrumb(at:)` is called with an index inside the current crumb range.
 - **ignore-out-of-range-crumb-index**: The component MUST NOT invoke `onSelect`, or take any other action, when `selectCrumb(at:)` or a crumb click reports an index outside the current crumb range.
 - **no-filesystem-access**: The component MUST NOT read the file system to compute crumb titles or directories; all path arithmetic MUST operate only on the `URL` values already given to it.
-- **native-keyboard-activation**: The component MUST support standard AppKit keyboard focus and activation (Tab to focus, Space/Return to trigger) on every crumb, because crumbs are instances of `NSButton` rather than custom-drawn views.
+- **native-keyboard-activation**: The component MUST support standard AppKit keyboard focus and activation on every crumb, because crumbs are instances of `NSButton` rather than custom-drawn views: when Full Keyboard Access is enabled, Tab moves focus to each crumb button in order, and Space or Return activates the focused button. (macOS only moves Tab focus to a push button when Full Keyboard Access is on; that is AppKit's own system-wide behavior, not something this component controls.)
 
 ## Appearance
 
@@ -99,28 +101,29 @@ approved-date: ''
 | breadcrumb-view-001 | render-one-crumb-per-title | rootURL = /Users/x/project; set fileURL = /Users/x/project/Sources/App/Main.swift | Strip renders exactly 3 crumb buttons titled "Sources", "App", "Main.swift", left to right in that order |
 | breadcrumb-view-002 | chevron-between-crumbs | Same setup as 001; inspect the stack's arranged subviews | Exactly 2 chevron views appear, each between two consecutive crumb buttons; no chevron precedes the first crumb |
 | breadcrumb-view-003 | clear-strip-when-file-nil | With crumbs already shown (as in 001), set fileURL = nil | The stack's arranged subviews become empty; crumbTitles is [] |
-| breadcrumb-view-004 | rebuild-on-every-file-assignment | With fileURL already set to a value, assign fileURL to that identical URL value again | rebuild() runs again: all arranged subviews are removed and a fresh, equivalent set of crumb views is added |
+| breadcrumb-view-004 | rebuild-on-every-file-assignment | With fileURL already set to a value, assign fileURL to that identical URL value again | The strip's crumb and chevron views are replaced with a fresh, equivalent set (new view instances, distinguishable by object identity from the ones they replace), even though crumbTitles is unchanged |
 | breadcrumb-view-005 | relative-titles-inside-root | rootURL = /Users/x/project; fileURL = /Users/x/project/a/b.txt | crumbTitles equals ["a", "b.txt"] |
 | breadcrumb-view-006 | single-crumb-outside-root | rootURL = /Users/x/project; fileURL = /Users/y/other/c.txt (outside root) | crumbTitles equals ["c.txt"]; exactly one crumb button renders, with no chevrons |
 | breadcrumb-view-007 | single-crumb-outside-root | rootURL = /Users/x/project; fileURL = /Users/x/project (equal to root) | crumbTitles equals ["project"]; exactly one crumb button renders |
-| breadcrumb-view-008 | crumb-directory-cumulative | rootURL = /Users/x/project; fileURL = /Users/x/project/a/b/c.txt | crumbDirectories[0] equals /Users/x/project/a; crumbDirectories[1] equals /Users/x/project/a/b |
-| breadcrumb-view-009 | last-crumb-directory-is-containing-folder | Same setup as 008 | crumbDirectories[2] (the "c.txt" crumb) equals /Users/x/project/a/b, the same directory as crumbDirectories[1] |
-| breadcrumb-view-010 | crumb-truncates-middle | Set a crumb's title to a name wider than the available width | The crumb button's visible text truncates in the middle (for example "VeryLong…erflows"); lineBreakMode is .byTruncatingMiddle |
-| breadcrumb-view-011 | crumb-yields-width-before-container | Inspect a crumb button's horizontal content compression resistance priority | Priority equals .defaultLow |
+| breadcrumb-view-008 | crumb-directory-cumulative | rootURL = /Users/x/project; fileURL = /Users/x/project/a/b/c.txt; call selectCrumb(at: 0), then selectCrumb(at: 1) | onSelect is invoked first with /Users/x/project/a, then with /Users/x/project/a/b |
+| breadcrumb-view-009 | last-crumb-directory-is-containing-folder | Same setup as 008; call selectCrumb(at: 2) (the "c.txt" crumb) | onSelect is invoked with /Users/x/project/a/b — the same directory selectCrumb(at: 1) reports, not the file's own path |
+| breadcrumb-view-010 | crumb-truncates-middle | rootURL = /Users/x/project; fileURL = /Users/x/project/ThisIsADirectoryNameLongEnoughToOverflowTheAvailableCrumbWidth/f.txt, with the strip constrained to a narrow width | The overflowing crumb button's visible text truncates in the middle (for example "ThisIsA…umbWidth"); lineBreakMode is .byTruncatingMiddle |
+| breadcrumb-view-011 | crumb-yields-width-before-container | Inspect a crumb button's horizontal content compression resistance priority | Priority equals .defaultLow (250) |
 | breadcrumb-view-012 | crumb-borderless-inline-style | Inspect a crumb button's bezelStyle and isBordered | bezelStyle equals .inline; isBordered equals false |
 | breadcrumb-view-013 | crumb-small-system-font | Inspect a crumb button's font | font equals NSFont.systemFont(ofSize: NSFont.smallSystemFontSize) |
 | breadcrumb-view-014 | crumb-accessibility-identifier | rootURL = /Users/x/project; fileURL = /Users/x/project/a/b.txt | The crumb at index 0 has accessibility identifier "breadcrumb.crumb.0"; the crumb at index 1 has "breadcrumb.crumb.1" |
 | breadcrumb-view-015 | chevron-decorative | Inspect a chevron view's accessibilityDescription | accessibilityDescription is nil |
-| breadcrumb-view-016 | chevron-fallback-image | Simulate NSImage(systemSymbolName: "chevron.right", ...) returning nil | The chevron view is created with a non-nil, zero-size NSImage() instead of crashing or being left without an image |
-| breadcrumb-view-017 | click-opens-popover | Strip shows 2+ crumbs; click the first crumb button | An NSPopover becomes visible, anchored to that button, with behavior .transient, whose content lists that crumb's directory |
+| breadcrumb-view-016 | chevron-fallback-image | Inspect the fallback expression in `chevron()` (no seam exists in source to inject a symbol-resolution failure at runtime, so this is verified by code inspection, not a runtime double) | `NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil) ?? NSImage()` guarantees a non-nil, zero-size NSImage() if symbol resolution ever returns nil, instead of crashing or leaving the image view without an image |
+| breadcrumb-view-017 | click-opens-popover, popover-transient | Strip shows 2+ crumbs; click the first crumb button | An NSPopover becomes visible, anchored to that button, with behavior .transient, whose content lists that crumb's directory |
 | breadcrumb-view-018 | single-popover-at-a-time | With a popover already open from clicking crumb A, click crumb B | The popover opened for crumb A closes; a new popover opens for crumb B; only one popover is visible at a time |
 | breadcrumb-view-019 | popover-selection-invokes-callback | With a popover open, its completion handler is called with a chosen file URL | onSelect is invoked exactly once with that file URL; the popover closes |
 | breadcrumb-view-020 | popover-cancel-closes-without-callback | With a popover open, its onCancel callback is invoked | The popover closes; onSelect is not invoked |
-| breadcrumb-view-021 | track-only-the-open-popover | Open popover A, then open popover B (which closes A); popover A's popoverDidClose(_:) notification then fires after B is already active | activePopover remains set to popover B; it is not cleared |
-| breadcrumb-view-022 | select-crumb-by-index | rootURL = /Users/x/project; fileURL = /Users/x/project/a/b.txt; call selectCrumb(at: 0) | onSelect is invoked with crumbDirectories[0] (/Users/x/project/a) |
+| breadcrumb-view-021 | track-only-the-open-popover | Open popover A, then open popover B (which closes A); popover A's popoverDidClose(_:) notification then fires after B is already active, then a third crumb C is clicked | Popover B remains open until C is clicked; clicking C then closes B (not a no-op) before opening C's popover — proving the stale notification for A did not wrongly clear the tracked reference to B |
+| breadcrumb-view-022 | select-crumb-by-index | rootURL = /Users/x/project; fileURL = /Users/x/project/a/b.txt; call selectCrumb(at: 0) | onSelect is invoked with /Users/x/project/a — the directory of the crumb at index 0 |
 | breadcrumb-view-023 | ignore-out-of-range-crumb-index | With 2 crumbs present, call selectCrumb(at: 5) and selectCrumb(at: -1) | onSelect is not invoked for either call; no crash occurs |
 | breadcrumb-view-024 | no-filesystem-access | Set fileURL/rootURL to a pair of paths that do not exist on disk | Crumb titles and directories are still computed correctly from the URLs' path components alone; no file-existence check or disk access occurs |
-| breadcrumb-view-025 | native-keyboard-activation | With the strip showing crumbs, Tab to a crumb button and press Space | The crumb's action (crumbClicked(_:)) fires, opening its popover, via standard NSButton key-equivalent handling |
+| breadcrumb-view-025 | native-keyboard-activation | With Full Keyboard Access enabled and the strip showing crumbs, Tab to a crumb button and press Space | The focused crumb's action fires, opening its popover, via standard NSButton keyboard focus and Space-activation handling (not key-equivalent handling) |
+| breadcrumb-view-026 | single-crumb-outside-root | rootURL = /Users/x/project; fileURL = /Users/x/project2/other/c.txt (a sibling path that shares a string prefix with the root but not a path component) | crumbTitles equals ["c.txt"]; exactly one crumb button renders — component-wise comparison correctly treats project2 as outside project, unlike a naive string-prefix check |
 
 ## Edge Cases
 
@@ -128,7 +131,7 @@ approved-date: ''
 - **Boundary — file equals root**: A `fileURL` whose standardized path equals `rootURL`'s standardized path falls back to a single crumb of the root's own last path component, because the comparison in `titles(for:rootURL:)` requires strictly more file components than root components. MUST.
 - **Boundary — single crumb**: A file exactly one level under the root produces exactly one crumb and no chevrons, since the chevron is only inserted when a crumb's index is greater than 0. MUST.
 - **Concurrent access**: `BreadcrumbView` is `@MainActor`-isolated, so every mutation of `fileURL`, `crumbTitles`, `crumbDirectories`, and `activePopover` is serialized on the main actor; `rebuild()` always finishes removing old crumb views and adding new ones before another main-actor task can observe the strip, so no interleaving of two rebuilds, or of a rebuild and a click, is possible. MUST.
-- **Popover replacement race**: A `.transient` popover's outside-click dismissal and a second crumb's click action can be delivered in an order where two sibling-listing popovers would otherwise both end up open. `presentPopover(for:relativeTo:)` closes `activePopover` unconditionally before opening the next popover to prevent this (see **single-popover-at-a-time**); this is a documented workaround in source, not incidental behavior. MUST.
+- **Popover replacement race**: A `.transient` popover (see **popover-transient**)'s outside-click dismissal and a second crumb's click action can be delivered in an order where two sibling-listing popovers would otherwise both end up open. `presentPopover(for:relativeTo:)` closes `activePopover` unconditionally before opening the next popover to prevent this (see **single-popover-at-a-time**); this is a documented workaround in source, not incidental behavior. MUST.
 - **Stale popover-close notification**: A `.transient` popover's closure can be reported after a different popover has already replaced it as `activePopover`. `popoverDidClose(_:)` clears `activePopover` only when the closing popover is the one currently tracked, so a stale notification cannot discard the reference to the live popover (see **track-only-the-open-popover**). MUST.
 - **Out-of-range crumb index**: Both `selectCrumb(at:)` and the internal click handler silently ignore an index outside the current crumb range rather than trapping or raising an error (see **ignore-out-of-range-crumb-index**). MUST.
 - **Symbol resolution failure**: If the `chevron.right` system symbol cannot be resolved, the chevron view is given an empty `NSImage()` rather than being left without an image or causing a crash (see **chevron-fallback-image**). MUST.
@@ -141,9 +144,9 @@ approved-date: ''
 |--------|------|---------|-------------|
 | `rootURL` | `URL` | required, set at init | The project root that crumb titles and directories are computed relative to. It is fixed at initialization and cannot be changed afterward. |
 | `fileURL` | `URL?` | `nil` | The file the strip currently describes. Setting it recomputes and rebuilds the crumbs (**rebuild-on-every-file-assignment**); `nil` clears the strip (**clear-strip-when-file-nil**). |
-| `onSelect` | `((URL) -> Void)?` | `nil` | Callback invoked with a directory URL — either the file a popover's user chose, or the crumb's own directory when `selectCrumb(at:)` is called directly. |
+| `onSelect` | `((URL) -> Void)?` | `nil` | Callback invoked with a URL — the file a popover's user chose, or the crumb's own directory when `selectCrumb(at:)` is called directly. |
 | `crumbTitles` | `[String]` (read-only) | `[]` | The crumb labels, root to leaf; empty when there is no file. |
-| `selectCrumb(at:)` | Method | n/a | Reports the directory of the crumb at `index` through `onSelect`, exactly as if that crumb's popover had opened and a listener chosen its own directory; an out-of-range index is ignored. |
+| `selectCrumb(at:)` | Method | n/a | Reports the directory of the crumb at `index` through `onSelect`, exactly as if that crumb's popover had opened and its listener acted on the directory itself; an out-of-range index is ignored. |
 
 ## Deep Linking
 
@@ -155,7 +158,7 @@ Not applicable: the source contains no user-facing string literals for this comp
 
 ## Accessibility Options
 
-Document which accessibility display options (Rule 15) this component responds to:
+Document which accessibility display options this component responds to:
 
 | Option | Behavior |
 |--------|----------|
@@ -193,7 +196,7 @@ Not applicable: no logging call appears anywhere in `BreadcrumbView.swift`.
 ## Design Decisions
 
 - **Decision**: `presentPopover(for:relativeTo:)` unconditionally closes `activePopover` before showing a new popover.
-  **Rationale**: A `.transient` popover closes when the user clicks outside it, but clicking a second crumb is not that click — the button's own click action is delivered first — so without this guard, two popovers listing different directories' siblings could end up open at once.
+  **Rationale**: A `.transient` popover (see **popover-transient**) closes when the user clicks outside it, but clicking a second crumb is not that click — the button's own click action is delivered first — so without this guard, two popovers listing different directories' siblings could end up open at once.
   **Approved**: pending
 
 - **Decision**: `popoverDidClose(_:)` clears `activePopover` only when the closing popover is the one currently tracked as active.
@@ -202,6 +205,10 @@ Not applicable: no logging call appears anywhere in `BreadcrumbView.swift`.
 
 - **Decision**: All crumb-title and crumb-directory computation is pure `URL` path-component arithmetic; `BreadcrumbView` performs no filesystem access itself.
   **Rationale**: Confining filesystem access to `BreadcrumbPopoverViewController`, shown only once a crumb is clicked, keeps the crumb-to-directory mapping testable without touching disk and keeps the strip's own behavior fully predictable from its `rootURL` and `fileURL` inputs alone.
+  **Approved**: pending
+
+- **Decision**: `rebuild()` runs on every `fileURL` assignment, including a reassignment of the same value, rather than skipping the rebuild when the new value equals the old one (see **rebuild-on-every-file-assignment**).
+  **Rationale**: `fileURL`'s `didSet` observer calls `rebuild()` unconditionally, with no equality check. This is the plain, simple behavior of a Swift property observer rather than a deliberate optimization; a port is free to add an equality check to skip redundant rebuilds without breaking any observable contract of this component.
   **Approved**: pending
 
 ## Compliance
@@ -213,12 +220,13 @@ Not applicable: no logging call appears anywhere in `BreadcrumbView.swift`.
 | [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
 | [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | passed | Internationalization |
 | [unicode-support](agenticdevelopercookbook://compliance/internationalization#unicode-support) | passed | Internationalization |
-| [rtl-layout-support](agenticdevelopercookbook://compliance/internationalization#rtl-layout-support) | passed | Internationalization |
+| [rtl-layout-support](agenticdevelopercookbook://compliance/internationalization#rtl-layout-support) | partial | Internationalization |
 
-The accessibility statuses are partial because the source sets only an accessibility identifier per crumb and leaves label, dynamic-text, and contrast behavior to AppKit's own defaults (a plain `NSButton` title and `NSColor.secondaryLabelColor`) rather than defining or verifying them itself, and because no accessibility notification accompanies a strip rebuild (see the Assistive technology marker above). The internationalization statuses are passed because the source has no hardcoded user-facing strings, displays crumb titles through `NSButton`'s native Unicode-capable text handling, and lays out using leading/trailing anchors and `NSStackView`, both of which mirror automatically for right-to-left locales.
+The accessibility statuses are partial because the source sets only an accessibility identifier per crumb and leaves label, dynamic-text, and contrast behavior to AppKit's own defaults (a plain `NSButton` title and `NSColor.secondaryLabelColor`) rather than defining or verifying them itself, and because no accessibility notification accompanies a strip rebuild (see the Assistive technology marker above). The internationalization statuses for hardcoded strings and Unicode support are passed because the source has no hardcoded user-facing strings and displays crumb titles through `NSButton`'s native Unicode-capable text handling. `rtl-layout-support` is partial rather than passed: the strip's own leading/trailing anchors and `NSStackView` layout mirror automatically for right-to-left locales, but the chevron separator is drawn with the `chevron.right` SF Symbol, which does not mirror to point left in RTL — `chevron.forward` is the symbol that does.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: marked rtl-layout-support partial for the non-mirroring chevron.right symbol, made native-keyboard-activation's Tab behavior conditional on Full Keyboard Access, reworded the chevron-fallback-image vector to code inspection since no injection seam exists, added the popover's domain to related, restated single-crumb-outside-root as a component-wise path comparison with a new sibling-path vector, named the exact .defaultLow (250) compression-resistance priority, unified the onSelect payload description across Overview/Configuration/selectCrumb(at:), rewrote vectors that named private internals against observable public behavior, added a popover-transient requirement, downgraded rebuild-on-every-file-assignment to MAY with a supporting Design Decision, and dropped an unlinked "(Rule 15)" citation |
 | 1.0.0 | 2026-09-23 | Claude | Initial creation from source code |

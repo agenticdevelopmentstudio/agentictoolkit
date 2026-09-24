@@ -3,7 +3,7 @@ id: e9c10ff7-4e13-4007-a963-d2a9e4006745
 title: CheckboxView
 domain: agentictoolkit://recipes/checkbox-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -11,8 +11,7 @@ modified: '2026-09-23'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
-summary: A macOS ComposableSettings row pairing a title label with a trailing NSSwitch,
-  mirroring System Settings' boolean-row layout, bound to a Bool view model.
+summary: 'A macOS ComposableSettings row: title label leading, trailing NSSwitch bound to a Bool view model.'
 platforms:
 - swift
 - macos
@@ -23,7 +22,9 @@ tags:
 - macos
 - appkit
 depends-on: []
-related: []
+related:
+- agentictoolkit://recipes/popup-menu-choice-view
+- agentictoolkit://recipes/stepper-view
 references: []
 approved-by: ''
 approved-date: ''
@@ -50,13 +51,13 @@ model's `settingObserver`.
 ## Behavioral Requirements
 
 - **arranges-row-layout**: Component MUST arrange the title label and the
-  toggle in a single horizontal row (`label`, then `toggle`), and MUST pin
-  that row to the edges of the view.
+  toggle in a single horizontal row (`label`, then `toggle`), MUST place the
+  toggle at the row's trailing edge with a flexible spacer absorbing the
+  leftover width between `label` and `toggle`, and MUST pin that row to the
+  edges of the view.
 - **links-toggle-accessibility-title**: Component MUST set the toggle's
   accessibility title UI element to the label
   (`toggle.setAccessibilityTitleUIElement(label)`).
-- **wires-toggle-action**: Component MUST set `toggle.target` to itself and
-  `toggle.action` to its `toggleChanged(_:)` selector.
 - **initializes-from-view-model**: Component MUST, at the end of
   initialization, set the label's text to `viewModel.title` and the toggle's
   state to `.on` when `viewModel.value` is `true` and `.off` when it is
@@ -81,6 +82,16 @@ model's `settingObserver`.
   trigger a fatal error.
 - **confines-to-main-actor**: Component MUST be usable only on the main
   actor; the class is declared `@MainActor`.
+- **claims-sole-onchange-observer**: Component MUST assign its own handler
+  to `viewModel.onChange` during initialization
+  (`viewModel.onChange = { [weak self] _ in self?.update() }`), superseding
+  any handler already registered on that view model instance (see
+  **overwritten external observer** in Edge Cases).
+- **inherits-native-keyboard-focus**: Component MUST NOT override `toggle`'s
+  or `label`'s default `NSControl` focus, tabbing, or key-handling behavior;
+  no `acceptsFirstResponder`, `keyDown`, or focus-ring override appears in
+  source, so keyboard operability follows `NSSwitch`'s native behavior
+  unchanged.
 
 ## Appearance
 
@@ -156,31 +167,36 @@ model's `settingObserver`.
   source); the 44×44pt minimum is iOS/touch guidance, not a macOS
   pointer-interface requirement. `CheckboxView` sets no `controlSize` on
   `toggle`, so it keeps `NSSwitch`'s regular system click-target metrics.
+- **Keyboard operability**: `CheckboxView` sets no `acceptsFirstResponder`,
+  key-handling, or focus-ring override on `toggle` or `label` in source, so
+  `toggle` keeps `NSSwitch`'s inherited `NSControl` tab order and its native
+  Space/Return activation (see **inherits-native-keyboard-focus**).
 
 ## Conformance Test Vectors
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| checkbox-view-001 | arranges-row-layout | Construct `CheckboxView` with any `viewModel` | `label` and `toggle` are both subviews of a single row view that is pinned to the component's edges; no other layout container appears |
+| checkbox-view-001 | arranges-row-layout | Construct `CheckboxView` with any `viewModel` | `label` and `toggle` are both subviews of a single row view that is pinned to the component's edges; a flexible spacer sits between `label` and `toggle`, so `toggle` sits at the row's trailing edge; no other layout container appears |
 | checkbox-view-002 | links-toggle-accessibility-title | Construct `CheckboxView` with any `viewModel` | `toggle`'s accessibility title UI element is `label` |
-| checkbox-view-003 | wires-toggle-action | Any initialized `CheckboxView` | `toggle.target === view`; `toggle.action == Selector("toggleChanged:")` |
-| checkbox-view-004 | initializes-from-view-model | `viewModel.title = "Enable Sync"`, `viewModel.value = true` | After init, `label.stringValue == "Enable Sync"` and `toggle.state == .on` |
-| checkbox-view-005 | initializes-from-view-model | `viewModel.value = false` | After init, `toggle.state == .off` |
-| checkbox-view-006 | commits-toggle-value | `viewModel.settingObserver.value = false`; set `toggle.state = .on` and invoke `toggleChanged(toggle)` | `viewModel.settingObserver.value == true` after the call |
-| checkbox-view-007 | skips-redundant-commits | `viewModel.settingObserver.value = true`; set `toggle.state = .on` (same value) and invoke `toggleChanged(toggle)` | `viewModel.settingObserver.value`'s setter is not invoked a second time (e.g. no additional write/observer notification is recorded) |
-| checkbox-view-008 | syncs-on-external-change | After construction, externally change `viewModel.title` and `viewModel.value`, then invoke `viewModel.onChange(newValue)` | `label.stringValue` and `toggle.state` both update to reflect the new `viewModel` state |
-| checkbox-view-009 | exposes-constituent-views | Construct the component, then access `.label` and `.toggle` from outside the type | Both properties are accessible and return the same `NSTextField`/`NSSwitch` instances built during init |
-| checkbox-view-010 | requires-designated-initializer | Attempt `CheckboxView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
-| checkbox-view-011 | rejects-frame-only-initialization | Attempt `CheckboxView(frame: .zero)` | The call traps with a fatal error; no instance is returned |
-| checkbox-view-012 | confines-to-main-actor | Attempt to construct or mutate a `CheckboxView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
+| checkbox-view-003 | initializes-from-view-model | `viewModel.title = "Enable Sync"`, `viewModel.value = true` | After init, `label.stringValue == "Enable Sync"` and `toggle.state == .on` |
+| checkbox-view-004 | initializes-from-view-model | `viewModel.value = false` | After init, `toggle.state == .off` |
+| checkbox-view-005 | commits-toggle-value | `viewModel.settingObserver.value = false`; set `toggle.state = .on` and invoke `toggleChanged(toggle)` | `viewModel.settingObserver.value == true` after the call |
+| checkbox-view-006 | skips-redundant-commits | Wrap `viewModel.settingObserver.value`'s setter with a spy; set `viewModel.settingObserver.value = true`, then set `toggle.state = .on` (same value) and invoke `toggleChanged(toggle)` | The spy records zero calls: `viewModel.settingObserver.value`'s setter is not invoked, and `viewModel.settingObserver.value` remains `true` |
+| checkbox-view-007 | syncs-on-external-change | After construction, externally change `viewModel.title` and `viewModel.value`, then invoke `viewModel.onChange(newValue)` | `label.stringValue` and `toggle.state` both update to reflect the new `viewModel` state |
+| checkbox-view-008 | exposes-constituent-views | Construct the component, then access `.label` and `.toggle` from outside the type | Both properties are accessible and return the same `NSTextField`/`NSSwitch` instances built during init |
+| checkbox-view-009 | requires-designated-initializer | Attempt `CheckboxView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
+| checkbox-view-010 | rejects-frame-only-initialization | Attempt `CheckboxView(frame: .zero)` | The call traps with a fatal error; no instance is returned |
+| checkbox-view-011 | confines-to-main-actor | Attempt to construct or mutate a `CheckboxView` from off the main actor | Compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |
+| checkbox-view-012 | claims-sole-onchange-observer | Register an observer closure on `viewModel.onChange`, then construct a `CheckboxView` against that same `viewModel` | `viewModel.onChange` now points at `CheckboxView`'s own handler; invoking it no longer calls the previously registered closure |
+| checkbox-view-013 | inherits-native-keyboard-focus | Construct `CheckboxView` in a running app, tab focus to `toggle`, then press Space | `toggle` receives keyboard focus in the window's tab order and its state flips on Space, per `NSSwitch`'s native `NSControl` behavior (unmodified by source) |
 
 ## Edge Cases
 
 - Null/empty input: `viewModel` (`ComposableSettings.ViewModel<Bool>`) is a
-  non-optional, typed constructor parameter; Swift's type system rules out
-  `nil`. `viewModel.title` as an empty string produces a label with an
-  empty string and no crash. This is a MUST: the component provides, and
-  needs, no nil-handling path for its one initializer parameter.
+  non-optional, typed constructor parameter, so Swift's type system rules
+  out `nil` entirely; the component needs no nil-handling path for its one
+  initializer parameter. `viewModel.title` as an empty string produces a
+  label with an empty string and no crash.
 - Boundary values: Not applicable — the bound value is `Bool`, a two-value
   type with no minimum/maximum or intermediate range to bound.
 - Concurrent access: Not applicable — the class is declared `@MainActor`,
@@ -196,19 +212,16 @@ model's `settingObserver`.
 - Overwritten external observer: `viewModel.onChange` is a single closure
   property. `CheckboxView`'s initializer unconditionally assigns
   `viewModel.onChange = { [weak self] _ in self?.update() }`, replacing
-  whatever handler (if any) was previously registered on that `viewModel`.
-  This is a MUST-level, source-traceable consequence of plain
-  closure-property assignment: the component MUST NOT be assumed to
-  coexist with another `onChange` observer already registered on the same
-  view model instance — constructing a second `CheckboxView` (or any other
-  observer) against the same view model silently drops the earlier
-  handler.
+  whatever handler (if any) was previously registered on that `viewModel`
+  (see **claims-sole-onchange-observer**). Constructing a second
+  `CheckboxView` (or any other observer) against the same view model
+  silently drops the earlier handler.
 
 ## Configuration
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `viewModel` | `ComposableSettings.ViewModel<Bool>` | — (required) | Supplies the row's title and current boolean value; receives committed toggle changes via `settingObserver.value`. The initializer also overwrites this view model's `onChange` closure with the component's own `update` handler (see Edge Cases). `viewModel.explanation` (inherited from `AbstractViewModel`) is accepted but never read or displayed by `CheckboxView` — see Design Decisions. |
+| `viewModel` | `ComposableSettings.ViewModel<Bool>` | — (required) | Supplies the row's title and current boolean value; receives committed toggle changes via `settingObserver.value`. The initializer also overwrites this view model's `onChange` closure with the component's own `update` handler (see **claims-sole-onchange-observer**). `viewModel.explanation` (inherited from `AbstractViewModel`) is accepted by the initializer chain but never read or rendered anywhere in `CheckboxView.swift`. |
 
 ## Deep Linking
 
@@ -227,7 +240,7 @@ caller provides, so there is nothing for this component to localize itself.
 | Option | Behavior |
 |--------|----------|
 | Reduce Motion | Not applicable: source contains no animation, transition, or `NSAnimationContext` call; every state change is an instantaneous property assignment (`label.stringValue`, `toggle.state`). |
-| Increase Contrast | Not applicable: `CheckboxView.swift` sets no custom `NSColor` of its own on `toggle`; the label's color comes from the theme's `.primaryText` role, and `NSSwitch`'s track/thumb colors follow AppKit's default rendering, which tracks the system's Increase Contrast setting automatically. |
+| Increase Contrast | Not verified for the label: `CheckboxView.swift` sets no custom `NSColor` of its own on `toggle`, and the label's color comes from the theme's `.primaryText` role via `SemanticPalette.derive`, but nothing in this source, or in the theme code searched, shows that role responding to the system Increase Contrast setting. `NSSwitch`'s own track/thumb colors are unmodified system rendering, which does track Increase Contrast automatically. |
 | Differentiate Without Color | Not applicable: the on/off state is communicated through `NSSwitch`'s own track position and system iconography, not through a color-only signal introduced by this component. |
 
 ## Feature Flags
@@ -289,7 +302,9 @@ Not applicable: `CheckboxView.swift` contains no logging call (no `print`,
   composes two subviews — an `NSTextField` label from
   `ComposableSettings.makeRowLabel` and an `NSSwitch` — into one row via
   `ComposableSettings.makeRow` and `pinToEdges`, links the switch's
-  accessibility title to the label, and wires the switch's target/action to
+  accessibility title to the label, and wires the switch's target/action
+  (`toggle.target = self`, `toggle.action = #selector(toggleChanged(_:))`) —
+  the AppKit plumbing behind **commits-toggle-value** — to
   `toggleChanged(_:)`. There is no UIKit code path in source; a UIKit port
   would replace `NSSwitch` with `UISwitch` and the `target`/`action`
   pattern with `.addTarget(_:action:for: .valueChanged)` — UIKit has no
@@ -334,14 +349,6 @@ Not applicable: `CheckboxView.swift` contains no logging call (no `print`,
   name, so VoiceOver would announce it as an unlabelled control; the
   visible label is its title element."
   Approved: pending
-- Decision: `ComposableSettings.ViewModel<Bool>`'s inherited
-  `AbstractViewModel.explanation` property is accepted by the initializer
-  chain but never read or rendered anywhere in `CheckboxView.swift`.
-  Rationale: `update()` sets `label.stringValue` from `viewModel.title`
-  only; documenting this here, rather than omitting it, keeps the recipe
-  faithful to what the source actually renders versus what the view model
-  type happens to carry.
-  Approved: pending
 - Decision: Force a fatal error from both `init(coder:)` and the
   frame-only `init(frame:)`, leaving `init(with:)` as the only usable
   initializer.
@@ -350,6 +357,26 @@ Not applicable: `CheckboxView.swift` contains no logging call (no `print`,
   initializers that could construct it without one are intentionally
   disabled rather than left to produce a half-configured row.
   Approved: pending
+- **Decision**: Keep the public type name `CheckboxView` even though it
+  draws an `NSSwitch`, not a checkbox.
+  **Rationale**: The type is `SettingsViewProtocol`-conforming API surface
+  read by callers across `ComposableSettingsWindow`; renaming it (e.g. to
+  `SwitchRowView`) is a breaking rename with no behavioral upside, while the
+  file's own doc comments already correct the mismatch at the
+  `toggle`-vs-`checkbox` property level (see the `toggle` naming decision
+  above) — VoiceOver, callers, and tests all read `toggle`, not the type
+  name, so the outer name causes no runtime confusion today.
+  **Approved**: pending
+- **Decision**: Unconditionally overwrite `viewModel.onChange` with the
+  component's own handler during initialization, rather than chaining it
+  after any previously registered handler.
+  **Rationale**: `ComposableSettings.ViewModel<Bool>`'s `onChange` is a
+  single closure property with no built-in multicast support; chaining
+  would require a broader change to the shared view-model type, which is
+  out of scope for this row view. The source accepts the tradeoff that one
+  `CheckboxView` (or other observer) per view model instance is the
+  supported usage (see **claims-sole-onchange-observer**).
+  **Approved**: pending
 
 ## Compliance
 
@@ -359,10 +386,22 @@ Not applicable: `CheckboxView.swift` contains no logging call (no `print`,
 | [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
 | [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | accessibility |
-| [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | reliability |
+| [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | partial | reliability |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
+
+`keyboard-navigable` and `screen-reader-support` rest on `toggle` being an
+unmodified `NSSwitch`/`NSControl` with `setAccessibilityTitleUIElement` set
+(no focus, key-handling, or accessibility-role override anywhere in
+source — see **inherits-native-keyboard-focus** and
+**links-toggle-accessibility-title**); `idempotent-operations` is `partial`
+because repeated commits of the same toggle value are a no-op
+(**skips-redundant-commits**), but constructing a second observer against
+the same `viewModel` is not idempotent — it silently overwrites the prior
+`onChange` handler (**claims-sole-onchange-observer**).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: shorten summary; add related sibling recipes; split target/action wiring into Platform Notes and add trailing-edge/spacer detail to arranges-row-layout; add claims-sole-onchange-observer and inherits-native-keyboard-focus requirements with test vectors; move normative language out of Edge Cases; mark Increase Contrast label color as not verified; drop the non-decision explanation entry from Design Decisions; downgrade idempotent-operations to partial and add compliance evidence sentence; backfill initial Change History row |
