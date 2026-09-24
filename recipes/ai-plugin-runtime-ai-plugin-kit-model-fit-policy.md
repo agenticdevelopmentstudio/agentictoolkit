@@ -3,11 +3,11 @@ id: 5069f11f-e0c6-40c3-92ca-6152b8df3bc2
 title: ModelFitPolicy
 domain: agentictoolkit://recipes/ai-plugin-runtime-ai-plugin-kit-model-fit-policy
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -409,10 +409,17 @@ values of `ModelFitPolicy`'s functions — are exactly the ones marked
 
 ## Compliance
 
-Not applicable: no automated compliance check exists yet for this component
-in the cookbook's check registry.
+| Check | Status | Category |
+|-------|--------|----------|
+| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
+| [unit-test-coverage](agenticdevelopercookbook://compliance/best-practices#unit-test-coverage) | passed | Best Practices |
+| [test-pyramid](agenticdevelopercookbook://compliance/best-practices#test-pyramid) | passed | Best Practices |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+
+Notes: separation-of-concerns passes because the policy is kept at toolkit level specifically so enforcement (`LocalInferenceGuard`) and presentation (`ModelChooserContent`/`ModelChooserViewController`) each consume the same pure computation rather than each reimplementing it, per the Overview's "so every `AIPluginKit` host shares one representation... and the two cannot drift." unit-test-coverage passes because `ModelFitPolicyTests.swift` covers tier boundaries, verdict precedence, and every `fitInfo`/`pickerLabel` text format across 20 vectors. test-pyramid passes because `ModelFitPolicyTests.swift` tests the pure functions entirely at the unit level, with no integration or UI layer needed for a case-less policy enum. no-hardcoded-strings fails because every string `ModelFitPolicy` produces — `gbString`, `footprintDescription`, `fitInfo.text`, `pickerLabel`, and `verdict`'s reasons — is a hardcoded English literal composed inline with no localization key, and that text is shown verbatim by the macOS model picker.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Compliance section rewritten as linked checks against the compliance catalog |

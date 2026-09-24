@@ -3,11 +3,11 @@ id: 2067e249-4f97-4575-b8ed-8f55f6dc96df
 title: AIStreamEvent
 domain: agentictoolkit://recipes/ai-plugin-runtime-ai-plugin-kit-ai-stream-event
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -169,9 +169,17 @@ Not applicable: `AIStreamEvent.swift` contains no logging call; it is a pure dat
 
 ## Compliance
 
-Not applicable: no automated compliance check exists yet for this component in the cookbook's check registry.
+| Check | Status | Category |
+|-------|--------|----------|
+| [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
+| [unit-test-coverage](agenticdevelopercookbook://compliance/best-practices#unit-test-coverage) | passed | Best Practices |
+| [explicit-error-handling](agenticdevelopercookbook://compliance/best-practices#explicit-error-handling) | failed | Best Practices |
+| [fault-tolerance](agenticdevelopercookbook://compliance/reliability#fault-tolerance) | partial | Reliability |
+
+Notes: separation-of-concerns passes because the event enum (`AIStreamEvent`) is kept separate from the decoding protocol (`AIStreamDecoder`), and decoding itself is kept separate from the host's transport and framing — `PluginTransport` supplies the bytes, this file only turns bytes already in hand into typed events. unit-test-coverage passes because `PluginDecoderTests.swift`, `PluginTransportTests.swift`, and `PluginTransportFramingTests.swift` exercise every shipped decoder and the framing contract directly. explicit-error-handling fails because a malformed or unparseable frame is silently swallowed as `[]` from `consume(_:)`/`finish()` with no distinct signal reaching the host, per the open question on decode-failure-signal. fault-tolerance is partial because `consume(_:)` and `finish()` never throw or crash on unexpected byte input — every shipped decoder falls back to returning no event — but a permanently malformed frame stays indistinguishable from one that is merely incomplete, the same gap covered by the open question on decode-failure-signal.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Compliance section rewritten as linked checks against the compliance catalog |
