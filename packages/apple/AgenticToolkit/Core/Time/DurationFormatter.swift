@@ -41,4 +41,71 @@ public enum DurationFormatter {
         let total = max(0, seconds)
         return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
     }
+
+    /// A typed duration, in seconds, or nil if the text is not one.
+    ///
+    /// Accepts decimal hours (`"1.5"`, `"0.25"`, `".5"`, `"1,5"`), a clock
+    /// (`"1:30"`, minutes always two digits), and units (`"1h 30m"`, `"2h"`,
+    /// `"90m"`). Negative numbers and anything else answer nil. Whether a
+    /// duration is *allowed* (not zero, not over a day) is the caller's call.
+    ///
+    /// Integer arithmetic throughout, as everywhere billing touches time: a
+    /// fraction of an hour becomes seconds by `(digits × 3600) / 10ⁿ`, rounded
+    /// half-up, never through a `Double`.
+    public static func seconds(parsing text: String) -> Int? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !trimmed.isEmpty else { return nil }
+        if let colon = trimmed.firstIndex(of: ":") {
+            let minutesText = trimmed[trimmed.index(after: colon)...]
+            guard let hours = digits(trimmed[..<colon]), minutesText.count == 2,
+                  let minutes = digits(minutesText), minutes < 60 else { return nil }
+            return hours * 3600 + minutes * 60
+        }
+        if trimmed.contains("h") || trimmed.contains("m") {
+            return unitSeconds(trimmed)
+        }
+        return decimalHourSeconds(trimmed)
+    }
+
+    /// Plain ASCII digits, at most six of them. Six keeps every product below
+    /// in range and is already more hours than anyone bills.
+    private static func digits(_ text: Substring) -> Int? {
+        guard !text.isEmpty, text.count <= 6,
+              text.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        return Int(text)
+    }
+
+    /// `"1h 30m"`, `"1h30m"`, `"2h"`, `"90m"`.
+    private static func unitSeconds(_ text: String) -> Int? {
+        let compact = Substring(text.filter { $0 != " " })
+        var hours = 0
+        var rest = compact
+        if let hourMark = compact.firstIndex(of: "h") {
+            guard let value = digits(compact[..<hourMark]) else { return nil }
+            hours = value
+            rest = compact[compact.index(after: hourMark)...]
+        }
+        var minutes = 0
+        if !rest.isEmpty {
+            guard rest.last == "m", let value = digits(rest.dropLast()) else { return nil }
+            minutes = value
+        }
+        return hours * 3600 + minutes * 60
+    }
+
+    /// `"1.5"`, `".5"`, `"2"`, `"1,5"`.
+    private static func decimalHourSeconds(_ text: String) -> Int? {
+        let parts = text.replacingOccurrences(of: ",", with: ".")
+            .split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count <= 2 else { return nil }
+        let wholeText = parts[0]
+        let fractionText = parts.count == 2 ? parts[1] : Substring("")
+        guard !(wholeText.isEmpty && fractionText.isEmpty) else { return nil }
+        guard let whole = wholeText.isEmpty ? 0 : digits(wholeText) else { return nil }
+        guard !fractionText.isEmpty else { return whole * 3600 }
+        guard let fraction = digits(fractionText) else { return nil }
+        var scale = 1
+        for _ in 0..<fractionText.count { scale *= 10 }
+        return whole * 3600 + (fraction * 3600 * 2 + scale) / (2 * scale)
+    }
 }

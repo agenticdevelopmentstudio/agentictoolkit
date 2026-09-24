@@ -39,6 +39,14 @@ extension ComposableSettings {
             set { removeButton.isEnabled = newValue }
         }
 
+        /// Puts a control after `+`/`−` and before `trailingView`: a status
+        /// button, a filter. Accessories stay in the order they were added.
+        public func addAccessoryView(_ view: NSView) {
+            let index = trailingView.flatMap { stack.arrangedSubviews.firstIndex(of: $0) }
+                ?? stack.arrangedSubviews.count
+            stack.insertArrangedSubview(view, at: index)
+        }
+
         private let stack = NSStackView()
 
         /// - Parameter accessibilityPrefix: `"<prefix>.add"` and

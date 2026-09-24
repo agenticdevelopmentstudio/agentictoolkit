@@ -111,6 +111,22 @@ extension ComposableSettings {
         public var onToggle: ((_ rowID: String, _ columnID: String, _ isOn: Bool) -> Void)?
         public var onSort: ((_ columnID: String, _ ascending: Bool) -> Void)?
 
+        /// Asked whether the selected row may be removed; `−` is disabled when
+        /// it answers false. Nil allows every row. A billed entry answers
+        /// false: a button that looks live and then refuses teaches nothing.
+        public var canRemoveRow: ((_ rowID: String) -> Bool)? {
+            didSet { updateButtons() }
+        }
+
+        /// False hides `+` and `−`, for a table that only reports (a history,
+        /// a log). Buttons added with `addFooterButton` stay.
+        public var showsAddRemove = true {
+            didSet {
+                footer.addButton.isHidden = !showsAddRemove
+                footer.removeButton.isHidden = !showsAddRemove
+            }
+        }
+
         // MARK: State
 
         public private(set) var rows: [EditableTableRow] = []
@@ -133,6 +149,7 @@ extension ComposableSettings {
         private var isEditingField = false
         private var pendingRows: [EditableTableRow]?
         private var lastReportedSelection: String??
+        private var footerActions: [ObjectIdentifier: () -> Void] = [:]
 
         private static let cellIdentifier = NSUserInterfaceItemIdentifier("editable-table-cell")
 
@@ -201,6 +218,25 @@ extension ComposableSettings {
             onEdit?(rows[rowIndex].id, columnID, newValue)
         }
 
+        /// A push button in the footer, after `+`/`−`. The owner decides when
+        /// it is enabled. The card only places it and reports the click.
+        @discardableResult
+        public func addFooterButton(
+            title: String, identifier: String, action: @escaping () -> Void
+        ) -> NSButton {
+            let button = NSButton(title: title, target: self, action: #selector(footerButtonPressed(_:)))
+            button.bezelStyle = .push
+            button.controlSize = .small
+            _ = button.accessibilityID(identifier)
+            footerActions[ObjectIdentifier(button)] = action
+            footer.addAccessoryView(button)
+            return button
+        }
+
+        @objc private func footerButtonPressed(_ sender: NSButton) {
+            footerActions[ObjectIdentifier(sender)]?()
+        }
+
         // MARK: - Test seams
 
         /// The two halves of "a field is being edited", without a field editor.
@@ -266,7 +302,11 @@ extension ComposableSettings {
         }
 
         private func updateButtons() {
-            footer.isRemoveEnabled = selectedRowID != nil
+            guard let selected = selectedRowID else {
+                footer.isRemoveEnabled = false
+                return
+            }
+            footer.isRemoveEnabled = canRemoveRow?(selected) ?? true
         }
 
         @objc fileprivate func togglePressed(_ sender: NSButton) {

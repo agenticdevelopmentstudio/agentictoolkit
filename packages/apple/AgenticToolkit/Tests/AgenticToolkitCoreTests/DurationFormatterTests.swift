@@ -42,4 +42,34 @@ final class DurationFormatterTests: XCTestCase {
         XCTAssertEqual(DurationFormatter.decimalHours(seconds: -1), "0.00")
         XCTAssertEqual(DurationFormatter.clock(seconds: -1), "0:00:00")
     }
+
+    /// The forms people type into an hours cell.
+    func testSecondsParsingAcceptsTheCommonForms() {
+        XCTAssertEqual(DurationFormatter.seconds(parsing: "1.5"), 5400)
+        XCTAssertEqual(DurationFormatter.seconds(parsing: "0.25"), 900)
+        XCTAssertEqual(DurationFormatter.seconds(parsing: ".5"), 1800)
+        XCTAssertEqual(DurationFormatter.seconds(parsing: "2"), 7200)
+        XCTAssertEqual(DurationFormatter.seconds(parsing: "1,5"), 5400, "a comma is a decimal point in most of Europe")
+        XCTAssertEqual(DurationFormatter.seconds(parsing: "1:30"), 5400)
+        XCTAssertEqual(DurationFormatter.seconds(parsing: "1h 30m"), 5400)
+        XCTAssertEqual(DurationFormatter.seconds(parsing: "1h30m"), 5400)
+        XCTAssertEqual(DurationFormatter.seconds(parsing: "2h"), 7200)
+        XCTAssertEqual(DurationFormatter.seconds(parsing: "90m"), 5400)
+        XCTAssertEqual(DurationFormatter.seconds(parsing: " 45M "), 2700)
+        XCTAssertEqual(DurationFormatter.seconds(parsing: "0"), 0)
+    }
+
+    /// Fractions of an hour round half-up to the second, in integers.
+    func testSecondsParsingRoundsFractionsHalfUp() {
+        // 0.333 h = 1198.8 s → 1199.
+        XCTAssertEqual(DurationFormatter.seconds(parsing: "0.333"), 1199)
+        // 0.1 h is exactly 360 s.
+        XCTAssertEqual(DurationFormatter.seconds(parsing: "0.1"), 360)
+    }
+
+    func testSecondsParsingRefusesWhatIsNotADuration() {
+        for text in ["", "  ", "-1", "abc", "1.2.3", ".", "h", "m", "1:5", "1:75", "1m30", "1.5h", "1234567"] {
+            XCTAssertNil(DurationFormatter.seconds(parsing: text), "\(text.debugDescription) is not a duration")
+        }
+    }
 }
