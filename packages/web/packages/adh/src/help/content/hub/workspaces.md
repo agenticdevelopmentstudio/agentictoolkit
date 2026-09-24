@@ -17,7 +17,7 @@ accounts and their own level of reach.
 - **Settings** — appearance, account, security, subscription, your public
   profile, and notifications, plus the organization's own name and description.
 - **API tokens** — mint, list, and revoke tokens that reach your data. Each one
-  gets its own default bucket.
+  can reach the workspace's storage buckets.
 
 ## What you use it with
 

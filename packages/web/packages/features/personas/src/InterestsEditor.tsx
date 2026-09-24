@@ -145,13 +145,12 @@ const SLUG_MESSAGE = /^slug:/i;
 
 /** The unique-violation 409 — generic CRUD answers a duplicate row with "resource already exists"
  *  and a duplicate rdid with "id already exists" (`crud/factory.ts`), the same "already exists"
- *  text `rethrowConflict` keys on elsewhere in this codebase. Matched POSITIVELY, so the two
- *  PROVISIONING 409s the pre-create hook also throws ("… has no default bucket …",
- *  "cannot resolve a corpus ecosystem …") fall through to their own text instead of being
- *  narrated as a name clash — an owner with an un-provisioned storage tree saving their FIRST
- *  interest was previously told they already had one by that name. Positive rather than negative
- *  matching on purpose: a fourth 409 added later falls through to the backend's words, which is
- *  merely unpolished, instead of inheriting a confident falsehood. */
+ *  text `rethrowConflict` keys on elsewhere in this codebase. Matched POSITIVELY, so the
+ *  PROVISIONING 409 the pre-create hook also throws ("cannot resolve a corpus ecosystem …") falls
+ *  through to its own text instead of being narrated as a name clash — an owner saving their FIRST
+ *  interest under a unique name was once told they already had one by that name. Positive rather
+ *  than negative matching on purpose: another 409 added later falls through to the backend's
+ *  words, which is merely unpolished, instead of inheriting a confident falsehood. */
 const DUPLICATE_MESSAGE = /already exists/i;
 
 /** The one save-blocking rule this editor can check BEFORE the request, in one place: it is both

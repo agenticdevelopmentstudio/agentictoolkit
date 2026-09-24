@@ -174,8 +174,8 @@ describe("SchemasPane — the bucket layout", () => {
     expect(within(dialog).getByRole("button", { name: /^Delete Bucket$/ })).toBeInTheDocument();
   });
 
-  it("the built-in default bucket offers no Delete", async () => {
-    schemasApi.list.mockResolvedValue([{ ...BUCKET, kind: "default" }]);
+  it("a built-in bucket offers no Delete", async () => {
+    schemasApi.list.mockResolvedValue([{ ...BUCKET, kind: "system" }]);
     const dialog = await openSettings();
     expect(within(dialog).queryByRole("button", { name: /Danger Zone/ })).toBeNull();
   });
@@ -228,12 +228,6 @@ describe("SchemasPane — the bucket layout", () => {
     save();
     await waitFor(() => expect(schemasApi.update).toHaveBeenCalled());
     expect(schemasApi.update).toHaveBeenCalledWith(BUCKET.id, expect.objectContaining({ slug: "customers" }));
-  });
-
-  it("the built-in default bucket's slug is not editable", async () => {
-    schemasApi.list.mockResolvedValue([{ ...BUCKET, kind: "default" }]);
-    const dialog = await openSettings();
-    expect(within(dialog).getByLabelText("Slug")).toBeDisabled();
   });
 
   it("New bucket: the slug follows the name until it is edited, and is sent on create", async () => {

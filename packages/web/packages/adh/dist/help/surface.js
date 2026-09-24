@@ -724,7 +724,7 @@ an invitation that was sent in error.</li>
 <li><strong>Settings</strong> \u2014 appearance, account, security, subscription, your public
 profile, and notifications, plus the organization's own name and description.</li>
 <li><strong>API tokens</strong> \u2014 mint, list, and revoke tokens that reach your data. Each one
-gets its own default bucket.</li>
+can reach the workspace's storage buckets.</li>
 </ul>
 <h2 id="what-you-use-it-with"><a href="#what-you-use-it-with">What you use it with</a></h2>
 <p><strong>A workspace plus <a href="/hub/workspaces">members</a> is what makes a persona

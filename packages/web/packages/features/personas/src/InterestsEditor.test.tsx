@@ -219,20 +219,6 @@ describe("InterestsEditor", () => {
     await attempt();
     expect(await screen.findByText(/already has an interest by that name/i)).toBeInTheDocument();
     unmount();
-
-    // The provisioning 409s the Task 6 C1 fix added to the SAME hook: an owner whose realm has no
-    // default bucket, saving their FIRST interest under a unique name, was told they already had
-    // one by that name. Fall through to the backend's own text instead of a confident falsehood.
-    create.mockRejectedValue(
-      Object.assign(
-        new Error("ecosystem eco-1 has no default bucket — cannot provision an interest corpus"),
-        { status: 409 },
-      ),
-    );
-    render(<InterestsEditor personaId="persona.acme.bitbag" />);
-    await attempt();
-    expect(await screen.findByText(/no default bucket/i)).toBeInTheDocument();
-    expect(screen.queryByText(/already has an interest by that name/i)).not.toBeInTheDocument();
   });
 
   it("does not call the other provisioning 409 a duplicate either", async () => {

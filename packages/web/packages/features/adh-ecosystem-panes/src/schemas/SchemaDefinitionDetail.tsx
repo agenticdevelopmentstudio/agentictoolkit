@@ -46,19 +46,16 @@ export function withName(draft: SchemaDefinitionInput, name: string): SchemaDefi
 /**
  * The Slug box — the bucket's rdid leaf behind its fixed `storage.<eco path>.` prefix
  * ("buckets need unique slugs and rdids" (Mike, 2026-09-24)). Shared by the create modal and Settings so the two cannot disagree on
- * what a slug is. `readOnly` is for the built-in default bucket, whose address is elided and
- * whose slug is the backend's to keep.
+ * what a slug is.
  */
 export function BucketSlugField({
   draft,
   onChange,
   prefix,
-  readOnly,
 }: {
   draft: SchemaDefinitionInput;
   onChange: (next: SchemaDefinitionInput) => void;
   prefix: string;
-  readOnly?: boolean;
 }) {
   return (
     <RdidEditor
@@ -66,7 +63,6 @@ export function BucketSlugField({
       prefix={prefix}
       value={draft.slug}
       placeholder="profile-basics"
-      disabled={readOnly}
       hint="Unique among this ecosystem's buckets. Changing it changes the bucket's id."
       error={draft.slug ? validateLeaf(draft.slug) : null}
       onChange={(slug) => onChange({ ...draft, slug })}
@@ -146,8 +142,8 @@ export function SchemaDefinitionDetail({
   ecosystemRdid?: string;
   /** The host's Transfer Ownership section; omitted ⇒ the bucket offers no transfer. */
   renderTransfer?: RenderTransferSection;
-  /** Deletes the bucket; omitted for the built-in `default` bucket, which the backend refuses to
-   *  delete — so it gets no Delete button rather than one that always fails. */
+  /** Deletes the bucket; omitted for a built-in (non-`custom`) bucket, which the backend refuses
+   *  to delete — so it gets no Delete button rather than one that always fails. */
   onDelete?: () => Promise<void>;
 }) {
   return (
@@ -167,7 +163,6 @@ export function SchemaDefinitionDetail({
               draft={draft}
               onChange={onChange}
               prefix={bucketSlugPrefix(schema?.id, ecosystemRdid)}
-              readOnly={schema?.kind === "default"}
             />
 
             {schema && (

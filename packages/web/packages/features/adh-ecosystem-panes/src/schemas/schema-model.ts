@@ -50,8 +50,8 @@ export interface SchemaDefinition {
   description: string;
   tables: SchemaTable[];
   ecosystemId: string;
-  /** `default` = the auto-seeded "all available tables" bucket every ecosystem gets (undeletable —
-   *  the backend 409s a non-custom delete); `custom` = a developer-created bucket. */
+  /** `custom` = an ordinary bucket, deletable; anything else is built in and the backend 409s its
+   *  delete. */
   kind: string;
   createdAt: string;
   updatedAt: string;

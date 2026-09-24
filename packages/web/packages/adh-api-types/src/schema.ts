@@ -1207,7 +1207,7 @@ export interface paths {
         put?: never;
         /**
          * Mint an API token for the application (raw value shown once)
-         * @description The application must belong to the caller’s ecosystem (404 otherwise). Minting also grants the app CRUD on its ecosystem’s default bucket so the token works immediately.
+         * @description The application must belong to the caller’s ecosystem (404 otherwise). Minting also grants the app CRUD on every storage bucket a feature provisioned in its ecosystem, so the token works immediately.
          */
         post: {
             parameters: {
@@ -18007,7 +18007,7 @@ export interface paths {
         put?: never;
         /**
          * Provision features onto the ecosystem
-         * @description Creates whatever each feature needs — the default bucket, the system roles, the ecosystem’s Project — in ONE transaction, so a partial failure rolls back whole. A key that is already active is a no-op, not a conflict. Returns the ecosystem’s full feature list afterwards. 422 when the ecosystem has no workspace principal behind it and a requested feature needs one.
+         * @description Creates whatever each feature needs — the storage buckets, the system roles, the ecosystem’s Project — in ONE transaction, so a partial failure rolls back whole. A key that is already active is a no-op, not a conflict. Returns the ecosystem’s full feature list afterwards. 422 when the ecosystem has no workspace principal behind it and a requested feature needs one.
          */
         post: {
             parameters: {
@@ -46897,7 +46897,6 @@ export interface paths {
                         metadata?: ((string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[]) | null;
-                        syncTxid?: number;
                         id?: string;
                     };
                 };
@@ -47044,7 +47043,6 @@ export interface paths {
                         metadata?: ((string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[]) | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -47177,6 +47175,7 @@ export interface paths {
                             ecosystemId: string;
                             parentId: string | null;
                             name: string;
+                            slug: string;
                             description: string;
                             kind: string;
                             metadata: ((string | number | boolean | null) | {
@@ -47217,12 +47216,12 @@ export interface paths {
                         ecosystemId?: string;
                         parentId?: string | null;
                         name: string;
+                        slug: string;
                         description?: string;
                         kind?: string;
                         metadata?: ((string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[]) | null;
-                        syncTxid?: number;
                         id?: string;
                     };
                 };
@@ -47239,6 +47238,7 @@ export interface paths {
                             ecosystemId: string;
                             parentId: string | null;
                             name: string;
+                            slug: string;
                             description: string;
                             kind: string;
                             metadata: ((string | number | boolean | null) | {
@@ -47311,6 +47311,7 @@ export interface paths {
                             ecosystemId: string;
                             parentId: string | null;
                             name: string;
+                            slug: string;
                             description: string;
                             kind: string;
                             metadata: ((string | number | boolean | null) | {
@@ -47361,12 +47362,12 @@ export interface paths {
                         ecosystemId?: string;
                         parentId?: string | null;
                         name?: string;
+                        slug?: string;
                         description?: string;
                         kind?: string;
                         metadata?: ((string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[]) | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -47382,6 +47383,7 @@ export interface paths {
                             ecosystemId: string;
                             parentId: string | null;
                             name: string;
+                            slug: string;
                             description: string;
                             kind: string;
                             metadata: ((string | number | boolean | null) | {
@@ -47563,7 +47565,6 @@ export interface paths {
                         region?: string;
                         postalCode?: string;
                         country?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -47738,7 +47739,6 @@ export interface paths {
                         region?: string;
                         postalCode?: string;
                         country?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -47936,7 +47936,6 @@ export interface paths {
                         color?: string;
                         icon?: string;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -48075,7 +48074,6 @@ export interface paths {
                         color?: string;
                         icon?: string;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -48244,7 +48242,6 @@ export interface paths {
                         parentId: string;
                         childId: string;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -48377,7 +48374,6 @@ export interface paths {
                         parentId?: string;
                         childId?: string;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -48546,7 +48542,6 @@ export interface paths {
                         targetKind: string;
                         targetId: string;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -48682,7 +48677,6 @@ export interface paths {
                         targetKind?: string;
                         targetId?: string;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -48860,7 +48854,6 @@ export interface paths {
                         email?: string;
                         phone?: string;
                         notes?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -49008,7 +49001,6 @@ export interface paths {
                         email?: string;
                         phone?: string;
                         notes?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -49178,7 +49170,6 @@ export interface paths {
                         ecosystemId?: string;
                         name: string;
                         value: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -49308,7 +49299,6 @@ export interface paths {
                         ecosystemId?: string;
                         name?: string;
                         value?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -49482,7 +49472,6 @@ export interface paths {
                         recurrence?: string;
                         contactId?: string | null;
                         notes?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -49627,7 +49616,6 @@ export interface paths {
                         recurrence?: string;
                         contactId?: string | null;
                         notes?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -49800,7 +49788,6 @@ export interface paths {
                         payload: (string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[];
-                        syncTxid?: number;
                     };
                 };
             };
@@ -49936,7 +49923,6 @@ export interface paths {
                         payload?: (string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[];
-                        syncTxid?: number;
                     };
                 };
             };
@@ -50118,7 +50104,6 @@ export interface paths {
                         deviceInfo?: string;
                         status?: string;
                         adminNotes?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -50272,7 +50257,6 @@ export interface paths {
                         deviceInfo?: string;
                         status?: string;
                         adminNotes?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -50448,7 +50432,6 @@ export interface paths {
                         value: (string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[];
-                        syncTxid?: number;
                     };
                 };
             };
@@ -50584,7 +50567,6 @@ export interface paths {
                         value?: (string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[];
-                        syncTxid?: number;
                     };
                 };
             };
@@ -50754,7 +50736,6 @@ export interface paths {
                         targetKind: string;
                         targetId: string;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -50890,7 +50871,6 @@ export interface paths {
                         targetKind?: string;
                         targetId?: string;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -51058,7 +51038,6 @@ export interface paths {
                         label: string;
                         color?: string;
                         description?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -51191,7 +51170,6 @@ export interface paths {
                         label?: string;
                         color?: string;
                         description?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -51362,7 +51340,6 @@ export interface paths {
                         value: (string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[];
-                        syncTxid?: number;
                     };
                 };
             };
@@ -51501,7 +51478,6 @@ export interface paths {
                         value?: (string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[];
-                        syncTxid?: number;
                     };
                 };
             };
@@ -51668,7 +51644,6 @@ export interface paths {
                         ecosystemId?: string;
                         name: string;
                         description?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -51798,7 +51773,6 @@ export interface paths {
                         ecosystemId?: string;
                         name?: string;
                         description?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -51974,7 +51948,6 @@ export interface paths {
                         startDate?: string;
                         endDate?: string | null;
                         notes?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -52122,7 +52095,6 @@ export interface paths {
                         startDate?: string;
                         endDate?: string | null;
                         notes?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -52294,7 +52266,6 @@ export interface paths {
                         pollId: string;
                         text: string;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -52427,7 +52398,6 @@ export interface paths {
                         pollId?: string;
                         text?: string;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -52598,7 +52568,6 @@ export interface paths {
                         question: string;
                         allowMultiple?: boolean;
                         expiresAt?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -52737,7 +52706,6 @@ export interface paths {
                         question?: string;
                         allowMultiple?: boolean;
                         expiresAt?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -52917,7 +52885,6 @@ export interface paths {
                         dequeuedAt?: string | null;
                         ackedAt?: string | null;
                         nackedAt?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -53066,7 +53033,6 @@ export interface paths {
                         dequeuedAt?: string | null;
                         ackedAt?: string | null;
                         nackedAt?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -53234,7 +53200,6 @@ export interface paths {
                     "application/json": {
                         ecosystemId?: string;
                         name: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -53361,7 +53326,6 @@ export interface paths {
                     "application/json": {
                         ecosystemId?: string;
                         name?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -53532,7 +53496,6 @@ export interface paths {
                         relationshipKind?: string;
                         sinceDate?: string;
                         notes?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -53674,7 +53637,6 @@ export interface paths {
                         relationshipKind?: string;
                         sinceDate?: string;
                         notes?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -53865,7 +53827,6 @@ export interface paths {
                         url?: string;
                         handle?: string;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -54031,7 +53992,6 @@ export interface paths {
                         url?: string;
                         handle?: string;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -54230,7 +54190,6 @@ export interface paths {
                         level?: string;
                         sinceDate?: string;
                         notes?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -54375,7 +54334,6 @@ export interface paths {
                         level?: string;
                         sinceDate?: string;
                         notes?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -54565,7 +54523,6 @@ export interface paths {
                         previewError?: string | null;
                         previewGeneratedAt?: string | null;
                         previewAttempts?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -54727,7 +54684,6 @@ export interface paths {
                         previewError?: string | null;
                         previewGeneratedAt?: string | null;
                         previewAttempts?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -54916,7 +54872,6 @@ export interface paths {
                         profileVisibility?: string;
                         tokenVersion?: number;
                         preferredMfaMethod?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -55068,7 +55023,6 @@ export interface paths {
                         profileVisibility?: string;
                         tokenVersion?: number;
                         preferredMfaMethod?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -55249,7 +55203,6 @@ export interface paths {
                         contentText?: string;
                         contentMeta?: string;
                         lastOpId?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -55393,7 +55346,6 @@ export interface paths {
                         contentText?: string;
                         contentMeta?: string;
                         lastOpId?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -55567,7 +55519,6 @@ export interface paths {
                         docType?: string;
                         lastOpId?: string | null;
                         lastSnapshotId?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -55705,7 +55656,6 @@ export interface paths {
                         docType?: string;
                         lastOpId?: string | null;
                         lastSnapshotId?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -55879,7 +55829,6 @@ export interface paths {
                         startAnchor: string;
                         endAnchor: string;
                         markData?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -56020,7 +55969,6 @@ export interface paths {
                         startAnchor?: string;
                         endAnchor?: string;
                         markData?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -56200,7 +56148,6 @@ export interface paths {
                         opPayload?: string;
                         undoGroupId?: string | null;
                         inverseOfOpId?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -56348,7 +56295,6 @@ export interface paths {
                         opPayload?: string;
                         undoGroupId?: string | null;
                         inverseOfOpId?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -56525,7 +56471,6 @@ export interface paths {
                         description?: string;
                         pinnedOpId: string;
                         pinnedSyncVersion: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -56666,7 +56611,6 @@ export interface paths {
                         description?: string;
                         pinnedOpId?: string;
                         pinnedSyncVersion?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -56836,7 +56780,6 @@ export interface paths {
                         slug: string;
                         displayName: string;
                         consumerKind: string;
-                        syncTxid?: number;
                         id?: string;
                     };
                 };
@@ -56970,7 +56913,6 @@ export interface paths {
                         slug?: string;
                         displayName?: string;
                         consumerKind?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -57756,7 +57698,6 @@ export interface paths {
                         data?: ((string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[]) | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -57910,7 +57851,6 @@ export interface paths {
                         data?: ((string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[]) | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -58095,7 +58035,6 @@ export interface paths {
                         value: number;
                         duration?: number | null;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -58244,7 +58183,6 @@ export interface paths {
                         value?: number;
                         duration?: number | null;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -58431,7 +58369,6 @@ export interface paths {
                         status?: string;
                         eventLog?: string;
                         eventRetentionDays?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -58586,7 +58523,6 @@ export interface paths {
                         status?: string;
                         eventLog?: string;
                         eventRetentionDays?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -58765,7 +58701,6 @@ export interface paths {
                         toId: string;
                         amount?: number;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -58905,7 +58840,6 @@ export interface paths {
                         toId?: string;
                         amount?: number;
                         sortOrder?: number;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -59079,7 +59013,6 @@ export interface paths {
                         visibility?: string;
                         firstPlayedAt: string;
                         lastPlayedAt: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -59220,7 +59153,6 @@ export interface paths {
                         visibility?: string;
                         firstPlayedAt?: string;
                         lastPlayedAt?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -59423,7 +59355,6 @@ export interface paths {
                         raw?: ((string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[]) | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -59607,7 +59538,6 @@ export interface paths {
                         raw?: ((string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[]) | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -59805,7 +59735,6 @@ export interface paths {
                         raw?: ((string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[]) | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -59959,7 +59888,6 @@ export interface paths {
                         raw?: ((string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[]) | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -60155,7 +60083,6 @@ export interface paths {
                         collectionName?: string | null;
                         isFavorite?: boolean;
                         externalCreatedAt?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -60320,7 +60247,6 @@ export interface paths {
                         collectionName?: string | null;
                         isFavorite?: boolean;
                         externalCreatedAt?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -60531,7 +60457,6 @@ export interface paths {
                         url?: string | null;
                         aiExtraction?: string | null;
                         ecosystemId?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -60714,7 +60639,6 @@ export interface paths {
                         url?: string | null;
                         aiExtraction?: string | null;
                         ecosystemId?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -60931,7 +60855,6 @@ export interface paths {
                         raw?: ((string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[]) | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -61115,7 +61038,6 @@ export interface paths {
                         raw?: ((string | number | boolean | null) | {
                             [key: string]: unknown;
                         } | unknown[]) | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -61325,7 +61247,6 @@ export interface paths {
                         authorizedDate?: string | null;
                         pending?: boolean;
                         logoUrl?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -61496,7 +61417,6 @@ export interface paths {
                         authorizedDate?: string | null;
                         pending?: boolean;
                         logoUrl?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -61703,7 +61623,6 @@ export interface paths {
                         notificationReason?: string | null;
                         externalCreatedAt?: string | null;
                         externalUpdatedAt?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -61877,7 +61796,6 @@ export interface paths {
                         notificationReason?: string | null;
                         externalCreatedAt?: string | null;
                         externalUpdatedAt?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -62079,7 +61997,6 @@ export interface paths {
                         popularity?: number | null;
                         isSaved?: boolean;
                         lastPlayedAt?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -62244,7 +62161,6 @@ export interface paths {
                         popularity?: number | null;
                         isSaved?: boolean;
                         lastPlayedAt?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -62437,7 +62353,6 @@ export interface paths {
                         parentId?: string | null;
                         isArchived?: boolean;
                         lastEditedAt?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -62593,7 +62508,6 @@ export interface paths {
                         parentId?: string | null;
                         isArchived?: boolean;
                         lastEditedAt?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -62785,7 +62699,6 @@ export interface paths {
                         itemUrl?: string | null;
                         isRead?: boolean;
                         externalCreatedAt?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -62944,7 +62857,6 @@ export interface paths {
                         itemUrl?: string | null;
                         isRead?: boolean;
                         externalCreatedAt?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -65611,7 +65523,6 @@ export interface paths {
                             [key: string]: unknown;
                         } | unknown[];
                         sizeLimit?: number | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -65750,7 +65661,6 @@ export interface paths {
                             [key: string]: unknown;
                         } | unknown[];
                         sizeLimit?: number | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -65945,7 +65855,6 @@ export interface paths {
                         validTo?: string | null;
                         status?: string;
                         supersedesId?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -66117,7 +66026,6 @@ export interface paths {
                         validTo?: string | null;
                         status?: string;
                         supersedesId?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -66297,7 +66205,6 @@ export interface paths {
                         srcId: string;
                         dstId: string;
                         relation?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -66430,7 +66337,6 @@ export interface paths {
                         srcId?: string;
                         dstId?: string;
                         relation?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -66627,7 +66533,6 @@ export interface paths {
                         tags?: string[];
                         validFrom?: string | null;
                         validTo?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -66807,7 +66712,6 @@ export interface paths {
                         tags?: string[];
                         validFrom?: string | null;
                         validTo?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -66999,7 +66903,6 @@ export interface paths {
                         endDate?: string | null;
                         location?: string;
                         description?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -67144,7 +67047,6 @@ export interface paths {
                         endDate?: string | null;
                         location?: string;
                         description?: string;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -67323,7 +67225,6 @@ export interface paths {
                         location?: string;
                         description?: string;
                         isCurrent?: boolean;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -67468,7 +67369,6 @@ export interface paths {
                         location?: string;
                         description?: string;
                         isCurrent?: boolean;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -67660,7 +67560,6 @@ export interface paths {
                         externalProjectName?: string | null;
                         labels?: string | null;
                         url?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -67825,7 +67724,6 @@ export interface paths {
                         externalProjectName?: string | null;
                         labels?: string | null;
                         url?: string | null;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -68005,7 +67903,6 @@ export interface paths {
                         email?: boolean;
                         sms?: boolean;
                         inApp?: boolean;
-                        syncTxid?: number;
                     };
                 };
             };
@@ -68141,7 +68038,6 @@ export interface paths {
                         email?: boolean;
                         sms?: boolean;
                         inApp?: boolean;
-                        syncTxid?: number;
                     };
                 };
             };
