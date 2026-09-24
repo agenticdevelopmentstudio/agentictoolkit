@@ -53,7 +53,8 @@ import { SchemasPane } from "./SchemasPane";
 const STAMPS = { createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" };
 const BUCKET = {
   id: "storage.acme.crm",
-  name: "crm",
+  name: "Customer CRM",
+  slug: "crm",
   description: "Customer data",
   ecosystemId: "eco-uuid",
   kind: "custom",
@@ -129,7 +130,7 @@ const rail = (id: string) => screen.getByRole("navigation", { name: id });
 
 async function openBucket() {
   renderPane();
-  fireEvent.click(await within(rail("buckets-list")).findByRole("button", { name: "crm" }));
+  fireEvent.click(await within(rail("buckets-list")).findByRole("button", { name: "Customer CRM" }));
   return rail("bucket-contents");
 }
 
@@ -141,8 +142,9 @@ async function openSettings() {
 
 beforeEach(() => {
   schemasApi.list.mockResolvedValue([BUCKET]);
+  // A slug edit moves the rdid, as the backend's rename cascade does.
   schemasApi.update.mockImplementation((_id: string, patch: Partial<typeof BUCKET>) =>
-    Promise.resolve({ ...BUCKET, ...patch }),
+    Promise.resolve({ ...BUCKET, ...patch, id: `storage.acme.${patch.slug ?? BUCKET.slug}` }),
   );
 });
 
@@ -166,7 +168,7 @@ describe("SchemasPane — the bucket layout", () => {
 
   it("the gear opens Settings in a dialog: name, description, and the danger zone", async () => {
     const dialog = await openSettings();
-    expect(within(dialog).getByDisplayValue("crm")).toBeInTheDocument();
+    expect(within(dialog).getByDisplayValue("Customer CRM")).toBeInTheDocument();
     expect(within(dialog).getByDisplayValue("Customer data")).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: /Danger Zone/ }));
     expect(within(dialog).getByRole("button", { name: /^Delete Bucket$/ })).toBeInTheDocument();
@@ -187,30 +189,88 @@ describe("SchemasPane — the bucket layout", () => {
     );
   });
 
-  it("saving Settings sends the name and description only, never the table list", async () => {
+  it("saving Settings sends the name, slug and description only, never the table list", async () => {
     const dialog = await openSettings();
-    fireEvent.change(within(dialog).getByDisplayValue("crm"), { target: { value: "customers" } });
+    fireEvent.change(within(dialog).getByDisplayValue("Customer CRM"), { target: { value: "Customers" } });
+    // A saved bucket's slug does NOT follow a rename of its display name — that would move its rdid.
+    expect(within(dialog).getByLabelText("Slug")).toHaveValue("crm");
     fireEvent.click(within(dialog).getByRole("button", { name: /save/i }));
     await waitFor(() => expect(schemasApi.update).toHaveBeenCalled());
     expect(schemasApi.update).toHaveBeenCalledWith(BUCKET.id, {
-      name: "customers",
+      name: "Customers",
+      slug: "crm",
       description: "Customer data",
     });
+  });
+
+  // "buckets need unique slugs and rdids" (Mike, 2026-09-24).
+  it("Settings shows the slug behind its storage prefix, and the rdid read-only", async () => {
+    const dialog = await openSettings();
+    expect(within(dialog).getByText("storage.acme.")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Slug")).toHaveValue("crm");
+    expect(within(dialog).getByDisplayValue("storage.acme.crm")).toHaveAttribute("readonly");
+  });
+
+  it("a slug edit saves the slug; a bad or taken one is refused before the request", async () => {
+    schemasApi.list.mockResolvedValue([
+      BUCKET,
+      { ...BUCKET, id: "storage.acme.leads", name: "Leads", slug: "leads" },
+    ]);
+    const dialog = await openSettings();
+    const slug = within(dialog).getByLabelText("Slug");
+    const save = () => fireEvent.click(within(dialog).getByRole("button", { name: /save/i }));
+
+    fireEvent.change(slug, { target: { value: "leads" } });
+    save();
+    expect(await within(dialog).findByText('A bucket with the slug "leads" already exists.')).toBeInTheDocument();
+
+    fireEvent.change(slug, { target: { value: "customers" } });
+    save();
+    await waitFor(() => expect(schemasApi.update).toHaveBeenCalled());
+    expect(schemasApi.update).toHaveBeenCalledWith(BUCKET.id, expect.objectContaining({ slug: "customers" }));
+  });
+
+  it("the built-in default bucket's slug is not editable", async () => {
+    schemasApi.list.mockResolvedValue([{ ...BUCKET, kind: "default" }]);
+    const dialog = await openSettings();
+    expect(within(dialog).getByLabelText("Slug")).toBeDisabled();
+  });
+
+  it("New bucket: the slug follows the name until it is edited, and is sent on create", async () => {
+    schemasApi.create.mockResolvedValue({ ...BUCKET, id: "storage.acme.pb", name: "Profile Basics", slug: "pb" });
+    renderPane();
+    fireEvent.click(await within(rail("buckets-list")).findByRole("button", { name: "New bucket" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("storage.acme.")).toBeInTheDocument();
+    const name = within(dialog).getByPlaceholderText("Profile Basics");
+    const slug = within(dialog).getByLabelText("Slug");
+
+    fireEvent.change(name, { target: { value: "Profile Basics" } });
+    expect(slug).toHaveValue("profile-basics");
+    fireEvent.change(slug, { target: { value: "pb" } });
+    fireEvent.change(name, { target: { value: "Profile Basics 2" } });
+    expect(slug).toHaveValue("pb");
+
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: /create|save/i }));
+    });
+    await waitFor(() => expect(schemasApi.create).toHaveBeenCalled());
+    expect(schemasApi.create.mock.calls[0]![0]).toMatchObject({ name: "Profile Basics 2", slug: "pb" });
   });
 
   // "navigating away with an unsaved bucket didn't stop me with a warning" (Mike, 2026-09-24).
   it("closing Settings over an edit asks first; Stay keeps it, Discard restores the saved name", async () => {
     const dialog = await openSettings();
-    fireEvent.change(within(dialog).getByDisplayValue("crm"), { target: { value: "customers" } });
+    fireEvent.change(within(dialog).getByDisplayValue("Customer CRM"), { target: { value: "Customers" } });
     fireEvent.keyDown(dialog, { key: "Escape" });
     fireEvent.click(await screen.findByRole("button", { name: "Stay" }));
-    expect(within(screen.getByRole("dialog")).getByDisplayValue("customers")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByDisplayValue("Customers")).toBeInTheDocument();
 
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     fireEvent.click(within(rail("bucket-contents")).getByRole("button", { name: "Bucket settings" }));
-    expect(within(await screen.findByRole("dialog")).getByDisplayValue("crm")).toBeInTheDocument();
+    expect(within(await screen.findByRole("dialog")).getByDisplayValue("Customer CRM")).toBeInTheDocument();
     expect(schemasApi.update).not.toHaveBeenCalled();
   });
 

@@ -4,18 +4,74 @@ import { Field } from "@agenticdevelopertoolkit/ui/blocks";
 import { Card, CardContent } from "@agenticdevelopertoolkit/ui/components/card";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Textarea } from "@agenticdevelopertoolkit/ui/components/textarea";
+import { RdidEditor } from "@agentic-toolkit/adh-ui/components/rdid-editor";
+import { rdidPrefix, validateLeaf } from "@agentic-toolkit/adh-ui/rdid";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
+import { slugifyBucketName } from "./schema-model";
 import type { SchemaDefinition, SchemaDefinitionInput, SchemaTable } from "./schema-model";
 import { DetailSection } from "@agentic-toolkit/resource";
 import { DeleteEntitySection } from "@agentic-toolkit/adh-ui/blocks";
 import type { RenderTransferSection } from "../transfer-seam";
 
 export function schemaBlank(): SchemaDefinitionInput {
-  return { name: "", description: "", tables: [] };
+  return { name: "", slug: "", description: "", tables: [] };
 }
 
 export function schemaToInput(s: SchemaDefinition): SchemaDefinitionInput {
-  return { name: s.name, description: s.description, tables: s.tables };
+  return { name: s.name, slug: s.slug, description: s.description, tables: s.tables };
+}
+
+/**
+ * The `storage.<eco path>.` a bucket's slug sits under — from its own rdid once saved, else from the
+ * pane's ecosystem (`ecosystem.<path>` → `storage.<path>.`). Empty when neither is an rdid, and the
+ * editor then shows a bare slug box.
+ */
+export function bucketSlugPrefix(bucketId: string | undefined, ecosystemRdid: string | undefined): string {
+  if (bucketId) return rdidPrefix(bucketId);
+  return ecosystemRdid?.startsWith("ecosystem.")
+    ? `storage.${ecosystemRdid.slice("ecosystem.".length)}.`
+    : "";
+}
+
+/**
+ * Name and slug together: the slug follows the name until the user edits it themselves, the same
+ * pre-fill the Add-table dialog does for a table's name from its type. A slug that still equals
+ * the previous name's derivation has not been edited.
+ */
+export function withName(draft: SchemaDefinitionInput, name: string): SchemaDefinitionInput {
+  const following = !draft.slug || draft.slug === slugifyBucketName(draft.name);
+  return { ...draft, name, slug: following ? slugifyBucketName(name) : draft.slug };
+}
+
+/**
+ * The Slug box — the bucket's rdid leaf behind its fixed `storage.<eco path>.` prefix
+ * ("buckets need unique slugs and rdids" (Mike, 2026-09-24)). Shared by the create modal and Settings so the two cannot disagree on
+ * what a slug is. `readOnly` is for the built-in default bucket, whose address is elided and
+ * whose slug is the backend's to keep.
+ */
+export function BucketSlugField({
+  draft,
+  onChange,
+  prefix,
+  readOnly,
+}: {
+  draft: SchemaDefinitionInput;
+  onChange: (next: SchemaDefinitionInput) => void;
+  prefix: string;
+  readOnly?: boolean;
+}) {
+  return (
+    <RdidEditor
+      label="Slug"
+      prefix={prefix}
+      value={draft.slug}
+      placeholder="profile-basics"
+      disabled={readOnly}
+      hint="Unique among this ecosystem's buckets. Changing it changes the bucket's id."
+      error={draft.slug ? validateLeaf(draft.slug) : null}
+      onChange={(slug) => onChange({ ...draft, slug })}
+    />
+  );
 }
 
 /** Returns an error message for a new table's name, or null when it is valid. Names are unique
@@ -29,15 +85,21 @@ export function tableNameValidate(name: string, tables: SchemaTable[]): string |
   return null;
 }
 
-/** Returns an error message, or null when the draft is valid. */
+/** Returns an error message, or null when the draft is valid. `others` are the ecosystem's other
+ *  buckets, whose names and slugs this one may not reuse. */
 export function schemaValidate(
   draft: SchemaDefinitionInput,
-  takenNames: string[] = [],
+  others: Pick<SchemaDefinition, "name" | "slug">[] = [],
 ): string | null {
   const name = draft.name.trim();
   if (!name) return "Name is required.";
-  if (takenNames.some((n) => n.toLowerCase() === name.toLowerCase()))
+  if (others.some((o) => o.name.toLowerCase() === name.toLowerCase()))
     return `A bucket named "${name}" already exists.`;
+  const slug = draft.slug.trim();
+  const slugProblem = validateLeaf(slug);
+  if (slugProblem) return `Slug: ${slugProblem}`;
+  if (slug.length > 64) return "Slug: 64 characters at most.";
+  if (others.some((o) => o.slug === slug)) return `A bucket with the slug "${slug}" already exists.`;
   if (draft.tables.some((t) => !t.name.trim())) return "Every table needs a name.";
   // Names are unique per bucket (backend unique (bucket, name) index). Catch
   // duplicates inline — e.g. adding the same type twice pre-fills the same name —
@@ -100,6 +162,19 @@ export function SchemaDefinitionDetail({
                 onChange={(e) => onChange({ ...draft, name: e.target.value })}
               />
             </Field>
+
+            <BucketSlugField
+              draft={draft}
+              onChange={onChange}
+              prefix={bucketSlugPrefix(schema?.id, ecosystemRdid)}
+              readOnly={schema?.kind === "default"}
+            />
+
+            {schema && (
+              <Field label="Id" hint="The bucket's rdid — its slug under the ecosystem's storage.">
+                <Input value={schema.id} readOnly className="font-mono" />
+              </Field>
+            )}
 
             <Field label="Description">
               <Textarea

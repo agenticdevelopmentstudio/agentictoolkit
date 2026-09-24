@@ -199,6 +199,7 @@ export const CRUD_TABLES: Record<string, CrudTableMeta> = {
       {"name": "ecosystemId", "type": "string", "required": false, "nullable": false, "serverManaged": false},
       {"name": "parentId", "type": "string", "required": false, "nullable": true, "serverManaged": false},
       {"name": "name", "type": "string", "required": true, "nullable": false, "serverManaged": false, "maxLength": 128},
+      {"name": "slug", "type": "string", "required": true, "nullable": false, "serverManaged": false, "maxLength": 64},
       {"name": "description", "type": "string", "required": false, "nullable": false, "serverManaged": false},
       {"name": "kind", "type": "string", "required": false, "nullable": false, "serverManaged": false, "maxLength": 32},
       {"name": "metadata", "type": "unknown", "required": false, "nullable": true, "serverManaged": false},

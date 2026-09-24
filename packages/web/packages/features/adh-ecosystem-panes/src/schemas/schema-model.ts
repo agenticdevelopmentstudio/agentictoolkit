@@ -43,8 +43,10 @@ export interface SchemaTable {
 
 export interface SchemaDefinition {
   id: string;
-  /** Unique display name — the schema's identity. */
+  /** Unique display name. */
   name: string;
+  /** The rdid leaf — unique among siblings; editing it moves `id`. */
+  slug: string;
   description: string;
   tables: SchemaTable[];
   ecosystemId: string;
@@ -57,6 +59,7 @@ export interface SchemaDefinition {
 
 export interface SchemaDefinitionInput {
   name: string;
+  slug: string;
   description: string;
   tables: SchemaTable[];
 }
@@ -67,6 +70,21 @@ export function slugifyTableName(raw: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9_]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+/**
+ * A bucket's slug derived from its display name — the same derivation the backend backfilled every
+ * existing bucket with (`addressSegment(name)`), so a name typed today yields the address an older
+ * bucket of that name already has. 64 is the column's width; the trim runs after the cut so a word
+ * split at the edge leaves no trailing hyphen.
+ */
+export function slugifyBucketName(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64)
+    .replace(/-+$/, "");
 }
 
 export function newSchemaTableId(): string {

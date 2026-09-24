@@ -12,17 +12,19 @@
 //   /api/bucket/bucket-types  — one row per table (bucket-type) in the definition
 //
 // Field map:
-//   UI SchemaDefinition.id           <->  buckets.id              (opaque uuid)
-//   UI SchemaDefinition.name         <->  buckets.name            (unique per owner)
+//   UI SchemaDefinition.id           <->  buckets.id              (the rdid, storage.<eco>.<slug>)
+//   UI SchemaDefinition.name         <->  buckets.name            (display name, unique per owner)
+//   UI SchemaDefinition.slug         <->  buckets.slug            (the rdid leaf, unique per parent)
 //   UI SchemaDefinition.description  <->  buckets.metadata.description
 //   UI SchemaDefinition.ecosystemId  <->  buckets.ecosystem_id        (owner = the ecosystem)
 //   UI SchemaTable.id                <->  bucket_types.id         (opaque uuid)
 //   UI SchemaTable.name              <->  bucket_types.name       (alias, unique per bucket)
 //   UI SchemaTable.type              <->  bucket_types.sql_table_name
 //
-// `bucket.buckets` is RDID-addressed, but the rdid is optional per row: this
-// client never sends an `id`, so each bucket gets a plain uuid with no rdid
-// mapping — exactly the opaque-id model the UI already assumes.
+// `bucket.buckets` is RDID-addressed: the backend mints `storage.<eco path>.<slug>` on create and
+// every response's `id` IS that rdid. The slug is required and editable, and editing it MOVES the
+// rdid — so an update re-reads the tables under the id the PUT returned, never the one it was
+// called with ("buckets need unique slugs and rdids" (Mike, 2026-09-24)).
 //
 // NOTE: generic CRUD list has no server-side filter (it returns up to 500 rows),
 // so list()/get() fetch all bucket-types and group them client-side. Fine at
@@ -57,8 +59,10 @@ export interface SchemaTable {
 
 export interface SchemaDefinition {
   id: string;
-  /** Unique display name — the schema's identity. */
+  /** Unique display name. */
   name: string;
+  /** The rdid leaf — unique among siblings; editing it moves `id`. */
+  slug: string;
   description: string;
   tables: SchemaTable[];
   ecosystemId: string;
@@ -71,6 +75,7 @@ export interface SchemaDefinition {
 
 export interface SchemaDefinitionInput {
   name: string;
+  slug: string;
   description: string;
   tables: SchemaTable[];
 }
@@ -92,6 +97,7 @@ function toDefinition(s: BucketRow, allTables: BucketTypeRow[]): SchemaDefinitio
   return {
     id: s.id,
     name: s.name,
+    slug: s.slug,
     description: descriptionOf(s.metadata),
     tables: allTables.filter((t) => t.bucketId === s.id).map(toTable),
     ecosystemId: s.ecosystemId,
@@ -99,6 +105,18 @@ function toDefinition(s: BucketRow, allTables: BucketTypeRow[]): SchemaDefinitio
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
   };
+}
+
+/**
+ * A 409 from a bucket write, said in the user's words. The backend names the violated constraint
+ * (`resource already exists (uq_bucket_buckets_owner_parent_slug)`), and a taken rdid is `id already
+ * exists` — both are the SLUG; anything else "already exists" is the display name.
+ */
+function rethrowBucketConflict(err: unknown, name: string, slug: string): never {
+  if (err instanceof Error && /_slug\b|\bid already exists/i.test(err.message)) {
+    throw new Error(`A bucket with the slug "${slug}" already exists.`);
+  }
+  rethrowConflict(err, `A bucket named "${name}" already exists.`);
 }
 
 /**
@@ -171,8 +189,10 @@ export const schemasApi = {
     // (schema, name) index would otherwise reject it mid-create).
     assertUniqueTableNames(input.tables);
 
+    const slug = input.slug.trim();
     const schemaBody: BucketCreateBody = {
       name,
+      slug,
       metadata: { description: input.description },
     };
     // owner = the chosen ecosystem; absent, the backend defaults to the caller's.
@@ -188,7 +208,7 @@ export const schemasApi = {
         body: JSON.stringify(schemaBody),
       });
     } catch (err) {
-      rethrowConflict(err, `A bucket named "${name}" already exists.`);
+      rethrowBucketConflict(err, name, slug);
     }
 
     // A schema definition is a parent + its child tables, but generic CRUD has no
@@ -225,21 +245,29 @@ export const schemasApi = {
   ): Promise<SchemaDefinition> {
     const patch = compact({
       name: input.name?.trim(),
+      slug: input.slug?.trim(),
       metadata:
         input.description !== undefined ? { description: input.description } : undefined,
     } satisfies BucketPutBody);
 
-    const schema = Object.keys(patch).length
-      ? await authedJson<BucketRow>(`${SCHEMAS}/${enc(id)}`, {
-          method: "PUT",
-          body: JSON.stringify(patch),
-        })
-      : await authedJson<BucketRow>(`${SCHEMAS}/${enc(id)}`);
+    let schema: BucketRow;
+    try {
+      schema = Object.keys(patch).length
+        ? await authedJson<BucketRow>(`${SCHEMAS}/${enc(id)}`, {
+            method: "PUT",
+            body: JSON.stringify(patch),
+          })
+        : await authedJson<BucketRow>(`${SCHEMAS}/${enc(id)}`);
+    } catch (err) {
+      rethrowBucketConflict(err, patch.name ?? "", patch.slug ?? "");
+    }
+    // A slug edit moved the rdid: from here on the bucket is `schema.id`, and `id` is an alias.
+    const bucketId = schema.id;
 
     if (input.tables !== undefined) {
       assertUniqueTableNames(input.tables);
-      const allTables = await authedJson<BucketTypeRow[]>(`${TABLES}?bucketId=${enc(id)}`);
-      const current = allTables.filter((t) => t.bucketId === id);
+      const allTables = await authedJson<BucketTypeRow[]>(`${TABLES}?bucketId=${enc(bucketId)}`);
+      const current = allTables.filter((t) => t.bucketId === bucketId);
       const currentById = new Map(current.map((t) => [t.id, t]));
       const desiredIds = new Set(input.tables.map((t) => t.id));
 
@@ -260,7 +288,7 @@ export const schemasApi = {
           await authedJson<BucketTypeRow>(TABLES, {
             method: "POST",
             body: JSON.stringify({
-              bucketId: id,
+              bucketId,
               ecosystemId: schema.ecosystemId,
               sqlTableName: t.type,
               name: t.name,
@@ -276,7 +304,7 @@ export const schemasApi = {
     }
 
     // Re-read so the response carries the backend's table ids (new rows got uuids).
-    const finalTables = await authedJson<BucketTypeRow[]>(`${TABLES}?bucketId=${enc(id)}`);
+    const finalTables = await authedJson<BucketTypeRow[]>(`${TABLES}?bucketId=${enc(bucketId)}`);
     return toDefinition(schema, finalTables);
   },
 

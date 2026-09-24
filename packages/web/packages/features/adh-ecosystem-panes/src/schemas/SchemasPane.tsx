@@ -33,7 +33,10 @@ import { useMasterDetailForm } from "@agentic-toolkit/resource";
 import { useMasterDetailLevel } from "@agentic-toolkit/resource";
 import type { TopicLeaf } from "@agentic-toolkit/resource";
 import {
+  BucketSlugField,
+  bucketSlugPrefix,
   SchemaDefinitionDetail,
+  withName,
   schemaBlank,
   schemaToInput,
   schemaValidate,
@@ -43,16 +46,17 @@ import { nameForType, TypeOptions } from "./type-options";
 import { isMarkdownType, MarkdownRowsView } from "./MarkdownRowsView";
 import type { RenderTransferSection } from "../transfer-seam";
 
-// Settings edits the bucket's name and description only; its tables are added and removed one at
-// a time from the bucket's rail, each a save of its own. So neither the dirty check nor the save
+// Settings edits the bucket's name, slug and description only; its tables are added and removed one
+// at a time from the bucket's rail, each a save of its own. So neither the dirty check nor the save
 // looks at `tables` — a save from Settings must never rewrite the table list it did not show.
 function schemaDiffers(a: SchemaDefinitionInput, b: SchemaDefinitionInput): boolean {
-  return a.name !== b.name || a.description !== b.description;
+  return a.name !== b.name || a.slug !== b.slug || a.description !== b.description;
 }
 
 function schemaNormalize(d: SchemaDefinitionInput): SchemaDefinitionInput {
   return {
     name: d.name.trim(),
+    slug: d.slug.trim(),
     description: d.description.trim(),
     tables: d.tables,
   };
@@ -121,13 +125,14 @@ export function SchemasPane({
     urlSelection,
     blank: schemaBlank,
     toInput: schemaToInput,
-    validate: (draft, others) => schemaValidate(draft, others.map((o) => o.name)),
+    validate: (draft, others) => schemaValidate(draft, others),
     differs: schemaDiffers,
     normalize: schemaNormalize,
     create: (input) => schemasApi.create(input, ecosystemId ?? ""),
-    // Name and description only — see `schemaDiffers`.
+    // Name, slug and description only — see `schemaDiffers`. A slug edit returns the bucket under
+    // its NEW rdid, and the form re-selects by the returned id.
     update: (id, input) =>
-      schemasApi.update(id, { name: input.name, description: input.description }),
+      schemasApi.update(id, { name: input.name, slug: input.slug, description: input.description }),
     // No `remove`: deleting a bucket is the Settings danger zone's type-to-confirm, not a button
     // bar Delete one click away from Save.
     refresh,
@@ -362,7 +367,7 @@ export function SchemasPane({
             ariaLabel="New bucket"
             heading="New bucket"
             blank={schemaBlank}
-            validate={(d) => schemaValidate(d, (schemas ?? []).map((s) => s.name))}
+            validate={(d) => schemaValidate(d, schemas ?? [])}
             create={(d) => schemasApi.create(schemaNormalize(d), ecosystemId ?? "")}
             onClose={() => setNewOpen(false)}
             onCreated={(created) => {
@@ -379,9 +384,14 @@ export function SchemasPane({
                     autoFocus
                     value={draft.name}
                     placeholder="Profile Basics"
-                    onChange={(e) => onChange({ ...draft, name: e.target.value })}
+                    onChange={(e) => onChange(withName(draft, e.target.value))}
                   />
                 </Field>
+                <BucketSlugField
+                  draft={draft}
+                  onChange={onChange}
+                  prefix={bucketSlugPrefix(undefined, ecosystemId)}
+                />
                 <Field label="Description">
                   <Textarea
                     rows={2}

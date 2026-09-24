@@ -161,6 +161,8 @@ export interface BucketRow {
   id: string;
   ecosystemId: string;
   name: string;
+  /** The rdid leaf — `storage.<eco path>.<slug>`; unique among the bucket's siblings. */
+  slug: string;
   kind: string;
   metadata: { description?: string } | null;
   createdAt: string;
@@ -170,6 +172,7 @@ export interface BucketRow {
 /** `POST /bucket/buckets` body. */
 export interface BucketCreateBody {
   name: string;
+  slug: string;
   metadata: { description?: string };
   ecosystemId?: string;
 }
@@ -177,6 +180,7 @@ export interface BucketCreateBody {
 /** `PUT /bucket/buckets/{id}` body. */
 export interface BucketPutBody {
   name?: string;
+  slug?: string;
   metadata?: { description?: string };
 }
 
