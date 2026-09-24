@@ -3,7 +3,7 @@ id: a14c4ed2-f380-486b-90da-84a68cbfafc2
 title: Foundation Debug Automation
 domain: agentictoolkit://recipes/foundation-debug-automation
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -65,79 +65,70 @@ is at the keyboard.
   `String` in its `key` property verbatim and unchanged; `key` MUST serve
   both as the `UserDefaults` key `isOn(defaults:)` reads and as the
   launch-argument name a caller passes after `--args -<key> YES`
-  (`DebugLaunchSwitch.swift` lines 25-29).
+  (`DebugLaunchSwitch.swift`).
 - **switch-sendable-hashable-value-type**: `DebugLaunchSwitch` MUST be a
   `struct` conforming to `Sendable` and `Hashable`, with `key` as its only
   stored property, so an instance MUST be safe to read from any thread or
-  actor without additional synchronization (lines 23-26).
+  actor without additional synchronization.
 - **default-defaults-source**: `DebugLaunchSwitch.isOn` (the no-argument
-  computed property) MUST forward to `isOn(defaults: .standard)` (line 33).
+  computed property) MUST forward to `isOn(defaults: .standard)`.
 - **injectable-defaults-parameter**: `DebugLaunchSwitch.isOn(defaults:)` MUST
   accept its `UserDefaults` source as a parameter rather than reading
   `.standard` internally, so a caller MAY supply an isolated `UserDefaults`
-  suite instead of the real one (line 37).
+  suite instead of the real one.
 - **debug-build-reads-argument-domain**: `isOn(defaults:)`, when compiled
-  with the `DEBUG` flag set, MUST return `defaults.bool(forKey: key)` (lines
-  38-39).
+  with the `DEBUG` flag set, MUST return `defaults.bool(forKey: key)`.
 - **release-build-always-off**: `isOn(defaults:)`, when compiled without the
   `DEBUG` flag, MUST return `false` unconditionally, without reading the
   `defaults` parameter at all — the switch MUST be unreachable in a Release
   build regardless of any launch argument, preference, or profile passed to
-  it (lines 40-41).
+  it.
 - **quiet-activation-gate**: `NSApplication.activateUnlessQuiet()` MUST
   return immediately, without calling `activate(ignoringOtherApps:)`, when
-  `QuietWindowPresentation.isEnabled` is `true` (`NSApplication+QuietActivation.swift`
-  line 28).
+  `QuietWindowPresentation.isEnabled` is `true` (`NSApplication+QuietActivation.swift`).
 - **loud-activation-behavior**: `activateUnlessQuiet()` MUST call
   `activate(ignoringOtherApps: true)` when `QuietWindowPresentation.isEnabled`
-  is `false` (line 29).
+  is `false`.
 - **test-host-detection**: `NSWindow.isRunningInTests` MUST return `true` if
   and only if `NSClassFromString("XCTestCase")` resolves to a non-nil class,
-  and MUST return `false` otherwise (`NSWindow+TestHostVisibility.swift`
-  lines 12-13).
+  and MUST return `false` otherwise (`NSWindow+TestHostVisibility.swift`).
 - **sink-level-only**: `sinkBehindDesktop()` MUST change only the window's
   `level` property, setting it to `NSWindow.Level(Int(CGWindowLevelForKey(.desktopWindow)))`,
-  and MUST NOT call `orderOut`, `close`, or change `isVisible`/`alphaValue`
-  (line 31).
+  and MUST NOT call `orderOut`, `close`, or change `isVisible`/`alphaValue`.
 - **quiet-order-front**: `orderFrontQuietly()` MUST call `sinkBehindDesktop()`
   before calling `orderFront(nil)` when `QuietWindowPresentation.isEnabled`
-  is `true`, and MUST call only `orderFront(nil)` when it is `false` (lines
-  41-42).
+  is `true`, and MUST call only `orderFront(nil)` when it is `false`.
 - **quiet-make-key-and-order-front**: `makeKeyAndOrderFrontQuietly()` MUST
   call `sinkBehindDesktop()` before calling `makeKeyAndOrderFront(nil)` when
   `QuietWindowPresentation.isEnabled` is `true`, and MUST call only
-  `makeKeyAndOrderFront(nil)` when it is `false` (lines 52-53).
+  `makeKeyAndOrderFront(nil)` when it is `false`.
 - **level-set-before-ordering**: `orderFrontQuietly()` and
   `makeKeyAndOrderFrontQuietly()` MUST set the window's level before
   performing their ordering call, so the window MUST NOT be visible at the
-  normal level even briefly on its way to the sunk level (lines 37-38, 41-43,
-  50-53, per the doc comment on lines 37-38).
+  normal level even briefly on its way to the sunk level (per the doc comment).
 - **quiet-methods-main-actor-isolation**: `orderFrontQuietly()` and
-  `makeKeyAndOrderFrontQuietly()` MUST be declared `@MainActor` (lines 39,
-  50); `sinkBehindDesktop()` and `isRunningInTests` carry no actor annotation
-  in this source file (lines 12, 30).
+  `makeKeyAndOrderFrontQuietly()` MUST be declared `@MainActor`; `sinkBehindDesktop()` and `isRunningInTests` carry no actor annotation
+  in this source file.
 - **quiet-presentation-main-actor-isolation**: `QuietWindowPresentation` MUST
   be declared `@MainActor` at the enum level, so every member —
   `debugSwitch`, `defaultsKey`, `isEnabled`, and `resolve(isTestHost:defaults:)`
-  — MUST be confined to the main actor (`QuietWindowPresentation.swift` line
-  20).
+  — MUST be confined to the main actor (`QuietWindowPresentation.swift`).
 - **debug-switch-fixed-key**: `QuietWindowPresentation.debugSwitch` MUST be
   constructed as `DebugLaunchSwitch("QuietWindowPresentation")`, a fixed
-  literal key (line 24).
+  literal key.
 - **defaults-key-alias**: `QuietWindowPresentation.defaultsKey` MUST return
   `debugSwitch.key` exactly, i.e. the same string
-  `"QuietWindowPresentation"` (line 27).
+  `"QuietWindowPresentation"`.
 - **is-enabled-live-read**: `QuietWindowPresentation.isEnabled` MUST evaluate
   `resolve(isTestHost: NSWindow.isRunningInTests, defaults: .standard)`
-  freshly on every access; it MUST NOT cache or memoize the result (lines
-  30-32).
+  freshly on every access; it MUST NOT cache or memoize the result.
 - **resolve-or-precedence**: `resolve(isTestHost:defaults:)` MUST return
   `true` when `isTestHost` is `true`, and otherwise MUST return
-  `debugSwitch.isOn(defaults: defaults)` (lines 37-39).
+  `debugSwitch.isOn(defaults: defaults)`.
 - **test-host-short-circuits-defaults-read**: Because Swift's `||` operator
   short-circuits, `resolve(isTestHost:defaults:)` MUST NOT evaluate
   `debugSwitch.isOn(defaults: defaults)` — and therefore MUST NOT read the
-  `defaults` parameter at all — when `isTestHost` is `true` (line 38).
+  `defaults` parameter at all — when `isTestHost` is `true`.
 
 ## Appearance
 
@@ -162,16 +153,16 @@ z-order level, never its accessibility role, label, or announcements.
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| foundation-debug-automation-001 | switch-key-identity, release-build-always-off / debug-build-reads-argument-domain | `DebugLaunchSwitch("NeverPassed").isOn(defaults:)` against a scratch `UserDefaults` suite with no keys set (`DebugLaunchSwitchTests.swift`, `testASwitchIsOffUntilItsLaunchArgumentSaysOtherwise`, line 25). | Returns `false`. |
-| foundation-debug-automation-002 | debug-build-reads-argument-domain | `DebugLaunchSwitch("SomeDebugBehavior").isOn(defaults:)` against a scratch suite with that key set to `true`, under a Debug build (line 36). | Returns `true`. |
-| foundation-debug-automation-003 | debug-switch-fixed-key, defaults-key-alias | Read `QuietWindowPresentation.debugSwitch.key` and `QuietWindowPresentation.defaultsKey` (`DebugLaunchSwitchTests.swift`, `testTheKeyIsTheArgumentName`, lines 51-52). | Both equal the string `"QuietWindowPresentation"`. |
-| foundation-debug-automation-004 | resolve-or-precedence, test-host-short-circuits-defaults-read | `QuietWindowPresentation.resolve(isTestHost: true, defaults:)` against a scratch suite with `defaultsKey` set to `false` (`QuietWindowPresentationTests.swift`, `testATestHostIsAlwaysQuietWhateverTheDefaultsSay`, line 26). | Returns `true`, regardless of the stored `false`. |
-| foundation-debug-automation-005 | resolve-or-precedence | `QuietWindowPresentation.resolve(isTestHost: false, defaults:)` against a scratch suite with `defaultsKey` set to `true` (`testTheLaunchArgumentTurnsQuietPresentationOnOutsideATestHost`, line 36). | Returns `true`. |
-| foundation-debug-automation-006 | resolve-or-precedence | `QuietWindowPresentation.resolve(isTestHost: false, defaults:)` against an empty scratch suite (`testAnOrdinaryLaunchIsNotQuiet`, line 44). | Returns `false`. |
-| foundation-debug-automation-007 | is-enabled-live-read, test-host-detection | `QuietWindowPresentation.isEnabled` read from inside the running XCTest process itself (`testTheProcessRunningThisSuiteIsQuiet`, line 48). | Returns `true` — `isEnabled` reads the live environment (this process is an XCTest host), not merely `resolve(isTestHost:defaults:)` in isolation. |
-| foundation-debug-automation-008 | quiet-order-front, quiet-activation-gate (ordering half) | `SingleWindowController.forcesWindowFront`, evaluated as `!QuietWindowPresentation.isEnabled` while running under XCTest (`testQuietPresentationSuppressesFrontForcing`, line 56). | Returns `false`, confirming `isEnabled` is `true` for the calling process. |
-| foundation-debug-automation-009 | sink-level-only, quiet-make-key-and-order-front, level-set-before-ordering | Build a fresh `NSWindow` and call `makeKeyAndOrderFrontQuietly()` while `QuietWindowPresentation.isEnabled` is `true` (`testAQuietlyShownWindowIsVisibleButSunkBehindTheDesktop`, lines 74-85). | `window.isVisible` is `true`, `window.screen` is non-nil, and `window.level` equals `NSWindow.Level(Int(CGWindowLevelForKey(.desktopWindow)))`. |
-| foundation-debug-automation-010 | quiet-make-key-and-order-front | Compare the `isKeyWindow` of a window shown with plain `makeKeyAndOrderFront(nil)` against one shown with `makeKeyAndOrderFrontQuietly()`, both while `isEnabled` is `true` (`testSinkingCostsNoKeyStatusAPlainOrderFrontWouldHaveGiven`, lines 96-104). | The two `isKeyWindow` values are equal — sinking the level costs no key status a plain call would have given. |
+| foundation-debug-automation-001 | switch-key-identity, release-build-always-off / debug-build-reads-argument-domain | `DebugLaunchSwitch("NeverPassed").isOn(defaults:)` against a scratch `UserDefaults` suite with no keys set (`DebugLaunchSwitchTests.swift`, `testASwitchIsOffUntilItsLaunchArgumentSaysOtherwise`). | Returns `false`. |
+| foundation-debug-automation-002 | debug-build-reads-argument-domain | `DebugLaunchSwitch("SomeDebugBehavior").isOn(defaults:)` against a scratch suite with that key set to `true`, under a Debug build. | Returns `true`. |
+| foundation-debug-automation-003 | debug-switch-fixed-key, defaults-key-alias | Read `QuietWindowPresentation.debugSwitch.key` and `QuietWindowPresentation.defaultsKey` (`DebugLaunchSwitchTests.swift`, `testTheKeyIsTheArgumentName`). | Both equal the string `"QuietWindowPresentation"`. |
+| foundation-debug-automation-004 | resolve-or-precedence, test-host-short-circuits-defaults-read | `QuietWindowPresentation.resolve(isTestHost: true, defaults:)` against a scratch suite with `defaultsKey` set to `false` (`QuietWindowPresentationTests.swift`, `testATestHostIsAlwaysQuietWhateverTheDefaultsSay`). | Returns `true`, regardless of the stored `false`. |
+| foundation-debug-automation-005 | resolve-or-precedence | `QuietWindowPresentation.resolve(isTestHost: false, defaults:)` against a scratch suite with `defaultsKey` set to `true` (`testTheLaunchArgumentTurnsQuietPresentationOnOutsideATestHost`). | Returns `true`. |
+| foundation-debug-automation-006 | resolve-or-precedence | `QuietWindowPresentation.resolve(isTestHost: false, defaults:)` against an empty scratch suite (`testAnOrdinaryLaunchIsNotQuiet`). | Returns `false`. |
+| foundation-debug-automation-007 | is-enabled-live-read, test-host-detection | `QuietWindowPresentation.isEnabled` read from inside the running XCTest process itself (`testTheProcessRunningThisSuiteIsQuiet`). | Returns `true` — `isEnabled` reads the live environment (this process is an XCTest host), not merely `resolve(isTestHost:defaults:)` in isolation. |
+| foundation-debug-automation-008 | quiet-order-front, quiet-activation-gate (ordering half) | `SingleWindowController.forcesWindowFront`, evaluated as `!QuietWindowPresentation.isEnabled` while running under XCTest (`testQuietPresentationSuppressesFrontForcing`). | Returns `false`, confirming `isEnabled` is `true` for the calling process. |
+| foundation-debug-automation-009 | sink-level-only, quiet-make-key-and-order-front, level-set-before-ordering | Build a fresh `NSWindow` and call `makeKeyAndOrderFrontQuietly()` while `QuietWindowPresentation.isEnabled` is `true` (`testAQuietlyShownWindowIsVisibleButSunkBehindTheDesktop`). | `window.isVisible` is `true`, `window.screen` is non-nil, and `window.level` equals `NSWindow.Level(Int(CGWindowLevelForKey(.desktopWindow)))`. |
+| foundation-debug-automation-010 | quiet-make-key-and-order-front | Compare the `isKeyWindow` of a window shown with plain `makeKeyAndOrderFront(nil)` against one shown with `makeKeyAndOrderFrontQuietly()`, both while `isEnabled` is `true` (`testSinkingCostsNoKeyStatusAPlainOrderFrontWouldHaveGiven`). | The two `isKeyWindow` values are equal — sinking the level costs no key status a plain call would have given. |
 
 ## Edge Cases
 
@@ -214,13 +205,13 @@ z-order level, never its accessibility role, label, or announcements.
   same key string observe the same `UserDefaults`/launch-argument slot,
   since `Hashable`/`Equatable` conformance is exactly string equality on
   `key`. This is the documented contract — "the `UserDefaults` key, which is
-  also the launch-argument name" (`DebugLaunchSwitch.swift` line 25) — not an
+  also the launch-argument name" (`DebugLaunchSwitch.swift`) — not an
   omitted guard (MUST, see **switch-key-identity**).
 - **XCTest-framework linkage outside an actual test run**: `isRunningInTests`
   reports `true` whenever the `XCTestCase` class is resolvable in the
   current process, per its own stated assumption that "XCTest links its own
   framework into the runner, so the class exists in a test run and nowhere
-  else" (`NSWindow+TestHostVisibility.swift` lines 5-6). A host process that
+  else" (`NSWindow+TestHostVisibility.swift`). A host process that
   happens to link `XCTest.framework` for some other reason would also report
   `true`; this is the documented assumption the check relies on, not a
   validation this file performs (MUST, see **test-host-detection**).
@@ -244,10 +235,10 @@ z-order level, never its accessibility role, label, or announcements.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `key` (`DebugLaunchSwitch.init(_:)`) | `String` | none — required at construction | Caller-supplied name shared as both the `UserDefaults` key and the launch-argument name, e.g. `"QuietWindowPresentation"` or the doc comment's own example `"MultipleInstances"` (`DebugLaunchSwitch.swift` lines 7-8). |
-| Launch argument | CLI flag, e.g. `-QuietWindowPresentation YES` | absent | Passed as `open -n -g -a <App> --args -<key> YES`; written into the process's argument domain, which `isOn(defaults:)` reads through `UserDefaults`, and which lasts exactly as long as that one process (lines 3-8, 14-17). |
-| `defaults` (`isOn(defaults:)` parameter) | `UserDefaults` | `.standard`, via the no-argument `isOn` | Injectable so a test can supply an isolated `UserDefaults` suite instead of the developer's real preferences (line 37). |
-| `DEBUG` compilation flag | compiler build configuration | project-configured (Debug vs. Release) | Gates whether `isOn(defaults:)` ever consults `defaults` at all; a Release build removes the check entirely (lines 38-41). |
+| `key` (`DebugLaunchSwitch.init(_:)`) | `String` | none — required at construction | Caller-supplied name shared as both the `UserDefaults` key and the launch-argument name, e.g. `"QuietWindowPresentation"` or the doc comment's own example `"MultipleInstances"` (`DebugLaunchSwitch.swift`). |
+| Launch argument | CLI flag, e.g. `-QuietWindowPresentation YES` | absent | Passed as `open -n -g -a <App> --args -<key> YES`; written into the process's argument domain, which `isOn(defaults:)` reads through `UserDefaults`, and which lasts exactly as long as that one process. |
+| `defaults` (`isOn(defaults:)` parameter) | `UserDefaults` | `.standard`, via the no-argument `isOn` | Injectable so a test can supply an isolated `UserDefaults` suite instead of the developer's real preferences. |
+| `DEBUG` compilation flag | compiler build configuration | project-configured (Debug vs. Release) | Gates whether `isOn(defaults:)` ever consults `defaults` at all; a Release build removes the check entirely. |
 
 None of the four files reads a `ProcessInfo.environment` variable or any
 settings key of its own beyond the `UserDefaults` key described above.
@@ -359,7 +350,7 @@ inline `UserDefaults.bool(forKey:)` call at each use site.
 only in the launch-argument domain, not a written preference — so a stale
 `defaults write` cannot leave a developer wondering later why the app
 behaves oddly — and the `#if DEBUG` check is evaluated exactly once, in this
-type, so no call site can forget it (`DebugLaunchSwitch.swift` lines 11-22).
+type, so no call site can forget it (`DebugLaunchSwitch.swift`).
 **Approved**: pending
 
 **Decision**: `sinkBehindDesktop()` changes only the window's `level`,
@@ -370,7 +361,7 @@ hiding the window (`orderOut`, `isVisible = false`) or moving it off-screen.
 hidden or off-screen window would fail — while a person at the keyboard
 must not see it "in front of them"; dropping the level below the desktop
 gives AppKit a real, laid-out, visible window and gives the person at the
-keyboard nothing (`NSWindow+TestHostVisibility.swift` lines 16-29).
+keyboard nothing (`NSWindow+TestHostVisibility.swift`).
 **Approved**: pending
 
 **Decision**: `orderFrontQuietly()` and `makeKeyAndOrderFrontQuietly()` set
@@ -378,8 +369,7 @@ the window's level *before* calling `orderFront`/`makeKeyAndOrderFront`,
 rather than ordering first and sinking afterward.
 **Rationale**: Per the doc comment, this ordering keeps the window from
 ever being briefly visible at the normal level on its way to the sunk
-level — a flash a person at the keyboard could otherwise catch (lines
-37-38).
+level — a flash a person at the keyboard could otherwise catch.
 **Approved**: pending
 
 **Decision**: `QuietWindowPresentation.isEnabled` is the OR of two
@@ -392,7 +382,7 @@ an automated Debug session needs the argument because it is not itself an
 XCTest process. Exposing `resolve` with both inputs as parameters makes both
 branches independently testable — under XCTest, `isEnabled` would otherwise
 always short-circuit to `true` and the Debug-only branch could never be
-exercised (`QuietWindowPresentation.swift` lines 7-19, 34-36).
+exercised (`QuietWindowPresentation.swift`).
 **Approved**: pending
 
 **Decision**: `NSApplication.activateUnlessQuiet()` generalizes to app
@@ -403,8 +393,7 @@ bare `activate(ignoringOtherApps:)` repeated at each call site.
 called `activate(ignoringOtherApps:)` directly, so the quiet flag was
 honored by whichever of them happened to remember it and ignored by the
 rest; centralizing the check in one extension method removes that
-per-call-site inconsistency (`NSApplication+QuietActivation.swift` lines
-15-26).
+per-call-site inconsistency (`NSApplication+QuietActivation.swift`).
 **Approved**: pending
 
 ## Compliance
@@ -432,3 +421,4 @@ live `isEnabled` read, and the observable effect of
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-24 | Mike Fullerton | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

@@ -3,7 +3,7 @@ id: d4be0c36-834c-41aa-af89-478eaf660e0f
 title: ExtensionUpdateCheck
 domain: agentictoolkit://recipes/extension-host-core-extensions-extension-update-check
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -43,9 +43,8 @@ host could actually run. It holds an `OpenVSXClient` and the host's declared
 answers for one `LoadedExtension`, and `check(_:)`, which answers for a list
 by running one `update(for:)` lookup per extension concurrently and folding
 the results into an `ExtensionUpdateReport` (source:
-`packages/apple/AgenticToolkit/Core/Extensions/ExtensionUpdateCheck.swift`
-lines 19–97). The contract's defining rule, stated in the type's own doc
-comment (lines 9–18), is that a newer version is reported only when
+`packages/apple/AgenticToolkit/Core/Extensions/ExtensionUpdateCheck.swift`). The contract's defining rule, stated in the type's own doc
+comment, is that a newer version is reported only when
 installing it would succeed: each candidate is run through the same
 `OpenVSXExtensionDetail.installability(forHostVersion:)` gate the installer
 uses, and a newer version that fails it is treated as no update at all, not
@@ -54,14 +53,14 @@ as an update the caller must separately refuse.
 ## Behavioral Requirements
 
 - **default-client**: `ExtensionUpdateCheck.init` MUST default its `client`
-  parameter to `OpenVSXClient()` when the caller supplies none (lines 24–26).
+  parameter to `OpenVSXClient()` when the caller supplies none.
 - **default-host-version**: `ExtensionUpdateCheck.init` MUST default its
   `hostVersion` parameter to `ExtensionRegistry.declaredVSCodeVersion` when
-  the caller supplies none (line 26).
+  the caller supplies none.
 - **publisher-required**: `update(for:)` MUST throw
   `ExtensionUpdateError.noPublisher(installed.identifier)` when
   `installed.manifest.publisher` is `nil` or the empty string, before making
-  any registry request (lines 975–977).
+  any registry request.
 - **registry-lookup-by-manifest-fields**: `update(for:)` MUST request the
   registry's detail record by calling
   `client.detail(namespace: installed.manifest.publisher, name: installed.manifest.name)`,
@@ -69,66 +68,64 @@ as an update the caller must separately refuse.
   splitting `installed.identifier` (the case-folded `publisher.name` string)
   back apart, because a publisher name containing a `.` would split at the
   wrong place and the identifier's case-folding is this host's convention,
-  not the registry's (lines 970–978).
+  not the registry's.
 - **latest-version-requested**: `update(for:)` MUST call `client.detail`
   with no `version` argument, so the registry returns the latest published
-  version rather than a specific one (line 978).
+  version rather than a specific one.
 - **versions-must-both-parse**: `update(for:)` MUST throw
   `ExtensionUpdateError.versionNotComparable(installed: installed.manifest.version, published: latest.version)`
   when `SemanticVersion(installed.manifest.version)` is `nil`, when
-  `latest.semanticVersion` is `nil`, or both (lines 980–988).
+  `latest.semanticVersion` is `nil`, or both.
 - **no-downgrade-offered**: `update(for:)` MUST return `nil` when the parsed
   published version is not strictly greater than the parsed installed
   version — covering both an equal version and a published version that is
-  older than what is installed (lines 989 and the doc comment on
-  `ExtensionUpdateError.versionNotComparable`, lines 982–985).
+  older than what is installed (the version comparison and the doc comment on
+  `ExtensionUpdateError.versionNotComparable`).
 - **installability-gate**: `update(for:)` MUST return `nil`, and MUST NOT
   return an `ExtensionUpdate`, when
   `latest.installability(forHostVersion: hostVersion)` is not `.installable`,
-  even though the published version is strictly newer than the installed one
-  (lines 991–994).
+  even though the published version is strictly newer than the installed one.
 - **update-value-shape**: When a candidate is strictly newer and installable,
   `update(for:)` MUST return an `ExtensionUpdate` whose `identifier` is
   `installed.identifier`, whose `installedVersion` is
   `installed.manifest.version` (the raw string, not the parsed
   `SemanticVersion`), and whose `latest` is the full `OpenVSXExtensionDetail`
-  the registry returned (lines 995–998).
+  the registry returned.
 - **concurrent-per-extension-lookup**: `check(_:)` MUST run exactly one
   `outcome(for:)` lookup per element of `installed`, and MUST run every
   element's lookup concurrently rather than sequentially, using a
-  `withTaskGroup` over one child task per extension (lines 947–951).
+  `withTaskGroup` over one child task per extension.
 - **per-lookup-failure-isolation**: `check(_:)` MUST NOT fail, throw, or omit
   results for the extensions whose lookup succeeded when one or more other
   extensions' lookups fail; a failed lookup MUST be represented as an entry
   in the returned report's `notCheckable` array rather than aborting the
-  whole call (lines 1001–1015, `outcome(for:)`'s internal `catch`).
+  whole call (`outcome(for:)`'s internal `catch`).
 - **check-never-throws**: `check(_:)` MUST be a non-throwing `async` function;
   every error `update(for:)` can raise, and any other error a registry
   request can raise, MUST be caught inside `outcome(for:)` and converted into
   an `ExtensionUpdateUnavailable` entry rather than propagated to `check(_:)`'s
-  caller (line 947 signature; lines 1001–1015).
+  caller.
 - **updates-sorted-by-identifier**: `check(_:)` MUST return
   `ExtensionUpdateReport.updates` sorted ascending by `identifier` using
   `String`'s default `<` operator, regardless of the order in which the
-  concurrent lookups complete (lines 952, 954–957, 962).
+  concurrent lookups complete.
 - **unavailable-sorted-by-identifier**: `check(_:)` MUST return
   `ExtensionUpdateReport.notCheckable` sorted ascending by `identifier` using
   `String`'s default `<` operator, regardless of the order in which the
-  concurrent lookups complete (lines 953, 954–957, 963).
+  concurrent lookups complete.
 - **empty-input-empty-report**: `check(_:)` MUST return an
   `ExtensionUpdateReport` with an empty `updates` array and an empty
-  `notCheckable` array when `installed` is an empty array (lines 947–965; no
+  `notCheckable` array when `installed` is an empty array (no
   branch runs when the task group is given no tasks to add).
 - **error-classification-not-published**: `outcome(for:)` MUST classify a
   caught error as `ExtensionUpdateUnavailable.Reason.notPublished` when, and
-  only when, the error is `OpenVSXError.requestFailed(_, status: 404)`
-  (lines 1029, 1036–1037).
+  only when, the error is `OpenVSXError.requestFailed(_, status: 404)`.
 - **error-classification-no-publisher**: `outcome(for:)` MUST classify a
   caught error as `.noPublisher` when the error is
-  `ExtensionUpdateError.noPublisher` (line 1033).
+  `ExtensionUpdateError.noPublisher`.
 - **error-classification-version-not-comparable**: `outcome(for:)` MUST
   classify a caught error as `.versionNotComparable` when the error is
-  `ExtensionUpdateError.versionNotComparable` (line 1034).
+  `ExtensionUpdateError.versionNotComparable`.
 - **error-classification-default-unreachable**: `outcome(for:)` MUST
   classify every caught error that is not one of the three cases above —
   including every other `OpenVSXError` case (`requestFailed` with a status
@@ -136,27 +133,26 @@ as an update the caller must separately refuse.
   `artifactNotFetchable`, `artifactTooLarge`, `unsafeIdentity`,
   `responseNotHTTP`, `responseTooLarge`) and any error of a type this
   component does not otherwise recognize — as
-  `.registryUnreachable` (lines 1038–1040, `default: return .registryUnreachable`).
+  `.registryUnreachable` (`default: return .registryUnreachable`).
 - **failure-logged-at-debug**: `outcome(for:)` MUST log a `debug`-level
   message naming the failed extension's `identifier` and
   `String(describing: error)` for every caught error, before returning the
-  `.notCheckable` outcome (lines 1006–1010).
+  `.notCheckable` outcome.
 - **report-carries-both-arrays**: `ExtensionUpdateReport` MUST expose both
   `updates: [ExtensionUpdate]` and `notCheckable: [ExtensionUpdateUnavailable]`
   as separate arrays on every `check(_:)` result, so that "nothing to update"
   and "some extensions could not be asked about" remain distinguishable to a
-  caller (lines 1109–1122, doc comment lines 1109–1113).
+  caller (doc comment).
 - **value-type-equatability**: `ExtensionUpdate`, `ExtensionUpdateUnavailable`,
   `ExtensionUpdateUnavailable.Reason`, and `ExtensionUpdateReport` MUST each
-  conform to `Equatable` and `Sendable` (lines 1055, 1076, 1078, 1114).
+  conform to `Equatable` and `Sendable`.
 - **error-type-equatability**: `ExtensionUpdateError` MUST conform to `Error`,
   `Sendable`, and `Equatable`, with exactly two cases, `noPublisher(String)`
-  and `versionNotComparable(installed: String, published: String)`
-  (lines 1124–1129).
+  and `versionNotComparable(installed: String, published: String)`.
 - **non-sendable-lookup-result-type**: the private `ExtensionUpdateOutcome`
   enum used inside `check(_:)`'s task group MUST conform to `Sendable`, since
   it is the type parameter of `withTaskGroup(of:)` and is produced inside a
-  concurrently-executing child task (line 947, line 1043).
+  concurrently-executing child task.
 
 ## Appearance
 
@@ -205,7 +201,7 @@ role, label, or focus target of its own.
   `noPublisherThrows` and `aManifestWithNoPublisherSaysSo`).
 - **Publisher is the empty string**: treated identically to `nil` — the guard
   is `!publisher.isEmpty`, so a manifest that decoded `publisher` as `""`
-  MUST also throw `.noPublisher` (MUST, traced to line 975).
+  MUST also throw `.noPublisher` (MUST, traced to the source).
 - **Installed or published version string does not parse as
   `major[.minor[.patch]]`** (e.g. `"nightly-build"`, a prerelease suffix such
   as `"1.0.0-rc.1"`, or any string `SemanticVersion.init?` rejects): MUST
@@ -229,8 +225,7 @@ role, label, or focus target of its own.
   `newerButIncompatibleIsNotOffered` and `newerPlatformSpecificIsNotOffered`
   for two of the four `OpenVSXInstallability` non-`.installable` cases; the
   other two, `.noUniversalBuild` and `.engineRangeUnreadable`, are gated by
-  the same `guard installability == .installable else { return nil }` at
-  line 991 but have no dedicated test in
+  the same `guard installability == .installable else { return nil }` but have no dedicated test in
   `ExtensionUpdateCheckTests.swift`).
 - **Registry answers 404**: classified as `.notPublished`, the expected
   outcome for a sideloaded, unpublished, or private extension — this MUST
@@ -245,7 +240,7 @@ role, label, or focus target of its own.
   distinguishes only "no such extension" (404) from "no usable answer" (every
   other failure), and does not further distinguish among the causes of "no
   usable answer" (MUST, traced to `aFailingRegistryIsUnreachableRatherThanUnknown`
-  and the `default:` branch at lines 1038–1039).
+  and the `default:` branch).
 - **Concurrent lookups, and their completion order**: `check(_:)` MUST run
   every extension's lookup concurrently via `withTaskGroup`, and the outcome
   arrays MUST be independent of which task completes first — this is
@@ -263,30 +258,29 @@ role, label, or focus target of its own.
   entries that share an identical `identifier` after sorting is whichever
   order the concurrent lookups happened to complete in, which is not
   deterministic across runs (fact, traced to the absence of any
-  identifier-grouping step in `check(_:)`, lines 947–965).
+  identifier-grouping step in `check(_:)`).
 - **A dependency (the registry) is unavailable for the whole call, not just
   one extension**: no distinct code path exists for "the registry as a
   whole is down" versus "this one lookup failed" — every extension whose
   lookup reaches the registry and gets no usable answer is reported
   individually as `.registryUnreachable` in `notCheckable`; there is no
   fail-fast short-circuit that stops issuing further lookups once one has
-  failed this way (fact, traced to `outcome(for:)`'s per-task `catch`, lines
-  1001–1015, which is scoped to one extension with no shared state across
+  failed this way (fact, traced to `outcome(for:)`'s per-task `catch`, which is scoped to one extension with no shared state across
   tasks).
 - **Offline / disconnected state**: not a state this component detects or
   reports as such — a lost connection during a lookup throws a transport
   error from `OpenVSXClient`, which `outcome(for:)`'s `default:` branch
   classifies as `.registryUnreachable`, identically to a reachable-but-failing
-  registry (fact, traced to the same `default:` branch, lines 1038–1039;
+  registry (fact, traced to the same `default:` branch;
   `ExtensionUpdateCheck` has no separate concept of "offline").
 
 ## Configuration
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `client` | `OpenVSXClient` | `OpenVSXClient()` (the public Open VSX registry at `https://open-vsx.org/api`) | The registry client `update(for:)` and `check(_:)` issue lookups through; injected so tests can point it at a stub registry (lines 24–25). |
-| `hostVersion` | `SemanticVersion` | `ExtensionRegistry.declaredVSCodeVersion` (`1.138.0`) | The host version passed to `OpenVSXExtensionDetail.installability(forHostVersion:)` for every candidate; a caller who wants to check against a different declared version supplies it here (line 26). |
-| `installed` | `[LoadedExtension]` | — (required parameter of `check(_:)`) | The extensions to check, one lookup per element; supplying `[]` is valid and yields an empty report (line 947). |
+| `client` | `OpenVSXClient` | `OpenVSXClient()` (the public Open VSX registry at `https://open-vsx.org/api`) | The registry client `update(for:)` and `check(_:)` issue lookups through; injected so tests can point it at a stub registry. |
+| `hostVersion` | `SemanticVersion` | `ExtensionRegistry.declaredVSCodeVersion` (`1.138.0`) | The host version passed to `OpenVSXExtensionDetail.installability(forHostVersion:)` for every candidate; a caller who wants to check against a different declared version supplies it here. |
+| `installed` | `[LoadedExtension]` | — (required parameter of `check(_:)`) | The extensions to check, one lookup per element; supplying `[]` is valid and yields an empty report. |
 
 ## Deep Linking
 
@@ -298,8 +292,7 @@ scheme type).
 ## Localization
 
 Not applicable: the source contains no user-facing string. The one string
-literal built for display purposes, `"No update answer for \(...): \(...)"`
-(line 108), is a hardcoded English debug-log message, not a user-facing
+literal built for display purposes, `"No update answer for \(...): \(...)"`, is a hardcoded English debug-log message, not a user-facing
 string — it is never shown in any UI (traced to the full body of the source
 file, which returns only typed values — `ExtensionUpdate`,
 `ExtensionUpdateUnavailable`, `ExtensionUpdateReport`, or a thrown
@@ -330,7 +323,7 @@ file).
 - **Data collected**: None persisted by this component. Per lookup,
   `update(for:)` reads the fields the caller's `LoadedExtension.manifest`
   already holds in memory — `publisher`, `name`, and `version` — and does
-  not read or retain anything beyond those (lines 975, 978, 980).
+  not read or retain anything beyond those.
 - **Storage**: Not applicable — `ExtensionUpdateCheck` and `OpenVSXClient`
   are documented as stateless and hold no cache (source doc comment on
   `OpenVSXClient`: "Stateless and `Sendable`... keeps no cache"); nothing is
@@ -340,7 +333,7 @@ file).
   whichever registry `client` addresses — the public
   `https://open-vsx.org/api` unless a caller configured a different
   `registryBase` — by placing them in the request path of
-  `client.detail(namespace:name:)` (line 978). The installed `version`
+  `client.detail(namespace:name:)`. The installed `version`
   string is read locally for comparison but is never sent to the registry;
   only `namespace` and `name` appear in the outgoing request.
 - **Retention**: Not applicable — no data from this component is retained
@@ -431,7 +424,7 @@ past what this host declares, and versions built for one native platform;
 offering either as an update produces a button whose only outcome is a
 refusal on install, so a version that fails installability is treated as
 the end of that extension's updates for now rather than a broken offer
-(source doc comment on `ExtensionUpdateCheck`, lines 9–18, annotated
+(source doc comment on `ExtensionUpdateCheck`, annotated
 `*(principle-of-least-astonishment)*`; tests `newerButIncompatibleIsNotOffered`,
 `newerPlatformSpecificIsNotOffered`).
 **Approved**: pending
@@ -443,7 +436,7 @@ fields directly, never by splitting `installed.identifier` (the case-folded
 own example is `"my.company"` — would split at the wrong place under naive
 re-splitting, and the identifier's case-folding is this host's own
 convention for matching, not the registry's addressing scheme (inline
-comment at lines 970–974; test `lookupUsesThePublisherVerbatim`).
+comment; test `lookupUsesThePublisherVerbatim`).
 **Approved**: pending
 
 **Decision**: Treat an unparseable version string on either side as a
@@ -453,7 +446,7 @@ raw string inequality.
 downgrade as an update whenever string ordering and semantic ordering
 disagree; refusing to decide is safer than deciding wrong, so the source
 raises a distinct, typed error instead of silently falling through to "no
-update" (inline comment at lines 982–986; test `incomparableVersionsThrow`).
+update" (inline comment; test `incomparableVersionsThrow`).
 **Approved**: pending
 
 **Decision**: Run every extension's registry lookup concurrently via
@@ -465,8 +458,7 @@ twenty extensions installed should not wait twenty sequential round trips;
 running them together is strictly faster with no added risk, but task
 completion order alone would reshuffle a panel's rows between two runs that
 found the same answers, so the explicit `sorted` calls are what make the
-result reproducible rather than the concurrency itself (doc comment at
-lines 32–38; test `resultsAreSorted`).
+result reproducible rather than the concurrency itself (doc comment; test `resultsAreSorted`).
 **Approved**: pending
 
 **Decision**: Report a lookup that could not be answered (`notCheckable`)
@@ -479,7 +471,7 @@ genuinely unknown extension, and folding it into every other failure mode
 would tell a user whose network is down that most of their extensions do
 not exist. The two questions a reader can act on differently —
 "this was never published" versus "the registry did not answer" — are kept
-apart for that reason (doc comments at lines 1017–1028 and 1109–1113; tests
+apart for that reason (doc comments; tests
 `oneUnknownExtensionDoesNotFailTheCheck` and
 `aFailingRegistryIsUnreachableRatherThanUnknown`).
 **Approved**: pending
@@ -525,3 +517,4 @@ and empty input, and the dotted-publisher addressing case.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | | | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

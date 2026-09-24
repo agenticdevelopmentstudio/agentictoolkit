@@ -3,11 +3,11 @@ id: 3ea9329e-5acc-4c43-b5ce-bb8c50570104
 title: Auth Client
 domain: agentictoolkit://recipes/auth-client
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -72,107 +72,103 @@ part of it.
 
 - **default-runtime-config**: `authConfig()` MUST return `{ storageKey:
   'auth_tokens', refreshPath: '/api/auth/refresh' }` before `configureAuth` is
-  ever called (`config.ts`, lines 8-11, 17-19).
+  ever called (`config.ts`).
 - **configure-auth-merges**: `configureAuth(partial)` MUST shallow-merge
   `partial` onto the current config, leaving any field `partial` omits
-  unchanged (`config.ts`, lines 13-15).
+  unchanged (`config.ts`).
 - **auth-api-base-resolution**: `authApiBaseOrEnv(explicit)` MUST return
   `explicit` when given, else `process.env.NEXT_PUBLIC_AUTH_API_URL`, with any
   trailing `/` characters stripped, and MUST return `undefined` when neither
-  is set (`asBase.ts`, lines 9-12).
+  is set (`asBase.ts`).
 - **as-endpoint-proxy-fallback**: `asEndpoint(path, authApiBase)` MUST return
   `${base}${path}` when a base resolves via `authApiBaseOrEnv`, and MUST
   return `/api${path}` (the same-origin BFF proxy) when no base is configured
-  (`asBase.ts`, lines 24-26).
+  (`asBase.ts`).
 - **auth-tokens-shape**: `AuthTokens` MUST carry exactly `accessToken: string`
-  and `refreshToken: string` (`types.ts`, lines 1-4).
+  and `refreshToken: string` (`types.ts`).
 - **auth-user-shape**: `AuthUser` MUST carry `id`, `email`, `name`,
   `avatarUrl: string`, `capabilities: string[]`, `authMethods:
   UserAuthMethod[]`, and `attributes: UserAttribute[]`, and MAY carry `slug:
-  string | null` (`types.ts`, lines 12-24).
+  string | null` (`types.ts`).
 - **has-capability-null-safe**: `hasCapability(user, capability)` MUST return
   `true` if and only if `user.capabilities` includes `capability`, and MUST
-  return `false` when `user` is `null` or `undefined` (`types.ts`, lines
-  26-28).
+  return `false` when `user` is `null` or `undefined` (`types.ts`).
 - **is-admin-derived**: `isAdmin(user)` MUST return
-  `hasCapability(user, 'admin')` (`types.ts`, lines 30-32).
+  `hasCapability(user, 'admin')` (`types.ts`).
 - **tokens-from-response-precedence**: `tokensFromResponse(data)` MUST prefer
-  `data.accessToken` over `data.token` when both are present (`tokens.ts`,
-  lines 36-40).
+  `data.accessToken` over `data.token` when both are present (`tokens.ts`).
 - **tokens-from-response-refresh-token-blanked**: `tokensFromResponse` MUST
   always set the returned `refreshToken` to `''`, regardless of whether the
   response body carries one — refresh/revoke are cookie-first against an
   HttpOnly cookie, and the backend's `refreshToken` field is deliberately
-  never read or persisted (`tokens.ts`, lines 26-34, 39).
+  never read or persisted (`tokens.ts`).
 - **tokens-from-response-throws-when-absent**: `tokensFromResponse` MUST
   throw `Error('Token response missing token/accessToken')` when neither
-  `accessToken` nor `token` is present (`tokens.ts`, line 38).
+  `accessToken` nor `token` is present (`tokens.ts`).
 - **token-storage-key-configurable**: `readTokens`/`writeTokens`/`clearTokens`
   MUST read, write, and remove the localStorage key named by
-  `authConfig().storageKey`, as JSON (`tokens.ts`, lines 75-92).
+  `authConfig().storageKey`, as JSON (`tokens.ts`).
 - **token-read-off-browser-returns-null**: `readTokens` (and therefore
   `readAccessToken`) MUST return `null` when `window` is `undefined` (SSR)
-  (`tokens.ts`, lines 15-16).
+  (`tokens.ts`).
 - **token-read-malformed-json-returns-null**: `readTokens` MUST return `null`
-  when the stored value is not valid JSON, without throwing (`tokens.ts`,
-  lines 19-23).
+  when the stored value is not valid JSON, without throwing (`tokens.ts`).
 - **write-tokens-persists-and-announces**: `writeTokens(tokens)` MUST persist
   `tokens` under the storage key and then invoke every subscriber registered
-  via `onSessionChange` (`tokens.ts`, lines 79-83).
+  via `onSessionChange` (`tokens.ts`).
 - **clear-tokens-clears-sibling-user-key**: `clearTokens()` MUST remove both
   the tokens key and the sibling cached-user key (`${storageKey}:user`), then
-  invoke every `onSessionChange` subscriber (`tokens.ts`, lines 85-92).
+  invoke every `onSessionChange` subscriber (`tokens.ts`).
 - **read-access-token-derivation**: `readAccessToken()` MUST return
-  `readTokens()?.accessToken ?? null` (`tokens.ts`, lines 94-96).
+  `readTokens()?.accessToken ?? null` (`tokens.ts`).
 - **session-change-subscription**: `onSessionChange(fn)` MUST register `fn`
   to be called on every subsequent `writeTokens`/`clearTokens` call, and MUST
   return an unsubscribe function that removes `fn` from the listener set
-  (`tokens.ts`, lines 68-73).
+  (`tokens.ts`).
 - **session-change-payload-free**: `onSessionChange` listeners MUST be
   invoked with no arguments — the announcement communicates only that the
-  session moved, never what it moved to (`tokens.ts`, lines 46-47, 63-66).
+  session moved, never what it moved to (`tokens.ts`).
 - **session-change-snapshot-iteration**: `announceSessionChange` MUST iterate
   a snapshot (`[...sessionListeners]`) of the listener set, so a listener that
   unsubscribes itself or another listener from inside its own callback does
   not affect delivery to the other listeners in that same announcement
-  (`tokens.ts`, lines 44-48).
+  (`tokens.ts`).
 - **decode-base64url-json-utf8-strict**: `decodeBase64UrlJson(segment)` MUST
   base64url-decode `segment` and decode the resulting bytes as UTF-8 using a
   strict (`fatal: true`) decoder — never substituting U+FFFD for an invalid
-  byte sequence — before `JSON.parse`-ing the text (`tokens.ts`, lines
-  117-122).
+  byte sequence — before `JSON.parse`-ing the text (`tokens.ts`).
 - **decode-base64url-json-tolerates-missing-padding**: `decodeBase64UrlJson`
   MUST tolerate a segment whose `=` padding was stripped, by re-padding to a
-  multiple of 4 characters before decoding (`tokens.ts`, line 120).
+  multiple of 4 characters before decoding (`tokens.ts`).
 - **decode-base64url-json-never-throws**: `decodeBase64UrlJson` MUST return
   `null`, never throw, for input that fails at any step — invalid base64,
-  invalid UTF-8, or invalid JSON (`tokens.ts`, lines 118, 123-125).
+  invalid UTF-8, or invalid JSON (`tokens.ts`).
 - **read-token-subject-derivation**: `readTokenSubject()` MUST return the
   string `sub` claim decoded from the second dot-separated segment of the
   stored access token, and MUST return `null` when no token is stored, the
   token has no second segment, decoding fails, or `sub` is not a string
-  (`tokens.ts`, lines 134-140).
+  (`tokens.ts`).
 - **read-user-validates-shape**: `readUser()` MUST return `null` — never the
   malformed value — when the cached user blob is absent, lacks a string `id`,
-  or lacks an array `capabilities` (`tokens.ts`, lines 145-152).
+  or lacks an array `capabilities` (`tokens.ts`).
 - **write-user-persists-off-browser-noop**: `writeUser(user)` MUST persist
   `user` under the cached-user key as JSON, and MUST be a no-op when `window`
-  is `undefined` (`tokens.ts`, lines 154-157).
+  is `undefined` (`tokens.ts`).
 - **refresh-single-flight-dedup**: `refreshAccessToken()` MUST return the
   same in-flight `Promise` to every caller while a refresh is outstanding,
   issuing exactly one network request regardless of how many callers invoke
-  it concurrently (`refresh.ts`, lines 28-36).
+  it concurrently (`refresh.ts`).
 - **refresh-request-shape**: A refresh attempt MUST `POST` the literal body
   `'{}'` to `authConfig().refreshPath` with `credentials: 'include'` and
-  header `Content-Type: application/json` (`refresh.ts`, lines 41-46).
+  header `Content-Type: application/json` (`refresh.ts`).
 - **invalidate-refresh-bumps-generation**: `invalidateRefresh()` MUST
   increment the module's generation counter and MUST discard any outstanding
   in-flight refresh reference, so a fresh login or logout invalidates a
-  refresh that started before it (`refresh.ts`, lines 23-26).
+  refresh that started before it (`refresh.ts`).
 - **refresh-generation-guard**: If the generation counter has changed between
   the start of a refresh attempt and its response arriving, `doRefresh` MUST
   resolve `null` on the success path without calling `writeTokens` or
-  `clearTokens` (`refresh.ts`, lines 62-63).
+  `clearTokens` (`refresh.ts`).
 - **refresh-success-adopts-current-storage**: On a successful (`res.ok`)
   refresh response, `doRefresh` MUST compare the access token currently in
   storage against the one read at the start of the attempt; if storage no
@@ -180,178 +176,170 @@ part of it.
   another login/refresh), `doRefresh` MUST return the current stored token
   (or `null` if storage was cleared) instead of writing the newly fetched
   tokens, and MUST only call `writeTokens` when storage still holds the
-  unchanged starting token (`refresh.ts`, lines 64-71).
+  unchanged starting token (`refresh.ts`).
 - **refresh-failure-adopts-concurrent-winner**: On a non-OK refresh response,
   if storage's current access token already differs from the one this
   attempt started with, `doRefresh` MUST return that current token rather
-  than clearing it (`refresh.ts`, lines 48-51).
+  than clearing it (`refresh.ts`).
 - **refresh-failure-loser-recheck-delay**: On a non-OK refresh response with
   no immediately visible concurrent winner, `doRefresh` MUST wait exactly
   300ms (`LOSER_RECHECK_DELAY_MS`) and re-read storage once before deciding,
-  adopting a winner's token if one appeared during the wait (`refresh.ts`,
-  lines 19, 52-58).
+  adopting a winner's token if one appeared during the wait (`refresh.ts`).
 - **refresh-failure-clears-when-unresolved**: If, after the loser-recheck
   wait, storage still holds the access token this attempt started with, and
   the generation counter has not changed, `doRefresh` MUST call `clearTokens`
-  and resolve `null` (`refresh.ts`, lines 59-60).
+  and resolve `null` (`refresh.ts`).
 - **refresh-network-error-reports-and-clears**: A thrown network or parse
   error during a refresh attempt MUST be reported via
   `reportAuthError(err, { feature: 'auth', step: 'tokenRefresh' })`, and MUST
   then clear tokens (subject to the same generation guard) and resolve `null`
-  (`refresh.ts`, lines 72-78).
+  (`refresh.ts`).
 - **authed-fetch-bearer-attach**: `authedFetch`/`authedJson`/`authedRequest`
   MUST attach `Authorization: Bearer <token>` to the request whenever
-  `readAccessToken()` returns a non-null token (`client.ts`, lines
-  108-121, 155-167).
+  `readAccessToken()` returns a non-null token (`client.ts`).
 - **authed-fetch-default-content-type**: `rawFetch` MUST default a
   `Content-Type: application/json` header whenever `init.body` is set and no
-  `Content-Type` header was already supplied (`client.ts`, lines 111-113).
+  `Content-Type` header was already supplied (`client.ts`).
 - **authed-fetch-default-init**: `authedFetch`/`authedJson`/`authedRequest`
   MAY be called with no `init` argument; each MUST default it to `{}` rather
-  than requiring the caller to pass one (`client.ts`, lines 155, 183, 187).
+  than requiring the caller to pass one (`client.ts`).
 - **authed-fetch-401-refresh-retry-once**: On a `401` response, `authedFetch`
   MUST call `refreshAccessToken()` exactly once and, if it resolves to a
   token, MUST retry the original request exactly once with that token; it
   MUST NOT call `refreshAccessToken()` again or retry a second time if the
-  retried request also fails (`client.ts`, lines 158-163).
+  retried request also fails (`client.ts`).
 - **authed-fetch-throws-on-non-ok**: `authedFetch` MUST throw `AuthHttpError`
   — carrying the response's HTTP status and any machine-readable `code`
   extracted from the parsed JSON body — for any final non-OK response, after
-  the one refresh-and-retry has already been attempted (`client.ts`, lines
-  165-173).
+  the one refresh-and-retry has already been attempted (`client.ts`).
 - **authed-json-rejects-204**: `authedJson` MUST throw `Error('Unexpected
   empty response (204 No Content); use authedRequest for endpoints with no
-  body')` when the response status is `204` (`client.ts`, lines 182-185).
+  body')` when the response status is `204` (`client.ts`).
 - **authed-request-discards-body**: `authedRequest` MUST perform an
   `authedFetch` and resolve `void`, discarding the response body
-  (`client.ts`, lines 187-189).
+  (`client.ts`).
 - **auth-http-error-shape**: `AuthHttpError` MUST extend `Error`, MUST expose
   a `status: number` and an optional `code?: string`, and MUST set
-  `name` to `'AuthHttpError'` (`client.ts`, lines 48-58).
+  `name` to `'AuthHttpError'` (`client.ts`).
 - **extract-error-message-precedence**: `extractErrorMessage(body, fallback)`
   MUST return, in order: a string top-level `error`; else a string `message`
   on a nested `error` object; else a string top-level `message`; else
   (RFC 9457 problem+json) `detail` when the body also has a string `title`
-  and a numeric `status`; else a string `title`; else `fallback` (`client.ts`,
-  lines 104-133).
+  and a numeric `status`; else a string `title`; else `fallback` (`client.ts`).
 - **extract-error-code-precedence**: `extractErrorCode(body)` MUST return a
   string `code` from a nested `error.code`, else a top-level `code`, else
-  `undefined` (`client.ts`, lines 135-144).
+  `undefined` (`client.ts`).
 - **read-error-message-single-parse**: `readErrorMessage(res, fallback)` MUST
   parse the response body exactly once (`res.json().catch(() => null)`) and
-  pass that single parsed value to `extractErrorMessage` (`client.ts`, lines
-  146-149).
+  pass that single parsed value to `extractErrorMessage` (`client.ts`).
 - **exchange-sso-code-request-shape**: `exchangeSsoCode(code, exchangePath)`
   MUST `POST` `{ code }` as JSON to `exchangePath`, which MUST default to
-  `DEFAULT_EXCHANGE_PATH` (`'/api/oauth/signin/exchange'`) (`client.ts`, lines
-  43, 68-76).
+  `DEFAULT_EXCHANGE_PATH` (`'/api/oauth/signin/exchange'`) (`client.ts`).
 - **exchange-sso-code-network-retry-once**: `exchangeSsoCode` MUST retry the
   `POST` exactly once, after a 750ms delay
   (`EXCHANGE_NETWORK_RETRY_DELAY_MS`), only when the first attempt fails at
   the network level (`fetch` itself throws/rejects), and MUST propagate the
   second attempt's outcome — including a second network failure — without
-  retrying again (`client.ts`, lines 41, 79-91).
+  retrying again (`client.ts`).
 - **exchange-sso-code-no-http-retry**: `exchangeSsoCode` MUST NOT retry when
   the server returns any HTTP response, including a non-OK one; only a
-  network-level failure triggers the retry (`client.ts`, lines 80-91).
+  network-level failure triggers the retry (`client.ts`).
 - **exchange-sso-code-success-result**: On a `2xx` response, `exchangeSsoCode`
   MUST return `{ tokens, user }`, where `tokens` is built via
   `tokensFromResponse` and `user` is the response body's `user` field
-  (`client.ts`, lines 99-101).
+  (`client.ts`).
 - **exchange-sso-code-failure-throws**: On a non-OK response,
   `exchangeSsoCode` MUST throw `AuthHttpError` carrying the status and the
   message/code extracted from the parsed body, with fallback message
-  `'Sign-in failed'` (`client.ts`, lines 92-97).
+  `'Sign-in failed'` (`client.ts`).
 - **link-provider-routes-to-as-host**: `linkProvider(input, opts)` MUST
   resolve its target via `asEndpoint('/auth/link-provider', opts.authApiBase)`
   — the authorization server directly, never a hard-coded same-origin path —
   falling back to `/api/auth/link-provider` only when no AS base is
-  configured (`client.ts`, lines 271-284).
+  configured (`client.ts`).
 - **link-provider-authed-post**: `linkProvider` MUST `POST` `input`
   (`clientSlug`, `providerSlug`, `code`, `redirectUri`) as JSON through
   `authedRequest` (Bearer-authed, with the same one-refresh-then-retry
   waterfall as any other authed call), and MUST resolve on success or throw
-  `AuthHttpError` on failure (`client.ts`, lines 275-284).
+  `AuthHttpError` on failure (`client.ts`).
 - **retry-marker-hook**: `setAuthRetryMarker(fn)` MUST register `fn` to be
   invoked with the exact `RequestInit` object handed to `fetch` for a
   retried request — a post-refresh retry in `authedFetch`, or the
   network-failure retry in `exchangeSsoCode`; passing `null` MUST unregister
   it, and with no function registered, marking MUST be a silent no-op
-  (`client.ts`, lines 17-28, 83, 163).
+  (`client.ts`).
 - **webauthn-assertion-ceremony-shared**: The shared `runAssertion` helper
   MUST `POST` `body` to `optionsUrl`, throw `Error(optionsError)` (via
   `readErrorMessage`) on a non-OK response, otherwise run the browser's
   `startAuthentication` ceremony with the returned `options` and return
-  `{ token, response }` (`mfa.ts`, lines 57-74).
+  `{ token, response }` (`mfa.ts`).
 - **assert-second-factor-body**: `assertSecondFactor(token, optionsUrl)` MUST
   run the assertion ceremony with body `{ token }` and fallback error `'Could
-  not start the passkey check.'` (`mfa.ts`, lines 77-82).
+  not start the passkey check.'` (`mfa.ts`).
 - **assert-passwordless-passkey-body**: `assertPasswordlessPasskey(identifier,
   optionsUrl)` MUST run the assertion ceremony with body `{ identifier }` and
-  fallback error `'No passkey is available for this account.'` (`mfa.ts`,
-  lines 86-91).
+  fallback error `'No passkey is available for this account.'` (`mfa.ts`).
 - **request-login-sms**: `requestLoginSms(token)` MUST `POST` `{ token }` to
   `` `/api${LOGIN_SMS_PATH}` `` and MUST throw on a non-OK response, with
-  fallback message `'Could not send a code.'` (`mfa.ts`, lines 94-101).
+  fallback message `'Could not send a code.'` (`mfa.ts`).
 - **complete-login-code**: `completeLoginCode(token, method, code)` MUST
   `POST` `{ token, method, code }` to `/api/auth/login/mfa` and return the
   parsed response on success, else throw with fallback `'That code didn't
-  match.'` (`mfa.ts`, lines 104-116).
+  match.'` (`mfa.ts`).
 - **complete-login-passkey**: `completeLoginPasskey(token)` MUST run
   `assertSecondFactor` against `` `/api${MFA_WEBAUTHN_OPTIONS_PATH}` ``, then
   `POST` the resulting assertion to `/api/auth/login/mfa/webauthn`, returning
   the parsed response or throwing with fallback `'Passkey verification
-  failed.'` (`mfa.ts`, lines 120-129).
+  failed.'` (`mfa.ts`).
 - **passwordless-passkey-login**: `passwordlessPasskeyLogin(identifier)` MUST
   run `assertPasswordlessPasskey` against `` `/api${PASSKEY_OPTIONS_PATH}` ``,
   then `POST` the resulting assertion to `/api/auth/login/webauthn`,
   returning the parsed response or throwing with fallback `'Passkey login
-  failed.'` (`mfa.ts`, lines 133-142).
+  failed.'` (`mfa.ts`).
 - **begin-login-navigation**: `beginLogin(opts)` MUST be a no-op when
   `window` is `undefined`; otherwise it MUST stash `opts.returnTo` when given
   and navigate the top-level window (`window.location.href`) to the AS
   `/oauth/signin/authorize` URL for `opts.clientId` (default `'adh'`) and a
   return URL equal to `${origin}${opts.callbackPath ?? '/auth/callback'}`
-  (`sso.ts`, lines 139-144).
+  (`sso.ts`).
 - **authorize-url-shape**: `buildAuthorizeUrl` MUST resolve
   `/oauth/signin/authorize` via `asEndpoint` and MUST include `clientId` and
   `return` query parameters, plus a `prompt` parameter only when one is given
-  (`sso.ts`, lines 96-104).
+  (`sso.ts`).
 - **provider-signin-url-shape**: `providerSigninUrl(opts)` MUST resolve
   `/oauth/signin/start` via `asEndpoint` with `clientId`, `providerId`, and
-  `return` query parameters (`sso.ts`, lines 118-129).
+  `return` query parameters (`sso.ts`).
 - **sso-hint-cookie-check**: `ssoHintPresent()` MUST return `true` if and only
   if a cookie named `adh_sso_hint` is present, and MUST return `false` when
-  `document` is `undefined` (`sso.ts`, lines 187-190).
+  `document` is `undefined` (`sso.ts`).
 - **sso-checked-guard-tolerates-storage-failure**: `markSsoChecked()` and
   `clearSsoChecked()` MUST set/remove the `adh_sso_checked` sessionStorage
   flag and MUST swallow a thrown storage exception without propagating it
-  (`sso.ts`, lines 192-205).
+  (`sso.ts`).
 - **silent-restore-guard-order**: `shouldSilentRestore(initialHash)`
   MUST return `false`, checked in this order, when: `window` is `undefined`;
   `initialHash` carries an inbound SSO code/error (mid-flow); this tab has
   already checked (`ssoCheckedThisTab()`); or no AS base is configured — all
-  before any hint or cross-apex evidence is consulted (`sso.ts`, lines
-  354-361).
+  before any hint or cross-apex evidence is consulted (`sso.ts`).
 - **silent-restore-evidence**: Given none of the guards above apply,
   `shouldSilentRestore` MUST return `true` when the SSO hint cookie is
   present, and otherwise MUST return `true` if and only if the site is
-  cross-apex with the configured AS host (`sso.ts`, lines 362-363).
+  cross-apex with the configured AS host (`sso.ts`).
 - **registrable-domain-apex-comparison**: `isCrossApex` MUST compare the last
   two dot-separated labels of the AS host and the current hostname, treating
   them as different registrable domains if and only if those two-label
-  suffixes differ (`sso.ts`, lines 216-228).
+  suffixes differ (`sso.ts`).
 - **preflight-sso-return-contract**: `preflightSsoReturn(opts)` MUST `GET`
   the AS `/oauth/signin/preflight` endpoint (resolved via `asEndpoint` against
   `opts.authApiBase`) with `clientId` and `return` query parameters and
   `credentials: 'omit'`, and MUST return `true` if and only if the response
   is OK and its parsed JSON body has `allowed === true`; any other outcome —
   non-OK, thrown/rejected fetch, or a body without `allowed === true` — MUST
-  return `false` (`sso.ts`, lines 261-289).
+  return `false` (`sso.ts`).
 - **preflight-sso-return-timeout**: `preflightSsoReturn` MUST pass an
   `AbortSignal` with a 2000ms timeout (`PREFLIGHT_TIMEOUT_MS`) when
   `AbortSignal.timeout` exists in the runtime, and MUST proceed without a
-  signal when it does not (`sso.ts`, lines 297-306).
+  signal when it does not (`sso.ts`).
 - **begin-silent-login-flow**: `beginSilentLogin(opts)` MUST return `false`
   without navigating when `window` is `undefined`; MUST always call
   `markSsoChecked()` first; MUST return `false` without navigating when no AS
@@ -359,161 +347,142 @@ part of it.
   current URL; and, only when preflight allows it, MUST navigate the
   top-level window to the AS authorize URL with `prompt: 'none'` and a return
   URL equal to `${origin}${pathname}${search}` (dropping any existing hash),
-  returning `true` (`sso.ts`, lines 340-368).
+  returning `true` (`sso.ts`).
 - **parse-inbound-sso**: `parseInboundSso(hash)` MUST return `{ code }` when
   the fragment has a `code` param, else `{ error }` when it has an `error`
-  param, else `null` — including for an empty or absent hash (`sso.ts`, lines
-  461-471).
+  param, else `null` — including for an empty or absent hash (`sso.ts`).
 - **strip-sso-fragment-preserves-other-keys**: `stripSsoFragment(hash)` MUST
   remove only the `code` and `error` keys from the fragment, preserving every
   other key-value pair (e.g. a site-switch marker or scroll anchor) in its
-  original order, and MUST return `''` when nothing remains (`sso.ts`, lines
-  478-488).
+  original order, and MUST return `''` when nothing remains (`sso.ts`).
 - **sso-logout-navigation**: `ssoLogout(opts)` MUST be a no-op when `window`
   is `undefined`; otherwise it MUST navigate the top-level window to the AS
   `/oauth/signin/logout` endpoint with `clientId` (default `'adh'`) and
-  `return` (default `${origin}/`) query parameters (`sso.ts`, lines 505-511).
+  `return` (default `${origin}/`) query parameters (`sso.ts`).
 - **sso-switch-url**: `ssoSwitchUrl(destUrl, opts)` MUST return `destUrl`
   unchanged when no AS base is configured, and otherwise MUST return a
-  `prompt=none` authorize URL whose `return` parameter is `destUrl` (`sso.ts`,
-  lines 542-550).
+  `prompt=none` authorize URL whose `return` parameter is `destUrl` (`sso.ts`).
 - **current-return-to**: `currentReturnTo()` MUST return
   `${pathname}${search}${hash}` of the current location, and MUST return
-  `undefined` when `window` is `undefined` (`sso.ts`, lines 534-538).
+  `undefined` when `window` is `undefined` (`sso.ts`).
 - **safe-return-to-rejects-cross-origin**: `safeReturnTo(raw)` MUST return
   `null` for a `null`/empty input or for a value that, resolved against the
   current origin, yields a different origin (SEC-M8 open-redirect defense —
   this also refuses a protocol-relative `//evil.com/x` form), and otherwise
   MUST return only the resolved URL's `pathname + search + hash`, never the
-  raw string (`sso.ts`, lines 553-566).
+  raw string (`sso.ts`).
 - **stash-and-take-return-to-single-use**: `stashReturnTo(returnTo)` MUST
   persist `returnTo` in sessionStorage under a fixed key, swallowing a thrown
   storage exception; `takeReturnTo()` MUST read and remove that key (single
   use) and MUST return the result of `safeReturnTo` on the stored value, or
   `null` when `window` is `undefined` or a storage exception is thrown
-  (`sso.ts`, lines 574-596).
+  (`sso.ts`).
 - **read-central-params**: `readCentralParams(search)` MUST return `null`
   when the query has no `return` parameter, and otherwise MUST return
-  `{ clientId, returnUrl }` with `clientId` defaulting to `'adh'` (`sso.ts`,
-  lines 626-631).
+  `{ clientId, returnUrl }` with `clientId` defaulting to `'adh'` (`sso.ts`).
 - **central-login-target-resolution**: `centralLoginTarget(opts)` MUST return
   the AS-relayed `{ clientId, returnUrl }` unchanged (via `readCentralParams`)
   when present; otherwise it MUST stash `opts.returnTo` when given and
   synthesize `{ clientId: opts.clientId, returnUrl:
-  \`${origin}${opts.callbackPath ?? '/auth/callback'}\` }` (`sso.ts`, lines
-  664-673).
+  \`${origin}${opts.callbackPath ?? '/auth/callback'}\` }` (`sso.ts`).
 - **central-login-step-refuses-without-as-base**: `centralLoginStep` MUST
   throw, without making any network request, when no AS base is configured
   for the given target — it MUST NOT silently fall back to the same-origin
-  proxy the way `asEndpoint` does for other callers (`sso.ts`, lines 693-698).
+  proxy the way `asEndpoint` does for other callers (`sso.ts`).
 - **central-login-step-outcomes**: `centralLoginStep` MUST return the parsed
   `MfaChallenge` body on a `202` response; MUST navigate the top-level window
   to the response's `redirectUrl` and return `null` on any other OK response;
   and MUST throw `AuthHttpError` (status + extracted message/code, with
   fallback `` `Server error (${status})` `` for a `5xx` and `'Login failed'`
-  otherwise) on a non-OK, non-`202` response (`sso.ts`, lines 699-717).
+  otherwise) on a non-OK, non-`202` response (`sso.ts`).
 - **central-login-step-request-shape**: Every `centralLoginStep` `POST` MUST
   include `credentials: 'include'` and a JSON body merging the caller's
-  fields with `clientId` and `return` (`target.returnUrl`) (`sso.ts`, lines
-  700-705).
+  fields with `clientId` and `return` (`target.returnUrl`) (`sso.ts`).
 - **central-email-login**: `centralEmailLogin(p)` MUST `POST`
   `{ identifier, password }` (plus `clientId`/`return`) to
-  `/oauth/signin/login` via `centralLoginStep` (`sso.ts`, lines 728-733).
+  `/oauth/signin/login` via `centralLoginStep` (`sso.ts`).
 - **central-send-mfa-sms**: `centralSendMfaSms(target, token)` MUST `POST`
   `{ token }` to `LOGIN_SMS_PATH` on the AS and throw `AuthHttpError` on a
-  non-OK response, with fallback message `'Could not send a code.'` (`sso.ts`,
-  lines 741-753).
+  non-OK response, with fallback message `'Could not send a code.'` (`sso.ts`).
 - **central-complete-mfa-code**: `centralCompleteMfaCode(target, token,
   method, code)` MUST `POST` `{ token, method, code }` to
-  `/oauth/signin/login/mfa` via `centralLoginStep` (`sso.ts`, lines 756-761).
+  `/oauth/signin/login/mfa` via `centralLoginStep` (`sso.ts`).
 - **central-complete-mfa-passkey**: `centralCompleteMfaPasskey(target,
   token)` MUST run the shared WebAuthn assertion ceremony against the AS's
   MFA options endpoint, then `POST` the assertion to
-  `/oauth/signin/login/mfa/webauthn` via `centralLoginStep` (`sso.ts`, lines
-  763-769).
+  `/oauth/signin/login/mfa/webauthn` via `centralLoginStep` (`sso.ts`).
 - **central-passwordless-passkey**: `centralPasswordlessPasskey(target,
   identifier)` MUST run the passwordless assertion ceremony against the AS's
   passkey options endpoint, then `POST` the assertion to
-  `/oauth/signin/login/webauthn` via `centralLoginStep` (`sso.ts`, lines
-  771-778).
+  `/oauth/signin/login/webauthn` via `centralLoginStep` (`sso.ts`).
 - **begin-link-provider-csrf-nonce**: `beginLinkProvider(opts)` MUST generate
   a random nonce (`crypto.randomUUID` when available, else a fallback), MUST
   stash it in sessionStorage under a fixed key BEFORE navigating, and MUST
   return `false` without navigating when the nonce cannot be stashed;
   otherwise it MUST navigate the top-level window to the AS
   `/oauth/signin/start` URL with `link=1`, `clientId`, `providerId`, `return`,
-  and `linkNonce` query parameters, returning `true` (`sso.ts`, lines
-  798-822).
+  and `linkNonce` query parameters, returning `true` (`sso.ts`).
 - **mfa-status-fetch**: `getMfaStatus()` MUST `GET` `/api/account/mfa`
-  through `authedJson` and return the parsed `MfaStatus` (`account-security.ts`,
-  lines 40-42).
+  through `authedJson` and return the parsed `MfaStatus` (`account-security.ts`).
 - **totp-enroll**: `enrollTotp()` MUST `POST` `/api/account/mfa/totp/enroll`
-  through `authedJson` and return `{ secret, otpauthUri }` (`account-security.ts`,
-  lines 54-56).
+  through `authedJson` and return `{ secret, otpauthUri }` (`account-security.ts`).
 - **totp-confirm**: `confirmTotp(code)` MUST `POST` `{ code }` to
-  `/api/account/mfa/totp/confirm` through `authedJson` (`account-security.ts`,
-  lines 57-62).
+  `/api/account/mfa/totp/confirm` through `authedJson` (`account-security.ts`).
 - **totp-remove**: `removeTotp()` MUST `DELETE`
-  `/api/account/mfa/totp` through `authedRequest` (`account-security.ts`,
-  lines 63-65).
+  `/api/account/mfa/totp` through `authedRequest` (`account-security.ts`).
 - **webauthn-list**: `listWebauthn()` MUST `GET` `/api/account/mfa/webauthn`
-  through `authedJson` and return `{ items }` (`account-security.ts`, lines
-  69-71).
+  through `authedJson` and return `{ items }` (`account-security.ts`).
 - **webauthn-register-ceremony**: `registerWebauthn(kind, name)` MUST `POST`
   `{ kind }` to `/api/account/mfa/webauthn/register/options` through
   `authedJson`, run the browser's `startRegistration` ceremony with the
   returned options, then `POST` `{ token, response, name }` to
   `/api/account/mfa/webauthn/register/verify` through `authedJson`
-  (`account-security.ts`, lines 74-87).
+  (`account-security.ts`).
 - **webauthn-remove**: `removeWebauthn(id)` MUST `DELETE`
   `` `/api/account/mfa/webauthn/${encodeURIComponent(id)}` `` through
-  `authedRequest` (`account-security.ts`, lines 88-90).
+  `authedRequest` (`account-security.ts`).
 - **recovery-codes-regenerate**: `regenerateRecoveryCodes()` MUST `POST`
   `/api/account/mfa/recovery/regenerate` through `authedJson` and return
-  `{ codes }` (`account-security.ts`, lines 94-96).
+  `{ codes }` (`account-security.ts`).
 - **preferred-method-set**: `setPreferredMethod(method)` MUST `PUT`
   `{ method }` to `/api/account/mfa/preference` through `authedJson` and
-  return `{ preferredMethod }` (`account-security.ts`, lines 97-101).
+  return `{ preferredMethod }` (`account-security.ts`).
 - **account-security-authed**: Every `account-security.ts` operation MUST go
   through `authedJson`/`authedRequest` — Bearer-authed, with the same
   one-refresh-then-retry-on-401 waterfall as any other authed call — never a
-  bare `fetch` (`account-security.ts`, line 15 and every exported function).
+  bare `fetch` (`account-security.ts` and every exported function).
 - **report-unexpected-status-gate**: `reportUnexpectedAuthError(err,
   context)` MUST NOT report (to the injected sink or the console) an error
   whose numeric `.status` (duck-typed off any `Error`, not just this
   package's own `AuthHttpError`) is less than 500 — an expected 4xx from
-  either this package's or a host's own error class (`report.ts`, lines
-  47-49).
+  either this package's or a host's own error class (`report.ts`).
 - **report-unexpected-dedup-window**: `reportUnexpectedAuthError` MUST report
   at most once per exact `` `${message}|${JSON.stringify(context)}` ``
   signature per 60000ms window (`REPORT_DEDUPE_WINDOW_MS`), dropping
-  duplicate reports of the same signature within that window (`report.ts`,
-  lines 28-29, 50-55).
+  duplicate reports of the same signature within that window (`report.ts`).
 - **report-auth-error-unconditional**: `reportAuthError(err, context)` MUST
   call the injected reporter (if one is registered) and MUST always
   `console.error(err, context)`, regardless of the error's status
-  (`report.ts`, lines 64-70).
+  (`report.ts`).
 - **report-never-throws**: `reportAuthError` MUST swallow any exception
   thrown by the injected reporter and MUST NOT propagate it to the caller
-  (`report.ts`, lines 65-69).
+  (`report.ts`).
 - **set-auth-error-reporter-hook**: `setAuthErrorReporter(fn)` MUST register
   `fn` as the sink `reportAuthError`/`reportUnexpectedAuthError` call; passing
-  `null` MUST unregister it, leaving console-only reporting (`report.ts`,
-  lines 19-21).
+  `null` MUST unregister it, leaving console-only reporting (`report.ts`).
 - **provider-label-known-and-fallback**: `providerLabel(slug)` MUST return
   `'GitHub'` for `'github'`, `'Google'` for `'google'`, and otherwise the
-  slug with only its first character capitalized (`labels.ts`, lines 5-9).
+  slug with only its first character capitalized (`labels.ts`).
 - **oauth-error-message-known-codes-and-fallback**: `oauthErrorMessage(code)`
   MUST return a fixed message for `'account_exists'`, `'user_not_found'`, and
   `'signups_closed'`; MUST return `loginDisabledBody` for
   `'login_disabled'`; and MUST otherwise return the code verbatim inside
-  `` `Sign-in failed (${code})` `` (`labels.ts`, lines 83-89).
+  `` `Sign-in failed (${code})` `` (`labels.ts`).
 - **link-copy-provider-substitution**: Every account-linking modal copy
   function (`accountExistsLinkBody`, `linkConfirmTitle`/`Body`/`Action`,
   `linkInProgressTitle`/`Body`, `linkSuccessTitle`/`Body`,
   `linkAlreadyLinkedBody`, `linkStartFailedBody`) MUST substitute
-  `providerLabel(providerSlug)` into its returned string (`labels.ts`, lines
-  22-74).
+  `providerLabel(providerSlug)` into its returned string (`labels.ts`).
 
 ### Security
 
@@ -556,7 +525,7 @@ mechanics.
   cache scoping (keying cached data to the current principal so an account
   switch in another tab cannot serve stale rows) and MUST NEVER be used as an
   authorization decision — the token is not signature-verified client-side
-  (`tokens.ts`, lines 128-133).
+  (`tokens.ts`).
 
 ## Appearance
 
@@ -779,21 +748,21 @@ not resolved through any deep-link mechanism.
 
 | String Key | Default (en) | Context |
 |-----------|-------------|---------|
-| `tokens.missingToken` | Token response missing token/accessToken | Thrown by `tokensFromResponse` (`tokens.ts`, line 38) |
-| `client.exchangeFallback` | Sign-in failed | `exchangeSsoCode`'s fallback error message (`client.ts`, line 96) |
-| `client.httpFallback` | HTTP {status} | `authedFetch`'s fallback error message (`client.ts`, line 169) |
-| `client.emptyResponse` | Unexpected empty response (204 No Content); use authedRequest for endpoints with no body | `authedJson`'s 204 guard (`client.ts`, line 183) |
-| `mfa.passkeyCheckFailed` | Could not start the passkey check. | `assertSecondFactor`'s fallback (`mfa.ts`, line 81) |
-| `mfa.noPasskey` | No passkey is available for this account. | `assertPasswordlessPasskey`'s fallback (`mfa.ts`, line 90) |
-| `mfa.smsSendFailed` | Could not send a code. | `requestLoginSms`'s fallback (`mfa.ts`, line 100) |
-| `mfa.codeMismatch` | That code didn't match. | `completeLoginCode`'s fallback (`mfa.ts`, line 114) |
-| `mfa.passkeyVerifyFailed` | Passkey verification failed. | `completeLoginPasskey`'s fallback (`mfa.ts`, line 127) |
-| `mfa.passkeyLoginFailed` | Passkey login failed. | `passwordlessPasskeyLogin`'s fallback (`mfa.ts`, line 140) |
-| `labels.accountExistsTitle` | Account already exists | `accountExistsTitle` (`labels.ts`, line 17) |
-| `labels.oauthAccountExists` | An account already exists for this email — sign in with your email and password instead. | `oauthErrorMessage('account_exists')` (`labels.ts`, line 85) |
-| `labels.linkFailedTitle` | Couldn't connect account | `linkFailedTitle` (`labels.ts`, line 68) |
-| `labels.loginDisabledTitle` / `loginDisabledBody` | We're not open just yet / The Hub isn't quite ready for visitors yet — please check back soon. | Shown when `user_login_disabled` is on (`labels.ts`, lines 77-78) |
-| `sso.misconfigured` | Sign-in is misconfigured on this site: NEXT_PUBLIC_AUTH_API_URL was not set when it was built... | `centralLoginStep`'s thrown message when no AS base is configured (`sso.ts`, lines 690-695) |
+| `tokens.missingToken` | Token response missing token/accessToken | Thrown by `tokensFromResponse` (`tokens.ts`) |
+| `client.exchangeFallback` | Sign-in failed | `exchangeSsoCode`'s fallback error message (`client.ts`) |
+| `client.httpFallback` | HTTP {status} | `authedFetch`'s fallback error message (`client.ts`) |
+| `client.emptyResponse` | Unexpected empty response (204 No Content); use authedRequest for endpoints with no body | `authedJson`'s 204 guard (`client.ts`) |
+| `mfa.passkeyCheckFailed` | Could not start the passkey check. | `assertSecondFactor`'s fallback (`mfa.ts`) |
+| `mfa.noPasskey` | No passkey is available for this account. | `assertPasswordlessPasskey`'s fallback (`mfa.ts`) |
+| `mfa.smsSendFailed` | Could not send a code. | `requestLoginSms`'s fallback (`mfa.ts`) |
+| `mfa.codeMismatch` | That code didn't match. | `completeLoginCode`'s fallback (`mfa.ts`) |
+| `mfa.passkeyVerifyFailed` | Passkey verification failed. | `completeLoginPasskey`'s fallback (`mfa.ts`) |
+| `mfa.passkeyLoginFailed` | Passkey login failed. | `passwordlessPasskeyLogin`'s fallback (`mfa.ts`) |
+| `labels.accountExistsTitle` | Account already exists | `accountExistsTitle` (`labels.ts`) |
+| `labels.oauthAccountExists` | An account already exists for this email — sign in with your email and password instead. | `oauthErrorMessage('account_exists')` (`labels.ts`) |
+| `labels.linkFailedTitle` | Couldn't connect account | `linkFailedTitle` (`labels.ts`) |
+| `labels.loginDisabledTitle` / `loginDisabledBody` | We're not open just yet / The Hub isn't quite ready for visitors yet — please check back soon. | Shown when `user_login_disabled` is on (`labels.ts`) |
+| `sso.misconfigured` | Sign-in is misconfigured on this site: NEXT_PUBLIC_AUTH_API_URL was not set when it was built... | `centralLoginStep`'s thrown message when no AS base is configured (`sso.ts`) |
 
 Every string above is hardcoded English with no lookup table, ICU message,
 or locale parameter anywhere in these 11 files — there is no localization
@@ -838,7 +807,7 @@ SDK (e.g. Sentry), not product-analytics events.
   persisted here. The refresh token is explicitly never read or persisted
   (**refresh-token-never-persisted**). `reportAuthError`'s `ErrorContext` is
   typed scalars-only (no PII, request bodies, or ids) by declared contract
-  (`report.ts`, line 3).
+  (`report.ts`).
 - **Storage**: The access token and cached user live in `localStorage` under
   `authConfig().storageKey` and `` `${storageKey}:user` `` as plaintext JSON
   — readable by any script running on the page (the standard SPA
@@ -868,9 +837,9 @@ Subsystem: `agentictoolkit` | Category: `auth-client`
 
 | Event | Level | Message |
 |-------|-------|---------|
-| Refresh network/parse failure | error (via `reportAuthError`, always reaches `console.error`) | `reportAuthError(err, { feature: 'auth', step: 'tokenRefresh' })` (`refresh.ts`, line 76) |
-| Any reported auth error (unconditional path) | error | `console.error(err, context)` (`report.ts`, line 70) |
-| Missing AS base at build/runtime (logged once per page load) | error | `'[adh-auth] NEXT_PUBLIC_AUTH_API_URL was not set when this site was built...'` (`sso.ts`, lines 65-73) |
+| Refresh network/parse failure | error (via `reportAuthError`, always reaches `console.error`) | `reportAuthError(err, { feature: 'auth', step: 'tokenRefresh' })` (`refresh.ts`) |
+| Any reported auth error (unconditional path) | error | `console.error(err, context)` (`report.ts`) |
+| Missing AS base at build/runtime (logged once per page load) | error | `'[adh-auth] NEXT_PUBLIC_AUTH_API_URL was not set when this site was built...'` (`sso.ts`) |
 
 No file in this component uses `console.log`, `console.warn`, or `console.info` — every log call site is `console.error`, and every one is either an unexpected-failure report (`report.ts`, `refresh.ts`) or the one-time misconfiguration notice above (`sso.ts`). `report.ts`'s error-status gate (**report-unexpected-status-gate**) is specifically what keeps an expected 4xx (wrong password, stale code) off this log.
 
@@ -1082,3 +1051,4 @@ honestly-reported gap in the source, not a hidden one.
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

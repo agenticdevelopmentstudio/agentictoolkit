@@ -3,7 +3,7 @@ id: 0396e49d-f933-4454-bacc-5cf97beda7de
 title: ProjectFilter
 domain: agentictoolkit://recipes/git-client-projects-project-filter
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -44,7 +44,7 @@ whether a `GitRepo` survives a search by checking whether the query appears in
 its `name` or its `path`. Both answers are deliberately routed through the
 same `ranges(of:in:)` computation "so the characters a row highlights can
 never disagree with the reason that row survived the filter" (source doc
-comment, lines 3-6) — the file's own word for this is `dry`. It is consumed by
+comment) — the file's own word for this is `dry`. It is consumed by
 two callers: `ProjectBrowserViewController.applyFilter()`, which filters the
 project tree and bolds matched characters in each row's label, and
 `BreadcrumbPopoverViewController.applyFilter()`/`attributedTitle(for:)`, which
@@ -369,3 +369,4 @@ fast, isolated, repeatable, and self-validating on its own.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-24 | Mike Fullerton | Initial creation. |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

@@ -3,7 +3,7 @@ id: bc4c4fe9-aa33-47a7-94d2-fb688e70caec
 title: OpenVSXClient
 domain: agentictoolkit://recipes/extension-host-core-extensions-open-vsx-client
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -45,18 +45,17 @@ of a registry-named artifact (a `.vsix`, its detached `.sigzip` signature
 archive, its `.sha256` digest, or its public key). It is read-only by
 construction — there is no publish, review, or account surface on this type,
 and nothing it sends to the registry beyond the request itself could be
-attributed to a user (source: doc comment on `OpenVSXClient`, lines 9–21).
+attributed to a user (source: doc comment on `OpenVSXClient`).
 It holds no cache: every call re-fetches from the registry, because a
 memoizing client would hand an update check a stale "latest version" when
-being current is the whole point of the check (doc comment lines 23–26).
+being current is the whole point of the check (doc comment).
 
 Callers reach it to browse and vet an extension before installing it — the
 doc comment on `detail` names `ExtensionUpdateCheck`, which feeds a
 sideloaded extension's manifest `publisher` field in as `namespace`, and the
 doc comment on the private `requireSafeComponent` helper names `VSIXInstaller`
 as the sibling caller that applies the same identity guard to the same kind
-of manifest field before building an install directory name (source lines
-124–131, 268–277). `OpenVSXClient` itself never touches the filesystem and
+of manifest field before building an install directory name. `OpenVSXClient` itself never touches the filesystem and
 never installs anything; it only hands back registry-published bytes and
 metadata, safely, to whichever caller does.
 
@@ -68,92 +67,89 @@ another file is named.
 
 - **default-registry**: `OpenVSXClient.openVSXRegistry` MUST equal
   `https://open-vsx.org/api`, and `init`'s `registryBase` parameter MUST
-  default to it when the caller supplies none (lines 31, 66).
+  default to it when the caller supplies none.
 - **self-hosted-registry-override**: A caller MAY supply a `registryBase`
   other than the default, addressing a self-hosted Open VSX-compatible
-  registry that serves the same API shape at a different host (doc comment
-  lines 15–17; `init` lines 65–71).
+  registry that serves the same API shape at a different host (doc comment; `init`).
 - **default-page-size**: `OpenVSXClient.defaultPageSize` MUST equal `50`, and
-  `search`'s `size` parameter MUST default to it (lines 36, 91).
+  `search`'s `size` parameter MUST default to it.
 - **default-artifact-ceiling**: `OpenVSXClient.defaultMaximumArtifactBytes`
   MUST equal `536,870,912` (`512 * 1024 * 1024`) bytes, and `init`'s
-  `maximumArtifactBytes` parameter MUST default to it (lines 46, 68).
+  `maximumArtifactBytes` parameter MUST default to it.
 - **default-metadata-ceiling**: `OpenVSXClient.defaultMaximumMetadataBytes`
   MUST equal `8,388,608` (`8 * 1024 * 1024`) bytes, and `init`'s
-  `maximumMetadataBytes` parameter MUST default to it (lines 58, 69).
+  `maximumMetadataBytes` parameter MUST default to it.
 - **stateless-value-type**: `OpenVSXClient` MUST be declared as a `Sendable`
   `struct` holding only `registryBase`, `loader`, `maximumArtifactBytes`, and
   `maximumMetadataBytes`, all assigned once in `init` and never mutated
   afterward; no result of `search`, `detail`, `data`, or `text` MUST be
-  cached or memoized by this type (lines 27, 60–78).
+  cached or memoized by this type.
 - **session-configuration-reuse**: `init` MUST construct its internal
   `BoundedBodyLoader` from `session.configuration` rather than from `session`
   itself, so that an injected `URLSessionConfiguration.protocolClasses` (the
   mechanism every test in this component stands the registry up with) still
-  applies to requests this client makes (lines 72–76).
+  applies to requests this client makes.
 - **search-default-query**: `search`'s `query` parameter MUST default to the
   empty string, and an empty or all-whitespace query MUST be treated as the
   browse case, not an error — the request MUST be sent with the whole
-  catalog implied rather than refused (doc comment lines 83–87; lines 88–110).
+  catalog implied rather than refused (doc comment).
 - **search-query-trimmed**: `search` MUST trim `query` of leading and
   trailing whitespace and newline characters with
   `trimmingCharacters(in: .whitespacesAndNewlines)` before deciding whether
   to send it, and MUST send the trimmed value, never the original, as the
-  `query` URL query item (line 107; test `queryIsTrimmed`).
+  `query` URL query item (test `queryIsTrimmed`).
 - **search-query-omitted-when-blank**: `search` MUST omit the `query` URL
   query item entirely when the trimmed query is empty, rather than sending an
-  empty `query=` parameter (lines 108–110; test `emptyQueryOmitsTheItem`).
+  empty `query=` parameter (test `emptyQueryOmitsTheItem`).
 - **search-pagination-params**: `search` MUST send `size`, `offset`,
   `sortBy`, and a fixed `sortOrder` of `"desc"` as URL query items on every
   call, using the caller-supplied `offset` and `size` verbatim and
-  `sortBy.rawValue` for `sortBy` (lines 97–101; test `searchSendsTheQuery`).
+  `sortBy.rawValue` for `sortBy` (test `searchSendsTheQuery`).
 - **search-single-row-per-extension**: `search` MUST send
   `includeAllVersions=false` as a fixed URL query item on every call, so the
   result contains one row per extension rather than one row per published
-  version of a single extension (lines 102–105; test `searchSendsTheQuery`).
+  version of a single extension (test `searchSendsTheQuery`).
 - **search-sort-order**: `search`'s `sortBy` parameter MUST default to
   `SortOrder.downloadCount` and MUST accept `.relevance`, `.rating`, or
   `.timestamp` as alternatives, each sent as the `String` raw value declared
-  on `SortOrder` (lines 91–92, 312–317).
+  on `SortOrder`.
 - **search-malformed-registry-url**: `search` MUST throw
   `OpenVSXError.malformedRegistryURL(registryBase)`, without making a
   request, when `URLComponents` cannot compose a request URL from
-  `registryBase` and the assembled query items (lines 112–114).
+  `registryBase` and the assembled query items.
 - **search-result-shape**: On success, `search` MUST decode and return an
   `OpenVSXSearchPage` carrying `offset`, `totalSize`, and the `extensions`
-  array of `OpenVSXSearchEntry` rows (line 115;
-  `OpenVSXCatalog.swift` lines 47–52; test `searchDecodes`).
+  array of `OpenVSXSearchEntry` rows (`OpenVSXCatalog.swift`; test `searchDecodes`).
 - **detail-latest-by-default**: `detail(namespace:name:version:)` MUST
   address the latest published version of the extension when `version` is
   `nil`, and MUST address exactly the named version, appended as an
-  additional path component, when `version` is non-`nil` (lines 120–144;
-  test `detailAddressesTheVersion`).
+  additional path component, when `version` is non-`nil` (test `detailAddressesTheVersion`).
 - **detail-identity-validated**: `detail` MUST validate `namespace`, `name`,
   and (when present) `version` with `requireSafeComponent` before composing
   the request URL, and MUST throw `OpenVSXError.unsafeIdentity(field:value:)`
   without making a request when any of the three is unsafe by
-  `ExtensionIdentityComponent.isSafe`'s rule (lines 132–136, 278–282; tests
+  `ExtensionIdentityComponent.isSafe`'s rule (278–282; tests
   `detailRefusesATraversingNamespace`, `detailRefusesATraversingNameAndVersion`).
 - **detail-result-shape**: On success, `detail` MUST decode and return an
   `OpenVSXExtensionDetail` for the addressed namespace, name, and version
-  (line 144; test `detailAcceptsOrdinaryNames`).
+  (test `detailAcceptsOrdinaryNames`).
 - **artifact-scheme-and-host-required**: `data(at:)` MUST throw
   `OpenVSXError.artifactNotFetchable(url:scheme:)`, without making a request,
   when `url`'s scheme — compared case-insensitively — is not `"https"`, or
-  when `url` has no non-empty host (lines 166–167, 284–289; tests
+  when `url` has no non-empty host (284–289; tests
   `fileArtifactURLIsRefused`, `plainHTTPArtifactURLIsRefused`,
   `aDataURLIsRefused`, `aHostlessURLIsRefused`,
   `anUppercaseFileSchemeIsRefused`).
 - **artifact-scheme-check-is-case-insensitive**: The scheme comparison in
   `requireFetchable` MUST lowercase `url.scheme` before testing membership in
   `fetchableSchemes`, so an uppercase `HTTPS:` URL MUST be fetched and an
-  uppercase `FILE:` URL MUST still be refused (lines 285–288; tests
+  uppercase `FILE:` URL MUST still be refused (tests
   `anUppercaseHTTPSSchemeIsFetched`, `anUppercaseFileSchemeIsRefused`).
 - **artifact-host-scheme-not-pinned**: `requireFetchable` MUST check only the
   URL scheme and the presence of a host, never the host's identity — an
   `https` artifact URL on a host other than `registryBase`'s host MUST still
   be fetched, since a self-hosted registry commonly serves artifacts from a
-  separate CDN host (doc comment lines 262–266; test
+  separate CDN host (doc comment; test
   `httpsArtifactOnAnotherHostIsFetched`).
 - **artifact-bounded-read**: `data(at:)` MUST read the response body only up
   to `maximumArtifactBytes` and MUST throw
@@ -161,91 +157,87 @@ another file is named.
   whether the excess is detected from a `Content-Length` the response
   declared before any byte is read, or from the running byte count as chunks
   arrive — an understated `Content-Length` MUST NOT allow an oversized body
-  past the ceiling (lines 166–170; `BoundedBodyLoader.swift` lines 108–126,
-  128–145; tests `dataRefusesAnOversizeArtifact`,
+  past the ceiling (`BoundedBodyLoader.swift`; tests `dataRefusesAnOversizeArtifact`,
   `aClaimedLengthPastTheCapIsRefused`, `anUnderstatedLengthIsNotBelieved`,
   `aBodyOfExactlyTheCapIsAccepted`, `aBodyOneByteOverTheCapIsRefused`).
 - **status-outranks-size-ceiling**: When a response both fails the HTTP
   status check and exceeds its ceiling, `body` MUST report the HTTP status
   failure (`OpenVSXError.requestFailed`), never the size failure — the status
   is checked on the failure response before the too-large error is thrown,
-  for both the artifact ceiling and the metadata ceiling (lines 233–240;
-  tests `anErrorStatusOutranksTheCeiling`, `aMissingArtifactIsReportedAsMissing`).
+  for both the artifact ceiling and the metadata ceiling (tests `anErrorStatusOutranksTheCeiling`, `aMissingArtifactIsReportedAsMissing`).
 - **artifact-non-http-response-refused**: `data(at:)` MUST throw
   `OpenVSXError.responseNotHTTP(url)` when the underlying `URLResponse` is
   not an `HTTPURLResponse`, rather than treating it as a successful read
-  (lines 301–303; test `nonHTTPResponseIsRefused`).
+  (test `nonHTTPResponseIsRefused`).
 - **artifact-status-range**: `data(at:)` MUST throw
   `OpenVSXError.requestFailed(url:status:)` when the HTTP status code is
-  outside `200..<300` (lines 304–306; test `artifactFailureNamesTheURL`).
+  outside `200..<300` (test `artifactFailureNamesTheURL`).
 - **text-trims-whitespace**: `text(at:)` MUST call `data(at:)` for the same
   `url`, decode the result as UTF-8, and return it trimmed of leading and
   trailing whitespace and newline characters with
-  `trimmingCharacters(in: .whitespacesAndNewlines)` (lines 178–184; test
+  `trimmingCharacters(in: .whitespacesAndNewlines)` (test
   `textIsTrimmed`).
 - **text-requires-utf8**: `text(at:)` MUST throw
   `OpenVSXError.artifactNotText(url)`, without altering or truncating the
-  bytes, when the downloaded data cannot be decoded as UTF-8 (lines 180–182;
-  test `nonTextArtifactIsRefused`).
+  bytes, when the downloaded data cannot be decoded as UTF-8 (test `nonTextArtifactIsRefused`).
 - **metadata-bounded-read**: `search` and `detail` MUST read their HTTP
   response body only up to `maximumMetadataBytes`, through the same
   `body`/`BoundedBodyLoader` mechanism `data(at:)` uses, and MUST throw
   `OpenVSXError.responseTooLarge(url:limit:)` once that ceiling is passed —
   whether by a declared `Content-Length` or by the running byte count
-  (lines 250–256; tests `anOversizeSearchAnswerIsRefused`,
+  (tests `anOversizeSearchAnswerIsRefused`,
   `anOversizeDetailAnswerIsRefused`, `aClaimedMetadataLengthPastTheCapIsRefused`,
   `anOrdinaryAnswerIsStillDecoded`).
 - **artifact-and-metadata-ceilings-are-distinct**: `defaultMaximumArtifactBytes`
   and `defaultMaximumMetadataBytes` MUST be different values, three orders of
   magnitude apart, because a search page or a detail record is at most a few
   kilobytes while a `.vsix` may legitimately run to hundreds of megabytes
-  (doc comment lines 48–57; test `theTwoCeilingsAreDistinct`).
+  (doc comment; test `theTwoCeilingsAreDistinct`).
 - **status-checked-before-decode**: `search` and `detail` MUST check the HTTP
   status of the response and throw `OpenVSXError.requestFailed(url:status:)`
   for a non-2xx status before attempting to decode the body as JSON — a
   404's or 500's error document MUST be reported as its status, never handed
-  to `JSONDecoder` (lines 231, 300–306; doc comment lines 219–220; tests
+  to `JSONDecoder` (300–306; doc comment; tests
   `notFoundIsAStatusFailure`, `serverErrorIsReported`).
 - **metadata-decode-failure**: `search` and `detail` MUST throw
   `OpenVSXError.undecodableResponse(url:underlying:)`, carrying the
   underlying `DecodingError` rendered with `String(describing:)`, when the
   bounded response body is empty, is valid JSON of the wrong shape, or is
-  truncated mid-token (lines 253–257; tests `undecodableResponse`,
+  truncated mid-token (tests `undecodableResponse`,
   `anEmptyBodyIsUndecodable`, `theWrongShapeIsUndecodable`,
   `aTruncatedBodyIsUndecodable`).
 - **sendable-isolation**: `OpenVSXClient` MUST be declared `Sendable` and
   MUST be usable concurrently, without additional synchronization, from any
   thread or actor, because every stored property (`registryBase`, `loader`,
   the two `Int` ceilings) is immutable after `init` and `BoundedBodyLoader`
-  is itself declared `Sendable` (line 27; `BoundedBodyLoader.swift` line 32).
+  is itself declared `Sendable` (`BoundedBodyLoader.swift`).
 - **independent-concurrent-calls**: Concurrent calls to `search`, `detail`,
   `data`, or `text` on the same `OpenVSXClient` value MUST run independently:
   each call starts its own `URLSessionDataTask`, and `BoundedBodyLoader`'s
   internal `State` keys every transfer by that task's `taskIdentifier` behind
   one lock, so one call's outcome MUST NOT depend on the order or overlap of
-  any other concurrent call (`BoundedBodyLoader.swift` lines 66–76, 86–106).
+  any other concurrent call (`BoundedBodyLoader.swift`).
 - **cancellation-stops-the-transfer**: Cancelling the `Task` that awaits
   `search`, `detail`, `data`, or `text` MUST cancel the underlying
   `URLSessionDataTask` via `withTaskCancellationHandler`'s `onCancel`, rather
   than continuing to accumulate a response body no one will read
-  (`BoundedBodyLoader.swift` lines 68–75).
+  (`BoundedBodyLoader.swift`).
 - **network-failure-propagates-untyped**: `body` MUST NOT catch any error
   from `loader.body(at:limit:)` other than `BoundedBodyLoader.Failure.tooLarge`
   — a session-level failure that arrives before or during the transfer (host
   unreachable, TLS failure, timeout, or the cancellation above) MUST
   propagate to the caller of `search`, `detail`, `data`, or `text` as its
   original error type (for example a `URLError`), not wrapped in
-  `OpenVSXError` (lines 226–232, 250–252).
+  `OpenVSXError`.
 - **logging-conformance-declared-unused**: `OpenVSXClient` MUST conform to
   `Loggable`, declaring `public static nonisolated let logger = makeLogger()`
   scoped by that protocol's default to category `"OpenVSXClient"`, but no
   method on `OpenVSXClient` calls `logger` — every failure surfaces to the
-  caller as a thrown `OpenVSXError` case instead of a log line (lines
-  320–322; `Loggable.swift` lines 18–40).
+  caller as a thrown `OpenVSXError` case instead of a log line (`Loggable.swift`).
 - **error-cases-carry-the-failing-url**: Every case of `OpenVSXError` except
   `unsafeIdentity` MUST carry the `URL` the failure happened at, so a report
   is actionable when `registryBase` is a configurable, possibly self-hosted,
-  value (doc comment lines 326–329; lines 334–373).
+  value (doc comment).
 
 ## Appearance
 
@@ -306,7 +298,7 @@ visual component.
 | open-vsx-client-038 | metadata-decode-failure | `search("vim")` against an empty-string body with status 200 | Throws `OpenVSXError.undecodableResponse(url, underlying:)` naming the `/-/search` path, with non-empty `underlying` (test `anEmptyBodyIsUndecodable`) |
 | open-vsx-client-039 | metadata-decode-failure | `search("vim")` against the JSON body `"[1, 2, 3]"` | Throws an `OpenVSXError` (wrong shape, valid JSON) (test `theWrongShapeIsUndecodable`) |
 | open-vsx-client-040 | metadata-decode-failure | `search("vim")` against a body truncated mid-token (`{ "offset": 0, "totalSize": 2, "exten`) | Throws an `OpenVSXError` (test `aTruncatedBodyIsUndecodable`) |
-| open-vsx-client-041 | default-registry, default-page-size, default-artifact-ceiling, default-metadata-ceiling | `OpenVSXClient()` constructed with no arguments | Its effective configuration equals `registryBase: https://open-vsx.org/api`, `maximumArtifactBytes: 536870912`, `maximumMetadataBytes: 8388608`, and `search()`'s default `size` is `50` (source lines 31, 36, 46, 58, 66–69, 91) |
+| open-vsx-client-041 | default-registry, default-page-size, default-artifact-ceiling, default-metadata-ceiling | `OpenVSXClient()` constructed with no arguments | Its effective configuration equals `registryBase: https://open-vsx.org/api`, `maximumArtifactBytes: 536870912`, `maximumMetadataBytes: 8388608`, and `search()`'s default `size` is `50` |
 
 ## Edge Cases
 
@@ -352,15 +344,14 @@ visual component.
   for that transfer are discarded rather than returned as a partial result —
   `search`, `detail`, `data`, and `text` each return either the complete
   decoded value or a thrown error, never a partial `Data` or `String`
-  (`BoundedBodyLoader.swift` lines 147–163, 192–196;
+  (`BoundedBodyLoader.swift`;
   `network-failure-propagates-untyped`).
 - **Malformed input (path-traversal identity)**: `namespace`, `name`, or
   `version` values containing `/`, `\`, `:`, a leading `.`, or a control
   character — including a bare `/` with no `..` at all — MUST be refused by
   `detail-identity-validated` before any request is composed, since
   `appendingPathComponent` performs no escaping and would otherwise let such
-  a value address an endpoint outside the intended one (source comment lines
-  125–131; tests `detailRefusesATraversingNamespace`,
+  a value address an endpoint outside the intended one (source comment; tests `detailRefusesATraversingNamespace`,
   `detailRefusesATraversingNameAndVersion`).
 - **Malformed input (artifact URL scheme)**: An artifact URL using `file:`,
   `data:`, plain `http:`, or any scheme other than `https`, or an `https`
@@ -368,7 +359,7 @@ visual component.
   is made — every artifact URL `data(at:)` and `text(at:)` are given
   originates from the registry's own `files`/`downloads` JSON, so a
   malicious or misconfigured registry answer is the threat this guards
-  against, not a typo by the caller (doc comment lines 156–162;
+  against, not a typo by the caller (doc comment;
   `artifact-scheme-and-host-required`).
 - **Cancellation**: Cancelling the awaiting `Task` MUST cancel the
   in-flight `URLSessionDataTask` rather than let it run to completion
@@ -409,7 +400,7 @@ Not applicable: the source declares no user-facing string literal.
 `OpenVSXError`'s cases carry structured data — a `URL`, an HTTP status code,
 a field name and value — rather than display text, and no method returns or
 logs a message meant to be read by a person (traced to the `OpenVSXError`
-enum, lines 330–373, and to the absence of any display-text literal in
+enum, and to the absence of any display-text literal in
 `search`, `detail`, `data`, or `text`).
 
 ## Accessibility Options
@@ -437,19 +428,19 @@ caller, with no recorded event (traced to the full body of the source file).
   the `namespace`/`name`/`version` identifiers a caller passes to `detail`,
   are sent to the configured registry as URL query items or path
   components; `OpenVSXClient` itself collects and attaches nothing beyond
-  what the caller supplies as arguments (lines 88–115, 120–144).
+  what the caller supplies as arguments.
 - **Storage**: None. `OpenVSXClient` holds no cache and persists nothing
   between calls — whichever caller receives the decoded `OpenVSXSearchPage`,
   `OpenVSXExtensionDetail`, `Data`, or `String` decides whether to store it
-  (doc comment lines 23–26).
+  (doc comment).
 - **Transmission**: Every `search`/`detail` request, and every artifact
   fetch that passes `requireFetchable`, leaves the device for `registryBase`
   (`https://open-vsx.org/api` by default, or a caller-configured self-hosted
   host) over `https`; the doc comment states that nothing beyond the request
-  itself is sent that the registry could attribute to a user (lines 19–21).
+  itself is sent that the registry could attribute to a user.
 - **Retention**: Not applicable — no value returned by this type is retained
   past the call that produced it; the type stores nothing between calls
-  (doc comment lines 23–26).
+  (doc comment).
 
 ## Logging
 
@@ -458,7 +449,7 @@ Category: `OpenVSXClient`
 
 | Event | Level | Message |
 |-------|-------|---------|
-| — | — | Not emitted: `OpenVSXClient` conforms to `Loggable` and declares `public static nonisolated let logger = makeLogger()`, but no method in the source calls `logger` — every failure is communicated to the caller as a thrown `OpenVSXError` case instead of a log line (lines 320–322). |
+| — | — | Not emitted: `OpenVSXClient` conforms to `Loggable` and declares `public static nonisolated let logger = makeLogger()`, but no method in the source calls `logger` — every failure is communicated to the caller as a thrown `OpenVSXError` case instead of a log line. |
 
 ## Platform Notes
 
@@ -545,8 +536,8 @@ however much a stranger decided to send is already in memory. `bytes(from:)`
 can be bounded but its `AsyncBytes` yields one byte per `await`, measured at
 23.8 MB/s against 2.5 GB/s for whole-chunk delivery — a cost this type pays
 on every keystroke of a search field, not only on a 512 MB download
-(`BoundedBodyLoader.swift` doc comment lines 8–25; source doc comment on
-`body`, lines 198–210).
+(`BoundedBodyLoader.swift` doc comment; source doc comment on
+`body`).
 **Approved**: pending
 
 **Decision**: Check the HTTP status of a failure response before reporting
@@ -555,7 +546,7 @@ a body that exceeded its ceiling as too large.
 than the metadata ceiling; reporting that as "the answer was too large"
 sends whoever reads the error looking for a setting to raise, when the
 actual situation is a registry outage or a missing extension (source
-comment on `body`, lines 234–236; tests `anErrorStatusOutranksTheCeiling`,
+comment on `body`; tests `anErrorStatusOutranksTheCeiling`,
 `aMissingArtifactIsReportedAsMissing`).
 **Approved**: pending
 
@@ -567,7 +558,7 @@ describing an extension, never the extension itself, so 8 MB is generously
 above any honest metadata answer; a `.vsix` legitimately reaches hundreds of
 megabytes. One number for both would either make the metadata ceiling
 decorative or make the download ceiling impossible (source doc comment on
-`defaultMaximumMetadataBytes`, lines 48–57).
+`defaultMaximumMetadataBytes`).
 **Approved**: pending
 
 **Decision**: Restrict the scheme and host of an artifact URL
@@ -579,14 +570,13 @@ registry *names* in a `files`/`downloads` map is a different thing entirely
 — `URLSession` implements the `file:` and `data:` schemes, so an unchecked
 artifact URL would let a compromised or misconfigured registry answer make
 this client read a local file or an inline payload and hand it back as a
-"download" (source comment on `requireFetchable`'s call sites, lines
-156–162, 269–277).
+"download" (source comment on `requireFetchable`'s call sites).
 **Approved**: pending
 
 **Decision**: Hold no cache; re-fetch on every call.
 **Rationale**: A memoizing client would hand a settings panel a stale
 "latest version" answer for an update check whose entire purpose is to be
-current (doc comment on `OpenVSXClient`, lines 23–26).
+current (doc comment on `OpenVSXClient`).
 **Approved**: pending
 
 **Decision**: Construct `BoundedBodyLoader` from the caller's
@@ -596,8 +586,8 @@ current (doc comment on `OpenVSXClient`, lines 23–26).
 its own delegate could never deallocate and invalidate itself. Deriving from
 the configuration, not the session, is what lets an injected
 `protocolClasses` (how every test here stands the registry up) still apply
-to the new session (source comment in `init`, lines 72–76;
-`BoundedBodyLoader.swift` comment lines 27–31, 44–46).
+to the new session (source comment in `init`;
+`BoundedBodyLoader.swift` comment).
 **Approved**: pending
 
 ## Compliance
@@ -640,7 +630,7 @@ or a session-level network error — is reported immediately with no retry or
 backoff of any kind; the source's own framing is that this is a thin,
 current-by-construction read of the registry, and retrying a request is
 left entirely to whichever caller decides a failure is worth retrying
-(doc comment lines 23–26; absence of any retry loop or backoff delay in the
+(doc comment; absence of any retry loop or backoff delay in the
 source).
 
 ## Change History
@@ -648,3 +638,4 @@ source).
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-24 | Mike Fullerton | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

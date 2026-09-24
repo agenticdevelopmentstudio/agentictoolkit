@@ -3,7 +3,7 @@ id: 639bf7b5-011e-4dc0-9c4e-bc704957cf97
 title: JITAvailability, UpstreamDivergence & UpstreamDivergenceLedger
 domain: agentictoolkit://recipes/foundation-diagnostics
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -70,84 +70,77 @@ something a person or a panel can actually see.
 - **jit-value-shape**: `JITAvailability` MUST be a `Sendable`, `Hashable`
   struct with exactly two stored properties, `isHardenedRuntime: Bool` and
   `hasJITEntitlement: Bool`, and its public initializer MUST assign both
-  parameters directly with no validation (`JITAvailability.swift` lines 32,
-  38, 42, 44-47).
+  parameters directly with no validation (`JITAvailability.swift`).
 - **jit-degraded-definition**: `JITAvailability.isDegraded` MUST return
   `isHardenedRuntime && !hasJITEntitlement` — true only when the hardened
   runtime is enforcing and the JIT entitlement is absent, and false in every
   other combination, including the unhardened case where the entitlement is
-  irrelevant (line 57).
+  irrelevant.
 - **jit-diagnosis-nil-when-healthy**: `JITAvailability.diagnosis` MUST return
-  `nil` whenever `isDegraded` is false (lines 64-65).
+  `nil` whenever `isDegraded` is false.
 - **jit-diagnosis-content**: When `isDegraded` is true, `diagnosis` MUST
   return a fixed, non-nil sentence naming
   `com.apple.security.cs.allow-jit` as the missing entitlement, stating that
   extensions will run but every one of them interpreted, and naming
-  `App.entitlements` as where the fix belongs (lines 67-76).
+  `App.entitlements` as where the fix belongs.
 - **jit-current-memoized-once**: `JITAvailability.current` MUST be a
   `static let` whose value is computed by calling `probe()` exactly once for
   the process, and MUST return that same value on every later read for the
-  rest of the process's lifetime (line 83, doc comment lines 78-82).
+  rest of the process's lifetime (doc comment).
 - **jit-probe-live-each-call**: `JITAvailability.probe()` MUST perform a
   fresh call to `readHardenedRuntimeFlag()` and `readJITEntitlement()` on
-  every invocation, independent of whatever `current` has already memoized
-  (lines 89-94).
+  every invocation, independent of whatever `current` has already memoized.
 - **jit-hardened-flag-read**: `readHardenedRuntimeFlag()` MUST derive its
   answer from this process's own code object — `SecCodeCopySelf`, then
   `SecCodeCopyStaticCode`, then `SecCodeCopySigningInformation` with the
   `kSecCSSigningInformation` flag — read the `kSecCodeInfoFlags` entry of the
   resulting dictionary as a `UInt32`, and test it against the literal mask
-  `0x0001_0000` (`kSecCodeSignatureRuntime`, not exposed to Swift) (lines
-  98-133).
+  `0x0001_0000` (`kSecCodeSignatureRuntime`, not exposed to Swift).
 - **jit-hardened-read-failure-is-false**: `readHardenedRuntimeFlag()` MUST
   return `false`, never throw or crash, when any step of that chain fails —
   a non-success `OSStatus`, a nil code object, a signing-information
-  dictionary that fails to cast, or a missing or mistyped flags entry (lines
-  111-131, each a `guard ... else { return false }`).
+  dictionary that fails to cast, or a missing or mistyped flags entry (each a `guard ... else { return false }`).
 - **jit-entitlement-read**: `readJITEntitlement()` MUST read
   `com.apple.security.cs.allow-jit` off this process's own task via
   `SecTaskCreateFromSelf(nil)` and `SecTaskCopyValueForEntitlement`, and MUST
   return `false` when `SecTaskCreateFromSelf` returns `nil` or the
-  entitlement value does not cast to `Bool` (lines 142-150).
+  entitlement value does not cast to `Bool`.
 - **jit-log-once-per-process**: `JITAvailability.logIfDegraded()` MUST cause
   the process to write `current.diagnosis` to the OSLog error level at most
   once for the process's entire lifetime, however many times or from however
   many call sites it is invoked, by forcing evaluation of the private
   `static let hasLogged` closure — a Swift static stored property that runs
-  its initializer exactly once regardless of concurrent first callers (lines
-  156-169).
+  its initializer exactly once regardless of concurrent first callers.
 - **jit-no-log-when-healthy**: `logIfDegraded()` MUST NOT write anything to
   the log when `current.diagnosis` is `nil` — `hasLogged`'s closure returns
-  `true` immediately in that case without calling `logger.error` (line 166).
+  `true` immediately in that case without calling `logger.error`.
 - **jit-log-privacy**: The one log line `logIfDegraded()` can produce MUST
-  mark the diagnosis string `privacy: .public` in the `OSLog` call (line
-  167).
+  mark the diagnosis string `privacy: .public` in the `OSLog` call.
 - **jit-logging-category**: `extension JITAvailability: Loggable` MUST
   obtain its logger through `Loggable`'s default `makeLogger()`, which gives
   it OSLog category `"JITAvailability"` (the conforming type's own name) and
-  subsystem `Bundle.main.bundleIdentifier` (line 154 of
-  `JITAvailability.swift`; `Loggable.swift` lines 26-31, 38-39).
+  subsystem `Bundle.main.bundleIdentifier` (`JITAvailability.swift`; `Loggable.swift`).
 - **divergence-value-shape**: `UpstreamDivergence` MUST be a `Sendable`,
   `Hashable`, `Identifiable`, `Codable` struct with exactly the six stored
   properties `id`, `area`, `upstreamBehaviour`, `ourBehaviour`, `rationale`,
-  and `detection: Detection` (`UpstreamDivergence.swift` lines 22, 43-60).
+  and `detection: Detection` (`UpstreamDivergence.swift`).
 - **divergence-detection-cases**: `UpstreamDivergence.Detection` MUST be a
   `String`-backed, `Sendable`, `Hashable`, `Codable` enum with exactly two
-  cases, `counted` and `declared` (lines 33-38).
+  cases, `counted` and `declared`.
 - **divergence-public-init**: `UpstreamDivergence.init(id:area:
   upstreamBehaviour:ourBehaviour:rationale:detection:)` MUST be public and
   MUST assign every one of the six parameters directly, with no validation,
-  normalization, or default value (lines 62-76).
+  normalization, or default value.
 - **divergence-known-catalogue**: `UpstreamDivergence.known` MUST be the
   single list a consumer iterates to enumerate "every divergence this app
   knows about" — a `static let` divergence defined elsewhere in the file but
   omitted from `known` MUST remain individually addressable but MUST NOT
-  appear to any caller that iterates `known` (doc comment lines 224-228).
+  appear to any caller that iterates `known` (doc comment).
 - **divergence-known-fixed-membership**: `UpstreamDivergence.known` MUST
   contain exactly six entries in this fixed order: `documentOutsideWorkspaceScope`,
   `semanticTokenLineOutOfRange`, `semanticTokenModifiersIgnored`,
   `semanticTokenMultilineUnsupported`, `semanticTokenOverlapDropped`,
-  `semanticTokenTypeUnmapped` (lines 229-236).
+  `semanticTokenTypeUnmapped`.
 - **divergence-ids-unique**: Every entry in `UpstreamDivergence.known` MUST
   have a distinct `id` string (confirmed by
   `UpstreamDivergenceCatalogueTests.idsAreUnique`).
@@ -158,85 +151,75 @@ something a person or a panel can actually see.
 - **divergence-detection-mix**: `UpstreamDivergence.known` MUST contain at
   least one entry of each `Detection` case, and the number of `.counted`
   entries MUST be greater than or equal to the number of `.declared` entries
-  (source lines 116, 139, 157, 180, 199, 221 give five `.counted` entries
+  (221 give five `.counted` entries
   and one `.declared` entry; confirmed by
   `UpstreamDivergenceCatalogueTests.bothDetectionKindsArePresent`).
 - **hit-value-shape**: `UpstreamDivergenceHit` MUST be a `Sendable`,
   `Hashable`, `Identifiable` struct with exactly the five stored properties
   `divergence: UpstreamDivergence`, `detail: String`, `firstSeen: Date`,
-  `lastSeen: Date`, and `count: Int` (`UpstreamDivergenceLedger.swift` lines
-  18, 20-33).
+  `lastSeen: Date`, and `count: Int` (`UpstreamDivergenceLedger.swift`).
 - **hit-identity-key**: `UpstreamDivergenceHit.id` MUST be computed as
   `divergence.id` and `detail` joined by the ASCII unit-separator character
-  `\u{1F}` — never a UUID or other synthesized identifier (line 35).
+  `\u{1F}` — never a UUID or other synthesized identifier.
 - **ledger-unchecked-sendable-shared**: `UpstreamDivergenceLedger` MUST be
   declared `final class UpstreamDivergenceLedger: @unchecked Sendable`, MUST
   expose one process-wide `static let shared` instance, and MUST also leave
   its own `public init()` available so a caller (a test, or another host)
-  MAY construct an independent ledger instead of using `shared` (lines 74,
-  79, 95).
+  MAY construct an independent ledger instead of using `shared`.
 - **ledger-record-noop-nonpositive**: `record(_:detail:count:)` MUST perform
-  no row write, no log write, and no publish when `count <= 0` (lines
-  128-129, confirmed by
+  no row write, no log write, and no publish when `count <= 0` (confirmed by
   `UpstreamDivergenceLedgerTests.nonPositiveCountsAreIgnored`).
 - **ledger-record-default-count-one**: `record(_:detail:)` called with
   `count` omitted MUST record exactly one occurrence, per the parameter's
-  `count: Int = 1` default (line 128).
+  `count: Int = 1` default.
 - **ledger-row-key-by-detail**: A ledger row MUST be keyed by the pair of
   the divergence's `id` and the caller-supplied `detail` string — two
   `record` calls for the same divergence but different `detail` values MUST
-  produce two independent rows, never merged into one (lines 81-84, 131,
-  confirmed by `UpstreamDivergenceLedgerTests.detailsAreSeparateRows`).
+  produce two independent rows, never merged into one (confirmed by `UpstreamDivergenceLedgerTests.detailsAreSeparateRows`).
 - **ledger-row-accumulates**: A second `record(_:detail:count:)` call for a
   key that already has a row MUST add its `count` to the existing row's
   `count`, MUST replace `lastSeen` with the current time, and MUST leave
-  `firstSeen` unchanged from the row's original creation (lines 134-142,
-  confirmed by `UpstreamDivergenceLedgerTests.secondRecordAccumulates` and
+  `firstSeen` unchanged from the row's original creation (confirmed by `UpstreamDivergenceLedgerTests.secondRecordAccumulates` and
   `.firstSeenIsPinnedAndLastSeenMoves`).
 - **ledger-write-serialization**: Every read and every write of the ledger's
   `rows` dictionary MUST occur while holding `lock` (an `NSLock`), so that
   concurrent `record`, `clear`, `hits`, and `hits(for:)` calls from different
-  threads MUST NOT corrupt the dictionary or lose an update (lines 102-113,
-  134-143, 158-162, confirmed by
+  threads MUST NOT corrupt the dictionary or lose an update (confirmed by
   `UpstreamDivergenceLedgerTests.concurrentRecordingIsTotalled`, which
   records 200 concurrent hits for one key and observes all 200 counted).
 - **ledger-first-hit-logs-once**: `record(_:detail:count:)` MUST write an
   OSLog info-level line containing the divergence's `id` and its
   `ourBehaviour` text, marked `privacy: .public`, only on the call where
   `existing == nil` (the key's first-ever hit); every later `record` call
-  for that same key MUST NOT log again (lines 145-152).
+  for that same key MUST NOT log again.
 - **ledger-hits-sorted**: Both `hits` and `hits(for:)` MUST return their
   rows sorted by the tuple `(divergence.id, detail)`, never in insertion or
-  arrival order (lines 102-106, 109-113, 195-199, confirmed by
+  arrival order (confirmed by
   `UpstreamDivergenceLedgerTests.rowsAreSortedForReading`).
 - **ledger-hits-for-filters**: `hits(for:)` MUST return only the rows whose
-  key's `divergenceID` equals the given divergence's `id` (lines 109-113,
-  confirmed by `UpstreamDivergenceLedgerTests.hitsForOneSite`).
+  key's `divergenceID` equals the given divergence's `id` (confirmed by `UpstreamDivergenceLedgerTests.hitsForOneSite`).
 - **ledger-publisher-current-value**: `hitsPublisher` MUST be backed by a
   `CurrentValueSubject`, so a subscriber MUST receive the ledger's rows as
   they stand at the moment of subscription, even if no `record` or `clear`
-  call happens afterward (lines 88, 118-120, confirmed by
+  call happens afterward (confirmed by
   `UpstreamDivergenceLedgerTests.publisherCarriesTheRows`).
 - **ledger-every-mutation-publishes**: Both `record(_:detail:count:)` (when
   `count > 0`) and `clear()` MUST call `publish()` exactly once per call,
-  each sending a fresh snapshot of the current rows to every subscriber
-  (lines 153, 162-163).
+  each sending a fresh snapshot of the current rows to every subscriber.
 - **ledger-clear-empties**: `clear()` MUST remove every row from the ledger
   and then publish an empty array to subscribers; it MUST NOT touch
   `firstSeen`/`lastSeen` bookkeeping for any row, because it discards the
-  rows themselves rather than resetting a per-row field (lines 158-163,
-  confirmed by `UpstreamDivergenceLedgerTests.clearEmptiesAndPublishes`).
+  rows themselves rather than resetting a per-row field (confirmed by `UpstreamDivergenceLedgerTests.clearEmptiesAndPublishes`).
 - **ledger-publish-lock-ordering**: `publish()` MUST take a second lock,
   `publishLock`, around taking its rows snapshot and sending it, so that two
   `publish()` calls racing on different threads MUST deliver to subscribers
   in the same order their respective row mutations actually committed, and
-  MUST NOT deliver a stale snapshot after a newer one (lines 184-193, per
-  the type's own doc comment on lines 165-183; not exercised by a dedicated
+  MUST NOT deliver a stale snapshot after a newer one (per
+  the type's own doc comment; not exercised by a dedicated
   ordering test — inferred from the documented purpose of the second lock).
 - **ledger-logging-category**: `extension UpstreamDivergenceLedger:
   Loggable` MUST obtain its logger through `Loggable`'s default
-  `makeLogger()`, giving it OSLog category `"UpstreamDivergenceLedger"`
-  (line 203).
+  `makeLogger()`, giving it OSLog category `"UpstreamDivergenceLedger"`.
 
 ## Appearance
 
@@ -264,11 +247,11 @@ divergence ledger, not a visual component.
 | foundation-diagnostics-005 | jit-diagnosis-content | Read `.diagnosis` from `JITAvailability(isHardenedRuntime: true, hasJITEntitlement: false)` (`.diagnosisIsProse`). | `diagnosis.count > 60` and `diagnosis.hasSuffix(".")`. |
 | foundation-diagnostics-006 | jit-probe-live-each-call | Call `JITAvailability.probe()` twice in the same process (`.probeIsStable`). | Both calls return the same `isHardenedRuntime` and the same `hasJITEntitlement` as each other. |
 | foundation-diagnostics-007 | jit-current-memoized-once | Compare `JITAvailability.current` to a fresh `JITAvailability.probe()` call (`.currentMatchesAProbe`). | `current.isHardenedRuntime == probed.isHardenedRuntime` and `current.hasJITEntitlement == probed.hasJITEntitlement`. |
-| foundation-diagnostics-008 | jit-value-shape, jit-hardened-flag-read, jit-entitlement-read | Inspect `JITAvailability`'s declaration and `readHardenedRuntimeFlag()`/`readJITEntitlement()` bodies (source lines 32-150; not exercised by a value-level unit test since both readings depend on how the test runner itself was signed). | Struct conforms to `Sendable, Hashable` with exactly the two documented properties; both private readers follow the `SecCode`/`SecTask` chain described and return `false` on any failure step. |
+| foundation-diagnostics-008 | jit-value-shape, jit-hardened-flag-read, jit-entitlement-read | Inspect `JITAvailability`'s declaration and `readHardenedRuntimeFlag()`/`readJITEntitlement()` bodies (not exercised by a value-level unit test since both readings depend on how the test runner itself was signed). | Struct conforms to `Sendable, Hashable` with exactly the two documented properties; both private readers follow the `SecCode`/`SecTask` chain described and return `false` on any failure step. |
 | foundation-diagnostics-009 | divergence-ids-unique | `UpstreamDivergence.known.map(\.id)` (`UpstreamDivergenceCatalogueTests.idsAreUnique`). | `Set(ids).count == ids.count`. |
 | foundation-diagnostics-010 | divergence-fields-nonempty | Every entry in `UpstreamDivergence.known` (`.everyEntryIsDescribed`). | `id`, `area`, `upstreamBehaviour`, `ourBehaviour`, and `rationale` are all non-empty for every entry. |
 | foundation-diagnostics-011 | divergence-detection-mix | Partition `UpstreamDivergence.known` by `detection` (`.bothDetectionKindsArePresent`). | Neither partition is empty, and `counted.count >= declared.count`. |
-| foundation-diagnostics-012 | divergence-known-fixed-membership | Read `UpstreamDivergence.known` (source lines 229-236; not directly asserted by any given test, derived from the array literal itself). | Exactly six entries, in the order `documentOutsideWorkspaceScope`, `semanticTokenLineOutOfRange`, `semanticTokenModifiersIgnored`, `semanticTokenMultilineUnsupported`, `semanticTokenOverlapDropped`, `semanticTokenTypeUnmapped`. |
+| foundation-diagnostics-012 | divergence-known-fixed-membership | Read `UpstreamDivergence.known` (not directly asserted by any given test, derived from the array literal itself). | Exactly six entries, in the order `documentOutsideWorkspaceScope`, `semanticTokenLineOutOfRange`, `semanticTokenModifiersIgnored`, `semanticTokenMultilineUnsupported`, `semanticTokenOverlapDropped`, `semanticTokenTypeUnmapped`. |
 | foundation-diagnostics-013 | ledger-row-key-by-detail | `ledger.record(.semanticTokenOverlapDropped, detail: "file:///a.swift", count: 3)` on a fresh `UpstreamDivergenceLedger()` (`UpstreamDivergenceLedgerTests.firstRecordStartsARow`). | `ledger.hits.count == 1`; that row's `divergence == overlap`, `detail == "file:///a.swift"`, `count == 3`. |
 | foundation-diagnostics-014 | ledger-row-accumulates | `ledger.record(overlap, detail: "file:///a.swift", count: 2)` then `ledger.record(overlap, detail: "file:///a.swift")` (`.secondRecordAccumulates`). | `ledger.hits.count == 1`; that row's `count == 3`. |
 | foundation-diagnostics-015 | ledger-row-key-by-detail | `ledger.record(overlap, detail: "file:///a.swift")` then `ledger.record(overlap, detail: "file:///b.swift")` (`.detailsAreSeparateRows`). | `ledger.hits.count == 2`; `ledger.hits(for: overlap).count == 2`; the two rows' `detail` values are exactly `{"file:///a.swift", "file:///b.swift"}`. |
@@ -279,7 +262,7 @@ divergence ledger, not a visual component.
 | foundation-diagnostics-020 | ledger-clear-empties | `ledger.record(overlap, detail: "a")`, subscribe, then `ledger.clear()` (`.clearEmptiesAndPublishes`). | `ledger.hits.isEmpty == true`; the last value delivered to the subscriber is an empty array. |
 | foundation-diagnostics-021 | ledger-record-noop-nonpositive | `ledger.record(overlap, detail: "a", count: 0)` then `ledger.record(overlap, detail: "a", count: -4)` (`.nonPositiveCountsAreIgnored`). | `ledger.hits.isEmpty == true`. |
 | foundation-diagnostics-022 | ledger-write-serialization | 200 concurrent tasks each call `ledger.record(.semanticTokenOverlapDropped, detail: "shared")` (`.concurrentRecordingIsTotalled`). | `ledger.hits.count == 1`; that row's `count == 200` — no increment lost to the race. |
-| foundation-diagnostics-023 | ledger-unchecked-sendable-shared | Read `UpstreamDivergenceLedger.shared` from two call sites, and separately construct `UpstreamDivergenceLedger()` directly (source lines 79, 95; not exercised by a dedicated identity test — every ledger test in the suite deliberately constructs its own instance instead of using `.shared`, per the test file's own doc comment). | `UpstreamDivergenceLedger.shared` is reachable and constructible exactly once as a `static let`; `UpstreamDivergenceLedger()` succeeds and yields an independent, empty ledger. |
+| foundation-diagnostics-023 | ledger-unchecked-sendable-shared | Read `UpstreamDivergenceLedger.shared` from two call sites, and separately construct `UpstreamDivergenceLedger()` directly (not exercised by a dedicated identity test — every ledger test in the suite deliberately constructs its own instance instead of using `.shared`, per the test file's own doc comment). | `UpstreamDivergenceLedger.shared` is reachable and constructible exactly once as a `static let`; `UpstreamDivergenceLedger()` succeeds and yields an independent, empty ledger. |
 
 ## Edge Cases
 
@@ -288,11 +271,11 @@ divergence ledger, not a visual component.
   and `record(_:detail:count:)` both accept `detail`/`area`/etc. as plain,
   unvalidated `String`s — an empty string (`detail: ""`) MUST be accepted
   and treated as an ordinary, distinct row key exactly like any other string
-  (`UpstreamDivergenceLedger.swift` lines 81-84, 128-131; no length or
+  (`UpstreamDivergenceLedger.swift`; no length or
   content check exists in either file).
 - **Boundary values**: `UpstreamDivergenceHit.count` is an `Int` with no
   upper bound enforced by `record(_:detail:count:)` — repeated accumulation
-  (`(existing?.count ?? 0) + count`, line 141) MUST eventually trap on
+  (`(existing?.count ?? 0) + count`) MUST eventually trap on
   signed-integer overflow rather than saturate or wrap, since Swift's `+`
   operator traps by default and the source performs no `addingReportingOverflow`
   or clamping of its own; reaching that boundary requires on the order of
@@ -308,16 +291,14 @@ divergence ledger, not a visual component.
   `ledger-publish-lock-ordering`). Two independently constructed
   `UpstreamDivergenceLedger` instances (for example `.shared` and one built
   by a test) each own their own `rows`, `lock`, `publishLock`, and `subject`;
-  a `record` call on one MUST have no effect on the other's `hits` (source
-  lines 74-95). `JITAvailability.current` and the private `hasLogged` static
+  a `record` call on one MUST have no effect on the other's `hits`. `JITAvailability.current` and the private `hasLogged` static
   are both lazily initialized `static let` bindings, which Swift's runtime
   guarantees run their initializer exactly once even when first read from
   several threads at once — for example, several `JSVirtualMachine`s created
-  concurrently by `ExtensionHost` all calling `logIfDegraded()` (lines 83,
-  165-169) — so no additional locking is needed or present in either type
+  concurrently by `ExtensionHost` all calling `logIfDegraded()` — so no additional locking is needed or present in either type
   for this case. `JITAvailability.probe()` itself holds no lock and no
   shared mutable state, so concurrent calls to it MUST run independently
-  with no coordination between them (lines 89-94).
+  with no coordination between them.
 - **Error states**: `readHardenedRuntimeFlag()` and `readJITEntitlement()`
   each depend on Security-framework calls
   (`SecCodeCopySelf`/`SecCodeCopyStaticCode`/`SecCodeCopySigningInformation`,
@@ -325,7 +306,7 @@ divergence ledger, not a visual component.
   reasons outside this component's control (an unsigned binary, a signature
   the OS cannot parse); per the source's own doc comment, an unreadable
   signature MUST answer `false` rather than throw, because "this type may
-  not invent a problem it cannot demonstrate" (lines 103-108, 139-141).
+  not invent a problem it cannot demonstrate".
   Neither `UpstreamDivergence` nor `UpstreamDivergenceLedger` declares a
   `throws` function or has any dependency capable of failing; `record`,
   `clear`, `hits`, and `hits(for:)` all complete unconditionally.
@@ -340,7 +321,7 @@ divergence ledger, not a visual component.
   `(divergence.id, detail)` pair recorded for the life of the process
   occupies one row until an explicit `clear()` call, per the type's own doc
   comment describing itself as "deliberately cheap: an in-memory dictionary
-  behind a lock, no persistence, cleared when the app quits" (lines 63-67).
+  behind a lock, no persistence, cleared when the app quits".
   A session that opens many distinct documents that each trip
   `documentOutsideWorkspaceScope` or a semantic-token divergence MUST
   therefore grow the dictionary by one row per distinct document URI, with
@@ -350,10 +331,10 @@ divergence ledger, not a visual component.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `JITAvailability.init(isHardenedRuntime:hasJITEntitlement:)` parameters | `Bool`, `Bool` | none — both required | Used directly only by `JITAvailabilityTests.swift`; production code reads `.current` or calls `.probe()` rather than constructing a value by hand (lines 44-47, 83-94). |
-| `UpstreamDivergence.init(id:area:upstreamBehaviour:ourBehaviour:rationale:detection:)` parameters | `String` ×4, `Detection` | none — all six required | Used only to define the six `static let` catalogue entries in `UpstreamDivergence.swift`; the initializer is public, so an external caller MAY build an additional divergence, but no call site in this codebase does (lines 62-76). |
-| `UpstreamDivergenceLedger.record(_:detail:count:)` `count` | `Int` | `1` | The only defaulted parameter across either file; every other parameter in both types is required with no default (line 128). |
-| `UpstreamDivergenceLedger` instance (injection seam) | `UpstreamDivergenceLedger` | `.shared`, at each consumer's own call site | Consumers depend on the concrete class rather than a protocol, but its `public init()` lets a test or an alternate host substitute an independent ledger, as `LanguageServerDocumentSync.init(ledger:)`'s `= .shared` default parameter does (line 95). |
+| `JITAvailability.init(isHardenedRuntime:hasJITEntitlement:)` parameters | `Bool`, `Bool` | none — both required | Used directly only by `JITAvailabilityTests.swift`; production code reads `.current` or calls `.probe()` rather than constructing a value by hand. |
+| `UpstreamDivergence.init(id:area:upstreamBehaviour:ourBehaviour:rationale:detection:)` parameters | `String` ×4, `Detection` | none — all six required | Used only to define the six `static let` catalogue entries in `UpstreamDivergence.swift`; the initializer is public, so an external caller MAY build an additional divergence, but no call site in this codebase does. |
+| `UpstreamDivergenceLedger.record(_:detail:count:)` `count` | `Int` | `1` | The only defaulted parameter across either file; every other parameter in both types is required with no default. |
+| `UpstreamDivergenceLedger` instance (injection seam) | `UpstreamDivergenceLedger` | `.shared`, at each consumer's own call site | Consumers depend on the concrete class rather than a protocol, but its `public init()` lets a test or an alternate host substitute an independent ledger, as `LanguageServerDocumentSync.init(ledger:)`'s `= .shared` default parameter does. |
 
 Neither `JITAvailability.swift`, `UpstreamDivergence.swift`, nor
 `UpstreamDivergenceLedger.swift` reads an environment variable or a settings
@@ -368,9 +349,8 @@ navigation.
 
 ## Localization
 
-`JITAvailability.diagnosis` (lines 67-76) and every `UpstreamDivergence`
-entry's `area`, `upstreamBehaviour`, `ourBehaviour`, and `rationale` text
-(lines 88-236) are hardcoded English prose with no localization mechanism —
+`JITAvailability.diagnosis` and every `UpstreamDivergence`
+entry's `area`, `upstreamBehaviour`, `ourBehaviour`, and `rationale` text are hardcoded English prose with no localization mechanism —
 no `String(localized:)`, no string-catalog key, no `Bundle` lookup. Both
 surfaces are read by a person: `diagnosis`'s own doc comment says it is
 written as prose because it reaches "the log and the Extensions settings
@@ -407,32 +387,32 @@ logging, covered under Logging below, not analytics instrumentation.
   published row; the type's own doc comment states the constraint on that
   string explicitly: "a document URI or a server name is the useful thing,
   never anything drawn from the file's contents" (`UpstreamDivergenceHit`
-  doc comment, lines 12-17). Enforcing that constraint is the caller's
+  doc comment). Enforcing that constraint is the caller's
   responsibility — every current call site passes a document URI or a
   token-type name (`SemanticTokenHighlightProvider.swift`,
   `LanguageServerDocumentSync.swift`, outside this recipe's sources), never
   document text.
 - **Storage**: In-memory only. `UpstreamDivergenceLedger.rows` is a plain
   Swift dictionary with no disk, database, or `UserDefaults` persistence of
-  any kind (lines 74-87).
+  any kind.
 - **Transmission**: None. Neither type makes a network call; `hitsPublisher`
-  delivers rows only to in-process Combine subscribers (line 118-120).
+  delivers rows only to in-process Combine subscribers.
 - **Retention**: A row persists only until the process exits or an explicit
-  `clear()` call empties the ledger (lines 158-163); nothing in either file
+  `clear()` call empties the ledger; nothing in either file
   writes a row to persistent storage, so no data survives a relaunch.
 
 ## Logging
 
 Subsystem: `Bundle.main.bundleIdentifier` (via `Loggable`'s default,
-`Loggable.swift` lines 26-27) | Category: `JITAvailability` and
+`Loggable.swift`) | Category: `JITAvailability` and
 `UpstreamDivergenceLedger` respectively (`Loggable`'s default per-type
-category, lines 30-31).
+category).
 
 | Event | Level | Message |
 |-------|-------|---------|
-| Degraded JIT availability, first detection in the process | error | The full `diagnosis` sentence (`JITAvailability.swift` line 167), marked `privacy: .public`. |
+| Degraded JIT availability, first detection in the process | error | The full `diagnosis` sentence (`JITAvailability.swift`), marked `privacy: .public`. |
 | Healthy JIT availability | — | No log line is written (`jit-no-log-when-healthy`). |
-| A divergence's first-ever hit for a given key | info | `"Divergence from VS Code first seen: \(divergence.id) — \(divergence.ourBehaviour)"` (`UpstreamDivergenceLedger.swift` lines 146-150), marked `privacy: .public`. |
+| A divergence's first-ever hit for a given key | info | `"Divergence from VS Code first seen: \(divergence.id) — \(divergence.ourBehaviour)"` (`UpstreamDivergenceLedger.swift`), marked `privacy: .public`. |
 | A repeat hit for a key already recorded | — | No log line is written (`ledger-first-hit-logs-once`). |
 
 ## Platform Notes
@@ -593,3 +573,4 @@ documents grows `rows` without bound until an explicit `clear()`.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-24 | Mike Fullerton | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

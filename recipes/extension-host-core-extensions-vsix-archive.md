@@ -3,7 +3,7 @@ id: dbe4b3b6-ac5b-4d45-ba2a-84aad1a8582e
 title: VSIXArchive
 domain: agentictoolkit://recipes/extension-host-core-extensions-vsix-archive
 type: ingredient
-version: 1.0.1
+version: 1.0.2
 status: review
 language: en
 created: '2026-09-24'
@@ -42,10 +42,10 @@ downloaded `.vsix` file: `verify`, which checks the raw archive bytes against
 whatever digest and Ed25519 signature the registry published for them, and
 `expand`, which unpacks the archive onto disk through the platform's own
 `ditto` unarchiver under a timeout and a decompressed-size ceiling (source:
-doc comment on `VSIXArchive`, lines 10–16). A `.vsix` is a zip whose extension
+doc comment on `VSIXArchive`). A `.vsix` is a zip whose extension
 tree lives under an `extension/` subdirectory alongside packaging metadata
 this host does not read; `payloadDirectory(in:)` is the one place that
-subdirectory name is spelled out (lines 13–16, 19–20, 275–279).
+subdirectory name is spelled out.
 
 Both operations are read-only with respect to the network: nothing here
 downloads anything. The one caller in this codebase,
@@ -54,15 +54,14 @@ the archive bytes and the optional digest/signature/key text over HTTP
 itself, then calls `VSIXArchive.verify` followed by `VSIXArchive.expand`
 synchronously, inside a dedicated blocking-work context, because neither
 function suspends and both can hold a thread for the length of a 512 MB
-download's worth of hashing or a `ditto` run (`VSIXInstaller.swift` lines
-122–174).
+download's worth of hashing or a `ditto` run (`VSIXInstaller.swift`).
 
 `verify`'s doc comment states plainly what its two checks do and do not
 establish: the digest and signature are both checked against values the
 *registry* published in the same response that named the archive, never
 against an out-of-band publisher key, so a registry serving altered bytes
 under a key of its own passes every check here. That is why a fully verified
-result is named `.registryAttested` rather than `.verified` (lines 24–53).
+result is named `.registryAttested` rather than `.verified`.
 
 ## Behavioral Requirements
 
@@ -71,129 +70,120 @@ All line references below are to
 another file is named.
 
 - **payload-directory-name**: `VSIXArchive.payloadDirectoryName` MUST equal
-  `"extension"` (line 20).
+  `"extension"`.
 - **payload-directory-path**: `payloadDirectory(in: expanded)` MUST return
   `expanded` with `payloadDirectoryName` appended as a directory path
-  component (lines 277–279).
+  component.
 - **sha256-hex-format**: `sha256Hex(of:)` MUST return the SHA-256 digest of
   its input as lowercase hexadecimal, MUST be deterministic for the same
-  bytes, and MUST differ for different bytes (lines 110–112; test
+  bytes, and MUST differ for different bytes (test
   `digestIsOfTheBytes`).
 - **digest-always-hashed**: `verify` MUST compute `sha256Hex(of: archive)`
   and return it as `VSIXVerification.sha256` on every call, whether or not
-  `expectedDigest` is supplied (line 61; doc comment on `sha256`,
-  lines 341–343).
+  `expectedDigest` is supplied (doc comment on `sha256`).
 - **digest-comparison-normalized**: When `expectedDigest` is non-`nil`,
   `verify` MUST trim it of leading and trailing whitespace and newline
   characters with `trimmingCharacters(in: .whitespacesAndNewlines)` and
-  lowercase it before comparing to the computed hash (lines 69–71; test
+  lowercase it before comparing to the computed hash (test
   `digestComparisonIsForgivingAboutFormatting`).
 - **digest-mismatch**: `verify` MUST throw
   `VSIXVerificationError.digestMismatch(expected:actual:)`, carrying the
   normalized `expectedDigest` and the computed `sha256Hex`, when the two do
-  not match, and MUST NOT evaluate the signature in that case (lines 72–74;
-  test `digestMismatchThrows`).
+  not match, and MUST NOT evaluate the signature in that case (test `digestMismatchThrows`).
 - **digest-match-result**: When the normalized `expectedDigest` equals the
-  computed hash, `verify`'s returned `digest` field MUST be `.matched` (line
-  75; test `digestComparisonIsForgivingAboutFormatting`).
+  computed hash, `verify`'s returned `digest` field MUST be `.matched` (test `digestComparisonIsForgivingAboutFormatting`).
 - **digest-not-published-result**: When `expectedDigest` is `nil`, `verify`'s
   returned `digest` field MUST be `.notPublished`, distinct from `.matched`,
-  even though `sha256` is still filled in (line 67; doc comment lines 63–66;
+  even though `sha256` is still filled in (doc comment;
   test `noDigestStillHashes`).
 - **digest-checked-before-signature**: `verify` MUST evaluate the digest
   before evaluating the signature, so a digest mismatch is reported as
   `digestMismatch` even when a signature and key are also supplied and would
-  otherwise verify (lines 61–76 preceding lines 78–107; test
+  otherwise verify (the digest check precedes the signature check; test
   `digestIsCheckedFirst`).
 - **signature-neither-published**: When both `signature` and `publicKeyPEM`
   are `nil`, `verify` MUST succeed and return `signature: .notPublished`
-  rather than throwing (lines 79–80; test `noDigestStillHashes`).
+  rather than throwing (test `noDigestStillHashes`).
 - **signature-half-pair-refused**: When exactly one of `signature` or
   `publicKeyPEM` is non-`nil`, `verify` MUST throw
   `VSIXVerificationError.signatureIncomplete(missing:)` naming the missing
   half as `"publicKey"` or `"signature"` respectively, without attempting any
-  cryptographic check (lines 86–89; test `halfThePairIsRefused`).
+  cryptographic check (test `halfThePairIsRefused`).
 - **signature-verified-with-real-key**: When both `signature` and
   `publicKeyPEM` are non-`nil`, `verify` MUST extract the raw signature bytes
   from the `signature` `.sigzip` and the Ed25519 public key from the
   `publicKeyPEM` PEM text, and MUST check the signature against `archive`
   with `Curve25519.Signing.PublicKey.isValidSignature(_:for:)`, returning
-  `signature: .registryAttested` on success (lines 91–106; test
+  `signature: .registryAttested` on success (test
   `signatureVerifies`).
 - **signature-invalid**: `verify` MUST throw
   `VSIXVerificationError.signatureInvalid` when the extracted signature does
   not validate against `archive` under the extracted key — whether because
   the bytes being verified were substituted or the signature bytes were
-  corrupted (lines 102–103; tests `signatureOverOtherBytesIsRefused`,
+  corrupted (tests `signatureOverOtherBytesIsRefused`,
   `corruptedSignatureIsRefused`).
 - **signature-manifest-and-p7s-ignored**: `verify` MUST verify the signature
   against `archive`'s bytes directly, using only `.signature.sig` from the
   `.sigzip`; it MUST NOT read or verify `.signature.manifest` or
-  `.signature.p7s`, the other two entries a `.sigzip` may carry (doc comment
-  lines 92–99).
+  `.signature.p7s`, the other two entries a `.sigzip` may carry (doc comment).
 - **signature-archive-extraction**: `signatureBytes(fromSigZip:)` MUST write
   its `Data` argument to a scratch file, expand it with `expand`, and read
   exactly `ed25519SignatureLength` (64) bytes from
   `.signature.sig` inside the expanded tree, throwing
   `VSIXVerificationError.signatureArchiveUnreadable` with a diagnostic string
   when that file is absent or is not exactly 64 bytes, or when writing or
-  expanding the scratch archive itself fails (lines 283–306; test
+  expanding the scratch archive itself fails (test
   `emptySignatureArchive`).
 - **signature-scratch-cleanup**: `signatureBytes(fromSigZip:)` MUST remove
   its scratch directory via `defer` on every exit path, whether extraction
-  succeeded or threw (line 286).
+  succeeded or threw.
 - **public-key-parsing**: `ed25519Key(fromPEM:)` MUST strip PEM header/footer
   lines (lines starting `-----`) and newline characters, base64-decode the
   remainder, and require exactly `ed25519SPKILength` (44) decoded bytes,
   taking the last `ed25519KeyLength` (32) bytes as the raw Ed25519 key;
   anything that fails base64 decoding or is not exactly 44 bytes, or whose
   final 32 bytes `Curve25519.Signing.PublicKey` refuses, MUST throw
-  `VSIXVerificationError.publicKeyUnreadable` (lines 308–327; test
+  `VSIXVerificationError.publicKeyUnreadable` (test
   `unreadablePublicKey`).
 - **expand-destination-must-not-exist**: `expand` MUST throw
   `VSIXArchiveError.destinationExists(destination)` without creating any
   directory or launching any process when `destination` already exists
-  (lines 152–154; test `expandRefusesAnExistingDestination`).
+  (test `expandRefusesAnExistingDestination`).
 - **expand-destination-created**: When `destination` does not already exist,
   `expand` MUST create it, with intermediate directories, before launching
-  `ditto` (lines 155–156).
+  `ditto`.
 - **expand-uses-ditto**: `expand` MUST run `/usr/bin/ditto -x -k` with
   `archive.path` and `destination.path` as its two positional arguments,
   through `CommandRunner.runToCompletion`, rather than a Swift zip library
-  (lines 158–174; doc comment lines 118–133).
+  (doc comment).
 - **expand-default-parameters**: `expand`'s `timeout`, `byteCeiling`, and
   `checkInterval` parameters MUST default to `VSIXArchive.expansionTimeout`
   (120 seconds), `VSIXArchive.expansionByteCeiling` (2,147,483,648 bytes),
-  and `VSIXArchive.expansionCheckInterval` (0.5 seconds) respectively
-  (lines 145–150, 213, 229, 238).
+  and `VSIXArchive.expansionCheckInterval` (0.5 seconds) respectively.
 - **expand-byte-ceiling-watchdog**: `expand` MUST supply
   `CommandRunner.runToCompletion` a `Watchdog` polled every `checkInterval`
   whose `shouldAbort` closure calls `expandedSize(of: destination,
   stoppingAbove: byteCeiling)` and returns whether that result exceeds
-  `byteCeiling` (lines 172–174).
+  `byteCeiling`.
 - **expand-timeout-cleanup**: When the run's `Outcome.timedOut` is `true`,
   `expand` MUST attempt to remove `destination` and MUST throw
-  `VSIXArchiveError.expansionTimedOut(seconds: timeout)` (lines 183–186;
-  test `anExpansionThatOutlastsItsBudgetIsStopped`).
+  `VSIXArchiveError.expansionTimedOut(seconds: timeout)` (test `anExpansionThatOutlastsItsBudgetIsStopped`).
 - **expand-abort-cleanup**: When the run's `Outcome.aborted` is `true`,
   `expand` MUST attempt to remove `destination` and MUST throw
-  `VSIXArchiveError.expansionTooLarge(bytes: byteCeiling)` (lines 187–189;
-  test `anOversizeExpansionIsStopped`).
+  `VSIXArchiveError.expansionTooLarge(bytes: byteCeiling)` (test `anOversizeExpansionIsStopped`).
 - **expand-nonzero-status-cleanup**: When neither timed out nor aborted but
   `Outcome.status` is non-zero, `expand` MUST attempt to remove `destination`
   and MUST throw `VSIXArchiveError.expansionFailed(status:message:)`, with
   `message` set to `Outcome.diagnostics` (`ditto`'s trimmed standard error)
-  (lines 191–194; test `aSymlinkWrittenThroughFailsTheExpansion`).
+  (test `aSymlinkWrittenThroughFailsTheExpansion`).
 - **expand-launch-failure-cleanup**: When `CommandRunner.runToCompletion`
   itself throws — `ditto` could not be launched at all — `expand` MUST
   attempt to remove `destination` and MUST throw
-  `VSIXArchiveError.expansionUnavailable(String(describing: error))` (lines
-  167–178).
+  `VSIXArchiveError.expansionUnavailable(String(describing: error))`.
 - **expand-cleanup-is-best-effort**: Every removal of `destination` on a
   failure path MUST use `try?` rather than propagate a secondary error, so a
   failure to delete the partially written tree is discarded silently and
-  never masks or replaces the original thrown error (lines 176, 184, 188,
-  192).
+  never masks or replaces the original thrown error.
 - **expand-success-preserves-destination**: When `Outcome.status == 0` and
   the run neither timed out nor aborted, `expand` MUST leave the fully
   expanded tree in place at `destination` and MUST NOT remove it (tests
@@ -203,56 +193,51 @@ another file is named.
   absolute path (for example `/tmp/x`) to write outside `destination`; both
   forms MUST land inside `destination`, flattened or re-rooted, because
   `ditto -x -k` provides this containment and `expand` neither disables nor
-  duplicates it (doc comment lines 118–125; tests
+  duplicates it (doc comment; tests
   `aRelativeTraversalIsFlattened`, `anAbsoluteNameIsReRooted`).
 - **expand-symlink-escape-failure**: When an archive entry is a symlink
   pointing outside `destination`, followed by an entry written through that
   symlink, `expand` MUST fail the whole run with a non-zero
   `Outcome.status` — reported as `expansionFailed` — rather than complete
-  with the write silently redirected outside `destination` (doc comment
-  lines 126–129; test `aSymlinkWrittenThroughFailsTheExpansion`).
+  with the write silently redirected outside `destination` (doc comment; test `aSymlinkWrittenThroughFailsTheExpansion`).
 - **expanded-size-measurement**: `expandedSize(of:stoppingAbove:)` MUST sum
   `totalFileAllocatedSize` (falling back to `fileAllocatedSize`) rather than
   logical file size for every item under `directory`, using
   `.skipsPackageDescendants` so a directory bundle is walked as ordinary
   files rather than skipped as an opaque package, and MUST return as soon as
   the running total exceeds `ceiling` without continuing to walk the rest of
-  the tree (lines 254–273).
+  the tree.
 - **byte-ceiling-exceeds-artifact-cap**: `VSIXArchive.expansionByteCeiling`
   MUST be greater than `OpenVSXClient.defaultMaximumArtifactBytes`, so the
   decompressed-size ceiling this type enforces is never tighter than the
-  compressed-size ceiling the archive was already downloaded under (lines
-  218–224; test `theDefaultCeilingIsAboveTheDownloadCap`).
+  compressed-size ceiling the archive was already downloaded under (test `theDefaultCeilingIsAboveTheDownloadCap`).
 - **stateless-namespace**: `VSIXArchive` MUST be declared as a `public enum`
   with no cases, holding only `static let` constants and `static func`
   operations and no stored instance property of any kind — it can never be
   instantiated, so it carries no per-call or shared mutable state and
   requires no explicit `Sendable` conformance to be safe to call from any
-  thread or actor (line 17; full source).
+  thread or actor (full source).
 - **synchronous-blocking-execution**: `verify` and `expand` MUST both be
   synchronous, non-`async` functions with no suspension point; `verify`
   performs its SHA-256 and Ed25519 work, and `expand` waits on
   `CommandRunner.runToCompletion`'s `DispatchSemaphore` for up to `timeout`
   plus up to two `terminationGrace` periods, entirely on the calling thread
-  (lines 54–59, 145–151; `CommandRunner.swift` lines 125–129, 139–181).
+  (145–151; `CommandRunner.swift`).
 - **concurrent-calls-independent-when-destinations-differ**: Concurrent calls
   to `verify`, or to `expand` with distinct `destination` values, MUST run
   independently with no shared state between them: `verify` reads only its
   arguments, and each `expand`/`signatureBytes` call creates its own process
-  and, for `signatureBytes`, its own `UUID`-named scratch directory (lines
-  283–285).
+  and, for `signatureBytes`, its own `UUID`-named scratch directory.
 - **logging-conformance-declared-unused**: `VSIXArchive` MUST conform to
   `Loggable`, declaring `public static nonisolated let logger =
   makeLogger()` scoped by that protocol's default to category
   `"VSIXArchive"`, but no function in `VSIXArchive` calls `logger` — every
   failure surfaces to the caller as a thrown `VSIXVerificationError` or
-  `VSIXArchiveError` case instead of a log line (lines 334–336;
-  `Loggable.swift` lines 18–40).
+  `VSIXArchiveError` case instead of a log line (`Loggable.swift`).
 - **error-cases-carry-diagnostic-data**: Every `VSIXArchiveError` case except
   `destinationExists` MUST carry data identifying why the run was stopped —
   a message, a byte count, or a duration — rather than a bare case with no
-  payload, so a report against a failed install names what happened (lines
-  390–406).
+  payload, so a report against a failed install names what happened.
 
 ## Appearance
 
@@ -311,13 +296,12 @@ not a visual component.
   (`expand-nonzero-status-cleanup`).
 - **Boundary values**: A decompressed tree whose measured size is exactly
   equal to `byteCeiling` MUST NOT abort the run — only a running total
-  strictly greater than `ceiling` triggers the watchdog (line 270,
-  `if total > ceiling`); a `publicKeyPEM` that decodes to exactly
+  strictly greater than `ceiling` triggers the watchdog (`if total > ceiling`); a `publicKeyPEM` that decodes to exactly
   `ed25519SPKILength` (44) bytes MUST be accepted, and any other length MUST
   be refused (`public-key-parsing`); a `.signature.sig` of exactly
   `ed25519SignatureLength` (64) bytes MUST be accepted, and any other length
   MUST be refused (`signature-archive-extraction`).
-- **concurrent-access**: NEEDS REVIEW: Not implemented in source. Two concurrent calls to `expand` given the same `destination` URL are not serialized against each other — no lock or exclusive-create primitive guards the check-then-create sequence at lines 152–156, since `FileManager.default.createDirectory(at:withIntermediateDirectories: true)` does not throw when the directory already exists, so both callers can pass the `!fileExists` guard and then run two `ditto` processes writing into the same directory concurrently with no defined outcome for which files survive; resolving this needs either a doc-comment contract requiring a fresh `destination` per call or a lock/atomic-create primitive — today's only caller, `VSIXInstaller`, always supplies a fresh `UUID`-named `destination` per install, which does not settle what `expand` itself guarantees.
+- **concurrent-access**: NEEDS REVIEW: Not implemented in source. Two concurrent calls to `expand` given the same `destination` URL are not serialized against each other — no lock or exclusive-create primitive guards the check-then-create sequence, since `FileManager.default.createDirectory(at:withIntermediateDirectories: true)` does not throw when the directory already exists, so both callers can pass the `!fileExists` guard and then run two `ditto` processes writing into the same directory concurrently with no defined outcome for which files survive; resolving this needs either a doc-comment contract requiring a fresh `destination` per call or a lock/atomic-create primitive — today's only caller, `VSIXInstaller`, always supplies a fresh `UUID`-named `destination` per install, which does not settle what `expand` itself guarantees.
 
   Calls to `verify`, and calls to `expand` with distinct `destination` values,
   remain independent (`concurrent-calls-independent-when-destinations-differ`).
@@ -331,7 +315,7 @@ not a visual component.
 - **Offline / disconnected state**: Not applicable — `VSIXArchive` performs
   no network I/O; it operates entirely on `archive` bytes or a local
   `archive` file URL the caller already has in hand, and its only imports are
-  `CryptoKit`, `Foundation`, and `OSLog` (lines 6–8). Connectivity is a
+  `CryptoKit`, `Foundation`, and `OSLog`. Connectivity is a
   concern for whichever caller downloaded the archive before calling
   `verify` or `expand`.
 - **Malformed input (not a zip)**: An `archive` file that is not a valid zip
@@ -341,15 +325,14 @@ not a visual component.
   not a valid zip MUST be caught inside `signatureBytes(fromSigZip:)`'s
   `do`/`catch` and rethrown as
   `VSIXVerificationError.signatureArchiveUnreadable`, since `expand` is
-  called on it internally and any error it throws is caught there (lines
-  290–297).
+  called on it internally and any error it throws is caught there.
 - **Malformed input (hostile archive entries)**: A relative-traversal entry
   name, an absolute entry name, and a symlink written through are each
   handled as their own requirement rather than left unvalidated
   (`expand-path-traversal-containment`, `expand-symlink-escape-failure`); the
   containment is `ditto`'s own, not code in this file, which the doc comment
   states explicitly rather than claiming credit for a hand-rolled check
-  (doc comment lines 118–133).
+  (doc comment).
 - **Cancellation**: `verify` and `expand` are synchronous, non-`async`
   functions with no `Task` and no cooperative cancellation check anywhere in
   the source; the only way `expand` itself gives up early is its own
@@ -367,7 +350,7 @@ not a visual component.
   by the byte ceiling first and reported as `expansionTooLarge`, not as a
   timeout (`expand-abort-cleanup`; test `anOversizeExpansionIsStopped`) —
   the two limits guard different axes and either can fire without the other
-  (doc comment on `expansionByteCeiling`, lines 226–228).
+  (doc comment on `expansionByteCeiling`).
 
 ## Configuration
 
@@ -395,7 +378,7 @@ Not applicable: the source declares no user-facing string literal.
 digest string, a byte count, a duration, an `Int32` status, or `ditto`'s raw
 diagnostic text — rather than display text authored by this type, and no
 function returns or logs a message meant to be read by a person (traced to
-the `VSIXVerificationError` and `VSIXArchiveError` enums, lines 378–406, and
+the `VSIXVerificationError` and `VSIXArchiveError` enums, and
 to the absence of any display-text literal in `verify` or `expand`).
 
 ## Accessibility Options
@@ -423,16 +406,15 @@ caller, with no recorded event (traced to the full body of the source file).
 - **Data collected**: `VSIXArchive` collects nothing of its own; it operates
   on whatever `archive` bytes, `expectedDigest`, `signature`, and
   `publicKeyPEM` the caller already holds, all of which originate from the
-  registry response the caller fetched, not from a person using this device
-  (lines 54–59, 145–151).
+  registry response the caller fetched, not from a person using this device.
 - **Storage**: `expand` writes the decompressed extension tree to the
   caller-supplied `destination`, which persists after the call returns by
   design — that is the point of expanding an archive. `signatureBytes`'s
   internal scratch directory, used only to expand a `.sigzip` far enough to
   read `.signature.sig`, is always removed via `defer` before the call
-  returns (`signature-scratch-cleanup`, line 286).
+  returns (`signature-scratch-cleanup`).
 - **Transmission**: None. `VSIXArchive` performs no network I/O — its only
-  imports are `CryptoKit`, `Foundation`, and `OSLog` (lines 6–8).
+  imports are `CryptoKit`, `Foundation`, and `OSLog`.
 - **Retention**: `VSIXArchive` is a stateless namespace and retains nothing
   across calls (`stateless-namespace`); how long the expanded tree at
   `destination` is kept is decided entirely by the caller once `expand`
@@ -445,7 +427,7 @@ Category: `VSIXArchive`
 
 | Event | Level | Message |
 |-------|-------|---------|
-| — | — | Not emitted: `VSIXArchive` conforms to `Loggable` and declares `public static nonisolated let logger = makeLogger()`, but no function in the source calls `logger` — every failure is communicated to the caller as a thrown `VSIXVerificationError` or `VSIXArchiveError` case instead of a log line (lines 334–336). |
+| — | — | Not emitted: `VSIXArchive` conforms to `Loggable` and declares `public static nonisolated let logger = makeLogger()`, but no function in the source calls `logger` — every failure is communicated to the caller as a thrown `VSIXVerificationError` or `VSIXArchiveError` case instead of a log line. |
 
 ## Platform Notes
 
@@ -532,7 +514,7 @@ escapes its destination (a traversing relative or absolute entry name, and a
 symlink written through), checked here against a purpose-built archive
 rather than assumed. A pure-Swift unzip would have had to re-earn both, and
 getting either subtly wrong is a directory traversal in a path that takes
-third-party archives off the internet (doc comment lines 118–133).
+third-party archives off the internet (doc comment).
 **Approved**: pending
 
 **Decision**: Bound `expand` on two independent axes — a wall-clock
@@ -543,8 +525,7 @@ then exit cleanly well inside a two-minute timeout, which is why the timeout
 alone was previously (incorrectly) described as covering this case. The
 ceiling and the timeout each catch an archive the other does not — one that
 never finishes, and one that finishes by filling the disk (doc comment on
-`expansionTimeout`, lines 198–212; doc comment on `expansionByteCeiling`,
-lines 215–229).
+`expansionTimeout`; doc comment on `expansionByteCeiling`).
 **Approved**: pending
 
 **Decision**: Set `expansionByteCeiling` to 2 GiB, several times the size of
@@ -554,7 +535,7 @@ binary, rather than a tighter number closer to typical extension size.
 input, so the 512 MB `OpenVSXClient` artifact download cap alone is license
 to decompress to half a terabyte; 2 GiB is comfortably above any honest
 extension while remaining small enough that reaching it leaves room on the
-volume to report the failure (doc comment lines 215–224).
+volume to report the failure (doc comment).
 **Approved**: pending
 
 **Decision**: Name a fully verified result `.registryAttested` rather than
@@ -567,7 +548,7 @@ its own, publishes that key at that URL, and every check in `verify` passes.
 There is no anchor to compare the key against — Open VSX publishes no
 publisher key out of band, and this host has pinned none — so the settings
 panel line this result feeds has to say "the registry published," not "the
-publisher signed" (doc comment lines 24–38).
+publisher signed" (doc comment).
 **Approved**: pending
 
 **Decision**: Throw on a signature or key published alone, rather than
@@ -577,8 +558,7 @@ extension would refuse the catalog — but one half of the pair present is a
 different situation from neither being present: something *was* published,
 and reporting that as an unsigned extension states the opposite of what
 happened. The thrown `signatureIncomplete(missing:)` names which half is
-missing, which is the fact a report against the registry needs (doc comment
-lines 47–53, 82–85).
+missing, which is the fact a report against the registry needs (doc comment).
 **Approved**: pending
 
 **Decision**: Check the digest before the signature, and always compute
@@ -592,7 +572,7 @@ whoever reads the error looking at their network, not the publisher's key
 published because an install record needs it to recognize these exact bytes
 later, but its presence must not be read as "these bytes were checked" —
 hence the separate `.matched`/`.notPublished` result rather than inferring a
-check from the hash's presence (doc comment lines 63–66).
+check from the hash's presence (doc comment).
 **Approved**: pending
 
 ## Compliance
@@ -649,3 +629,4 @@ throw or fail cleanly), but concurrent calls to `expand` sharing the same
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-24 | Mike Fullerton | Initial creation |
 | 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
+| 1.0.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

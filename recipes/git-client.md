@@ -3,7 +3,7 @@ id: 779ac6ea-9ef5-4fb0-8ed9-dc6b9d617344
 title: Git Client
 domain: agentictoolkit://recipes/git-client
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -83,46 +83,43 @@ branch picker) is a consumer of this contract, not part of it.
 - **single-spawn-point**: `GitClient` MUST be the only path by which the
   toolkit spawns a git process; every public verb routes through the private
   `execute` method, which is the sole call site of `SubprocessChannel.run` in
-  this component (`GitClient.swift`, lines 3-24, 148-172).
+  this component (`GitClient.swift`).
 - **actor-isolation-non-serializing**: `GitClient` MUST be declared as a
   Swift `actor` whose verbs each suspend at the `await SubprocessChannel.run`
   point, releasing the actor for the whole lifetime of the child process, so
   concurrent callers run concurrent git processes rather than being
   serialized by the actor — the actor is a bottleneck for accounting, not for
-  execution order (`GitClient.swift`, lines 12-18, 24).
+  execution order (`GitClient.swift`).
 - **status-command-construction**: `status(in:caller:)` MUST invoke `git
   status` with arguments `["--porcelain=v1", "-z", "-uall"]`, and MUST append
   `"--ignore-submodules"` when `configuration.submoduleHandling == .ignore`
-  (`GitClient.swift`, lines 57-71).
+  (`GitClient.swift`).
 - **current-branch-detached-head**: `currentBranch(in:caller:)` MUST invoke
   `git rev-parse --abbrev-ref HEAD` and MUST return `nil` when the trimmed
-  output is empty or equal to the literal string `"HEAD"` (`GitClient.swift`,
-  lines 74-84).
+  output is empty or equal to the literal string `"HEAD"` (`GitClient.swift`).
 - **branches-format-string**: `branches(in:caller:)` MUST invoke `git
   for-each-ref` against `refs/heads` with `--format=<value>`, where the value
   is exactly `GitBranch.forEachRefFormat`,
-  `%(refname:short)%09%(HEAD)%09%(upstream:short)` (`GitClient.swift`, lines
-  87-96; `GitBranch.swift`, lines 15-21).
+  `%(refname:short)%09%(HEAD)%09%(upstream:short)` (`GitClient.swift`; `GitBranch.swift`).
 - **worktrees-listing**: `worktrees(in:caller:)` MUST invoke `git worktree
   list --porcelain` and MUST return every worktree of the repository
   containing `directory`, main worktree first, per `GitWorktree.parse`'s
-  contract (`GitClient.swift`, lines 99-108).
+  contract (`GitClient.swift`).
 - **global-config-directory**: The three global-config verbs
   (`globalConfig`, `setGlobalConfig(key:value:)`, `unsetGlobalConfig(key:)`)
   MUST run with the current user's home directory as the child's working
   directory, never a repository directory, because `git config --global`
-  neither discovers nor reads a repository (`GitClient.swift`, lines 30-36,
-  113-146).
+  neither discovers nor reads a repository (`GitClient.swift`).
 - **global-config-list**: `globalConfig(caller:)` MUST invoke `git config
   --global --list --null` and MUST parse the result with
-  `GitConfigEntry.parse(nullSeparated:)` (`GitClient.swift`, lines 113-122).
+  `GitConfigEntry.parse(nullSeparated:)` (`GitClient.swift`).
 - **set-global-config**: `setGlobalConfig(key:value:caller:)` MUST invoke
   `git config --global <key> <value>` and MUST discard the process's
-  captured output (`GitClient.swift`, lines 124-134).
+  captured output (`GitClient.swift`).
 - **unset-global-config-exit-5**: `unsetGlobalConfig(key:caller:)` MUST
   invoke `git config --global --unset <key>` and MUST surface git's exit
   status 5 (key was not set) as an ordinary `GitClientError.commandFailed`,
-  not as a distinct case (`GitClient.swift`, lines 136-146).
+  not as a distinct case (`GitClient.swift`).
 
 ### Execution, configuration and attribution
 
@@ -130,87 +127,83 @@ branch picker) is a consumer of this contract, not part of it.
   `FileManager.default.isExecutableFile(atPath:)` on the configured
   executable path before spawning, and MUST throw
   `GitClientError.executableNotFound(path:)` without spawning a process when
-  the check fails (`GitClient.swift`, lines 179-187).
+  the check fails (`GitClient.swift`).
 - **environment-terminal-prompt-disabled**: `execute` MUST set
   `GIT_TERMINAL_PROMPT=0` in the spawned child's environment (so a credential
   prompt cannot hang the child behind an unwatched terminal) and MUST merge
   `configuration.extraEnvironment` over that default, with `extraEnvironment`
   winning on key collision, using `SubprocessChannel`'s `.mergeOverParent`
-  environment policy (`GitClient.swift`, lines 188-201).
+  environment policy (`GitClient.swift`).
 - **total-failure-mapping**: `execute` MUST map every error thrown by
   `SubprocessChannel.run` onto exactly one of `GitClientError.timedOut` (for
   `WallClockBudgetExceeded`) or `.launchFailed` (for every other error), via
   an unqualified `catch` that follows a `WallClockBudgetExceeded`-specific
   catch and a `CancellationError`-specific catch — no error type outside
   `GitClientError` can leave `execute`, except the one deliberate exception
-  below (`GitClient.swift`, lines 158-171, 204-226).
+  below (`GitClient.swift`).
 - **cancellation-error-passthrough**: `execute` MUST record the attempt and
   then rethrow `CancellationError` unchanged, MUST NOT wrap it in
   `GitClientError`, so `Task.isCancelled` propagation and structured-
   concurrency cleanup keep working for the caller; this is the one way a
   `GitClient` verb can throw something that is not a `GitClientError`
-  (`GitClient.swift`, lines 165-171, 214-219).
+  (`GitClient.swift`).
 - **non-zero-exit-mapping**: `execute` MUST throw
   `GitClientError.commandFailed(verb:exitStatus:standardError:)` when the
   child's exit status is non-zero, carrying the raw `standardError` capture
-  for the caller to show (`GitClient.swift`, lines 231-237).
+  for the caller to show (`GitClient.swift`).
 - **output-decode-fallback**: `execute` MUST decode the child's captured
   standard output as UTF-8 first, MUST fall back to ISO Latin-1 when UTF-8
   decoding fails, and MUST return an empty string when both fail
-  (`GitClient.swift`, lines 238-248).
+  (`GitClient.swift`).
 - **invocation-recorded-before-return**: `execute` MUST call
   `GitCommandLog.record` on every exit path — executable-not-found, timed
   out, cancelled, launch-failed, and completed (successfully or not) — before
-  returning a value or throwing (`GitClient.swift`, lines 184-186, 209-212,
-  215-219, 221-225, 227-230).
+  returning a value or throwing (`GitClient.swift`).
 - **caller-capture-at-call-site**: `GitCaller`'s `file` and `function`
   properties MUST be captured via `#fileID`/`#function` default arguments
   evaluated in the calling context, not `GitClient`'s own, so a verb declared
   `caller: GitCaller = GitCaller()` records who invoked it without the caller
-  doing anything extra (`GitCaller.swift`, lines 6-17).
+  doing anything extra (`GitCaller.swift`).
 - **config-default**: `GitClientConfiguration.default` MUST equal
   `GitClientConfiguration()` with `executableURL` `/usr/bin/git`, `timeout`
-  `5` seconds, and `submoduleHandling` `.ignore` (`GitClientConfiguration.swift`,
-  lines 22-34).
+  `5` seconds, and `submoduleHandling` `.ignore` (`GitClientConfiguration.swift`).
 - **config-from-settings-timeout-clamp**: `GitClientConfiguration.fromSettings()`
   MUST read `UserSettings.gitExecutablePath`, `.gitStatusTimeoutSeconds`, and
   `.gitStatusIncludesSubmodules`, and MUST clamp the timeout setting's value
   to a minimum of `1` via `max(1, ...)`. This clamp applies only through
   `fromSettings()`; `GitClientConfiguration`'s plain initializer accepts any
   `TimeInterval` for `timeout`, including zero or a negative value, with no
-  clamp of its own (`GitClientConfiguration.swift`, lines 36-44).
+  clamp of its own (`GitClientConfiguration.swift`).
 - **config-provider-resolved-per-call**: `GitClient` MUST resolve its
   configuration by invoking `configurationProvider` on every verb call
   rather than capturing it once at initialization, so `GitClient.shared`
   follows a `UserSettings` change on the very next invocation
-  (`GitClient.swift`, lines 25-28, 38-44).
+  (`GitClient.swift`).
 - **value-types-sendable**: `GitBranch`, `GitCaller`,
   `GitClientConfiguration`, `GitConfigEntry`, `GitFileStatus`, `GitStatus`,
   and `GitWorktree` MUST each declare `Sendable` conformance, and `GitClient`
   MUST be declared as an `actor`, so every type that crosses the client's
   async boundary is safe to share across concurrency domains
-  (`GitBranch.swift` line 4; `GitCaller.swift` line 10;
-  `GitClientConfiguration.swift` line 4; `GitConfigEntry.swift` line 4;
-  `GitFileStatus.swift` line 4; `GitStatus.swift` line 6; `GitWorktree.swift`
-  line 4; `GitClient.swift` line 24).
+  (`GitBranch.swift`; `GitCaller.swift`;
+  `GitClientConfiguration.swift`; `GitConfigEntry.swift`;
+  `GitFileStatus.swift`; `GitStatus.swift`; `GitWorktree.swift`; `GitClient.swift`).
 
 ### Errors and security-relevant logging
 
 - **error-taxonomy**: `GitClientError` MUST be exactly four cases —
   `commandFailed`, `timedOut`, `launchFailed`, `executableNotFound` — and
-  MUST NOT include `CancellationError` as a case (`GitClientError.swift`,
-  lines 12-29).
+  MUST NOT include `CancellationError` as a case (`GitClientError.swift`).
 - **error-description-vs-log-description**: `GitClientError.errorDescription`
   MAY interpolate git's own `standardError` text into a user-facing message
   for `.commandFailed`. `GitClientError.logDescription` MUST NOT include
   `standardError`, the launch `reason`, or the configured executable `path`
   in any case, returning only the case name plus non-sensitive structured
-  fields (verb, exit status) (`GitClientError.swift`, lines 31-64).
+  fields (verb, exit status) (`GitClientError.swift`).
 - **command-log-fields**: `GitCommandLog.record` MUST log the verb, its
   redacted arguments, the working directory, the calling file and function,
   the duration in milliseconds, and the exit status (or the literal string
   `"unfinished"` when `exitStatus` is `nil`), and MUST NOT log the process's
-  standard output or standard error (`GitCommandLog.swift`, lines 15-44).
+  standard output or standard error (`GitCommandLog.swift`).
 - **redaction-scope-and-positional-rule**: `GitCommandLog.redactedArguments`
   MUST return arguments unchanged for every verb except `config`. For
   `config`, it MUST redact every argument at and after the first non-flag
@@ -218,59 +211,54 @@ branch picker) is a consumer of this contract, not part of it.
   `<redacted:<byte length>>` — regardless of whether that argument is shaped
   like a well-formed key; `GitConfigEntry.isWellFormedKey` is used only to
   decide whether to *keep* the argument found at that position, never to
-  relocate the position itself (`GitCommandLog.swift`, lines 82-98).
+  relocate the position itself (`GitCommandLog.swift`).
 - **config-entry-key-validator**: `GitConfigEntry.isWellFormedKey` MUST
   return `true` only for a non-empty string that contains at least one `.`,
   does not begin with `-`, and contains no whitespace character
-  (`GitConfigEntry.swift`, lines 26-31).
+  (`GitConfigEntry.swift`).
 - **config-entry-parse-split-rule**: `GitConfigEntry.parse(nullSeparated:)`
   MUST split records on NUL, and within each record MUST split the key from
   the value at the *first* newline only, yielding an empty value for a
-  record with no newline at all (`GitConfigEntry.swift`, lines 41-50).
+  record with no newline at all (`GitConfigEntry.swift`).
 
 ### Parsing (GitFileStatus, GitStatus, GitWorktree, GitBranch)
 
 - **file-status-priority-merge**: `GitFileStatus.merge` MUST return the
   status with the highest `priority` among its input — `conflicted` (7)
-  down to `ignored` (0) — or `nil` for empty input (`GitFileStatus.swift`,
-  lines 17-32).
+  down to `ignored` (0) — or `nil` for empty input (`GitFileStatus.swift`).
 - **status-porcelain-record-shape**: `GitStatus.parse` MUST split the
   `-z`-terminated porcelain output on NUL, MUST treat each record's first
   two bytes as the index and work-tree status columns, and MUST consume a
   second NUL-terminated field as the origin path whenever either status
-  column is `R` or `C`, ahead of every other classification (`GitStatus.swift`,
-  lines 39-89).
+  column is `R` or `C`, ahead of every other classification (`GitStatus.swift`).
 - **status-conflict-pair-detection**: `GitStatus.parse` MUST classify a
   record as `.conflicted` when its two-character status pair is exactly one
   of `DD`, `AU`, `UD`, `UA`, `DU`, `AA`, `UU`, ahead of the modified/added/
-  deleted ladder (`GitStatus.swift`, lines 17-26, 115-116).
+  deleted ladder (`GitStatus.swift`).
 - **status-byte-accurate-path-decode**: `GitStatus.parse` MUST slice and
   count each record in UTF-8 bytes rather than `Character`s, and MUST drop a
   record whose remaining bytes fail to decode as UTF-8 or decode to an empty
-  string, costing only that one record (`GitStatus.swift`, lines 47-56,
-  91-102).
+  string, costing only that one record (`GitStatus.swift`).
 - **status-directory-rollup**: `GitStatus.parse` MUST derive `directories`
   by assigning, to every ancestor path component of every entry in `files`,
   the highest-priority `GitFileStatus` among that ancestor's descendants
-  (`GitStatus.swift`, lines 136-156).
+  (`GitStatus.swift`).
 - **worktree-parse-flush-on-new-record**: `GitWorktree.parse` MUST flush the
   in-progress record whenever a new line beginning with `"worktree "`
   starts, not only on a blank line, and MUST flush once more after the loop
-  ends to capture a record with no trailing blank line (`GitWorktree.swift`,
-  lines 23-26, 39-53, 55-76).
+  ends to capture a record with no trailing blank line (`GitWorktree.swift`).
 - **worktree-branch-shortening**: `GitWorktree.parse` MUST shorten a
   `branch` line's `refs/heads/<name>` value to `<name>`, and MUST leave a
-  branch ref not beginning with `refs/heads/` unshortened (`GitWorktree.swift`,
-  lines 66-68).
+  branch ref not beginning with `refs/heads/` unshortened (`GitWorktree.swift`).
 - **worktree-main-is-first**: `GitWorktree.parse` MUST mark the first
   flushed record's `isMain` `true` and every subsequent record's `isMain`
   `false`, per porcelain's contract that the main worktree is always listed
-  first (`GitWorktree.swift`, lines 30, 49).
+  first (`GitWorktree.swift`).
 - **branch-parse-tab-separated**: `GitBranch.parse(forEachRef:)` MUST split
   each line on tab, treat a second field of `"*"` as the current branch, and
   treat a third field that is empty as no upstream — the third field for a
   real `for-each-ref` invocation is a single space, not an empty string, for
-  every non-current branch (`GitBranch.swift`, lines 23-35).
+  every non-current branch (`GitBranch.swift`).
 
 ## Appearance
 
@@ -364,10 +352,10 @@ component.
   for the whole lifetime of the child process, so ten concurrent callers run
   ten concurrent git processes rather than being queued behind one another —
   a deliberate accounting-only bottleneck, not a serialization guarantee
-  (`GitClient.swift`, lines 12-18). A task cancelled while a verb is in
+  (`GitClient.swift`). A task cancelled while a verb is in
   flight MUST see `CancellationError` propagate unchanged, never wrapped in
   `GitClientError`, so `Task.isCancelled` and structured-concurrency cleanup
-  keep working for the caller (`GitClient.swift`, lines 165-171).
+  keep working for the caller (`GitClient.swift`).
 - **Error states**: A configured executable path with nothing executable
   there MUST throw `executableNotFound` before any process is spawned, and
   the attempt MUST still be recorded (git-client-037). A command that runs
@@ -380,7 +368,7 @@ component.
   has no network path of its own; its analog of an unreachable server is a
   git process that exceeds `configuration.timeout`. That MUST throw
   `timedOut(verb:)`, with the child terminated before the throw
-  (`GitClientError.swift`, lines 20-21) and the attempt recorded with a `nil`
+  (`GitClientError.swift`) and the attempt recorded with a `nil`
   exit status (git-client-039). A launch failure (for example, a working
   directory that does not exist) and any other channel failure are
   collapsed by `execute`'s total, unqualified catch into `launchFailed` — no
@@ -391,14 +379,14 @@ component.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `executableURL` | `URL` | `file:///usr/bin/git` | Path to the git binary `GitClient` spawns (`GitClientConfiguration.swift`, line 23) |
-| `timeout` | `TimeInterval` | `5` | Wall-clock budget in seconds for one invocation, passed to `SubprocessChannel.run` as its budget (line 24) |
-| `submoduleHandling` | `SubmoduleHandling` (`.ignore` / `.include`) | `.ignore` | When `.ignore`, `status(in:)` appends `--ignore-submodules` (line 25; `GitClient.swift`, lines 60-62) |
-| `extraEnvironment` | `[String: String]` | `[:]` | Merged over the `GIT_TERMINAL_PROMPT=0` default in the spawned child's environment; lets a caller (a test, in particular) redirect something like `GIT_CONFIG_GLOBAL` without mutating process-wide state (line 26; `GitClient.swift`, lines 188-201) |
-| `caller` | `GitCaller` | `GitCaller()` captured at the call site | `#fileID`/`#function` default arguments identifying who invoked a verb (`GitCaller.swift`, lines 14-17) |
-| `git.executable_path` (`UserSettings` key) | `String` | `"/usr/bin/git"` | Read by `GitClientConfiguration.fromSettings()` into `executableURL` (`UserSettings+Git.swift`, line 5) |
-| `git.status_timeout_seconds` (`UserSettings` key) | `Int` | `5` | Read by `fromSettings()` into `timeout`, clamped to a minimum of `1` (line 8; `GitClientConfiguration.swift`, line 41) |
-| `git.status_includes_submodules` (`UserSettings` key) | `Bool` | `false` | Read by `fromSettings()`; `true` maps to `.include`, `false` to `.ignore` (lines 11-14; `GitClientConfiguration.swift`, line 42) |
+| `executableURL` | `URL` | `file:///usr/bin/git` | Path to the git binary `GitClient` spawns (`GitClientConfiguration.swift`) |
+| `timeout` | `TimeInterval` | `5` | Wall-clock budget in seconds for one invocation, passed to `SubprocessChannel.run` as its budget |
+| `submoduleHandling` | `SubmoduleHandling` (`.ignore` / `.include`) | `.ignore` | When `.ignore`, `status(in:)` appends `--ignore-submodules` (`GitClient.swift`) |
+| `extraEnvironment` | `[String: String]` | `[:]` | Merged over the `GIT_TERMINAL_PROMPT=0` default in the spawned child's environment; lets a caller (a test, in particular) redirect something like `GIT_CONFIG_GLOBAL` without mutating process-wide state (`GitClient.swift`) |
+| `caller` | `GitCaller` | `GitCaller()` captured at the call site | `#fileID`/`#function` default arguments identifying who invoked a verb (`GitCaller.swift`) |
+| `git.executable_path` (`UserSettings` key) | `String` | `"/usr/bin/git"` | Read by `GitClientConfiguration.fromSettings()` into `executableURL` (`UserSettings+Git.swift`) |
+| `git.status_timeout_seconds` (`UserSettings` key) | `Int` | `5` | Read by `fromSettings()` into `timeout`, clamped to a minimum of `1` (`GitClientConfiguration.swift`) |
+| `git.status_includes_submodules` (`UserSettings` key) | `Bool` | `false` | Read by `fromSettings()`; `true` maps to `.include`, `false` to `.ignore` (`GitClientConfiguration.swift`) |
 
 ## Deep Linking
 
@@ -411,10 +399,10 @@ own; none of its source files reference a URL scheme, Handoff activity, or
 
 | String Key | Default (en) | Context |
 |-----------|-------------|---------|
-| `commandFailed` detail | `"git \(verb) exited with status \(exitStatus)."` (or with git's own detail appended) | `GitClientError.errorDescription`, `.commandFailed` case (`GitClientError.swift`, lines 33-37) |
-| `timedOut` | `"git \(verb) did not finish within the configured timeout."` | `.timedOut` case (line 38-39) |
-| `launchFailed` | `"git \(verb) could not be run: \(reason)"` | `.launchFailed` case (line 40-41) |
-| `executableNotFound` | `"No git executable at \(path). Change it in Settings > Git."` | `.executableNotFound` case (line 42-43) |
+| `commandFailed` detail | `"git \(verb) exited with status \(exitStatus)."` (or with git's own detail appended) | `GitClientError.errorDescription`, `.commandFailed` case (`GitClientError.swift`) |
+| `timedOut` | `"git \(verb) did not finish within the configured timeout."` | `.timedOut` case |
+| `launchFailed` | `"git \(verb) could not be run: \(reason)"` | `.launchFailed` case |
+| `executableNotFound` | `"No git executable at \(path). Change it in Settings > Git."` | `.executableNotFound` case |
 
 Every string above is hardcoded English with no lookup table, ICU message,
 or locale parameter anywhere in these files — there is no localization
@@ -450,14 +438,13 @@ metadata for debugging and audit, not product-analytics events.
   only an executable path, a timeout integer, and a boolean. The one
   privacy-relevant surface is the *value* argument of
   `setGlobalConfig(key:value:)`, which may carry an email address, a signing
-  key, or a URL containing a token (`GitCommandLog.swift`, lines 65-66,
-  80-81).
+  key, or a URL containing a token (`GitCommandLog.swift`).
 - **Redaction lives at the funnel, not at call sites**: `GitCommandLog
   .redactedArguments` is scoped to the `config` verb and redacts every
   argument at and after the first non-flag position, so a caller-supplied
   value never reaches `.public` `OSLog` output in clear text; `standardError`
   — which may itself echo a repository path — MUST NEVER reach the log at
-  all (`GitCommandLog.swift`, lines 8-12, 46-99).
+  all (`GitCommandLog.swift`).
 - **Nothing leaves the device through this component**: every verb spawns a
   local git subprocess; none of these source files perform network I/O
   themselves, though the git binary they spawn may contact a remote if a
@@ -466,32 +453,31 @@ metadata for debugging and audit, not product-analytics events.
 ## Logging
 
 Subsystem/category are whatever `GitCommandLog`'s `Loggable` conformance
-configures via `makeLogger()` (`GitCommandLog.swift`, lines 102-104).
+configures via `makeLogger()` (`GitCommandLog.swift`).
 
 | Event | Level | Message shape |
 |-------|-------|---------------|
-| Every invocation attempt, regardless of outcome | info | `` `git <verb> <redacted-arguments> cwd=<path> from=<file>:<function> <ms>ms status=<exitStatus-or-"unfinished">` `` (`GitCommandLog.swift`, lines 23-44) |
+| Every invocation attempt, regardless of outcome | info | `` `git <verb> <redacted-arguments> cwd=<path> from=<file>:<function> <ms>ms status=<exitStatus-or-"unfinished">` `` (`GitCommandLog.swift`) |
 
 `GitCommandLog.record` MUST NOT log the process's standard output or
 standard error — only that a call happened and where it came from, so git
 usage can be counted, attributed, and audited without the log becoming a
-copy of the repository (`GitCommandLog.swift`, lines 8-12). Arguments are
+copy of the repository (`GitCommandLog.swift`). Arguments are
 logged at `.public` privacy after passing through `redactedArguments`
 (see Behavioral Requirements and Privacy above), never through
 `OSLogPrivacy.private`, because that would collapse the whole interpolation
 for every verb rather than redacting the one argument position that needs
-it (`GitCommandLog.swift`, lines 58-61). The redaction rule today covers only
+it (`GitCommandLog.swift`). The redaction rule today covers only
 the `config` verb; the source's own comment names `commit -m <message>` and
 any remote URL as expected future additions once those verbs exist
-(`GitCommandLog.swift`, lines 63-81).
+(`GitCommandLog.swift`).
 
 ## Platform Notes
 
 - **SwiftUI**: `GitClient` is Foundation-only and framework-agnostic, but its
   own doc comment calls out a SwiftUI caller by name: a `.task` that drives
   `status(in:)` and is torn down mid-flight is the reason `execute` rethrows
-  `CancellationError` unchanged rather than wrapping it (`GitClient.swift`,
-  lines 165-171). A SwiftUI port keeps that contract by driving every verb
+  `CancellationError` unchanged rather than wrapping it (`GitClient.swift`). A SwiftUI port keeps that contract by driving every verb
   from a cancellable `Task`/`.task` and never catching `CancellationError`
   as if it were a `GitClientError`.
 - **AppKit / UIKit**: The nine source files live in the shared
@@ -537,15 +523,14 @@ not for serializing execution — every verb suspends at
 processes.
 **Rationale**: A `status` on one repository has no reason to wait behind a
 `worktree list` on another; a struct with a shared queue would have
-serialized them for no benefit (`GitClient.swift`, lines 12-18).
+serialized them for no benefit (`GitClient.swift`).
 **Approved**: pending
 
 **Decision**: `execute` records and then rethrows `CancellationError`
 unchanged instead of wrapping it in `GitClientError`.
 **Rationale**: Wrapping it would break `Task.isCancelled` propagation and
 structured-concurrency cleanup for every caller, starting with a SwiftUI
-`.task` torn down while a `status` call is in flight (`GitClient.swift`,
-lines 165-171).
+`.task` torn down while a `status` call is in flight (`GitClient.swift`).
 **Approved**: pending
 
 **Decision**: `GitCommandLog.redactedArguments` redacts by argument
@@ -556,7 +541,7 @@ beginning with `-` to be the key; a key beginning with `-` (`-x.token`) is
 not a well-formed key, so that scan walked past it and logged the *secret*
 that followed at `.public`. Spending the position exactly once means a shape
 this rule does not model costs a redacted argument, never a leaked one
-(`GitCommandLog.swift`, lines 63-98).
+(`GitCommandLog.swift`).
 **Approved**: pending
 
 **Decision**: `execute` decodes captured standard output as UTF-8 first and
@@ -566,7 +551,7 @@ lossy-replacement decoding.
 could not express in UTF-8 and hand the parser a path matching nothing on
 disk, while a Latin-1 fallback re-reads the whole capture losslessly, at the
 cost of mojibake only on the rare capture that is not valid UTF-8
-(`GitClient.swift`, lines 238-248).
+(`GitClient.swift`).
 **Approved**: pending
 
 **Decision**: `GitStatus.parse` slices and counts each porcelain record in
@@ -574,8 +559,7 @@ UTF-8 bytes, never in `Character`s.
 **Rationale**: A path beginning with a combining mark merges with the
 preceding separator into one grapheme cluster under `Character` counting,
 which previously consumed a byte of the path along with the separator and
-yielded an empty path that trapped the directory roll-up (`GitStatus.swift`,
-lines 47-56).
+yielded an empty path that trapped the directory roll-up (`GitStatus.swift`).
 **Approved**: pending
 
 **Decision**: `execute` sets `GIT_TERMINAL_PROMPT=0` unconditionally in the
@@ -583,7 +567,7 @@ child's environment, merged under any caller-supplied `extraEnvironment`.
 **Rationale**: Without it, a credential prompt would hang the child behind a
 terminal nobody is watching, turning a network-auth failure into an
 indefinite hang instead of a `commandFailed`/`timedOut` the caller can act on
-(`GitClient.swift`, lines 188-201).
+(`GitClient.swift`).
 **Approved**: pending
 
 **Decision**: The `max(1, ...)` timeout clamp lives only in
@@ -593,7 +577,7 @@ reaches, where zero or a negative number is a user-entry mistake that must
 not produce an instantly-expiring budget; a directly-constructed
 `GitClientConfiguration` (as tests build) is a programmatic value the caller
 is responsible for, so the plain initializer imposes no clamp of its own
-(`GitClientConfiguration.swift`, lines 22-44).
+(`GitClientConfiguration.swift`).
 **Approved**: pending
 
 **Decision**: The three global-configuration verbs run with the user's home
@@ -601,7 +585,7 @@ directory as the child's working directory, never a repository directory.
 **Rationale**: `git config --global` neither discovers nor reads a
 repository, so home is used only as somewhere legible for the child to
 stand — never a location this client actually reads from or writes to as a
-repository (`GitClient.swift`, lines 30-36).
+repository (`GitClient.swift`).
 **Approved**: pending
 
 ## Compliance
@@ -658,3 +642,4 @@ one.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-24 | Mike Fullerton | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

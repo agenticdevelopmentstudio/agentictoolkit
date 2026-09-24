@@ -3,7 +3,7 @@ id: 2067e249-4f97-4575-b8ed-8f55f6dc96df
 title: AIStreamEvent
 domain: agentictoolkit://recipes/ai-plugin-runtime-ai-plugin-kit-ai-stream-event
 type: ingredient
-version: 1.0.2
+version: 1.0.3
 status: review
 language: en
 created: '2026-09-23'
@@ -38,23 +38,23 @@ approved-date: ''
 
 ## Behavioral Requirements
 
-- **case-set**: `AIStreamEvent` MUST have exactly three cases — `textDelta(String)`, `toolUse(id: String, name: String, argumentsJSON: Data)`, and `end(stopReason: String?)` (`AIStreamEvent.swift`, lines 907-917).
-- **event-sendable**: `AIStreamEvent` MUST conform to `Sendable` (line 907), so a decoded value MAY cross concurrency domains — e.g. yielded from `PluginTransport.run`'s background `Task` into an `AsyncThrowingStream<AIStreamEvent, Error>` that a `@MainActor`-isolated consumer such as `LocalChatSession` or `AIPluginChatBackend` iterates.
-- **text-delta-payload**: `textDelta`'s associated value MUST be a chunk of assistant text and nothing else (line 909-910); this type imposes no constraint on chunk size or boundaries — that is each decoder's own choice.
-- **tool-use-payload**: `toolUse`'s associated values MUST be `id: String`, `name: String`, and `argumentsJSON: Data`, where `argumentsJSON` MUST be the raw, undecoded JSON arguments the model supplied (line 912-913, "the raw JSON arguments") — a decoder MUST NOT parse or validate that JSON before emitting the event.
-- **end-stop-reason-optional**: `end`'s `stopReason` MUST be an `Optional<String>`, so a decoder MAY report `nil` when the provider gives no reason for stopping (line 915-916).
-- **decoder-class-bound**: `AIStreamDecoder` MUST require `AnyObject` (line 928), so only a reference type (a `class`) may conform — a `struct` conformer fails to compile.
-- **decoder-non-sendable-state**: `AIStreamDecoder` MUST NOT require `Sendable` conformance; a conforming type MAY hold mutable per-response parsing state without any synchronization of its own (lines 926-927, "may hold mutable per-response parsing state").
+- **case-set**: `AIStreamEvent` MUST have exactly three cases — `textDelta(String)`, `toolUse(id: String, name: String, argumentsJSON: Data)`, and `end(stopReason: String?)` (`AIStreamEvent.swift`).
+- **event-sendable**: `AIStreamEvent` MUST conform to `Sendable`, so a decoded value MAY cross concurrency domains — e.g. yielded from `PluginTransport.run`'s background `Task` into an `AsyncThrowingStream<AIStreamEvent, Error>` that a `@MainActor`-isolated consumer such as `LocalChatSession` or `AIPluginChatBackend` iterates.
+- **text-delta-payload**: `textDelta`'s associated value MUST be a chunk of assistant text and nothing else; this type imposes no constraint on chunk size or boundaries — that is each decoder's own choice.
+- **tool-use-payload**: `toolUse`'s associated values MUST be `id: String`, `name: String`, and `argumentsJSON: Data`, where `argumentsJSON` MUST be the raw, undecoded JSON arguments the model supplied ("the raw JSON arguments") — a decoder MUST NOT parse or validate that JSON before emitting the event.
+- **end-stop-reason-optional**: `end`'s `stopReason` MUST be an `Optional<String>`, so a decoder MAY report `nil` when the provider gives no reason for stopping.
+- **decoder-class-bound**: `AIStreamDecoder` MUST require `AnyObject`, so only a reference type (a `class`) may conform — a `struct` conformer fails to compile.
+- **decoder-non-sendable-state**: `AIStreamDecoder` MUST NOT require `Sendable` conformance; a conforming type MAY hold mutable per-response parsing state without any synchronization of its own ("may hold mutable per-response parsing state").
 - **stream-decoder-isolation-domain**: Because `AIStreamDecoder` declares no `Sendable` conformance, a conforming instance MUST stay within the single concurrency domain (`Task`) that created it via `makeDecoder()` — Swift's strict concurrency checking (`SWIFT_STRICT_CONCURRENCY: complete`) rejects passing a non-`Sendable` decoder across an `await` boundary into a different isolation domain. `PluginTransport.runHTTP`/`runCommand` both create the decoder inside the same task that then drives every `consume(_:)`/`finish()` call on it.
-- **fresh-decoder-per-request**: A new request MUST use a newly created `AIStreamDecoder` instance, per the doc comment "a fresh decoder is created per request (see `AIPlugin.makeDecoder()`)" (line 926); `PluginTransport.runHTTP` and `runCommand` each call `plugin.makeDecoder()` exactly once, inside the streaming task, before consuming any bytes.
-- **single-response-isolation**: One `AIStreamDecoder` instance MUST be used to decode a single response stream only and MUST NOT be shared across two concurrent responses, since it holds per-response state (line 927) and requires no thread-safety of its own.
-- **consume-accepts-incremental-bytes**: `consume(_ data: Data) -> [AIStreamEvent]` MUST accept newly received bytes and return the events that can now be fully decoded from them (lines 930-932).
-- **consume-buffers-partial-frame**: `consume(_:)` MUST retain any partial trailing frame internally rather than discard it or error on it, because the host MAY split a single logical frame across multiple `consume(_:)` calls (lines 921-923, 931).
-- **consume-returns-decodable-only**: `consume(_:)` MUST return only the events fully decodable from the bytes accumulated so far — it MUST NOT return a partial or speculative event for data it has not finished decoding (line 923, "returning only the events it can fully decode").
-- **non-throwing-decode**: `consume(_:)` and `finish()` MUST NOT throw — both are declared without `throws` (lines 932, 935) — so a decoder that cannot make sense of its buffered bytes MUST signal that by omitting an event, not by raising an error.
-- **finish-returns-final-events**: `finish() -> [AIStreamEvent]` MUST return whatever final events the decoder was still holding once the stream closes (lines 934-935).
-- **finish-default-empty**: A conforming type that does not implement `finish()` MUST receive the protocol extension's default implementation, which returns `[]` (lines 938-939).
-- **finish-called-once-per-stream**: The host MUST call `finish()` exactly once per response stream, after the stream closes, to flush any trailing state (line 924, "the host calls `finish()` once to flush any trailing state").
+- **fresh-decoder-per-request**: A new request MUST use a newly created `AIStreamDecoder` instance, per the doc comment "a fresh decoder is created per request (see `AIPlugin.makeDecoder()`)"; `PluginTransport.runHTTP` and `runCommand` each call `plugin.makeDecoder()` exactly once, inside the streaming task, before consuming any bytes.
+- **single-response-isolation**: One `AIStreamDecoder` instance MUST be used to decode a single response stream only and MUST NOT be shared across two concurrent responses, since it holds per-response state and requires no thread-safety of its own.
+- **consume-accepts-incremental-bytes**: `consume(_ data: Data) -> [AIStreamEvent]` MUST accept newly received bytes and return the events that can now be fully decoded from them.
+- **consume-buffers-partial-frame**: `consume(_:)` MUST retain any partial trailing frame internally rather than discard it or error on it, because the host MAY split a single logical frame across multiple `consume(_:)` calls.
+- **consume-returns-decodable-only**: `consume(_:)` MUST return only the events fully decodable from the bytes accumulated so far — it MUST NOT return a partial or speculative event for data it has not finished decoding ("returning only the events it can fully decode").
+- **non-throwing-decode**: `consume(_:)` and `finish()` MUST NOT throw — both are declared without `throws` — so a decoder that cannot make sense of its buffered bytes MUST signal that by omitting an event, not by raising an error.
+- **finish-returns-final-events**: `finish() -> [AIStreamEvent]` MUST return whatever final events the decoder was still holding once the stream closes.
+- **finish-default-empty**: A conforming type that does not implement `finish()` MUST receive the protocol extension's default implementation, which returns `[]`.
+- **finish-called-once-per-stream**: The host MUST call `finish()` exactly once per response stream, after the stream closes, to flush any trailing state ("the host calls `finish()` once to flush any trailing state").
 - **sequential-delivery**: The host MUST deliver bytes to `consume(_:)` and the terminating `finish()` call in strict arrival order on one instance, never out of order and never interleaved with another response's bytes — this is the only ordering guarantee this component's design (per-instance mutable state, no `Sendable`) makes workable.
 - **host-framing-contract**: The one host in this codebase, `PluginTransport`, MUST feed `consume(_:)` newline-delimited frames — each complete line including its trailing `0x0A` byte, or one final unterminated remainder — rather than arbitrary byte chunks (`PluginTransport.pump(bytes:through:into:)` for HTTP, and its `SubprocessChannel`-backed `.newlineDelimited` framing for a command). `AIStreamDecoder` itself imposes no such framing; its own doc comment promises only "raw bytes... possibly splitting a single logical frame across calls."
 - **no-persistence-or-caching**: `AIStreamEvent.swift` MUST NOT persist any event or cache decoder state beyond the `Data` and decoder-instance lifetimes already described above — the source contains no file, database, `UserDefaults`, or Keychain write of its own.
@@ -76,7 +76,7 @@ Not applicable — this is a Sendable event enum and a stream-decoding protocol,
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| ai-stream-event-001 | case-set, event-sendable | Inspect `AIStreamEvent.swift` lines 907-917. | Exactly three cases — `textDelta`, `toolUse`, `end` — and the enum declaration itself states `Sendable` conformance. |
+| ai-stream-event-001 | case-set, event-sendable | Inspect `AIStreamEvent.swift`. | Exactly three cases — `textDelta`, `toolUse`, `end` — and the enum declaration itself states `Sendable` conformance. |
 | ai-stream-event-002 | text-delta-payload | `AIStreamEvent.textDelta("Hello")`, pattern-matched as `PluginDecoderTests.textDeltas(_:)` does with `if case let .textDelta(text) = event`. | `text == "Hello"`, with no other payload carried. |
 | ai-stream-event-003 | tool-use-payload | `AIStreamEvent.toolUse(id: "call_1", name: "search", argumentsJSON: Data("{\"q\":\"cats\"}".utf8))`, pattern-matched as `LocalChatSession.swift`'s `case .toolUse(let id, let name, let args):` does. | `id == "call_1"`, `name == "search"`, and `args` equals the exact `Data` given, byte for byte, unparsed. |
 | ai-stream-event-004 | end-stop-reason-optional | Construct `AIStreamEvent.end(stopReason: nil)`. | Constructs without error; `stopReason` is `nil`. |
@@ -184,3 +184,4 @@ Notes: separation-of-concerns passes because the event enum (`AIStreamEvent`) is
 |---------|------|--------|---------|
 | 1.0.1 | 2026-09-24 | Mike Fullerton | Compliance section rewritten as linked checks against the compliance catalog |
 | 1.0.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
+| 1.0.3 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

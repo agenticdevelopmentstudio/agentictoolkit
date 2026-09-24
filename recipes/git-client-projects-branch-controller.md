@@ -3,7 +3,7 @@ id: 92f11498-2cb2-4b04-92b9-560d9f2de6ee
 title: BranchController
 domain: agentictoolkit://recipes/git-client-projects-branch-controller
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -71,13 +71,12 @@ confined to the main actor by that declaration alone.
 - **checkout-ownership**: `BranchController` MUST hold exactly one
   `ProjectCheckout` (`checkout`), one `GitStatusProvider` (`statusProvider`),
   and the mutable `currentBranch: String?` for that checkout, and MUST NOT
-  read or mutate any other checkout's state (`BranchController.swift` lines
-  9-11).
+  read or mutate any other checkout's state (`BranchController.swift`).
 - **main-actor-isolation**: `BranchController` MUST be declared `@MainActor`
   and MUST NOT declare `Sendable` conformance; every stored property
   (`checkout`, `statusProvider`, `currentBranch`, `gitClient`, `panes`) and
   every method is therefore confined to the main actor by that declaration,
-  not by any lock the type defines itself (`BranchController.swift` line 7).
+  not by any lock the type defines itself (`BranchController.swift`).
 - **injected-dependencies-no-defaults**: `init(checkout:gitClient:statusProvider:)`
   MUST accept `checkout`, `gitClient`, and `statusProvider` as required
   parameters with no default value for any of them, and MUST NOT construct a
@@ -85,125 +84,120 @@ confined to the main actor by that declaration alone.
   provider minted inside this initializer "could never be the one" a
   checkout's panes were already given before the controller exists, which
   would leave one checkout served by two status providers
-  (`BranchController.swift` lines 16-24).
+  (`BranchController.swift`).
 - **initial-branch-from-checkout**: `init` MUST set `currentBranch` to
   `checkout.branch` at construction time, before any call to `refresh()`
-  (`BranchController.swift` lines 25-28).
+  (`BranchController.swift`).
 - **pane-identity-per-tab-per-edge**: `makeTabPane(edge:tabID:)` MUST return
   the same `TabPaneViewController` instance for every call made with the same
   `edge` and `tabID` pair on one controller, found by a linear scan of
   `panes.allObjects` matching both `edge` and `tabID`, and MUST call
   `reload()` on that existing pane before returning it
-  (`BranchController.swift` lines 47-51).
+  (`BranchController.swift`).
 - **pane-created-once-per-tab-per-edge**: `makeTabPane(edge:tabID:)` called
   with an `(edge, tabID)` pair not already in `panes` MUST construct exactly
   one new `TabPaneViewController(edge:tabID:)`, and a different `edge` or a
   different `tabID` MUST always be treated as a distinct pane
-  (`BranchController.swift` lines 47, 52-57).
+  (`BranchController.swift`).
 - **pane-registration-on-creation**: A newly constructed pane MUST have its
   `dataSource` and `delegate` both set to the owning `BranchController`, MUST
   be added to `panes`, and MUST have `reload()` called on it before
-  `makeTabPane(edge:tabID:)` returns it (`BranchController.swift` lines
-  52-57).
+  `makeTabPane(edge:tabID:)` returns it (`BranchController.swift`).
 - **weak-pane-table**: `panes` MUST be an `NSHashTable<TabPaneViewController>`
   constructed with `.weakObjects()`, so a pane released by every other owner
   MUST be dropped from `panes` without `BranchController` ever calling an
-  explicit unregister method (`BranchController.swift` line 14).
+  explicit unregister method (`BranchController.swift`).
 - **display-name-derivation**: `displayName` MUST return `currentBranch` when
   it is non-nil, and otherwise MUST return `checkout.directory.lastPathComponent`,
   computed fresh from the live `currentBranch` on every access rather than
   from any value captured when the controller was built
-  (`BranchController.swift` lines 70-72).
+  (`BranchController.swift`).
 - **refresh-updates-branch-on-success**: When `gitClient.currentBranch(in:
   checkout.directory)` returns without throwing, `refresh()` MUST assign that
   result to `currentBranch`, including replacing a non-nil `currentBranch`
   with `nil` when the checkout is now a detached HEAD
-  (`BranchController.swift` lines 83-85).
+  (`BranchController.swift`).
 - **refresh-preserves-branch-on-failure**: When `gitClient.currentBranch(in:)`
   throws, `refresh()` MUST leave `currentBranch` at its previous value; the
   error MUST NOT be rethrown, logged, or otherwise surfaced by this method
-  (`BranchController.swift` lines 83-88).
+  (`BranchController.swift`).
 - **refresh-always-reloads-panes**: `refresh()` MUST call `reload()` on every
   pane in `panes.allObjects` after its branch-read attempt, regardless of
   whether that attempt succeeded, threw, or `panes` was empty
-  (`BranchController.swift` lines 89-91).
+  (`BranchController.swift`).
 - **commands-computed-per-access**: `commands` MUST be computed fresh on
   every access as an array of exactly three `AppCommand` values — Refresh
   Status, Reveal in Finder, Copy Path, in that order — rather than cached
-  from a previous access (`BranchController.swift` lines 111-146).
+  from a previous access (`BranchController.swift`).
 - **command-id-namespacing**: Every command id MUST be
   `"branch.action.<verb>.\(checkout.identifier)"` (`refreshStatus`,
   `revealInFinder`, or `copyPath`), so that two checkouts — including two
   worktrees of the same repository — MUST NOT produce colliding command ids
-  (`BranchController.swift` lines 112, 117, 131, 138).
+  (`BranchController.swift`).
 - **command-category-carries-checkout-name**: Every command's `category`
   MUST be `"Branch — \(displayName)"`, evaluated at the time `commands` is
   accessed, so a palette listing commands from multiple checkouts MUST show
-  each checkout's live name (`BranchController.swift` lines 114, 119, 133,
-  140).
+  each checkout's live name (`BranchController.swift`).
 - **command-title-excludes-checkout-name**: A command's `title` (`"Refresh
   Status"`, `"Reveal in Finder"`, `"Copy Path"`) MUST NOT include the
   checkout's name or branch; per the doc comment, the title is what a
   per-pane context menu renders alone, where the pane itself already
-  identifies the checkout (`BranchController.swift` lines 99-106, 118, 132,
-  139).
+  identifies the checkout (`BranchController.swift`).
 - **refresh-status-command-effect**: Invoking the Refresh Status command
   MUST call `statusProvider.refresh()` without awaiting or otherwise
   observing its effect, and MUST separately start an unstructured `Task`
   that awaits `self?.refresh()`; both calls MUST capture `self` weakly
-  (`BranchController.swift` lines 120, 127-128).
+  (`BranchController.swift`).
 - **reveal-in-finder-command-effect**: Invoking the Reveal in Finder command
   MUST call `NSWorkspace.shared.activateFileViewerSelecting([directory])`,
   where `directory` is `checkout.directory` captured by value when `commands`
   was accessed, not read through `self` at invocation time
-  (`BranchController.swift` lines 113, 130-136).
+  (`BranchController.swift`).
 - **copy-path-command-effect**: Invoking the Copy Path command MUST call
   `NSPasteboard.general.clearContents()` and then
   `NSPasteboard.general.setString(directory.path, forType: .string)`, using
-  the same value-captured `directory` (`BranchController.swift` lines 113,
-  137-144).
+  the same value-captured `directory` (`BranchController.swift`).
 - **captured-directory-outlives-controller**: Because Reveal in Finder and
   Copy Path capture `directory` by value rather than through `self`, MUST NOT
   fail or act on the wrong directory when invoked after the owning
   `BranchController` has been deallocated or its commands unregistered — per
   the doc comment this is deliberate, "so an unregister that races a menu
   already on screen still does the right thing rather than silently nothing"
-  (`BranchController.swift` lines 108-110, 113, 130-144).
+  (`BranchController.swift`).
 - **data-source-agent-name-fixed**: `tabPaneAgentName(_:)` MUST always
   return the literal string `"Claude"`, regardless of the pane or the
   checkout — a placeholder documented as pending "the document-model work
-  that follows the vsc-plugins branch" (`BranchController.swift` lines
-  150-153).
+  that follows the vsc-plugins branch" (`BranchController.swift`).
 - **data-source-model-name-nil**: `tabPaneModelName(_:)` MUST always return
-  `nil` (`BranchController.swift` line 154).
+  `nil` (`BranchController.swift`).
 - **data-source-status-symbols-fixed**: `tabPaneStatusSymbols(_:)` MUST
-  always return `[.idle]` (`BranchController.swift` line 155).
+  always return `[.idle]` (`BranchController.swift`).
 - **data-source-session-name-derivation**: `tabPaneSessionName(_:)` MUST
-  return `displayName` (`BranchController.swift` line 156).
+  return `displayName` (`BranchController.swift`).
 - **data-source-working-directory-fixed**: `tabPaneWorkingDirectory(_:)`
   MUST return `checkout.directory` unchanged for the controller's lifetime
-  (`BranchController.swift` line 157).
+  (`BranchController.swift`).
 - **data-source-branch-passthrough**: `tabPaneBranch(_:)` MUST return the
-  live `currentBranch` (`BranchController.swift` line 158).
+  live `currentBranch` (`BranchController.swift`).
 - **data-source-summary-nil**: `tabPaneSummary(_:)` MUST always return `nil`
-  (`BranchController.swift` line 159).
+  (`BranchController.swift`).
 - **context-menu-built-from-commands**: `tabPane(_:contextMenuFor:)` MUST
   build one `NSMenuItem` per entry in `commands`, in the same order, each
-  titled with that command's `title` (`BranchController.swift` lines 173-193).
+  titled with that command's `title` (`BranchController.swift`).
 - **context-menu-run-discards-arguments-and-result**: Each menu item's action
   MUST invoke the corresponding command's `run` with an empty argument array
   (`command.run([])`) and MUST discard the returned value
-  (`BranchController.swift` lines 176-181).
+  (`BranchController.swift`).
 - **context-menu-target-retention**: Each menu item's `target` MUST be a
   `ClosureMenuItemTarget` wrapping that command, and that same target MUST
   also be assigned to the item's `representedObject`, so it stays retained
   for the item's lifetime despite `NSMenuItem.target` being a weak reference
-  (`BranchController.swift` lines 163-172, 180-190).
+  (`BranchController.swift`).
 - **context-menu-item-enablement-via-validation**: Each menu item's enabled
   state MUST be governed by the wrapped command's `isEnabled` through
   `ClosureMenuItemTarget.validateMenuItem(_:)` — the path AppKit's
   `NSMenu.autoenablesItems` consults — MUST NOT be set directly on
-  `NSMenuItem.isEnabled` (`BranchController.swift` lines 163-167, 182).
+  `NSMenuItem.isEnabled` (`BranchController.swift`).
 
 ## Appearance
 
@@ -293,7 +287,7 @@ of which this file renders itself.
 - **Cancellation and timeouts**: The `Task { [weak self] in await
   self?.refresh() }` started by the Refresh Status command is unstructured;
   its handle is discarded, so nothing can cancel it once started
-  (`BranchController.swift` line 128). If `self` has already been
+  (`BranchController.swift`). If `self` has already been
   deallocated by the time that task runs, `self?.refresh()` is a no-op; if
   `self` is still alive, the weak-to-strong promotion inside the `await`
   expression keeps the controller alive for the duration of that one call
@@ -339,11 +333,11 @@ literals with no localization key or lookup mechanism:
 
 | String Key | Default (en) | Context |
 |-----------|-------------|---------|
-| (none — literal) | `Claude` | `tabPaneAgentName(_:)` placeholder agent name (line 153). |
-| (none — literal) | `Refresh Status` | Command title (line 118). |
-| (none — literal) | `Reveal in Finder` | Command title (line 132). |
-| (none — literal) | `Copy Path` | Command title (line 139). |
-| (none — literal) | `Branch — \(displayName)` | Command category, with the checkout's live name interpolated (line 114). |
+| (none — literal) | `Claude` | `tabPaneAgentName(_:)` placeholder agent name. |
+| (none — literal) | `Refresh Status` | Command title. |
+| (none — literal) | `Reveal in Finder` | Command title. |
+| (none — literal) | `Copy Path` | Command title. |
+| (none — literal) | `Branch — \(displayName)` | Command category, with the checkout's live name interpolated. |
 
 ## Accessibility Options
 
@@ -374,7 +368,7 @@ transmits no credential, token, or personal data.
 
 `BranchController.swift` makes no logging call of its own — no `Logger`,
 `os.Logger`, or `print` appears anywhere in the file. The one error this
-file swallows (`refresh()`'s `catch`, line 87) is recorded by a different
+file swallows (`refresh()`'s `catch`) is recorded by a different
 component, `GitCommandLog` via `GitClient.execute`'s unconditional recording
 (see `agentictoolkit://recipes/file-system-git`'s sibling `GitClient.swift`),
 not logged a second time here.
@@ -450,7 +444,7 @@ moves" — `identifier` depends on that being true, so a checkout keeps its
 identity across branch switches — but a label read off that frozen snapshot
 would go on naming whichever branch was checked out when the window opened.
 Everything the user reads (the command palette's category, a pane's session
-name) needs the live value instead (`BranchController.swift` lines 60-72).
+name) needs the live value instead (`BranchController.swift`).
 **Approved**: pending
 
 **Decision**: `refresh()` treats a successful call that resolves to `nil`
@@ -461,7 +455,7 @@ leaving `currentBranch` untouched — the two are not folded into one `try?`.
 last known branch stays put," matching the policy `GitStatusProvider` applies
 to a failed status; folding both into `try?` "kept a stale branch name on
 screen forever, because the two cases are indistinguishable once the error
-is discarded" (`BranchController.swift` lines 74-88).
+is discarded" (`BranchController.swift`).
 **Approved**: pending
 
 **Decision**: `makeTabPane(edge:tabID:)` returns the existing pane for a
@@ -472,7 +466,7 @@ for the same tab's item is asking the same question," and
 `refreshTabItems()` asks for every tab on every checkout scan and every
 branch refresh — a fresh controller per ask "built and threw away a view
 controller per tab per edge per scan," leaving discards in `panes` until
-AppKit released them (`BranchController.swift` lines 33-46).
+AppKit released them (`BranchController.swift`).
 **Approved**: pending
 
 **Decision**: A checkout's live `displayName` is placed in each command's
@@ -482,8 +476,7 @@ a bare `"Branch"` category, a two-worktree project offered six palette rows
 all reading `"Refresh Status — Branch"`, and picking one was "a coin flip
 over which directory it acted on." The title is what the per-pane context
 menu renders alone, inside a pane that already identifies its checkout, so
-repeating the name there would be redundant (`BranchController.swift` lines
-96-106).
+repeating the name there would be redundant (`BranchController.swift`).
 **Approved**: pending
 
 **Decision**: `revealInFinder` and `copyPath` capture `directory` by value
@@ -493,7 +486,7 @@ invocation time.
 that races a menu already on screen still does the right thing rather than
 silently nothing" — a menu already built and shown holds closures that keep
 working correctly even if the controller that built them has since been torn
-down (`BranchController.swift` lines 108-113).
+down (`BranchController.swift`).
 **Approved**: pending
 
 **Decision**: The context menu's `ClosureMenuItemTarget` is assigned to both
@@ -502,7 +495,7 @@ down (`BranchController.swift` lines 108-113).
 strong retention the target would be deallocated before the menu is ever
 shown, and "every item silently inert once its target is deallocated" —
 `representedObject` is the retention point chosen to prevent that
-(`BranchController.swift` lines 169-172, 189-190).
+(`BranchController.swift`).
 **Approved**: pending
 
 ## Compliance
@@ -550,3 +543,4 @@ subprocess runs.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | | | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

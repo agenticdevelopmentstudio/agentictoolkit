@@ -3,7 +3,7 @@ id: ae0932d6-572f-4173-ba49-df68f4039ba4
 title: ProjectChooserWindow
 domain: agentictoolkit://recipes/git-client-projects-project-chooser-window
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -51,111 +51,99 @@ button pair. It resolves to at most one `GitRepo` drawn from a
 calls. Per its own doc comment it is deliberately app-modal rather than a
 sheet: "this app has no window guaranteed to be on screen when the question
 is asked (it can be asked from the menu bar with nothing open at all), and a
-sheet with no parent cannot be dismissed" (lines 9-11). Both
+sheet with no parent cannot be dismissed". Both
 `ProjectChooserWindow` and its private content view controller are declared
-`@MainActor` (lines 12-13, 91-92).
+`@MainActor`.
 
 ## Behavioral Requirements
 
 - **coordinator-required-no-default**: `init(coordinator:)` and the static
   `choose(from:onChoose:)` MUST both require a `ProjectsCoordinator` argument
   with no default value, and `choose(from:onChoose:)` MUST NOT construct a
-  `ProjectChooserWindow` or a coordinator any other way (lines 20-24, 30).
+  `ProjectChooserWindow` or a coordinator any other way.
 - **window-identity-fixed-at-init**: `init(coordinator:)` MUST construct
   exactly one `NSWindow` with `contentRect` 460×480, `styleMask`
   `[.titled, .closable, .resizable]`, `backing: .buffered`, `defer: false`,
   title `"Open Project"`, and `minSize` 360×300, and MUST set that same
   window as both the controller's own `window` and the target of
-  `window.delegate` (lines 33-41, 50).
+  `window.delegate`.
 - **content-view-controller-fixed-at-init**: `init(coordinator:)` MUST
   construct exactly one `ProjectChooserContentViewController` for the given
-  `coordinator` and MUST assign it as `window.contentViewController`
-  (lines 31, 43).
+  `coordinator` and MUST assign it as `window.contentViewController`.
 - **coder-init-unavailable**: `ProjectChooserWindow.init?(coder:)` MUST be
   marked unavailable and MUST call `fatalError` if it is ever invoked, so the
-  type MUST NOT be instantiated from a storyboard or nib (lines 55-56); the
-  same requirement applies to `ProjectChooserContentViewController.init?(coder:)`
-  (lines 111-112).
+  type MUST NOT be instantiated from a storyboard or nib; the
+  same requirement applies to `ProjectChooserContentViewController.init?(coder:)`.
 - **main-actor-isolation**: `ProjectChooserWindow` and
   `ProjectChooserContentViewController` MUST both be declared `@MainActor`
   and MUST NOT declare `Sendable` conformance; every stored property
   (`content`, `chosen`, `onFinish`, `browser`, `openButton`) and every method
   of both types is therefore confined to the main actor by that declaration
-  alone, not by any lock either type defines itself (lines 12-13, 91-92).
+  alone, not by any lock either type defines itself.
 - **browser-constructed-in-chooser-mode**: `ProjectChooserContentViewController.init(coordinator:)`
-  MUST construct its `ProjectBrowserViewController` with `mode: .chooser`
-  (line 105).
+  MUST construct its `ProjectBrowserViewController` with `mode: .chooser`.
 - **onchoose-single-invocation**: `ProjectChooserWindow.choose(from:onChoose:)`
   MUST call `onChoose` exactly once, with the `GitRepo` returned by
   `runModal()`, and only when that result is non-nil; when `runModal()`
-  returns `nil` (the user cancelled), `onChoose` MUST NOT be called at all
-  (lines 18-28).
+  returns `nil` (the user cancelled), `onChoose` MUST NOT be called at all.
 - **runmodal-return-value**: `runModal()` MUST return `chosen` after the
   modal session ends; `chosen` is `nil` unless `finish(with:)` was called
-  with a non-nil `GitRepo` at some point during that session (lines 58-67,
-  82-85).
+  with a non-nil `GitRepo` at some point during that session.
 - **content-onfinish-drives-outcome**: The window's eventual outcome MUST be
   determined entirely by invocations of `content.onFinish`, which is wired
-  at the end of `init(coordinator:)` to call `finish(with:)` on the window
-  (line 52); `finish(with:)` MUST assign its argument to `chosen` and MUST
-  call `NSApp.stopModal()` (lines 82-85).
+  at the end of `init(coordinator:)` to call `finish(with:)` on the window; `finish(with:)` MUST assign its argument to `chosen` and MUST
+  call `NSApp.stopModal()`.
 - **open-button-forwards-current-selection**: Activating the Open button
   MUST call `onFinish?(browser.selectedRepo)`, forwarding whatever
   `browser.selectedRepo` reports at the moment the button is activated, not
-  a value captured earlier (lines 161-163).
+  a value captured earlier.
 - **cancel-button-forwards-nil**: Activating the Cancel button MUST call
   `onFinish?(nil)` unconditionally, regardless of the browser's current
-  selection (lines 165-167).
+  selection.
 - **browser-onchoose-forwarded-unchanged**: `browser.onChoose` MUST be wired,
   at construction, to call `onFinish?(repo)` with the exact `GitRepo` the
-  browser passes, forwarding it unchanged (line 107); the conditions under
+  browser passes, forwarding it unchanged; the conditions under
   which the browser itself invokes `onChoose` (double-click, Return) are
   `ProjectBrowserViewController`'s own contract, not this file's.
 - **open-button-enablement-tracks-selection**: `browser.onSelectionChange`
   MUST be wired, at construction, so that every reported selection change
   sets `openButton.isEnabled` to `true` when the reported `GitRepo?` is
-  non-nil and to `false` when it is `nil` (line 108).
+  non-nil and to `false` when it is `nil`.
 - **open-button-initial-disabled-then-synced**: `openButton.isEnabled` MUST
   be explicitly set to `false` during `loadView()`, before the browser's
-  view is created (line 128); accessing `browser.view` for the first time a
-  few lines later (line 137) synchronously loads the browser, which reports
+  view is created; accessing `browser.view` for the first time a
+  few lines later synchronously loads the browser, which reports
   its own initial selection through `onSelectionChange` — so
   `openButton.isEnabled` MUST end `loadView()` reflecting the browser's
-  initial selection, not the `false` value assigned moments before
-  (lines 128, 137).
+  initial selection, not the `false` value assigned moments before.
 - **window-close-ends-session-as-cancel**: `windowWillClose(_:)` MUST call
   `finish(with: nil)` whenever the closing window is the one AppKit
   currently treats as the active modal window (`NSApp.modalWindow === window`),
   which is how dismissal via the title bar close control or ⌘W — both of
-  which bypass Cancel and Open — MUST still end the session (lines 47-49,
-  75-80).
+  which bypass Cancel and Open — MUST still end the session.
 - **window-close-ignored-when-not-active-modal-session**: `windowWillClose(_:)`
   MUST NOT call `finish(with:)` (and therefore MUST NOT call
   `NSApp.stopModal()`) when `NSApp.modalWindow` does not identify this
-  window; per the inline comment, this ends "only end a session we are in"
-  (lines 76-80).
+  window; per the inline comment, this ends "only end a session we are in".
 - **runmodal-orders-out-without-closing**: `runModal()` MUST call
   `window.makeKeyAndOrderFront(nil)` before entering the modal loop and
   `window.orderOut(nil)` immediately after `NSApp.runModal(for:)` returns;
   per the inline comment, this `orderOut` call MUST NOT itself produce a
-  close notification, so it MUST NOT trigger `windowWillClose(_:)`
-  (lines 63-65, 76-77).
+  close notification, so it MUST NOT trigger `windowWillClose(_:)`.
 - **runmodal-activation-respects-quiet-presentation**: Before showing the
-  window, `runModal()` MUST call `NSApp.activateUnlessQuiet()` (line 62),
+  window, `runModal()` MUST call `NSApp.activateUnlessQuiet()`,
   which MUST call `NSApplication.activate(ignoringOtherApps: true)` unless
   `QuietWindowPresentation.isEnabled` is `true`, in which case activation
-  MUST be skipped entirely (`NSApplication+QuietActivation.swift` lines
-  27-30).
+  MUST be skipped entirely (`NSApplication+QuietActivation.swift`).
 - **stock-buttons-fixed-key-equivalents**: `loadView()` MUST create Cancel
   and Open as `NSButton` instances with `bezelStyle: .push`, MUST set
   Cancel's `keyEquivalent` to the Escape character (`"\u{1b}"`) and Open's
   `keyEquivalent` to Return (`"\r"`), and MUST route Cancel's action to
-  `cancelChoosing(_:)` and Open's action to `openChosen(_:)`
-  (lines 117-129).
+  `cancelChoosing(_:)` and Open's action to `openChosen(_:)`.
 - **accessibility-identifiers-fixed**: `ProjectChooserWindow` MUST set the
   accessibility identifier `"project-chooser.window"` on its window,
   `"project-chooser.cancel"` on the Cancel button, and
-  `"project-chooser.open"` on the Open button (lines 46, 120, 129).
+  `"project-chooser.open"` on the Open button.
 
 ## Appearance
 
@@ -202,10 +190,9 @@ concern, not this file's.
   `openButton.isEnabled` MUST stay `false` through `loadView()` (see
   **open-button-enablement-tracks-selection**); Cancel MUST remain fully
   functional regardless (see **cancel-button-forwards-nil**). `runModal()`'s
-  `guard let window else { return nil }` (line 60) MUST return `nil` if
+  `guard let window else { return nil }` MUST return `nil` if
   `window` were ever `nil`, but in practice `init(coordinator:)` always
-  calls `super.init(window:)` with a concrete, non-optional window
-  (line 41) and no other initializer path exists (`init?(coder:)` is
+  calls `super.init(window:)` with a concrete, non-optional window and no other initializer path exists (`init?(coder:)` is
   unavailable), so this guard is a defensive check on a case the file's own
   contract never actually produces.
 - **Boundary values**: `window.minSize` fixes the one numeric boundary this
@@ -269,9 +256,9 @@ string literals with no localization key or lookup mechanism:
 
 | String Key | Default (en) | Context |
 |-----------|-------------|---------|
-| (none — literal) | `Open Project` | Window title, set in `init(coordinator:)` (line 39). |
-| (none — literal) | `Open` | Open button title (line 102). |
-| (none — literal) | `Cancel` | Cancel button title (line 117). |
+| (none — literal) | `Open Project` | Window title, set in `init(coordinator:)`. |
+| (none — literal) | `Open` | Open button title. |
+| (none — literal) | `Cancel` | Cancel button title. |
 
 ## Accessibility Options
 
@@ -369,7 +356,7 @@ or transmits no credential, token, or personal data of its own.
 **Rationale**: Per the source's own doc comment, "this app has no window
 guaranteed to be on screen when the question is asked (it can be asked from
 the menu bar with nothing open at all), and a sheet with no parent cannot
-be dismissed" (`ProjectChooserWindow.swift` lines 9-11).
+be dismissed" (`ProjectChooserWindow.swift`).
 **Approved**: pending
 
 **Decision**: `windowWillClose(_:)` only calls `finish(with: nil)` when
@@ -379,7 +366,7 @@ notification.
 exists to "only end a session we are in," so a close notification for a
 window that is not the currently active modal session does not tear down a
 different, still-running modal session by calling `NSApp.stopModal()` on
-its behalf (`ProjectChooserWindow.swift` lines 76-80).
+its behalf (`ProjectChooserWindow.swift`).
 **Approved**: pending
 
 **Decision**: The title bar close control and ⌘W are routed through
@@ -390,7 +377,7 @@ title bar's close button and ⌘W bypass Cancel and Open, so the session has
 to be ended from the close notification too," because without it "the
 modal session outlives its window" and AppKit keeps disabling Quit, About,
 Settings, and every status-item command for the rest of the run
-(`ProjectChooserWindow.swift` lines 47-49, 69-74).
+(`ProjectChooserWindow.swift`).
 **Approved**: pending
 
 **Decision**: Cancel and Open are built as stock `NSButton`s with
@@ -398,7 +385,7 @@ Settings, and every status-item command for the rest of the run
 **Rationale**: The inline comment states this is deliberate: "this is the
 Open dialog of a Mac app: the pair at the bottom right is a shape people
 have known for thirty years, and a hand-drawn substitute is a worse version
-of it" (`ProjectChooserWindow.swift` lines 98-101), consistent with the
+of it" (`ProjectChooserWindow.swift`), consistent with the
 `native-controls-preference` compliance check below.
 **Approved**: pending
 
@@ -408,7 +395,7 @@ directly inside `ProjectChooserWindow`.
 **Rationale**: The inline comment gives the reason: splitting it out gives
 "the browser a real parent view controller" so it "gets its appearance
 callbacks," which is where the browser's own `viewDidAppear` takes first
-responder for its filter field (`ProjectChooserWindow.swift` lines 88-90).
+responder for its filter field (`ProjectChooserWindow.swift`).
 **Approved**: pending
 
 ## Compliance
@@ -453,3 +440,4 @@ the main thread.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-24 | Mike Fullerton | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

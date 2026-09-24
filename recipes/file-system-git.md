@@ -3,7 +3,7 @@ id: 9a4aa2a8-c01b-4cec-b789-6c89c100d8d3
 title: GitStatusProvider
 domain: agentictoolkit://recipes/file-system-git
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -63,86 +63,80 @@ framework draws the badge, red still means deleted.
   `Color.orange` for `.modified`, `Color.green` for `.added` and
   `.untracked`, `Color.red` for `.deleted`, `Color.blue` for `.renamed` and
   `.copied`, `Color.purple` for `.conflicted`, and `Color.gray` for
-  `.ignored` (`GitFileStatus+Color.swift` lines 6-15).
+  `.ignored` (`GitFileStatus+Color.swift`).
 - **ns-color-mapping-per-status**: `GitFileStatus.nsColor` MUST return the
   AppKit equivalent for each case: `NSColor.systemOrange` for `.modified`,
   `.systemGreen` for `.added` and `.untracked`, `.systemRed` for `.deleted`,
   `.systemBlue` for `.renamed` and `.copied`, `.systemPurple` for
-  `.conflicted`, and `.systemGray` for `.ignored` (`GitFileStatus+Color.swift`
-  lines 20-29).
+  `.conflicted`, and `.systemGray` for `.ignored` (`GitFileStatus+Color.swift`).
 - **color-and-ns-color-parity**: For every `GitFileStatus` case, `color` and
   `nsColor` MUST name the same semantic hue (orange/orange, green/green,
   red/red, blue/blue, purple/purple, gray/gray); per the doc comment these
   are "the same colors for AppKit callers... two spellings of one fact
   rather than two facts," so whichever framework draws a badge, red still
-  means deleted (`GitFileStatus+Color.swift` lines 17-19).
+  means deleted (`GitFileStatus+Color.swift`).
 - **refresh-result-cases**: `GitStatusRefreshResult` MUST provide exactly two
   cases, `.status(GitStatus)` and `.unavailable`, and MUST conform to
-  `Sendable` (`GitStatusProvider.swift` lines 14-17).
+  `Sendable` (`GitStatusProvider.swift`).
 - **observer-registration**: `observe(_:)` MUST register the supplied
   observer under a fresh `UUID` key so it receives every result the provider
   produces from the moment of registration onward, and MUST NOT replay any
-  result delivered before it was registered (`GitStatusProvider.swift` lines
-  76-78).
+  result delivered before it was registered (`GitStatusProvider.swift`).
 - **observation-token-unregisters-on-release**: The `GitStatusObservation`
   returned by `observe(_:)` MUST be the only way to stop receiving results;
   releasing it (letting it deinitialize) MUST remove the corresponding entry
   from the observers map via its `deinit`-invoked `cancel` closure
-  (`GitStatusProvider.swift` lines 26-30, 79-81).
+  (`GitStatusProvider.swift`).
 - **weak-reference-in-cancellation-closure**: The `cancel` closure captured
   by `observe(_:)` MUST hold `self` weakly, so an outstanding, unreleased
   `GitStatusObservation` MUST NOT keep the owning `GitStatusProvider` alive
-  (`GitStatusProvider.swift` line 79).
+  (`GitStatusProvider.swift`).
 - **broadcast-to-all-observers**: A single `refresh()` call's result MUST be
   delivered to every observer registered on the provider at delivery time,
-  not only to whichever caller triggered the refresh (`GitStatusProvider.swift`
-  lines 102-107).
+  not only to whichever caller triggered the refresh (`GitStatusProvider.swift`).
 - **main-actor-delivery**: Every observer invocation MUST occur on the main
   actor, matching the `Observer` typealias's `@MainActor` annotation
-  (`GitStatusProvider.swift` lines 51-53, 103-106).
+  (`GitStatusProvider.swift`).
 - **immediate-start-when-idle**: A `refresh()` call made while no run is in
   flight (`isRunning == false`) MUST set `isRunning` and start a new run
-  immediately, without waiting for any other event (`GitStatusProvider.swift`
-  lines 86-94).
+  immediately, without waiting for any other event (`GitStatusProvider.swift`).
 - **coalesced-overlap**: A `refresh()` call made while a run is already in
   flight MUST NOT start a second concurrent `client.status(in:)` call; it
   MUST instead set `isQueued` and return, leaving the in-flight run to
-  trigger the follow-up after it finishes delivering (`GitStatusProvider.swift`
-  lines 87-89, 108-116).
+  trigger the follow-up after it finishes delivering (`GitStatusProvider.swift`).
 - **bounded-burst-cost**: Any number of `refresh()` calls that arrive while
   one run is in flight MUST be coalesced into at most one follow-up run,
   because `isQueued` is a single boolean rather than a counter — a burst of
   N overlapping calls MUST cost at most two `client.status(in:)` invocations
-  in total, never N (`GitStatusProvider.swift` lines 60-65, 87-89, 109-111).
+  in total, never N (`GitStatusProvider.swift`).
 - **success-delivers-status-and-logs**: When `client.status(in:)` succeeds,
   `load` MUST wrap the result in `.status(status)`, and MUST log one
   `info`-level message naming the resulting file and directory counts with
-  `.public` privacy (`GitStatusProvider.swift` lines 122-128).
+  `.public` privacy (`GitStatusProvider.swift`).
 - **cancellation-yields-unavailable**: When `client.status(in:)` throws
   `CancellationError`, `load` MUST return `.unavailable` rather than
   rethrowing, and MUST NOT emit an error-level log for that case —
   cancellation is reported as "we do not know," never treated as evidence
-  the tree is clean (`GitStatusProvider.swift` lines 129-133).
+  the tree is clean (`GitStatusProvider.swift`).
 - **failure-yields-unavailable-never-empty**: When `client.status(in:)`
   throws any error other than `CancellationError`, `load` MUST return
   `.unavailable`, never a default or empty `GitStatus`, so a consumer cannot
   mistake "git could not be asked" for "the tree is clean"
-  (`GitStatusProvider.swift` lines 134-144).
+  (`GitStatusProvider.swift`).
 - **error-log-omits-git-output**: The error-level log emitted on a
   non-cancellation failure MUST be built from `GitClientError.logDescription`
   when the error is a `GitClientError`, or from
   `String(describing: type(of: error))` otherwise, and MUST NOT use
   `error.localizedDescription` or otherwise include git's raw `standardError`
-  text (`GitStatusProvider.swift` lines 135-142).
+  text (`GitStatusProvider.swift`).
 - **injectable-client-with-shared-default**: `init(repoRoot:client:)` MUST
   accept a `GitClient` and MUST default it to `GitClient.shared` when the
-  caller supplies none (`GitStatusProvider.swift` line 68).
+  caller supplies none (`GitStatusProvider.swift`).
 - **thread-safe-mutable-state**: `observers`, `isRunning`, and `isQueued`
   MUST be read and written only inside a `state.withLock` closure on the
   `OSAllocatedUnfairLock`-backed `state` property; `GitStatusProvider` MUST
   be declared `Sendable` on the strength of that discipline, since it holds
-  no other mutable state (`GitStatusProvider.swift` lines 50, 58-66, 78, 80,
-  86-93, 102, 108-115).
+  no other mutable state (`GitStatusProvider.swift`).
 
 ## Appearance
 
@@ -438,3 +432,4 @@ its own. secure-log-output passes because the failure branch is built from
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | | | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

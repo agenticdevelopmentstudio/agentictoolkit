@@ -3,7 +3,7 @@ id: 24e1710c-a805-4f6e-b720-fbd869472ca9
 title: ExtensionManifestLocalization
 domain: agentictoolkit://recipes/extension-host-core-extensions-extension-manifest-localization
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -43,7 +43,7 @@ in `AgenticToolkitCore`
 (`packages/apple/AgenticToolkit/Core/Extensions/ExtensionManifestLocalization.swift`,
 a macOS-only framework target per `project.yml`) that resolves the `%key%`
 placeholders a VS Code `package.json` uses in place of the strings a person
-reads (lines 8-23). An extension that ships translations does not put
+reads. An extension that ships translations does not put
 English in `package.json` at all — it writes `"displayName": "%name%"` and
 puts the English in `package.nls.json` beside it, the German in
 `package.nls.de.json`, and so on. `localize(_:forManifestIn:locale:)` is the
@@ -52,105 +52,95 @@ single entry point both of the manifest's readers call before decoding —
 `VSIXInstaller`, which decodes one it is about to install — so translation
 resolution happens exactly once, at the one place the bytes become an
 `ExtensionManifest`, rather than at each place a manifest string is later
-displayed (lines 20-23; `ExtensionRegistry.swift` line 521;
-`VSIXInstaller.swift` line 364). It never throws: a missing, unreadable, or
-malformed table costs the extension its translations and nothing else
-(lines 31-37).
+displayed (`ExtensionRegistry.swift`;
+`VSIXInstaller.swift`). It never throws: a missing, unreadable, or
+malformed table costs the extension its translations and nothing else.
 
 ## Behavioral Requirements
 
 - **placeholder-substitution**: `localize(_:forManifestIn:locale:)` MUST
   return `json` with every `%key%` placeholder that the merged localization
   table for `directory`/`locale` can answer replaced by the string that key
-  stands for (lines 49-61).
+  stands for.
 - **no-throw-contract**: `localize` MUST NOT declare `throws` and MUST
   return a value for every input; a missing, unreadable, or malformed
   localization table MUST cost the manifest its translations and nothing
-  else, and MUST NOT propagate an error to the caller (lines 49-61; doc
-  comment lines 31-37).
+  else, and MUST NOT propagate an error to the caller (doc
+  comment).
 - **unchanged-when-no-table**: `localize` MUST return `json` unchanged, byte
   for byte, without parsing or re-serializing it, when the merged table for
-  `directory`/`locale` is empty (line 55; `noTableMeansNoChange`).
+  `directory`/`locale` is empty (`noTableMeansNoChange`).
 - **unchanged-when-unparseable-input**: `localize` MUST return `json`
   unchanged when `JSONCPreprocessor.jsonObject(from:)` throws for `json`
-  itself (line 56).
+  itself.
 - **unchanged-when-unserializable-output**: `localize` MUST return `json`
   unchanged when `JSONSerialization.data(withJSONObject:)` throws while
-  re-serializing the substituted tree (lines 57-59).
+  re-serializing the substituted tree.
 - **default-locale-is-current**: `localize`'s `locale` parameter MUST
-  default to `Locale.current` when the caller supplies none (line 52).
+  default to `Locale.current` when the caller supplies none.
 - **table-search-order**: The table filenames searched for a given
   `locale`, least specific first, MUST be `package.nls.json`, then
   `package.nls.<language>.json` when the locale has a language code, then
   `package.nls.<language>-<region>.json` when the locale additionally has a
-  region (lines 96-104).
+  region.
 - **language-code-absent-limits-search**: `tableNames(for:)` MUST return
-  only `["package.nls.json"]` when `locale.language.languageCode` is `nil`
-  (line 98).
+  only `["package.nls.json"]` when `locale.language.languageCode` is `nil`.
 - **default-table-not-overwritten**: A key present only in the default
   (`package.nls.json`) table MUST remain available in the merged table even
-  when a more specific table for the same `locale` is also present (lines
-  67-71, 82-84; `theDefaultTableFillsTheGapsInATranslation`).
+  when a more specific table for the same `locale` is also present (82-84; `theDefaultTableFillsTheGapsInATranslation`).
 - **more-specific-table-wins**: For a key present in more than one table
   that applies to `locale`, the value from the most specific table
   (region-and-language over bare-language over default) MUST be the one the
-  merged table returns (lines 82-84, 96-104; `theReadersLanguageWins`,
+  merged table returns (96-104; `theReadersLanguageWins`,
   `aRegionalTableWins`).
 - **table-filename-case-insensitive**: A table file on disk MUST be matched
-  against its expected name without regard to case (lines 73, 81, 176-182).
+  against its expected name without regard to case.
 - **missing-table-file-contributes-nothing**: A table filename with no
   case-insensitively matching entry in `directory`'s contents MUST be
-  skipped, contributing no entries and not failing the merge (line 81;
-  `anUntranslatedLanguageFallsBack`).
+  skipped, contributing no entries and not failing the merge (`anUntranslatedLanguageFallsBack`).
 - **unreadable-directory-yields-no-tables**: `fileNames(in:)` MUST return
   `[:]` when `FileManager.default.contentsOfDirectory(atPath:)` throws for
   `directory`, so a nonexistent or unreadable `directory` MUST be treated
-  identically to one with no localization tables at all (lines 176-182).
+  identically to one with no localization tables at all.
 - **unreadable-table-file-contributes-nothing**: `entries(inTableAt:)` MUST
-  return `[:]` when `Data(contentsOf:)` throws for the table's `url` (line
-  108).
+  return `[:]` when `Data(contentsOf:)` throws for the table's `url`.
 - **malformed-table-contributes-nothing**: `entries(inTableAt:)` MUST return
   `[:]` when `JSONCPreprocessor.jsonObject(from:)` throws for the table's
-  contents, or when the parsed value is not a `[String: Any]` object (lines
-  109-110; `anUnreadableTableIsNotFatal`).
+  contents, or when the parsed value is not a `[String: Any]` object (`anUnreadableTableIsNotFatal`).
 - **table-supports-jsonc**: A table file MUST be parsed via
   `JSONCPreprocessor.jsonObject(from:)`, so a table written with `//`
-  comments or a trailing comma MUST be read the same as strict JSON (line
-  109).
+  comments or a trailing comma MUST be read the same as strict JSON.
 - **table-entry-two-value-shapes**: A table entry MUST resolve to a string
   when its JSON value is either a bare string or an object with a `message`
   string field, and MUST be dropped from the table for any other JSON shape
-  (lines 120-124; `theMessageAndCommentShapeIsUnderstood`).
+  (`theMessageAndCommentShapeIsUnderstood`).
 - **substitution-walks-full-tree**: Substitution MUST be applied to every
   string value at every depth of the parsed manifest tree, including inside
-  arrays and inside objects nested arbitrarily deep (lines 141-155;
-  `theDefaultTableSuppliesTheStrings`, which resolves a value five levels
+  arrays and inside objects nested arbitrarily deep (`theDefaultTableSuppliesTheStrings`, which resolves a value five levels
   down at `contributes.configuration[].properties.<setting>.description`).
 - **object-keys-never-substituted**: Substitution MUST be applied only to a
   JSON object's values, never to its keys, regardless of whether a key's
-  text would otherwise match the placeholder pattern (lines 147-151).
+  text would otherwise match the placeholder pattern.
 - **non-string-values-pass-through**: A JSON value that is not a string —
   `null`, a boolean, a number, an array, or an object — MUST be returned
   from `substituting` with its own kind unchanged, with substitution applied
-  only to any string values nested inside it (lines 141-155;
-  `nonStringValuesSurvive`).
+  only to any string values nested inside it (`nonStringValuesSurvive`).
 - **placeholder-must-be-whole-string**: A string MUST be treated as a
   placeholder reference only when its entire content, not a prefix, suffix,
   or substring, is a single `%…%` token — `string.count` greater than `2`
-  and the string both starting and ending with `%` (line 165;
-  `proseIsNotAPlaceholder`).
+  and the string both starting and ending with `%` (`proseIsNotAPlaceholder`).
 - **placeholder-key-rejects-embedded-percent**: A candidate placeholder
   whose extracted key — the text between the leading and trailing `%` —
   itself contains a `%` character MUST be returned unchanged rather than
-  looked up (lines 166-167).
+  looked up.
 - **unresolved-placeholder-left-visible**: A placeholder string whose
   extracted key has no entry in the merged table MUST be returned unchanged,
   leaving the literal `%key%` text visible in the output rather than
-  substituting an empty string (line 168; `anUnknownKeyIsLeftVisible`).
+  substituting an empty string (`anUnknownKeyIsLeftVisible`).
 - **identifying-fields-not-reference-shaped**: A manifest string that is not
   itself written in `%key%` form MUST NOT be substituted even when the
   merged table happens to hold an entry whose key equals that string's
-  literal text (line 165's whole-string test rejects it before any lookup;
+  literal text (the whole-string test rejects it before any lookup;
   `theIdentifyingFieldsAreUntouched`).
 
 ## Appearance
@@ -184,33 +174,31 @@ component.
 | extension-manifest-localization-010 | placeholder-must-be-whole-string | `description: "Uses 50% of one core, at most"` | `description` unchanged — no substring lookup of `"of one core, at most" ... "Uses 50"` (`proseIsNotAPlaceholder`) |
 | extension-manifest-localization-011 | malformed-table-contributes-nothing, no-throw-contract | `package.nls.json` contains `{ this is not json` | `localize` does not throw; manifest still decodes with placeholders left visible (`anUnreadableTableIsNotFatal`) |
 | extension-manifest-localization-012 | non-string-values-pass-through, object-keys-never-substituted | Configuration properties with `number`/`boolean`/`array` defaults alongside a `%configuration.mode%` description | Non-string defaults survive with their own type and value intact; only the string description resolves (`nonStringValuesSurvive`) |
-| extension-manifest-localization-013 | table-filename-case-insensitive | Table file on disk named `Package.NLS.JSON` (mixed case) with `{"extension.title": "Widget"}`, locale `en_US` | `displayName == "Widget"` — matched despite the case mismatch against the expected `package.nls.json` (derived from `fileNames(in:)`/`table(in:for:)`, lines 73, 81, 176-182; no dedicated test in the given suite) |
-| extension-manifest-localization-014 | unchanged-when-unparseable-input | `json` is the bytes `{ this is not json`, with a valid `package.nls.json` present in `directory` | Returned `Data` equals the input bytes unchanged, since `JSONCPreprocessor.jsonObject(from: json)` throws for the manifest itself (derived from line 56; no dedicated test in the given suite) |
-| extension-manifest-localization-015 | unchanged-when-unserializable-output | `json` is the bare top-level JSON string `"%name%"` (not an object or array), with a table resolving `name` | Returned `Data` equals the input bytes unchanged, because `JSONSerialization.data(withJSONObject:)` requires a top-level `Array`/`Dictionary` and throws for a bare `String` (derived from lines 57-59 and Foundation's documented `JSONSerialization` contract; no dedicated test in the given suite) |
-| extension-manifest-localization-016 | language-code-absent-limits-search | `Locale(identifier: "")`, whose `language.languageCode` is `nil` | `tableNames(for:)` returns only `["package.nls.json"]` (derived from line 98; no dedicated test in the given suite) |
-| extension-manifest-localization-017 | unreadable-directory-yields-no-tables | `directory` argument names a path that does not exist on disk | `fileNames(in:)` returns `[:]`; `localize` returns `json` unchanged, identically to the no-table case (derived from lines 176-182; no dedicated test in the given suite) |
-| extension-manifest-localization-018 | placeholder-key-rejects-embedded-percent | Manifest string `"%a%b%"` with a table entry for key `"a%b"` | String returned unchanged — the extracted key `"a%b"` itself contains `%`, so no lookup is attempted (derived from lines 166-167; no dedicated test in the given suite) |
-| extension-manifest-localization-019 | table-supports-jsonc | `package.nls.json` written with a `//` line comment and a trailing comma after its last entry | Entries parse identically to strict JSON, via `entries(inTableAt:)`'s `JSONCPreprocessor.jsonObject(from:)` call (derived from line 109; no dedicated test in the given suite) |
-| extension-manifest-localization-020 | object-keys-never-substituted | Manifest object literally keyed `"%mode%"` (a JSON key, not a value), with a table entry for key `"mode"` | The key text `"%mode%"` is unchanged in the output — `substituting` maps only a `[String: Any]`'s values, never its keys (derived from lines 147-151; no dedicated test in the given suite) |
+| extension-manifest-localization-013 | table-filename-case-insensitive | Table file on disk named `Package.NLS.JSON` (mixed case) with `{"extension.title": "Widget"}`, locale `en_US` | `displayName == "Widget"` — matched despite the case mismatch against the expected `package.nls.json` (derived from `fileNames(in:)`/`table(in:for:)`; no dedicated test in the given suite) |
+| extension-manifest-localization-014 | unchanged-when-unparseable-input | `json` is the bytes `{ this is not json`, with a valid `package.nls.json` present in `directory` | Returned `Data` equals the input bytes unchanged, since `JSONCPreprocessor.jsonObject(from: json)` throws for the manifest itself (derived from the source; no dedicated test in the given suite) |
+| extension-manifest-localization-015 | unchanged-when-unserializable-output | `json` is the bare top-level JSON string `"%name%"` (not an object or array), with a table resolving `name` | Returned `Data` equals the input bytes unchanged, because `JSONSerialization.data(withJSONObject:)` requires a top-level `Array`/`Dictionary` and throws for a bare `String` (derived from the source and Foundation's documented `JSONSerialization` contract; no dedicated test in the given suite) |
+| extension-manifest-localization-016 | language-code-absent-limits-search | `Locale(identifier: "")`, whose `language.languageCode` is `nil` | `tableNames(for:)` returns only `["package.nls.json"]` (derived from the source; no dedicated test in the given suite) |
+| extension-manifest-localization-017 | unreadable-directory-yields-no-tables | `directory` argument names a path that does not exist on disk | `fileNames(in:)` returns `[:]`; `localize` returns `json` unchanged, identically to the no-table case (derived from the source; no dedicated test in the given suite) |
+| extension-manifest-localization-018 | placeholder-key-rejects-embedded-percent | Manifest string `"%a%b%"` with a table entry for key `"a%b"` | String returned unchanged — the extracted key `"a%b"` itself contains `%`, so no lookup is attempted (derived from the source; no dedicated test in the given suite) |
+| extension-manifest-localization-019 | table-supports-jsonc | `package.nls.json` written with a `//` line comment and a trailing comma after its last entry | Entries parse identically to strict JSON, via `entries(inTableAt:)`'s `JSONCPreprocessor.jsonObject(from:)` call (derived from the source; no dedicated test in the given suite) |
+| extension-manifest-localization-020 | object-keys-never-substituted | Manifest object literally keyed `"%mode%"` (a JSON key, not a value), with a table entry for key `"mode"` | The key text `"%mode%"` is unchanged in the output — `substituting` maps only a `[String: Any]`'s values, never its keys (derived from the source; no dedicated test in the given suite) |
 
 ## Edge Cases
 
 - **Null/empty input**: `json` as empty `Data` MUST be returned unchanged —
   `JSONCPreprocessor.jsonObject(from:)` throws for empty bytes, which the
-  `try?` in `localize` catches (line 56). A `package.nls.json` whose content
+  `try?` in `localize` catches. A `package.nls.json` whose content
   is the valid, empty object `{}` MUST leave the merged table empty and
-  MUST NOT change `localize`'s no-table behavior (line 55, 110). MUST.
+  MUST NOT change `localize`'s no-table behavior. MUST.
 - **Boundary values**: A string of exactly `"%%"` (`count == 2`) MUST NOT be
-  treated as a placeholder — the `string.count > 2` guard rejects it (line
-  165). A string of exactly `"%x%"` (`count == 3`, the shortest possible
+  treated as a placeholder — the `string.count > 2` guard rejects it. A string of exactly `"%x%"` (`count == 3`, the shortest possible
   placeholder) MUST be treated as one. A key containing any `%` character,
-  at any position, MUST be rejected before lookup (lines 166-167). MUST.
+  at any position, MUST be rejected before lookup. MUST.
 - **Concurrent access**: `ExtensionManifestLocalization` is a caseless enum
   with no stored state; every function is a `static` function of its
   arguments and touches only local values and freshly-read files, never a
   shared cache. `ExtensionRegistry.read` and `VSIXInstaller.readManifest`
-  both call `localize` from `nonisolated` contexts (`ExtensionRegistry.swift`
-  line 479's `private nonisolated static func read`), and concurrent,
+  both call `localize` from `nonisolated` contexts (`ExtensionRegistry.swift`'s `private nonisolated static func read`), and concurrent,
   independent calls with independent `directory` arguments MUST NOT require
   external synchronization. Two concurrent calls that both name the *same*
   `directory` while one of its table files is being modified on disk are not
@@ -229,7 +217,7 @@ component.
 - **Offline/disconnected state**: Not applicable — this file performs no
   network access of any kind; `localize`, `table`, `entries`, and
   `fileNames` operate only on `FileManager`/`Data(contentsOf:)` calls
-  against the local file system named by `directory` (lines 49-182).
+  against the local file system named by `directory`.
 - **Cancellation and timeouts**: Not applicable — `localize` is a
   synchronous, non-`async` function with no `Task`, no cooperative
   cancellation check, and no timeout of any kind anywhere in this file; it
@@ -239,16 +227,15 @@ component.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `json` | `Data` | none — required | The bytes of a `package.json`, strict or JSONC, to localize (line 50). |
-| `directory` | `URL` | none — required | The directory `json` was read from; also where `package.nls*.json` tables are looked for (line 51). |
-| `locale` | `Locale` | `Locale.current` | Whose language, and region, to prefer when merging tables (line 52). |
+| `json` | `Data` | none — required | The bytes of a `package.json`, strict or JSONC, to localize. |
+| `directory` | `URL` | none — required | The directory `json` was read from; also where `package.nls*.json` tables are looked for. |
+| `locale` | `Locale` | `Locale.current` | Whose language, and region, to prefer when merging tables. |
 
 No environment variable, settings key, or injected dependency exists
 anywhere in this file. `ExtensionRegistry.read` and
 `VSIXInstaller.readManifest` both call `localize` with only `json` and
 `directory` supplied, relying on the `locale` default rather than passing
-one explicitly (`ExtensionRegistry.swift` line 521-522; `VSIXInstaller.swift`
-lines 363-364).
+one explicitly (`ExtensionRegistry.swift`; `VSIXInstaller.swift`).
 
 ## Deep Linking
 
@@ -264,18 +251,15 @@ resolve through:
 
 | Table filename | Applies when | Precedence |
 |----------------|--------------|------------|
-| `package.nls.json` | Always searched (line 97) | Least specific — the fallback for any key a more specific table lacks (lines 82-84, 96-104) |
-| `package.nls.<language>.json` | `locale.language.languageCode` resolves (line 98-99) | Overrides the default table for keys it also defines |
-| `package.nls.<language>-<region>.json` | `locale.region` also resolves (lines 100-102) | Most specific — overrides both tables above for keys it also defines |
+| `package.nls.json` | Always searched | Least specific — the fallback for any key a more specific table lacks |
+| `package.nls.<language>.json` | `locale.language.languageCode` resolves | Overrides the default table for keys it also defines |
+| `package.nls.<language>-<region>.json` | `locale.region` also resolves | Most specific — overrides both tables above for keys it also defines |
 
-Matching against the filenames on disk is case-insensitive (lines 73, 81,
-176-182). Each table's entries decode in either of two shapes VS Code's
+Matching against the filenames on disk is case-insensitive. Each table's entries decode in either of two shapes VS Code's
 ecosystem uses today: a bare string, or an object with a `message` string
-field and an ignored `comment` array meant for a human translator (lines
-114-124). A manifest value is a reference only when it is *entirely* one
-`%key%` token (line 165); a key with no matching entry is left visible on
-screen exactly as VS Code leaves it, rather than resolved to an empty string
-(line 168).
+field and an ignored `comment` array meant for a human translator. A manifest value is a reference only when it is *entirely* one
+`%key%` token; a key with no matching entry is left visible on
+screen exactly as VS Code leaves it, rather than resolved to an empty string.
 
 ## Accessibility Options
 
@@ -333,7 +317,7 @@ table existed but could not be used (see Design Decisions and the
   `typeof value` (`"string"` versus `Array.isArray(value)` versus a plain
   object) replaces `substituting`, and `value.startsWith("%") &&
   value.endsWith("%") && value.length > 2` is the direct equivalent of the
-  whole-string placeholder test at line 165.
+  whole-string placeholder test.
 - **WinUI 3 (C#)**: `System.IO.Directory.GetFiles`/`File.ReadAllBytes`
   replace the `FileManager` calls; `System.Globalization.CultureInfo`
   replaces `Locale`, with `CultureInfo.TwoLetterISOLanguageName` and
@@ -344,7 +328,7 @@ table existed but could not be used (see Design Decisions and the
   `substituting(_:using:)`, writing back through `JsonNode.ToJsonString()` in
   place of `JSONSerialization.data(withJSONObject:)`. One genuine platform
   difference: NTFS resolves filenames case-insensitively by default, so the
-  explicit lower-casing this file does in `fileNames(in:)` (lines 176-182) to
+  explicit lower-casing this file does in `fileNames(in:)` to
   match `package.nls.pt-BR.json` against a request for `package.nls.pt-br.json`
   is redundant on Windows — `File.Exists`/`Directory.GetFiles` already treat
   the two names as the same file, and a WinUI 3 port can rely on that instead
@@ -361,7 +345,7 @@ refusing the manifest over a table's typo would turn "a typo in a file
 nobody executes into an extension that has vanished," and an unresolved
 `%key%` visible on screen is itself the diagnostic signal — it says the
 extension's own table is incomplete, where a blank field would say nothing
-at all (lines 31-37).
+at all.
 **Approved**: pending
 
 **Decision**: The default (`package.nls.json`) table's entries stay in the
@@ -370,14 +354,13 @@ present; only overlapping keys are overridden.
 **Rationale**: A translation is nearly always less complete than the
 English it was made from. Replacing the default table outright, rather than
 merging under it, would turn every key the translation omits back into a
-visible placeholder — "worse than not translating at all" (lines 67-71).
+visible placeholder — "worse than not translating at all".
 **Approved**: pending
 
 **Decision**: When the merged table is empty, `localize` returns the input
 `Data` unchanged rather than parsing and re-serializing it.
 **Rationale**: Most extensions ship no translations at all, and the source's
-doc comment states they "should not pay for a round-trip — nor risk one"
-(lines 39-42): a re-serialized document is not byte-identical to what came
+doc comment states they "should not pay for a round-trip — nor risk one": a re-serialized document is not byte-identical to what came
 in (key order and number formatting can change), so skipping the round-trip
 entirely is also what keeps an untranslated manifest's bytes exactly as its
 author wrote them.
@@ -388,7 +371,7 @@ keys.
 **Rationale**: A key is a name the host matches on elsewhere — a command
 id, a setting id, a language id. Substituting a key that happened to look
 like a placeholder would make that name resolve to a word nothing else in
-the host uses, silently breaking the match (lines 147-151).
+the host uses, silently breaking the match.
 **Approved**: pending
 
 **Decision**: Table filenames are matched against the names on disk without
@@ -397,7 +380,7 @@ regard to case.
 casing — `package.nls.pt-BR.json` and `package.nls.zh-CN.json` both ship
 with exactly that capitalization — and a locale-derived name is not a
 promise about the file's actual case either, so an exact-case match would
-silently miss real tables (lines 76-80).
+silently miss real tables.
 **Approved**: pending
 
 **Decision**: A string is a placeholder reference only when its *entire*
@@ -405,8 +388,7 @@ content is one `%key%` token; a percent sign anywhere else in a string never
 triggers a lookup.
 **Rationale**: The source's own doc comment gives the counter-example this
 guards against — "Uses 50% of one core" is prose, not a lookup of `of one
-core, at most" … "Uses 50`, and this is the same rule VS Code itself applies
-(lines 159-163).
+core, at most" … "Uses 50`, and this is the same rule VS Code itself applies.
 **Approved**: pending
 
 ## Compliance
@@ -438,7 +420,7 @@ three arguments and the current contents of `directory`; two calls with
 unchanged inputs produce identical output. `separation-of-concerns`
 **passed**: this file's sole responsibility is placeholder resolution,
 sitting beside the manifest it serves and shared by both of its readers
-rather than duplicated in each (lines 20-23). `unit-test-coverage`
+rather than duplicated in each. `unit-test-coverage`
 **passed**: `ExtensionManifestLocalizationTests.swift` exercises the default
 table, language and region preference, gap fill-in from the default table,
 fallback to the default for an untranslated locale, both table-entry
@@ -450,3 +432,4 @@ not sinking the manifest, and non-string values surviving the rewrite.
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

@@ -3,7 +3,7 @@ id: 5069f11f-e0c6-40c3-92ca-6152b8df3bc2
 title: ModelFitPolicy
 domain: agentictoolkit://recipes/ai-plugin-runtime-ai-plugin-kit-model-fit-policy
 type: ingredient
-version: 1.0.1
+version: 1.0.2
 status: review
 language: en
 created: '2026-09-23'
@@ -58,107 +58,97 @@ own and performs no I/O.
 
 - **memory-pressure-cases**: `MemoryPressureLevel` MUST expose exactly three
   cases — `normal`, `warning`, and `critical` — as a `String`-raw-valued,
-  `Sendable`, `Equatable` enum (`ModelFitPolicy.swift`, lines 5-7).
+  `Sendable`, `Equatable` enum (`ModelFitPolicy.swift`).
 - **tier-cases**: `ModelFitPolicy.Tier` MUST expose exactly three cases —
-  `ok`, `warn`, and `block` — as an `Equatable`, `Sendable` enum (lines
-  27-30).
+  `ok`, `warn`, and `block` — as an `Equatable`, `Sendable` enum.
 - **verdict-cases**: `ModelFitPolicy.Verdict` MUST expose exactly three
   cases — `allow`, `block(reason: String)`, and `deferred(reason: String)` —
   as an `Equatable`, `Sendable` enum, with each refusal case carrying a
-  human-readable reason string (lines 32-36).
+  human-readable reason string.
 - **fit-info-shape**: `ModelFitPolicy.FitInfo` MUST be an `Equatable`,
   `Sendable` struct exposing immutable `text: String` and `tier: Tier`
-  properties, constructible only through its public `init(text:tier:)`
-  (lines 41-48).
+  properties, constructible only through its public `init(text:tier:)`.
 - **namespace-isolation**: `ModelFitPolicy` MUST be declared as a case-less
   `enum` — an uninstantiable namespace holding no stored instance state —
   whose public members are exclusively `static` constants and pure
   functions; since it declares no `Sendable`, `actor`, or `@MainActor`
   isolation of its own, every static member MUST be callable synchronously
   from any concurrency-isolation domain (an actor, a `@MainActor` context, or
-  a `nonisolated` context) without an `await` hop (lines 13-152).
+  a `nonisolated` context) without an `await` hop.
 - **resident-overhead-multiplier**: `ModelFitPolicy.residentOverheadMultiplier`
-  MUST equal `1.2` (line 17).
+  MUST equal `1.2`.
 - **estimated-bytes**: `estimatedBytes(diskBytes:)` MUST return
-  `Int(Double(diskBytes) * residentOverheadMultiplier)` (lines 52-54).
+  `Int(Double(diskBytes) * residentOverheadMultiplier)`.
 - **default-thresholds**: `ModelFitPolicy.defaultWarnPct` MUST equal `25` and
-  `ModelFitPolicy.defaultBlockPct` MUST equal `50` (lines 22-23).
+  `ModelFitPolicy.defaultBlockPct` MUST equal `50`.
 - **threshold-setting-keys**: `ModelFitPolicy.warnPctKey` MUST equal the
   literal string `ai_guard_warn_pct` and `ModelFitPolicy.blockPctKey` MUST
-  equal the literal string `ai_guard_block_pct` (lines 24-25).
+  equal the literal string `ai_guard_block_pct`.
 - **tier-unknown-size**: `tier(diskBytes:physicalRAM:warnPct:blockPct:)` MUST
-  return `nil` when `diskBytes` is `nil` (line 62).
-- **tier-zero-ram**: `tier` MUST return `nil` when `physicalRAM` is `0` (line
-  62).
+  return `nil` when `diskBytes` is `nil`.
+- **tier-zero-ram**: `tier` MUST return `nil` when `physicalRAM` is `0`.
 - **tier-classification**: When `diskBytes` is non-nil and `physicalRAM` is
   greater than `0`, `tier` MUST compute `pct` as
   `estimatedBytes(diskBytes:) / physicalRAM * 100` and MUST return `.block`
   when `pct >= blockPct`, `.warn` when `pct >= warnPct` and `pct < blockPct`,
-  and `.ok` when `pct < warnPct` (lines 63-66).
+  and `.ok` when `pct < warnPct`.
 - **tier-threshold-defaults**: `tier`, `fitInfo`, and `pickerLabel` MUST each
   default an omitted `warnPct` to `defaultWarnPct` and an omitted `blockPct`
-  to `defaultBlockPct` (lines 60, 110, 135).
+  to `defaultBlockPct`.
 - **pressure-verdict-normal**: `pressureVerdict(_:)` MUST return `.allow`
-  when `pressure` is `.normal` (line 73).
+  when `pressure` is `.normal`.
 - **pressure-verdict-elevated**: `pressureVerdict(_:)` MUST return
   `.deferred(reason:)` with a reason string of exactly the form
   `memory pressure is <pressure.rawValue>; deferring local inference` when
-  `pressure` is `.warning` or `.critical` (line 74).
+  `pressure` is `.warning` or `.critical`.
 - **verdict-pressure-precedence**: `verdict(model:diskBytes:physicalRAM:warnPct:blockPct:pressure:)`
   MUST evaluate `pressureVerdict(pressure)` first and, whenever that result
   is `.deferred`, MUST return that exact `.deferred(reason:)` result without
   evaluating the size tier at all — regardless of `diskBytes`, `model`, or
-  the thresholds (lines 85-87).
+  the thresholds.
 - **verdict-required-thresholds**: `verdict`'s `warnPct` and `blockPct`
   parameters MUST carry no default value; the caller MUST supply both
-  explicitly (lines 82-83) — unlike `tier`, `fitInfo`, and `pickerLabel`.
+  explicitly — unlike `tier`, `fitInfo`, and `pickerLabel`.
 - **verdict-allow-non-block-tier**: Under `.normal` pressure, `verdict` MUST
   return `.allow` whenever the computed tier is `.ok`, `.warn`, or `nil`
   (unknown size) — only a `.block` tier with a known `diskBytes` yields a
-  refusal (line 90).
+  refusal.
 - **verdict-block-reason-format**: When the computed tier is `.block` and
   `diskBytes` is known, `verdict` MUST return `.block(reason:)` with a
   reason string of exactly the form
   `<model> needs <footprintDescription> est.; block threshold is <blockPct>% of <gbString(physicalRAM)>`,
   where the embedded footprint description is computed from the estimated
-  (not on-disk) resident bytes (lines 90-94).
+  (not on-disk) resident bytes.
 - **footprint-description-format**: `footprintDescription(estimatedBytes:physicalRAM:)`
   MUST return a string of exactly the form
-  `~<gbString(estimatedBytes)> (~<ramPct(estimatedBytes, physicalRAM)>% of RAM)`
-  (lines 100-102).
+  `~<gbString(estimatedBytes)> (~<ramPct(estimatedBytes, physicalRAM)>% of RAM)`.
 - **fit-info-unknown**: `fitInfo(diskBytes:physicalRAM:warnPct:blockPct:)`
   MUST return `nil` when `diskBytes` is `nil` or when
-  `tier(diskBytes:physicalRAM:warnPct:blockPct:)` returns `nil` (lines
-  112-115).
+  `tier(diskBytes:physicalRAM:warnPct:blockPct:)` returns `nil`.
 - **fit-info-ok-text**: For an `.ok` tier, `fitInfo` MUST return
   `FitInfo(text: "<gbString(diskBytes)> (~<ramPct(estimatedBytes, physicalRAM)>% of RAM)", tier: .ok)`,
-  displaying the on-disk size rather than the estimated resident size (lines
-  118-120).
+  displaying the on-disk size rather than the estimated resident size.
 - **fit-info-warn-text**: For a `.warn` tier, `fitInfo` MUST return
-  `FitInfo(text: "<gbString(diskBytes)> ⚠ large: ~<ramPct(estimatedBytes, physicalRAM)>% of RAM", tier: .warn)`
-  (lines 121-123).
+  `FitInfo(text: "<gbString(diskBytes)> ⚠ large: ~<ramPct(estimatedBytes, physicalRAM)>% of RAM", tier: .warn)`.
 - **fit-info-block-text**: For a `.block` tier, `fitInfo` MUST return
   `FitInfo(text: "<gbString(diskBytes)> — won't run: exceeds memory budget", tier: .block)`;
   unlike the `.ok`/`.warn` text, the block text MUST NOT include a
-  RAM-percentage figure (lines 124-126).
+  RAM-percentage figure.
 - **picker-label-unknown**: `pickerLabel(model:diskBytes:physicalRAM:warnPct:blockPct:)`
   MUST return `model` unchanged when
-  `fitInfo(diskBytes:physicalRAM:warnPct:blockPct:)` returns `nil` (lines
-  137-139).
+  `fitInfo(diskBytes:physicalRAM:warnPct:blockPct:)` returns `nil`.
 - **picker-label-known**: `pickerLabel` MUST return the exact string
-  `<model> — <fitInfo.text>` when `fitInfo` returns a non-nil value (line
-  140).
+  `<model> — <fitInfo.text>` when `fitInfo` returns a non-nil value.
 - **gb-string-format**: `gbString(_:)` MUST format `bytes` as `<value> GB`
   with the value rendered to exactly one decimal place at
   `Double(bytes) / 1_000_000_000`, using the `en_US_POSIX` locale regardless
-  of the caller's current locale (lines 143-146).
+  of the caller's current locale.
 - **ram-pct-computation**: `ramPct(_:of:)` MUST return
   `Int((Double(bytes) / Double(physicalRAM) * 100).rounded())` — the nearest
   whole percentage, rounded half-away-from-zero per Swift's
-  `Double.rounded()` default — when `physicalRAM` is non-zero (lines
-  148-150).
+  `Double.rounded()` default — when `physicalRAM` is non-zero.
 - **ram-pct-zero-ram**: `ramPct(_:of:)` MUST return `0` when `physicalRAM`
-  is `0` (line 149).
+  is `0`.
 
 ## Appearance
 
@@ -196,7 +186,7 @@ component.
 | model-fit-policy-015 | picker-label-unknown | `pickerLabel(model: "mystery", diskBytes: nil, physicalRAM: 64_000_000_000)` (`pickerLabels`). | Returns exactly `"mystery"`. |
 | model-fit-policy-016 | estimated-bytes, resident-overhead-multiplier | `estimatedBytes(diskBytes: 51_000_000_000)`. | Returns `61_200_000_000` (`51_000_000_000 * 1.2`). |
 | model-fit-policy-017 | ram-pct-zero-ram | `ramPct(1_000_000_000, of: 0)`. | Returns `0`. |
-| model-fit-policy-018 | default-thresholds, threshold-setting-keys | Read `ModelFitPolicy.defaultWarnPct`, `defaultBlockPct`, `warnPctKey`, `blockPctKey` directly (lines 22-25). | `25`, `50`, `"ai_guard_warn_pct"`, `"ai_guard_block_pct"` respectively. |
+| model-fit-policy-018 | default-thresholds, threshold-setting-keys | Read `ModelFitPolicy.defaultWarnPct`, `defaultBlockPct`, `warnPctKey`, `blockPctKey` directly. | `25`, `50`, `"ai_guard_warn_pct"`, `"ai_guard_block_pct"` respectively. |
 | model-fit-policy-019 | memory-pressure-cases, tier-cases, verdict-cases, fit-info-shape | Construct `MemoryPressureLevel.warning`, `ModelFitPolicy.Tier.warn`, `ModelFitPolicy.Verdict.block(reason: "x")`, and `ModelFitPolicy.FitInfo(text: "t", tier: .ok)` and compare each for equality with itself. | Each equals itself under `==` (all four types conform to `Equatable`); each also compiles when passed across a `Task { ... }` boundary (all four conform to `Sendable`). |
 | model-fit-policy-020 | namespace-isolation | Call `ModelFitPolicy.tier(...)` synchronously from a `@MainActor` context and, separately, from inside a non-`AIPluginKit` `actor`'s method, with no `await`. | Both call sites compile and run without an `await`, because `ModelFitPolicy` carries no isolation of its own. |
 
@@ -208,12 +198,11 @@ component.
   `verdict-allow-non-block-tier`). An empty `model` string (`""`) is not
   validated or rejected anywhere in the source: `verdict` and `pickerLabel`
   MUST interpolate it verbatim into the reason string or label exactly as
-  any other string, since neither function branches on it (MUST, lines
-  82-95, 133-141).
+  any other string, since neither function branches on it (MUST).
 - **Boundary values**: A `pct` exactly equal to `warnPct` MUST classify as
   `.warn`, not `.ok`, and a `pct` exactly equal to `blockPct` MUST classify
   as `.block`, not `.warn`, because `tier` compares with `>=`, not `>` (MUST,
-  see `tier-classification`, lines 64-65). `physicalRAM == 0` MUST yield a
+  see `tier-classification`). `physicalRAM == 0` MUST yield a
   `nil` tier (so `verdict` fails open) and MUST make `ramPct` return `0`,
   regardless of `diskBytes` (MUST, see `tier-zero-ram`, `ram-pct-zero-ram`).
   A negative `diskBytes`, or a negative or over-100 `warnPct`/`blockPct`, is
@@ -224,7 +213,7 @@ component.
   validation branch exists in the source to enforce or violate).
 - **Concurrent access**: Not applicable in the mutex/serialization sense —
   `ModelFitPolicy` declares no actor, lock, or shared mutable state of any
-  kind (MUST, see `namespace-isolation`, lines 13-152); every function reads
+  kind (MUST, see `namespace-isolation`); every function reads
   only its parameters and returns a freshly computed value, so any number of
   concurrent callers on any number of threads or tasks are inherently
   race-free and require no synchronization.
@@ -237,7 +226,7 @@ component.
   document).
 - **Offline or disconnected state**: Not applicable — `ModelFitPolicy.swift`
   makes no network call and holds no notion of connectivity (traced to the
-  single `import Foundation` at line 1 and the absence of any networking API
+  single `import Foundation` and the absence of any networking API
   in the file). A caller's own unreachable local model server surfaces to
   `ModelFitPolicy` only as `diskBytes == nil`, identical to any other
   unknown-size case above.
@@ -301,8 +290,7 @@ event-tracking call.
 
 Not applicable: `ModelFitPolicy.swift` handles only a model name string and
 numeric memory figures (bytes, percentages) — no credential, token, or
-personal data — and performs no storage or transmission of its own (lines
-81-95, 108-128).
+personal data — and performs no storage or transmission of its own.
 
 ## Logging
 
@@ -389,7 +377,7 @@ model whose estimated footprint is exactly `warnPct`% of RAM is `.warn`, not
 `.ok`, and exactly `blockPct`% is `.block`, not `.warn`.
 **Rationale**: This is the plain reading of
 `if pct >= Double(blockPct) { return .block }` followed by
-`if pct >= Double(warnPct) { return .warn }` (lines 64-65); no comment
+`if pct >= Double(warnPct) { return .warn }`; no comment
 explains the choice, but it means the threshold value itself is the first
 percentage point treated as the more severe tier — the recipe records this
 as the normative `tier-classification` boundary rather than leaving a reader
@@ -423,3 +411,4 @@ Notes: separation-of-concerns passes because the policy is kept at toolkit level
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.1 | 2026-09-24 | Mike Fullerton | Compliance section rewritten as linked checks against the compliance catalog |
+| 1.0.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

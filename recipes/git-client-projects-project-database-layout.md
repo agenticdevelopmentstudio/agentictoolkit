@@ -3,7 +3,7 @@ id: ded9b397-958d-437d-8235-48ef85ae7386
 title: ProjectDatabase+Layout
 domain: agentictoolkit://recipes/git-client-projects-project-database-layout
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -45,69 +45,69 @@ approved-date: ''
 
 `ProjectDatabase+Layout.swift` is a `ProjectDatabase` extension that persists everything a project window's tab-and-pane arrangement needs to survive a relaunch: the tabs docked to each edge, the split tree of panes inside each tab, per-pane UI state (sizes, expansion, selection — whatever a caller stores under a string key), and the extra directories a project's file browser shows beyond the repository root. `ProjectDatabase` itself (`ProjectDatabase.swift`) owns the SQLite connection, the schema migrations that create the five tables this extension reads and writes (`project_tabs`, `layout_nodes`, `project_state`, `pane_state`, `project_directories`), and the low-level `execute`/`executeBound`/`forEachRow` helpers this extension calls; this extension adds no schema and no connection state of its own — it is purely a set of methods layered onto the base class.
 
-Every row this extension touches is scoped to one `repo_id`, matching a `git_repo.id` row owned by `ProjectDatabase`'s core methods; nothing here reads or writes a row for any `repoID` other than the one a caller passes in. `ProjectDatabase` is a `public final class` with no `Sendable` conformance and no `actor`/`@MainActor` isolation (`ProjectDatabase.swift` line 24), so this extension's methods carry no concurrency guarantee of their own — they run wherever the caller runs, synchronously, against one shared SQLite connection.
+Every row this extension touches is scoped to one `repo_id`, matching a `git_repo.id` row owned by `ProjectDatabase`'s core methods; nothing here reads or writes a row for any `repoID` other than the one a caller passes in. `ProjectDatabase` is a `public final class` with no `Sendable` conformance and no `actor`/`@MainActor` isolation (`ProjectDatabase.swift`), so this extension's methods carry no concurrency guarantee of their own — they run wherever the caller runs, synchronously, against one shared SQLite connection.
 
 ## Behavioral Requirements
 
 ### Reading tabs
 
-- **load-tabs-empty-default** — `loadTabs(repoID:)` MUST return `(tabs: [], activeTabID: nil, enabledEdges: [.top])` for a `repoID` with no `project_tabs` or `project_state` rows (lines 15, 63–64, 76).
-- **load-tabs-order** — MUST return tabs ordered ascending by the `project_tabs.position` column, via `ORDER BY position` in the query (line 19).
-- **load-tabs-malformed-row-dropped** — MUST silently exclude a `project_tabs` row from the returned array when its `id` or `root_node_id` column fails `UUID(uuidString:)` parsing (lines 29–33, `guard ... else { return }` inside the row callback).
-- **load-tabs-corrupt-row-signal**: NEEDS REVIEW: Not implemented in source. Neither `loadTabs` nor `fetchNodeRows` throws, logs, or otherwise signals when a row is dropped for failing UUID parsing (lines 29–33, 252); a caller has no way to detect that its persisted arrangement came back incomplete. Resolving this needs either a design decision that this can only happen from manual file tampering (this extension is the schema's only writer) or an error/signal path added to `loadTabs`.
-- **load-tabs-edge-fallback** — MUST default a tab's `edge` to `.top` when the stored `edge` column is `NULL` or fails `Edge(rawValue:)` (line 34).
-- **load-tabs-title-fallback** — MUST default a tab's `title` to `""` when the stored `title` column is `NULL` (line 39).
-- **load-tabs-group-id-fallback** — MUST fall back to the tab's own `id` for `groupID` when the stored `group_id` column is `NULL` or fails UUID parsing, via `TabRecord.init`'s `groupID ?? id` default (`LayoutNode.swift` lines 229–239; called from line 37).
-- **load-tabs-working-directory-empty-to-nil** — MUST map an empty-string `working_directory` column to `nil` rather than to a URL, so an unset working directory round-trips as unset rather than as the process's current directory (lines 42–52).
-- **load-tabs-working-directory-is-directory-url** — MUST construct any non-empty `working_directory` value with `URL(fileURLWithPath:isDirectory: true)`, always passing `isDirectory: true` regardless of whether the directory currently exists on disk (lines 50–52).
-- **load-tabs-tree-reconstruction** — MUST reconstruct each tab's `root` `LayoutNode` tree from `layout_nodes` rows via `buildTree(id:rows:)`, resolving a `split` row into exactly two ordered children by `position` (line 40, 269–301).
-- **load-tabs-active-tab-default** — MUST read `active_tab_id` and `enabled_edges` from the single `project_state` row for `repoID`, or fall back to `(nil, [.top])` when no such row exists (lines 56–65, 76).
-- **load-tabs-active-tab-consistency**: `loadTabs` reads `project_tabs`/`layout_nodes` and `project_state` as two separate, non-transactional statements (lines 16–26, 56–65), and never re-validates the returned `activeTabID` against the returned `tabs`, unlike `saveTabs`'s `validActive` check on write (line 157). `ProjectDatabase` is a non-`Sendable` `final class` and `loadTabs` is synchronous, so no `saveTabs` on the same instance can run between the two reads; a commit through a different SQLite connection to the same file between them can make the returned `activeTabID` name no tab in `tabs`.
-- **load-tabs-enabled-edges-fallback** — MUST discard a stored `enabled_edges` value that is empty, or that parses to zero valid `Edge` entries, and keep the default `[.top]` rather than return an empty array (lines 67–74).
+- **load-tabs-empty-default** — `loadTabs(repoID:)` MUST return `(tabs: [], activeTabID: nil, enabledEdges: [.top])` for a `repoID` with no `project_tabs` or `project_state` rows.
+- **load-tabs-order** — MUST return tabs ordered ascending by the `project_tabs.position` column, via `ORDER BY position` in the query.
+- **load-tabs-malformed-row-dropped** — MUST silently exclude a `project_tabs` row from the returned array when its `id` or `root_node_id` column fails `UUID(uuidString:)` parsing (`guard ... else { return }` inside the row callback).
+- **load-tabs-corrupt-row-signal**: NEEDS REVIEW: Not implemented in source. Neither `loadTabs` nor `fetchNodeRows` throws, logs, or otherwise signals when a row is dropped for failing UUID parsing; a caller has no way to detect that its persisted arrangement came back incomplete. Resolving this needs either a design decision that this can only happen from manual file tampering (this extension is the schema's only writer) or an error/signal path added to `loadTabs`.
+- **load-tabs-edge-fallback** — MUST default a tab's `edge` to `.top` when the stored `edge` column is `NULL` or fails `Edge(rawValue:)`.
+- **load-tabs-title-fallback** — MUST default a tab's `title` to `""` when the stored `title` column is `NULL`.
+- **load-tabs-group-id-fallback** — MUST fall back to the tab's own `id` for `groupID` when the stored `group_id` column is `NULL` or fails UUID parsing, via `TabRecord.init`'s `groupID ?? id` default (`LayoutNode.swift`; called from the tab loader).
+- **load-tabs-working-directory-empty-to-nil** — MUST map an empty-string `working_directory` column to `nil` rather than to a URL, so an unset working directory round-trips as unset rather than as the process's current directory.
+- **load-tabs-working-directory-is-directory-url** — MUST construct any non-empty `working_directory` value with `URL(fileURLWithPath:isDirectory: true)`, always passing `isDirectory: true` regardless of whether the directory currently exists on disk.
+- **load-tabs-tree-reconstruction** — MUST reconstruct each tab's `root` `LayoutNode` tree from `layout_nodes` rows via `buildTree(id:rows:)`, resolving a `split` row into exactly two ordered children by `position`.
+- **load-tabs-active-tab-default** — MUST read `active_tab_id` and `enabled_edges` from the single `project_state` row for `repoID`, or fall back to `(nil, [.top])` when no such row exists.
+- **load-tabs-active-tab-consistency**: `loadTabs` reads `project_tabs`/`layout_nodes` and `project_state` as two separate, non-transactional statements, and never re-validates the returned `activeTabID` against the returned `tabs`, unlike `saveTabs`'s `validActive` check on write. `ProjectDatabase` is a non-`Sendable` `final class` and `loadTabs` is synchronous, so no `saveTabs` on the same instance can run between the two reads; a commit through a different SQLite connection to the same file between them can make the returned `activeTabID` name no tab in `tabs`.
+- **load-tabs-enabled-edges-fallback** — MUST discard a stored `enabled_edges` value that is empty, or that parses to zero valid `Edge` entries, and keep the default `[.top]` rather than return an empty array.
 
 ### Writing tabs
 
-- **save-tabs-whole-replace** — `saveTabs(_:activeTabID:enabledEdges:repoID:)` MUST replace the entire arrangement for `repoID`: it deletes every existing `project_tabs`, `layout_nodes`, and `project_state` row for `repoID` before reinserting from the `tabs` argument (lines 88, 95–103, 166).
-- **save-tabs-atomic-rollback** — MUST wrap the whole replace in `BEGIN IMMEDIATE TRANSACTION` / `COMMIT`, and MUST roll back and rethrow the original error unchanged if any step fails, leaving the previously persisted arrangement intact (lines 88, 166–170).
-- **save-tabs-default-enabled-edges** — `enabledEdges` MUST default to `[.top]` when the caller omits it (line 85).
-- **save-tabs-tab-position** — MUST persist each tab's `project_tabs.position` as its index in the `tabs` array argument, in that order (lines 105, 115).
-- **save-tabs-tree-insert-order** — MUST insert each tab's root node, and recursively its children, via `insertNode`, assigning a split's two children `position` 0 and 1 in `first`/`second` order and `parent_id` equal to the split's own id (line 106, 219–222).
-- **save-tabs-active-tab-validated** — MUST validate `activeTabID` against the `tabs` argument and persist `NULL` for `project_state.active_tab_id` when it names no tab in `tabs`, rather than persist a reference to a tab that was not saved (lines 157, 163).
-- **save-tabs-state-row-always-written** — MUST always insert exactly one `project_state` row for `repoID`, even when the validated active tab is `nil`, so `enabledEdges` still persists (lines 155–165).
-- **save-tabs-enabled-edges-canonical-order** — MUST persist `enabledEdges` as a comma-joined string in `Edge.allCases`'s fixed order (top, right, bottom, left), filtered to only the edges present in the caller's argument — not in the argument's own order (line 158).
-- **save-tabs-pane-state-orphan-sweep** — MUST delete every `pane_state` row for `repoID` whose `node_id` is absent from the just-rewritten `layout_nodes` for that `repoID` (lines 129–136).
-- **save-tabs-pane-state-content-change-sweep** — MUST additionally delete a `pane_state` row for any `node_id` whose leaf `contentType` differs between the previous arrangement and the new one, even when that node id is still present in the new `layout_nodes` (lines 147–153).
-- **insert-node-column-nulls-by-kind** — `insertNode` MUST write `NULL` for `orientation` on a leaf row and `NULL` for `content_type`/`pane_label` on a split row (lines 205–206, 209).
+- **save-tabs-whole-replace** — `saveTabs(_:activeTabID:enabledEdges:repoID:)` MUST replace the entire arrangement for `repoID`: it deletes every existing `project_tabs`, `layout_nodes`, and `project_state` row for `repoID` before reinserting from the `tabs` argument.
+- **save-tabs-atomic-rollback** — MUST wrap the whole replace in `BEGIN IMMEDIATE TRANSACTION` / `COMMIT`, and MUST roll back and rethrow the original error unchanged if any step fails, leaving the previously persisted arrangement intact.
+- **save-tabs-default-enabled-edges** — `enabledEdges` MUST default to `[.top]` when the caller omits it.
+- **save-tabs-tab-position** — MUST persist each tab's `project_tabs.position` as its index in the `tabs` array argument, in that order.
+- **save-tabs-tree-insert-order** — MUST insert each tab's root node, and recursively its children, via `insertNode`, assigning a split's two children `position` 0 and 1 in `first`/`second` order and `parent_id` equal to the split's own id.
+- **save-tabs-active-tab-validated** — MUST validate `activeTabID` against the `tabs` argument and persist `NULL` for `project_state.active_tab_id` when it names no tab in `tabs`, rather than persist a reference to a tab that was not saved.
+- **save-tabs-state-row-always-written** — MUST always insert exactly one `project_state` row for `repoID`, even when the validated active tab is `nil`, so `enabledEdges` still persists.
+- **save-tabs-enabled-edges-canonical-order** — MUST persist `enabledEdges` as a comma-joined string in `Edge.allCases`'s fixed order (top, right, bottom, left), filtered to only the edges present in the caller's argument — not in the argument's own order.
+- **save-tabs-pane-state-orphan-sweep** — MUST delete every `pane_state` row for `repoID` whose `node_id` is absent from the just-rewritten `layout_nodes` for that `repoID`.
+- **save-tabs-pane-state-content-change-sweep** — MUST additionally delete a `pane_state` row for any `node_id` whose leaf `contentType` differs between the previous arrangement and the new one, even when that node id is still present in the new `layout_nodes`.
+- **insert-node-column-nulls-by-kind** — `insertNode` MUST write `NULL` for `orientation` on a leaf row and `NULL` for `content_type`/`pane_label` on a split row.
 
 ### Rebuilding the tree
 
-- **build-tree-missing-node-error** — `buildTree(id:rows:)` MUST throw `ProjectDatabaseError.invalidSchema` when a referenced node id — the root, or either split child — is absent from the fetched rows (lines 270–271).
-- **build-tree-split-child-count** — MUST throw `ProjectDatabaseError.invalidSchema` when a row whose `kind` is `split` has any number of children other than exactly 2 (lines 285–287).
-- **build-tree-unknown-kind-error** — MUST throw `ProjectDatabaseError.invalidSchema` when a row's `kind` column is neither `"leaf"` nor `"split"` (lines 298–299).
-- **build-tree-orientation-fallback** — MUST default a split's orientation to `.horizontal` when the stored `orientation` value is `NULL` or fails `ComposableTabsAxis(rawValue:)` (line 288).
-- **build-tree-content-type-fallback** — MUST default a leaf's `contentType` to `ComposableTabsViewID.placeholder` when the stored `content_type` column is `NULL` (line 275).
-- **fetch-node-rows-malformed-id-dropped** — `fetchNodeRows(repoID:)` MUST silently exclude any `layout_nodes` row whose `id` column fails `UUID(uuidString:)` parsing from the returned dictionary (line 252); this is the same class of gap as **load-tabs-corrupt-row-signal** above, one level lower.
+- **build-tree-missing-node-error** — `buildTree(id:rows:)` MUST throw `ProjectDatabaseError.invalidSchema` when a referenced node id — the root, or either split child — is absent from the fetched rows.
+- **build-tree-split-child-count** — MUST throw `ProjectDatabaseError.invalidSchema` when a row whose `kind` is `split` has any number of children other than exactly 2.
+- **build-tree-unknown-kind-error** — MUST throw `ProjectDatabaseError.invalidSchema` when a row's `kind` column is neither `"leaf"` nor `"split"`.
+- **build-tree-orientation-fallback** — MUST default a split's orientation to `.horizontal` when the stored `orientation` value is `NULL` or fails `ComposableTabsAxis(rawValue:)`.
+- **build-tree-content-type-fallback** — MUST default a leaf's `contentType` to `ComposableTabsViewID.placeholder` when the stored `content_type` column is `NULL`.
+- **fetch-node-rows-malformed-id-dropped** — `fetchNodeRows(repoID:)` MUST silently exclude any `layout_nodes` row whose `id` column fails `UUID(uuidString:)` parsing from the returned dictionary; this is the same class of gap as **load-tabs-corrupt-row-signal** above, one level lower.
 
 ### Pane state
 
-- **pane-state-read** — `paneState(repoID:nodeID:key:)` MUST return the stored `value` for the exact `(repoID, nodeID, key)` triple, or `nil` when no such row exists (lines 311–319).
-- **pane-state-write-upsert** — `setPaneState(repoID:nodeID:key:value:)` with a non-nil `value` MUST upsert via `INSERT ... ON CONFLICT(repo_id, node_id, key) DO UPDATE SET value = excluded.value`, so writing the same triple twice replaces the row rather than duplicating it (lines 333–341).
-- **pane-state-write-nil-deletes** — `setPaneState` with `value: nil` MUST delete the row rather than persist an empty string (lines 323–331).
-- **prune-nested-pane-state-scope** — `pruneNestedPaneState(repoID:nodeID:keeping:)` MUST delete only `pane_state` rows under `(repoID, nodeID)` whose `key` embeds at least one dot-separated UUID component absent from `liveIDs`, and MUST leave untouched any key with no UUID component (lines 362–393).
-- **prune-nested-pane-state-read-then-delete** — MUST fully exhaust the `SELECT` over candidate rows before issuing any `DELETE`, matching its own comment that deleting from a table while stepping a cursor over it is undefined in SQLite (lines 376–384).
+- **pane-state-read** — `paneState(repoID:nodeID:key:)` MUST return the stored `value` for the exact `(repoID, nodeID, key)` triple, or `nil` when no such row exists.
+- **pane-state-write-upsert** — `setPaneState(repoID:nodeID:key:value:)` with a non-nil `value` MUST upsert via `INSERT ... ON CONFLICT(repo_id, node_id, key) DO UPDATE SET value = excluded.value`, so writing the same triple twice replaces the row rather than duplicating it.
+- **pane-state-write-nil-deletes** — `setPaneState` with `value: nil` MUST delete the row rather than persist an empty string.
+- **prune-nested-pane-state-scope** — `pruneNestedPaneState(repoID:nodeID:keeping:)` MUST delete only `pane_state` rows under `(repoID, nodeID)` whose `key` embeds at least one dot-separated UUID component absent from `liveIDs`, and MUST leave untouched any key with no UUID component.
+- **prune-nested-pane-state-read-then-delete** — MUST fully exhaust the `SELECT` over candidate rows before issuing any `DELETE`, matching its own comment that deleting from a table while stepping a cursor over it is undefined in SQLite.
 
 ### Project directories
 
-- **project-directories-order** — `loadProjectDirectories(repoID:)` MUST return paths ordered by the stored `position` column (line 405).
-- **project-directories-empty-means-none** — an empty `project_directories` result MUST be treated as "this project has no extra browsed directories," not as "this project has never been saved" (lines 402–405).
-- **project-directories-whole-replace** — `saveProjectDirectories(_:repoID:)` MUST delete every existing `project_directories` row for `repoID` and reinsert `paths` at their array index as `position`, inside one transaction that rolls back and rethrows on failure (lines 418–437).
+- **project-directories-order** — `loadProjectDirectories(repoID:)` MUST return paths ordered by the stored `position` column.
+- **project-directories-empty-means-none** — an empty `project_directories` result MUST be treated as "this project has no extra browsed directories," not as "this project has never been saved".
+- **project-directories-whole-replace** — `saveProjectDirectories(_:repoID:)` MUST delete every existing `project_directories` row for `repoID` and reinsert `paths` at their array index as `position`, inside one transaction that rolls back and rethrows on failure.
 
 ### Concurrency and lifetime
 
-- **non-sendable-isolation** — `ProjectDatabase` MUST be treated as non-`Sendable`: it is declared `public final class ProjectDatabase` with no `Sendable` conformance, no `actor` keyword, and no `@MainActor` isolation anywhere in `ProjectDatabase.swift` (line 24); every method in this extension inherits that lack of isolation, so a caller MUST NOT share one instance across concurrency domains without its own synchronization.
-- **error-type-non-sendable** — `ProjectDatabaseError` MUST likewise be treated as non-`Sendable`: it is declared `public enum ProjectDatabaseError: Error` with no `Sendable` conformance (`ProjectDatabase.swift` line 6).
-- **write-serialized-via-busy-timeout** — a writer contending for the same database file MUST wait up to 5000ms (`sqlite3_busy_timeout(database, 5_000)`, `ProjectDatabase.swift` line 92) before the underlying call surfaces `SQLITE_BUSY` as `ProjectDatabaseError.executionFailed`/`.prepareFailed` from `execute`/`executeBound`; this extension does not retry beyond that timeout.
-- **cascade-delete-on-repo-removal** — deleting a `git_repo` row via `ProjectDatabase.delete(id:)` (`ProjectDatabase.swift` lines 404–408) MUST cascade-delete every `project_tabs`, `layout_nodes`, `project_state`, `pane_state`, and `project_directories` row for that `repoID`, via the `ON DELETE CASCADE` foreign keys declared on each table's `repo_id` column (`ProjectDatabase.swift` lines 210, 225, 238, 246, 307). `pane_state.node_id` (line 308) carries no foreign key of its own — which is why **save-tabs-pane-state-orphan-sweep** and **prune-nested-pane-state-scope** exist as explicit application-level sweeps rather than relying on cascade.
+- **non-sendable-isolation** — `ProjectDatabase` MUST be treated as non-`Sendable`: it is declared `public final class ProjectDatabase` with no `Sendable` conformance, no `actor` keyword, and no `@MainActor` isolation anywhere in `ProjectDatabase.swift`; every method in this extension inherits that lack of isolation, so a caller MUST NOT share one instance across concurrency domains without its own synchronization.
+- **error-type-non-sendable** — `ProjectDatabaseError` MUST likewise be treated as non-`Sendable`: it is declared `public enum ProjectDatabaseError: Error` with no `Sendable` conformance (`ProjectDatabase.swift`).
+- **write-serialized-via-busy-timeout** — a writer contending for the same database file MUST wait up to 5000ms (`sqlite3_busy_timeout(database, 5_000)`, `ProjectDatabase.swift`) before the underlying call surfaces `SQLITE_BUSY` as `ProjectDatabaseError.executionFailed`/`.prepareFailed` from `execute`/`executeBound`; this extension does not retry beyond that timeout.
+- **cascade-delete-on-repo-removal** — deleting a `git_repo` row via `ProjectDatabase.delete(id:)` (`ProjectDatabase.swift`) MUST cascade-delete every `project_tabs`, `layout_nodes`, `project_state`, `pane_state`, and `project_directories` row for that `repoID`, via the `ON DELETE CASCADE` foreign keys declared on each table's `repo_id` column (`ProjectDatabase.swift`). `pane_state.node_id` carries no foreign key of its own — which is why **save-tabs-pane-state-orphan-sweep** and **prune-nested-pane-state-scope** exist as explicit application-level sweeps rather than relying on cascade.
 
 ## Appearance
 
@@ -137,8 +137,8 @@ Not applicable: this component has no UI surface to make accessible.
 
 ## Edge Cases
 
-- **Empty/missing input**: `repoID` with zero rows → `loadTabs`'s documented default tuple (**load-tabs-empty-default**); `saveTabs` with an empty `tabs` array → every existing row for `repoID` is deleted and `project_state.active_tab_id` is written `NULL` (**save-tabs-state-row-always-written**); `saveProjectDirectories([])` → the table ends empty for `repoID` (**project-directories-whole-replace**); `setPaneState(..., value: nil)` on a key with no existing row is a no-op delete, not an error (line 324's `DELETE` matches zero rows silently).
-- **Distinguishing "empty" from "absent"**: `pane_state.value` is `TEXT NOT NULL`, so a caller can persist the empty string `""` as a real value, distinct from `paneState` returning `nil` for a row that does not exist at all (lines 311–319, 322–331).
+- **Empty/missing input**: `repoID` with zero rows → `loadTabs`'s documented default tuple (**load-tabs-empty-default**); `saveTabs` with an empty `tabs` array → every existing row for `repoID` is deleted and `project_state.active_tab_id` is written `NULL` (**save-tabs-state-row-always-written**); `saveProjectDirectories([])` → the table ends empty for `repoID` (**project-directories-whole-replace**); `setPaneState(..., value: nil)` on a key with no existing row is a no-op delete, not an error (the `DELETE` matches zero rows silently).
+- **Distinguishing "empty" from "absent"**: `pane_state.value` is `TEXT NOT NULL`, so a caller can persist the empty string `""` as a real value, distinct from `paneState` returning `nil` for a row that does not exist at all.
 - **Malformed persisted data**: a `project_tabs`/`layout_nodes` row with an unparseable UUID is dropped rather than surfaced (**load-tabs-malformed-row-dropped**, **fetch-node-rows-malformed-id-dropped**, both tied to the **load-tabs-corrupt-row-signal** gap); a `layout_nodes` row with a `kind` outside `{"leaf","split"}`, a `split` row with other than exactly two children, or a tree with a dangling child reference instead throws `ProjectDatabaseError.invalidSchema` rather than being silently dropped (**build-tree-unknown-kind-error**, **build-tree-split-child-count**, **build-tree-missing-node-error**) — this file has no test coverage exercising any of those three throw paths (confirmed by grep over `ProjectDatabaseTests.swift`/`ProjectDatabaseLayoutTests.swift`/`ProjectDatabaseWorkingDirectoryTests.swift` for `invalidSchema`, `buildTree`, `prepareFailed`, `executionFailed`, `openFailed`: no matches).
 - **Boundary values**: `Int` tab/node positions are cast to SQLite's `INTEGER` with no range check in this extension — a `tabs` or sibling-child array whose index exceeds what `sqlite3_bind_int` accepts is not guarded here; a `thicknessFraction` of exactly `0.0` is a distinct, valid stored value from `nil` (unsized) per test vector 6.
 - **Concurrent access to one `repoID`**: covered by **load-tabs-active-tab-consistency** above — the same instance cannot interleave a `saveTabs` between `loadTabs`'s two reads, and a commit through another connection is not guarded against; concurrent access to two different `repoID`s is unaffected by each other (test vector 5).
@@ -209,19 +209,19 @@ Not applicable: `ProjectDatabase+Layout.swift` contains no `Logger`, `os.log`, `
   Why: the caller already holds the complete, current arrangement in memory (there is no incremental "move this one tab" entry point), so a diff would duplicate state the caller already reconciled for no benefit.
   Trade-off: every save rewrites every row for `repoID`, even when only one field changed, and any two-statement read racing a save sees a representation that briefly does not exist (**load-tabs-active-tab-consistency**).
 
-- **`pane_state.node_id` carries no foreign key.** The `pane_state` table's `repo_id` cascades from `git_repo`, but its `node_id` column references no other table (`ProjectDatabase.swift` line 308).
+- **`pane_state.node_id` carries no foreign key.** The `pane_state` table's `repo_id` cascades from `git_repo`, but its `node_id` column references no other table (`ProjectDatabase.swift`).
   Why: a pane's node id changes shape across saves — a leaf can be replaced by a different leaf carrying the same visual slot — so a hard foreign key to `layout_nodes.id` would either block a legitimate rewrite or require deleting and reinserting `pane_state` on every save regardless of whether that pane survived.
   Trade-off: orphaned `pane_state` rows are only removed by the application-level sweeps in **save-tabs-pane-state-orphan-sweep** and **prune-nested-pane-state-scope**; a caller that saves tabs through a path other than `saveTabs` (there is none in this extension) could leave orphans behind indefinitely.
 
-- **Content-change sweep beyond id-based orphaning.** `saveTabs` deletes a `pane_state` row when a still-present node id's leaf `contentType` changed, not only when the id itself disappeared (lines 147–153).
+- **Content-change sweep beyond id-based orphaning.** `saveTabs` deletes a `pane_state` row when a still-present node id's leaf `contentType` changed, not only when the id itself disappeared.
   Why: a node id can be reused across a rebuild for a pane that now shows different content (per `LayoutNode.swift`'s `reshaped(toMatch:)` id-reuse contract), and pane state keyed to the old content (e.g. a scroll position for a file that is no longer there) would otherwise silently apply to the new content.
   Trade-off: this requires reading the previous arrangement's leaf content types before the delete, adding a second full tree walk to every `saveTabs` call.
 
-- **`activeTabID` validated on write, not on read.** `saveTabs` drops an `activeTabID` that names no tab in `tabs` to `NULL` before persisting (line 157); `loadTabs` performs no equivalent check on the way out (**load-tabs-active-tab-consistency**).
+- **`activeTabID` validated on write, not on read.** `saveTabs` drops an `activeTabID` that names no tab in `tabs` to `NULL` before persisting; `loadTabs` performs no equivalent check on the way out (**load-tabs-active-tab-consistency**).
   Why: at write time the full, authoritative `tabs` array is right there in the same call; at read time, re-validating would mean either a second query or holding both result sets in a shared transaction, which the current two-statement read does not do.
   Trade-off: the write-side guarantee only holds until the next write from any caller; a read racing a concurrent write is not covered by it, which is exactly the residual gap the marker names.
 
-- **`working_directory` empty string means unset, not "here".** An empty `working_directory` column maps to `nil`, never to a `URL` for the empty path or the current directory (lines 42–52).
+- **`working_directory` empty string means unset, not "here".** An empty `working_directory` column maps to `nil`, never to a `URL` for the empty path or the current directory.
   Why: `TabRecord.workingDirectory == nil` has an existing meaning elsewhere in the type ("use the project directory"); coercing an empty string to a concrete `URL` would silently reassign that meaning to whatever directory the process happened to be running in when the row was read.
   Trade-off: `isDirectory: true` is forced on every non-empty value even when the directory no longer exists on disk, so a moved or deleted working directory round-trips as a URL that fails to resolve rather than as `nil`.
 
@@ -239,3 +239,4 @@ Notes: both `partial` findings above trace to the same underlying property of th
 ## Change History
 
 - 1.0.0 (2026-09-24): Initial recipe, documenting `ProjectDatabase+Layout.swift` as of its current form — tab/tree/pane-state/project-directories persistence, the two open gaps around malformed-row signaling and read-side active-tab consistency, and the schema-migration crash-recovery behavior it inherits from the base `ProjectDatabase`.
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

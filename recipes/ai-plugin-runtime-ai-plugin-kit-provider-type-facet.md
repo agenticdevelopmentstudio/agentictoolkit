@@ -3,11 +3,11 @@ id: 80df89b9-a1d3-4fb5-b9e3-08bafd2720fb
 title: Provider Type Facet
 domain: agentictoolkit://recipes/ai-plugin-runtime-ai-plugin-kit-provider-type-facet
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -78,7 +78,7 @@ Not applicable — this is a bucketing enum, not a visual component.
 | provider-type-facet-004 | matches-empty-selection, matches-membership | `ProviderTypeFacet.matches(type: .apiKey, selected: [])`; `matches(type: .apiKey, selected: [.apiKey, .local])`; `matches(type: .subscription, selected: [.apiKey, .local])` (traced to `ProviderTypeFacetTests.matches`) | Returns `true`, `true`, `false` respectively |
 | provider-type-facet-005 | title-strings, detail-strings | For every facet in `ProviderTypeFacet.allCases` (traced to `ProviderTypeFacetTests.labels`) | `facet.title.isEmpty == false` and `facet.detail.isEmpty == false` for all four cases |
 | provider-type-facet-006 | case-iterable-order, case-set | `ProviderTypeFacet.allCases` (traced to the case declaration order in `ProviderTypeFacet.swift`; no test enumerates order directly) | Returns `[.subscription, .apiKey, .local, .custom]`, in that order |
-| provider-type-facet-007 | rawvalue-initializer, raw-value-identity | `ProviderTypeFacet(rawValue: "apiKey")`; `ProviderTypeFacet(rawValue: "bogus")` (traced to the compiler-synthesized `RawRepresentable` initializer that `ProviderPickerViewController.swift` line 647 calls via `compactMap(ProviderTypeFacet.init(rawValue:))`) | Returns `.apiKey` for `"apiKey"`; returns `nil` for `"bogus"` |
+| provider-type-facet-007 | rawvalue-initializer, raw-value-identity | `ProviderTypeFacet(rawValue: "apiKey")`; `ProviderTypeFacet(rawValue: "bogus")` (traced to the compiler-synthesized `RawRepresentable` initializer that `ProviderPickerViewController.swift` calls via `compactMap(ProviderTypeFacet.init(rawValue:))`) | Returns `.apiKey` for `"apiKey"`; returns `nil` for `"bogus"` |
 | provider-type-facet-008 | config-type-precedence-order, config-type-local-match, config-type-apikey-match | `ProviderTypeFacet(configType: "Local API Key")` (derived directly from the if/else-if order in `ProviderTypeFacet.swift`; not exercised by an existing test) | Returns `.local` — the local rule is checked and matches before the key/token rule is ever reached |
 
 ## Edge Cases
@@ -140,10 +140,10 @@ Not applicable: `ProviderTypeFacet.swift` contains no `os_log`, `Logger`, `print
 
 ## Platform Notes
 
-- **SwiftUI**: not the source, but a straightforward consumer — a SwiftUI Type filter would read `ProviderTypeFacet.allCases` to populate a `Picker`/`Menu`, using `.title` as the label and `.detail` as a subtitle or tooltip, the same data `MultiChoiceFilterButton`'s AppKit consumer already reads at `ProviderPickerViewController.swift` line 108. No `ObservableObject` wrapper is needed since the enum is `Sendable`, `Equatable`, and stateless.
+- **SwiftUI**: not the source, but a straightforward consumer — a SwiftUI Type filter would read `ProviderTypeFacet.allCases` to populate a `Picker`/`Menu`, using `.title` as the label and `.detail` as a subtitle or tooltip, the same data `MultiChoiceFilterButton`'s AppKit consumer already reads at `ProviderPickerViewController.swift`. No `ObservableObject` wrapper is needed since the enum is `Sendable`, `Equatable`, and stateless.
 - **Compose**: a Kotlin port models `ProviderTypeFacet` as an `enum class ProviderTypeFacet(val rawValue: String)` with the same four cases, plus a companion factory (e.g. `fromConfigType(configType: String): ProviderTypeFacet`) that reproduces the four-branch, lowercase, ordered `contains` chain exactly — subscription/oauth/account first, then local, then key/token, else custom. `matches` becomes a companion or top-level function over `Set<ProviderTypeFacet>`, and `CaseIterable.allCases` maps to `ProviderTypeFacet.entries`.
 - **React/Web**: a TypeScript port models the four cases as a string-literal union (`type ProviderTypeFacet = "subscription" | "apiKey" | "local" | "custom"`); `title`/`detail` become `Record<ProviderTypeFacet, string>` lookup tables; `fromConfigType(configType: string)` reproduces the same lowercased, ordered `includes()` chain; `matches` becomes a plain function testing `selected.size === 0 || selected.has(type)` over a `Set`.
-- **AppKit / UIKit**: this is the source, indirectly. `ProviderTypeFacet.swift` itself has no AppKit import, but its only production consumer is `ProviderPickerViewController.swift` (`packages/apple/AgenticToolkit/macOS/Features/AIPlugins/Settings/`): `ProviderPickerRow.type` computes the facet per row from `configType`, `ProviderPickerFilter.filter` narrows rows through `ProviderTypeFacet.matches`, the Type filter button's choices come from `ProviderTypeFacet.allCases.map { .init(id: $0.rawValue, title: $0.title, detail: $0.detail) }` at line 108, and a persisted selection is restored via `Set(typeFilter.selection.compactMap(ProviderTypeFacet.init(rawValue:)))` at line 647. No iOS/UIKit target exists for `AIPluginKit` today — `project.yml` declares the framework `platform: macOS` only.
+- **AppKit / UIKit**: this is the source, indirectly. `ProviderTypeFacet.swift` itself has no AppKit import, but its only production consumer is `ProviderPickerViewController.swift` (`packages/apple/AgenticToolkit/macOS/Features/AIPlugins/Settings/`): `ProviderPickerRow.type` computes the facet per row from `configType`, `ProviderPickerFilter.filter` narrows rows through `ProviderTypeFacet.matches`, the Type filter button's choices come from `ProviderTypeFacet.allCases.map { .init(id: $0.rawValue, title: $0.title, detail: $0.detail) }`, and a persisted selection is restored via `Set(typeFilter.selection.compactMap(ProviderTypeFacet.init(rawValue:)))`. No iOS/UIKit target exists for `AIPluginKit` today — `project.yml` declares the framework `platform: macOS` only.
 - **WinUI 3**: a .NET port models the four cases as `public enum ProviderTypeFacet { Subscription, ApiKey, Local, Custom }` with a `JsonStringEnumConverter` (or an explicit string map) so the wire values stay the lowercase-first `"subscription"`/`"apiKey"`/`"local"`/`"custom"` strings this Swift enum's synthesized `Codable` produces. `Title`/`Detail` become an extension method or a `switch` expression over the enum returning the same eight literal strings. `FromConfigType(string configType)` reproduces the exact four-branch, lowercase-then-`Contains` chain in the same fixed order (config-type-precedence-order); because `string.Contains` is ordinal by default, the port MUST call `.ToLowerInvariant()` first (matching Swift's `.lowercased()`) or pass `StringComparison.OrdinalIgnoreCase` explicitly to reproduce config-type-case-insensitive. `Matches(type, selected)` becomes a static method over `IReadOnlySet<ProviderTypeFacet>`, and `Enum.GetValues<ProviderTypeFacet>()` feeds the `ItemsSource` of the `ComboBox`/toggle-button group standing in for `MultiChoiceFilterButton` in the settings XAML.
 
 ## Design Decisions
@@ -172,3 +172,4 @@ Not applicable: `ProviderTypeFacet.swift` contains no `os_log`, `Logger`, `print
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | | | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

@@ -3,7 +3,7 @@ id: 1bbc9593-4064-4e79-8bce-08b3cf00c13d
 title: OpenVSXCatalog
 domain: agentictoolkit://recipes/extension-host-core-extensions-open-vsx-catalog
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -62,114 +62,104 @@ decided before any bytes are downloaded.
   `OpenVSXExtensionDetail.downloads`, and `OpenVSXExtensionDetail.files` MUST
   decode as `[String: String]?`, never as a dictionary of `URL`, so a value
   that cannot parse as a URL costs only the computed accessor that reads it
-  and never the decode of the entry or the page containing it (lines 11-16,
-  35, 42, 77, 79, 125-127, 131-146, 171-173).
+  and never the decode of the entry or the page containing it.
 - **search-entry-identifier-case-folded**: `OpenVSXSearchEntry.identifier`
-  MUST return `` "\(namespace).\(name)".lowercased() `` (line 40).
+  MUST return `` "\(namespace).\(name)".lowercased() ``.
 - **search-entry-icon-url-resolves-independently**:
   `OpenVSXSearchEntry.iconURL` MUST return the parsed `URL` when
   `files["icon"]` is present and parseable, and MUST return `nil`, never
-  throw, when the key is absent or the string is unparseable (line 42).
+  throw, when the key is absent or the string is unparseable.
 - **search-page-total-size-is-whole-result-set**:
   `OpenVSXSearchPage.totalSize` MUST report the size of the entire result set
   the query matched, not the number of elements in that page's `extensions`
-  array, so a caller can decide whether to request another `offset` (lines
-  45-47, 49-51).
+  array, so a caller can decide whether to request another `offset`.
 - **search-page-array-decode-is-all-or-nothing**:
   `OpenVSXSearchPage.extensions` MUST decode via `Decodable`'s synthesized
   array decoding, which MUST throw for the whole page when any one element is
   missing a required field (`namespace`, `name`, or `version`) or gives it
   the wrong JSON type — this file implements no per-element recovery for
-  `OpenVSXSearchEntry` the way it does for a single URL-shaped field (lines
-  17-43, 48-52; contrast with **url-shaped-fields-decoded-as-string**).
+  `OpenVSXSearchEntry` the way it does for a single URL-shaped field (48-52; contrast with **url-shaped-fields-decoded-as-string**).
 - **extension-detail-identifier-case-folded**:
   `OpenVSXExtensionDetail.identifier` MUST return
   `` "\(namespace).\(name)".lowercased() `` and, for the same `namespace` and
   `name`, MUST equal `OpenVSXSearchEntry.identifier`, so a search row and a
   detail record for the same extension join without either side re-deriving
-  the case-folding rule (line 101; see **search-entry-identifier-case-folded**).
+  the case-folding rule (see **search-entry-identifier-case-folded**).
 - **license-field-carries-absence**: `OpenVSXExtensionDetail.license` MUST
   decode to `nil` when the `license` key is absent, and MUST preserve
   whatever string the registry sent verbatim — including an empty string —
-  when the key is present, with no normalization between the two (lines
-  64-68).
+  when the key is present, with no normalization between the two.
 - **semantic-version-nil-on-non-semver**:
   `OpenVSXExtensionDetail.semanticVersion` MUST return `nil`, never throw or
-  substitute a default, when `version` does not parse as `SemanticVersion`
-  (lines 103-107).
+  substitute a default, when `version` does not parse as `SemanticVersion`.
 - **engine-range-nil-when-absent-or-unparseable**:
   `OpenVSXExtensionDetail.engineRange` MUST return `nil` both when `engines`
   is absent or has no `vscode` key, and when the `vscode` value is present
   but does not parse as `VSCodeEngineRange`, drawing no distinction between
   those two cases at this property; the distinction between "not gated" and
-  "unreadable" is drawn only by `installability(forHostVersion:)` (lines
-  109-114, 162-167).
+  "unreadable" is drawn only by `installability(forHostVersion:)`.
 - **universal-download-is-the-only-download-url-exposed**:
   `OpenVSXExtensionDetail.universalDownloadURL` MUST return the parsed URL
   for `downloads["universal"]` only, and MUST return `nil` when that key is
   absent, even when `downloads` holds one or more other platform-keyed
-  entries (lines 125-127, 177).
+  entries.
 - **file-urls-resolve-per-named-key**: `sha256URL`, `signatureURL`,
   `publicKeyURL`, `licenseTextURL`, `readmeURL`, and `iconURL` on
   `OpenVSXExtensionDetail` MUST each resolve independently through the
   shared `fileURL(_:)` helper reading `files[key]`, and MUST each return
   `nil` on its own — with no effect on any other accessor — when its own key
-  is absent or its value is unparseable (lines 131-146, 171-173).
+  is absent or its value is unparseable.
 - **web-extension-kind-is-advisory-only**: `declaresWebExtensionKind` MUST
   report whether the registry's `extensionKind` array contains the string
   `"web"`, and `installability(forHostVersion:)` MUST NOT read
   `extensionKind` or `declaresWebExtensionKind` at all when computing its
-  verdict (lines 86, 148-150, 157-169).
+  verdict.
 - **installability-checks-platform-before-download-existence**:
   `installability(forHostVersion:)` MUST return `.platformSpecific(platform)`
   when `targetPlatform` is present and not equal to the literal string
   `"universal"`, and MUST perform this check before checking whether a
-  universal download exists (lines 158-160).
+  universal download exists.
 - **installability-requires-a-universal-download**:
   `installability(forHostVersion:)` MUST return `.noUniversalBuild` when
   `universalDownloadURL` is `nil`, checked after the platform check and
-  before any engine check (line 161).
+  before any engine check.
 - **installability-engine-gate-skipped-when-absent-or-empty**:
   `installability(forHostVersion:)` MUST treat a `nil` `engines["vscode"]`
   and an empty-string `engines["vscode"]` identically: both MUST skip the
-  engine check entirely rather than being treated as an unparseable range
-  (line 162).
+  engine check entirely rather than being treated as an unparseable range.
 - **installability-engine-range-unreadable-carries-raw-string**:
   `installability(forHostVersion:)` MUST return
   `.engineRangeUnreadable(declared)`, carrying the exact `engines["vscode"]`
   string, when that string is non-empty and does not parse as
-  `VSCodeEngineRange` (lines 163-165).
+  `VSCodeEngineRange`.
 - **installability-engine-incompatible-carries-parsed-range**:
   `installability(forHostVersion:)` MUST return `.engineIncompatible(range)`,
   carrying the parsed `VSCodeEngineRange`, when the range parses but
-  `range.accepts(host)` is `false` (line 166).
+  `range.accepts(host)` is `false`.
 - **installability-default-is-installable**:
   `installability(forHostVersion:)` MUST return `.installable` when the
   platform check, the download-existence check, and the engine check (when
-  applicable) all pass (lines 158-168).
+  applicable) all pass.
 - **installability-is-pure-and-synchronous**:
   `installability(forHostVersion:)` MUST compute its result solely from
   `self`'s already-decoded fields and the `host` argument, MUST return
-  synchronously, and MUST NOT perform file, network, or process access
-  (lines 157-169).
+  synchronously, and MUST NOT perform file, network, or process access.
 - **is-installable-reflects-only-the-installable-case**:
   `OpenVSXInstallability.isInstallable` MUST return `true` if and only if the
-  value equals `.installable`, and MUST return `false` for every other case
-  (line 211).
+  value equals `.installable`, and MUST return `false` for every other case.
 - **installability-refusal-cases-are-named-not-freeform**:
   `OpenVSXInstallability` MUST expose one distinct case per refusal reason
   (`engineIncompatible`, `engineRangeUnreadable`, `platformSpecific`,
   `noUniversalBuild`) rather than a `Bool` paired with a freeform message, so
   a caller can distinguish and separately present each reason without
-  parsing prose (lines 180-211).
+  parsing prose.
 - **catalog-types-are-sendable-value-types**: `OpenVSXSearchEntry`,
   `OpenVSXSearchPage`, `OpenVSXExtensionDetail`, and `OpenVSXInstallability`
   MUST each be declared `Sendable` and `Equatable` value types with no
   `actor` or `@MainActor` isolation, and decoding MUST be a synchronous,
   side-effect-free function of the `Decoder` handed to it, so a decoded
   value MAY be passed freely across concurrency domains and MAY be decoded
-  concurrently by independent callers with no external coordination (lines
-  17, 48, 56, 188).
+  concurrently by independent callers with no external coordination.
 
 ## Appearance
 
@@ -195,10 +185,10 @@ not a visual component.
 | open-vsx-catalog-003 | url-shaped-fields-decoded-as-string | `{ "namespace": "acme", "name": "none", "version": "1.0.0" }` (no `files` key) vs. the same with `"files": {}` | First: `files == nil`, `sha256URL == nil`, `signatureURL == nil`, `publicKeyURL == nil`, `licenseTextURL == nil`; second: `files == [:]` (`absentFilesIsNotEmpty`) |
 | open-vsx-catalog-004 | file-urls-resolve-per-named-key | `files` populated with `download`, `sha256`, `signature`, `publicKey`, `license`, `readme`, and `icon` keys | Each of `sha256URL`, `signatureURL`, `publicKeyURL`, `licenseTextURL`, `readmeURL`, `iconURL` resolves to the matching filename (`artifactURLsResolve`) |
 | open-vsx-catalog-005 | web-extension-kind-is-advisory-only, engine-range-nil-when-absent-or-unparseable | `engines.vscode: "^1.74.0"`, `extensionKind: ["ui", "web"]` vs. `extensionKind: ["workspace"]` | First: `engineRange?.accepts(host) == true`, `declaresWebExtensionKind == true`; second: `declaresWebExtensionKind == false` (`declarationsAreReadAsWritten`) |
-| open-vsx-catalog-006 | semantic-version-nil-on-non-semver | `version: "not-a-version"` decoded as `OpenVSXExtensionDetail` | `semanticVersion == nil` (derived from `SemanticVersion.init?`, `OpenVSXCatalog.swift` lines 103-107) |
-| open-vsx-catalog-007 | search-page-total-size-is-whole-result-set | `{ "offset": 20, "totalSize": 137, "extensions": [] }` | `totalSize == 137` while `extensions.count == 0`, demonstrating `totalSize` names the whole result set, not this page (`OpenVSXCatalog.swift` lines 45-47) |
-| open-vsx-catalog-008 | search-page-array-decode-is-all-or-nothing | `{ "offset": 0, "totalSize": 1, "extensions": [{ "name": "x", "version": "1.0.0" }] }` (entry missing `namespace`) | Decoding `OpenVSXSearchPage` throws; no entries are recovered (derived from `Decodable`'s synthesized array decode semantics, `OpenVSXCatalog.swift` lines 17-21, 48-52) |
-| open-vsx-catalog-009 | universal-download-is-the-only-download-url-exposed | `downloads: { "darwin-arm64": "https://open-vsx.org/w-arm64.vsix" }` (no `universal` key) | `universalDownloadURL == nil`, even though `downloads` is non-empty (`OpenVSXCatalog.swift` lines 125-127; `noUniversalBuild`) |
+| open-vsx-catalog-006 | semantic-version-nil-on-non-semver | `version: "not-a-version"` decoded as `OpenVSXExtensionDetail` | `semanticVersion == nil` (derived from `SemanticVersion.init?`, `OpenVSXCatalog.swift`) |
+| open-vsx-catalog-007 | search-page-total-size-is-whole-result-set | `{ "offset": 20, "totalSize": 137, "extensions": [] }` | `totalSize == 137` while `extensions.count == 0`, demonstrating `totalSize` names the whole result set, not this page (`OpenVSXCatalog.swift`) |
+| open-vsx-catalog-008 | search-page-array-decode-is-all-or-nothing | `{ "offset": 0, "totalSize": 1, "extensions": [{ "name": "x", "version": "1.0.0" }] }` (entry missing `namespace`) | Decoding `OpenVSXSearchPage` throws; no entries are recovered (derived from `Decodable`'s synthesized array decode semantics, `OpenVSXCatalog.swift`) |
+| open-vsx-catalog-009 | universal-download-is-the-only-download-url-exposed | `downloads: { "darwin-arm64": "https://open-vsx.org/w-arm64.vsix" }` (no `universal` key) | `universalDownloadURL == nil`, even though `downloads` is non-empty (`OpenVSXCatalog.swift`; `noUniversalBuild`) |
 | open-vsx-catalog-010 | installability-default-is-installable, is-installable-reflects-only-the-installable-case | A detail with a universal download and `engines.vscode: "^1.74.0"`, checked against host `1.138.0` | `installability(forHostVersion:) == .installable`; `.isInstallable == true` (`installableCase`) |
 | open-vsx-catalog-011 | installability-engine-incompatible-carries-parsed-range, is-installable-reflects-only-the-installable-case | `engines.vscode: "^1.200.0"`, host `1.138.0` | `.engineIncompatible(range)` where `!range.accepts(host)` and `range.accepts(1.200.0)`; `.isInstallable == false` (`engineIncompatible`) |
 | open-vsx-catalog-012 | installability-engine-range-unreadable-carries-raw-string | `engines.vscode: ">= 1.74.0"` (interior whitespace), host `1.138.0` | `.engineRangeUnreadable(">= 1.74.0")` (`engineRangeUnreadable`) |
@@ -212,7 +202,7 @@ not a visual component.
 
 - **Null/empty input**: `{}` decoded as `OpenVSXSearchEntry` or as
   `OpenVSXExtensionDetail` MUST throw, because `namespace`, `name`, and
-  `version` are non-optional on both types (lines 19-21, 58-60). A `files`
+  `version` are non-optional on both types. A `files`
   key present but empty (`{}`) MUST decode to `[:]`, distinct from an absent
   `files` key, which MUST decode to `nil` (open-vsx-catalog-003).
 - **Boundary values**: `engines.vscode` absent and `engines.vscode` present
@@ -250,13 +240,13 @@ not a visual component.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| JSON payload | `Data` (via a `Decoder`) | none — required | The sole decode input for `OpenVSXSearchEntry`, `OpenVSXSearchPage`, and `OpenVSXExtensionDetail`; a caller constructs its own `JSONDecoder()` and calls `.decode(_:from:)` — this file defines no custom `keyDecodingStrategy` or `userInfo` (lines 17-52, 56-178). |
-| `host` | `SemanticVersion` | none — required | The caller-supplied host version `installability(forHostVersion:)` compares a declared `engines.vscode` range against (line 157). |
+| JSON payload | `Data` (via a `Decoder`) | none — required | The sole decode input for `OpenVSXSearchEntry`, `OpenVSXSearchPage`, and `OpenVSXExtensionDetail`; a caller constructs its own `JSONDecoder()` and calls `.decode(_:from:)` — this file defines no custom `keyDecodingStrategy` or `userInfo`. |
+| `host` | `SemanticVersion` | none — required | The caller-supplied host version `installability(forHostVersion:)` compares a declared `engines.vscode` range against. |
 
 No environment variable, settings key, or injected dependency exists
 anywhere in this file. `Self.universalTargetPlatform` (the literal string
 `"universal"`) is a fixed, compile-time constant read by two properties and
-one check — it is not runtime configuration a caller can vary (line 177).
+one check — it is not runtime configuration a caller can vary.
 
 ## Deep Linking
 
@@ -468,3 +458,4 @@ programmatic case name.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-24 | Mike Fullerton | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

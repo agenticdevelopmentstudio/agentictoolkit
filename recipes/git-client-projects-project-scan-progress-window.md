@@ -3,7 +3,7 @@ id: 46e79f87-0dbb-4bd5-b11c-bd65ae0087a9
 title: ProjectScanProgressWindow
 domain: agentictoolkit://recipes/git-client-projects-project-scan-progress-window
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -46,67 +46,66 @@ updates the headline, and closes the panel itself one second later.
 `ProjectsCoordinator.swift` constructs one instance per scan, calls
 `present()` before starting the scan, calls `finish()` when the scan
 completes, and drops its own reference to the instance immediately after
-calling `finish()` (`ProjectsCoordinator.swift` lines 203-205, 260-261).
+calling `finish()` (`ProjectsCoordinator.swift`).
 
 ## Behavioral Requirements
 
 - **mainactor-isolation**: `ProjectScanProgressWindow` MUST be declared
   `@MainActor`, so `init()`, `present()`, `finish()`, and its `headline` and
   `bar` properties MUST only be called or accessed from the main actor
-  (`ProjectScanProgressWindow.swift` lines 19-20, 26-27).
+  (`ProjectScanProgressWindow.swift`).
 - **fixed-panel-geometry-and-style**: `init()` MUST construct its window as
   an `NSPanel` with a content rect of 240 by 72 points and a style mask of
   `.titled` and `.utilityWindow`, created with `backing: .buffered` and
-  `defer: false` (`ProjectScanProgressWindow.swift` lines 30-35).
+  `defer: false` (`ProjectScanProgressWindow.swift`).
 - **panel-title**: `init()` MUST set the panel's `title` to "Scanning"
-  (`ProjectScanProgressWindow.swift` line 36).
+  (`ProjectScanProgressWindow.swift`).
 - **floating-non-modal-presentation**: `init()` MUST set `isFloatingPanel` to
   `true`; the class exposes no method that presents the panel modally
-  (`ProjectScanProgressWindow.swift` line 37).
+  (`ProjectScanProgressWindow.swift`).
 - **deactivation-visibility**: `init()` MUST set `hidesOnDeactivate` to
   `false`, so the panel remains visible when the host application becomes
-  inactive (`ProjectScanProgressWindow.swift` line 38).
+  inactive (`ProjectScanProgressWindow.swift`).
 - **key-only-if-needed**: `init()` MUST set `becomesKeyOnlyIfNeeded` to
-  `true` (`ProjectScanProgressWindow.swift` line 39).
+  `true` (`ProjectScanProgressWindow.swift`).
 - **centered-on-screen**: `init()` MUST center the panel via `panel.center()`
-  (`ProjectScanProgressWindow.swift` line 42).
+  (`ProjectScanProgressWindow.swift`).
 - **automation-identifiers-assigned**: `init()` MUST assign the accessibility
   identifier "project-scan.window" to the panel, and `makeContentView()` MUST
   assign the accessibility identifier "project-scan.headline" to the
-  headline label (`ProjectScanProgressWindow.swift` lines 43, 59).
+  headline label (`ProjectScanProgressWindow.swift`).
 - **initial-headline-text**: The `headline` label MUST be initialized with
   the literal string "Scanning for projects…"
-  (`ProjectScanProgressWindow.swift` line 26).
+  (`ProjectScanProgressWindow.swift`).
 - **initial-progress-bar-state**: `makeContentView()` MUST configure `bar`
   with style `.bar`, `isIndeterminate` `true`, `controlSize` `.small`,
   `usesThreadedAnimation` `true`, `minValue` `0`, and `maxValue` `1`
-  (`ProjectScanProgressWindow.swift` lines 52-57).
+  (`ProjectScanProgressWindow.swift`).
 - **coder-initialization-unsupported**: `init?(coder:)` MUST be marked
   unavailable and MUST call `fatalError` with the message "init(coder:) is
   not supported" if it is ever invoked
-  (`ProjectScanProgressWindow.swift` lines 46-47).
+  (`ProjectScanProgressWindow.swift`).
 - **present-starts-animation-and-orders-front**: `present()` MUST call
   `bar.startAnimation(nil)` and MUST order the window to the front via
   `orderFrontRegardless()`, never via a method that makes the window key
-  (`ProjectScanProgressWindow.swift` lines 80-83).
+  (`ProjectScanProgressWindow.swift`).
 - **present-guards-missing-window**: `present()` MUST do nothing — MUST NOT
   call `startAnimation` or `orderFrontRegardless` — when its `window`
-  property is `nil` (`ProjectScanProgressWindow.swift` line 81).
+  property is `nil` (`ProjectScanProgressWindow.swift`).
 - **finish-completes-progress-bar**: `finish()` MUST call
   `bar.stopAnimation(nil)`, MUST set `bar.isIndeterminate` to `false`, and
   MUST set `bar.doubleValue` equal to `bar.maxValue`
-  (`ProjectScanProgressWindow.swift` lines 91-93).
+  (`ProjectScanProgressWindow.swift`).
 - **finish-updates-headline-text**: `finish()` MUST set
   `headline.stringValue` to the literal string "Scan complete"
-  (`ProjectScanProgressWindow.swift` line 94).
+  (`ProjectScanProgressWindow.swift`).
 - **finish-schedules-delayed-close**: `finish()` MUST schedule a call to
   `close()` on the main queue after exactly `lingerAfterFinishing` (1.0
   second) has elapsed, via `DispatchQueue.main.asyncAfter(deadline: .now() +
-  Self.lingerAfterFinishing)` (`ProjectScanProgressWindow.swift` lines 24,
-  99-101).
+  Self.lingerAfterFinishing)` (`ProjectScanProgressWindow.swift`).
 - **finish-close-closure-strong-capture**: The closure `finish()` passes to
   `asyncAfter` MUST capture `self` strongly, not weakly
-  (`ProjectScanProgressWindow.swift` lines 95-101).
+  (`ProjectScanProgressWindow.swift`).
 
 ## Appearance
 
@@ -149,24 +148,23 @@ Not applicable — this is a window controller, not a visual component.
 
 - **Null and empty input**: Not applicable — none of `init()`, `present()`,
   or `finish()` accept any parameter, so there is no null or empty input to
-  handle (`ProjectScanProgressWindow.swift` lines 29, 80, 90).
+  handle (`ProjectScanProgressWindow.swift`).
 - **Boundary values**: The progress bar's range is fixed at `minValue` `0`
   and `maxValue` `1`, and the close delay is fixed at `lingerAfterFinishing`
   (1.0 second); none of these are caller-supplied, so there is no boundary
-  condition a caller can vary (`ProjectScanProgressWindow.swift` lines 24,
-  56-57). MUST (this is the file's actual, unparameterized behavior).
+  condition a caller can vary (`ProjectScanProgressWindow.swift`). MUST (this is the file's actual, unparameterized behavior).
 - **Concurrent access**: `ProjectScanProgressWindow` is `@MainActor`, so all
   access to `headline`, `bar`, and `window` is serialized onto the main
   actor by the compiler. Calling `finish()` a second time before the first
   call's scheduled `close()` fires MUST queue a second `asyncAfter` closure
   that also calls `close()`; the second call lands on an already-closing or
   already-closed window, which is a harmless no-op
-  (`ProjectScanProgressWindow.swift` lines 19-20, 99-101). MUST.
+  (`ProjectScanProgressWindow.swift`). MUST.
 - **Error states**: The only defensive check in the file is `present()`'s
-  guard against a `nil` `window` (line 81); it MUST return silently, with no
+  guard against a `nil` `window`; it MUST return silently, with no
   error signal of any kind, since the file declares no `throws` function, no
   `Result` type, and no other error-reporting mechanism
-  (`ProjectScanProgressWindow.swift` line 81). MUST.
+  (`ProjectScanProgressWindow.swift`). MUST.
 - **Offline or disconnected state**: Not applicable —
   `ProjectScanProgressWindow.swift` makes no network call; its only work is
   updating local AppKit UI state and scheduling one local timer (whole
@@ -174,19 +172,19 @@ Not applicable — this is a window controller, not a visual component.
 - **Cancellation**: The type provides no cancel operation of any kind; the
   type's doc comment states directly that the panel is "deliberately not
   modal and deliberately not cancellable"
-  (`ProjectScanProgressWindow.swift` lines 15-18). This is the file's actual
+  (`ProjectScanProgressWindow.swift`). This is the file's actual
   behavior, not an unresolved gap.
 - **Out-of-order calls**: `finish()` MUST behave identically whether or not
   `present()` was called first — it updates `bar` and `headline` and
   schedules `close()` unconditionally; a panel that was never shown is
   simply closed once, while still hidden
-  (`ProjectScanProgressWindow.swift` lines 90-101). MUST.
+  (`ProjectScanProgressWindow.swift`). MUST.
 
 ## Configuration
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `lingerAfterFinishing` (private static constant) | `TimeInterval` | `1.0` | Seconds `finish()` waits before calling `close()`; not exposed to callers or configurable at the call site (`ProjectScanProgressWindow.swift` line 24). |
+| `lingerAfterFinishing` (private static constant) | `TimeInterval` | `1.0` | Seconds `finish()` waits before calling `close()`; not exposed to callers or configurable at the call site (`ProjectScanProgressWindow.swift`). |
 
 `init()`, `present()`, and `finish()` take no parameters at all. There is no
 caller-supplied configuration surface, environment variable, or settings key
@@ -194,7 +192,7 @@ anywhere in `ProjectScanProgressWindow.swift`. The one caller-side wiring
 point lives outside this file: `ProjectsCoordinator.swift` constructs a bare
 `ProjectScanProgressWindow()` with no arguments, calls `present()` before
 starting a scan, and calls `finish()` when the scan completes
-(`ProjectsCoordinator.swift` lines 203-205, 260-261).
+(`ProjectsCoordinator.swift`).
 
 ## Deep Linking
 
@@ -205,14 +203,14 @@ route, or navigation destination (whole file).
 
 | String Key | Default (en) | Context |
 |-----------|-------------|---------|
-| (none — inline literal) | Scanning | The `NSPanel`'s window title, set in `init()` (`ProjectScanProgressWindow.swift` line 36). |
-| (none — inline literal) | Scanning for projects… | The headline label's initial text (`ProjectScanProgressWindow.swift` line 26). |
-| (none — inline literal) | Scan complete | The headline text `finish()` sets once the scan is done (`ProjectScanProgressWindow.swift` line 94). |
+| (none — inline literal) | Scanning | The `NSPanel`'s window title, set in `init()` (`ProjectScanProgressWindow.swift`). |
+| (none — inline literal) | Scanning for projects… | The headline label's initial text (`ProjectScanProgressWindow.swift`). |
+| (none — inline literal) | Scan complete | The headline text `finish()` sets once the scan is done (`ProjectScanProgressWindow.swift`). |
 
 None of these three strings are extracted to a string catalog, an
 `NSLocalizedString` call, or any other localization mechanism; each is a
 Swift string literal hardcoded at its use site
-(`ProjectScanProgressWindow.swift` lines 26, 36, 94).
+(`ProjectScanProgressWindow.swift`).
 
 ## Accessibility Options
 
@@ -221,7 +219,7 @@ Not applicable: `ProjectScanProgressWindow.swift` contains no check of
 `accessibilityDisplayShouldIncreaseContrast`,
 `accessibilityDisplayShouldDifferentiateWithoutColor`, or any other
 accessibility display option; `usesThreadedAnimation` is set unconditionally
-(`ProjectScanProgressWindow.swift` line 55), and the file has no color-only
+(`ProjectScanProgressWindow.swift`), and the file has no color-only
 state distinction for Differentiate Without Color to apply to.
 
 ## Feature Flags
@@ -241,8 +239,7 @@ token and displays only the two static status strings above. The type's doc
 comment explains that an earlier version's per-directory counts and the
 scanned path were deliberately removed because they were "registry
 bookkeeping the user had not asked for and could not act on" and "unreadable
-at the speed the walk produces it" (`ProjectScanProgressWindow.swift` lines
-9-13); the current panel reports no scan results, counts, or file-system
+at the speed the walk produces it" (`ProjectScanProgressWindow.swift`); the current panel reports no scan results, counts, or file-system
 paths at all.
 
 ## Logging
@@ -324,19 +321,19 @@ only the fixed strings "Scanning for projects…" and "Scan complete".
 **Rationale**: The type's doc comment states the counts were "registry
 bookkeeping the user had not asked for and could not act on," and the path
 "flickered through was unreadable at the speed the walk produces it"
-(`ProjectScanProgressWindow.swift` lines 9-13).
+(`ProjectScanProgressWindow.swift`).
 **Approved**: pending
 
 **Decision**: The panel is not presented modally.
 **Rationale**: The doc comment states "the scan touches nothing the user
 could be editing, so blocking them out of the app would buy nothing"
-(`ProjectScanProgressWindow.swift` lines 15-17).
+(`ProjectScanProgressWindow.swift`).
 **Approved**: pending
 
 **Decision**: The panel provides no Cancel control.
 **Rationale**: The doc comment states "a Cancel button that leaves the
 registry half-reconciled is worse than a scan that finishes"
-(`ProjectScanProgressWindow.swift` lines 17-18).
+(`ProjectScanProgressWindow.swift`).
 **Approved**: pending
 
 **Decision**: `present()` orders the window front without making it key
@@ -344,14 +341,14 @@ registry half-reconciled is worse than a scan that finishes"
 `becomesKeyOnlyIfNeeded` is set to `true`.
 **Rationale**: The doc comment on `present()` states this is "so a scan at
 launch does not steal focus from whatever the user is already doing"
-(`ProjectScanProgressWindow.swift` lines 77-79).
+(`ProjectScanProgressWindow.swift`).
 **Approved**: pending
 
 **Decision**: `finish()` leaves the bar at its full determinate value rather
 than leaving it indeterminate or resetting it to empty.
 **Rationale**: The doc comment on `finish()` states "an indeterminate bar
 frozen part-way through reads as a scan that gave up"
-(`ProjectScanProgressWindow.swift` lines 88-89).
+(`ProjectScanProgressWindow.swift`).
 **Approved**: pending
 
 **Decision**: The `asyncAfter` closure in `finish()` captures `self`
@@ -359,9 +356,9 @@ strongly rather than weakly.
 **Rationale**: The inline comment states this directly: the caller "drops
 its reference as soon as it has asked for the finish, so a weak capture
 leaves nothing alive to run `close()` and the panel stays on screen for
-good" (`ProjectScanProgressWindow.swift` lines 95-98), which matches
+good" (`ProjectScanProgressWindow.swift`), which matches
 `ProjectsCoordinator.swift` setting `progressWindow = nil` immediately after
-calling `finish()` (`ProjectsCoordinator.swift` line 261).
+calling `finish()` (`ProjectsCoordinator.swift`).
 **Approved**: pending
 
 ## Compliance
@@ -400,3 +397,4 @@ progress indicator or window chrome.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | | | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

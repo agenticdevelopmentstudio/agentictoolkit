@@ -3,7 +3,7 @@ id: 5bfadad5-c93b-432a-807e-04be57ff16b4
 title: ProjectController
 domain: agentictoolkit://recipes/git-client-projects-project-controller
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -78,157 +78,149 @@ and method is confined to the main actor by that declaration alone.
 - **state-surface**: `ProjectController` MUST expose its live state as
   `checkouts: [ProjectCheckout]` and `branchControllers: [ProjectCheckout:
   BranchController]`, both `public private(set)`, as the only project-owned
-  collections it maintains (`ProjectController.swift` lines 12-13).
+  collections it maintains (`ProjectController.swift`).
 - **tab-item-data-source-conformance**: `ProjectController` MUST conform to
   `ComposableTabsTabItemDataSource` and answer every
   `composableTabsWindowController(_:tabItemFor:on:)` call itself, rather than
   delegating conformance to `workspace` or a `BranchController`
-  (`ProjectController.swift` line 10).
+  (`ProjectController.swift`).
 - **main-actor-isolation**: `ProjectController` MUST be declared `@MainActor`
   and MUST NOT declare `Sendable` conformance; every stored property and
   method is therefore confined to the main actor by that declaration alone
-  (`ProjectController.swift` line 9).
+  (`ProjectController.swift`).
 - **required-workspace-optional-registry**: `init(workspace:commandRegistry:)`
   MUST accept `workspace: ProjectWorkspace` as a required parameter with no
   default value, and `commandRegistry: CommandRegistry?` as a required
   parameter (also with no default) whose value MAY be `nil`
-  (`ProjectController.swift` lines 72-75).
+  (`ProjectController.swift`).
 - **derived-git-client**: `gitClient` MUST be computed as `workspace.gitClient`
   on every access rather than stored or constructed independently, so this
   controller and every `BranchController` it creates read git through the one
-  client the workspace was given (`ProjectController.swift` line 38).
+  client the workspace was given (`ProjectController.swift`).
 - **open-runs-serialized-reconcile**: `open()` MUST call
   `serializedReconcile()` and MUST NOT itself perform any git read, checkout
-  assignment, or tab persistence (`ProjectController.swift` lines 79-81).
+  assignment, or tab persistence (`ProjectController.swift`).
 - **refresh-checkouts-runs-serialized-reconcile**: `refreshCheckouts()` MUST
   call `serializedReconcile()`, the same entry point `open()` uses
-  (`ProjectController.swift` lines 83-85).
+  (`ProjectController.swift`).
 - **reconcile-calls-chain-in-order**: `serializedReconcile()` MUST capture
   whatever `Task` is currently `inFlightReconcile` as `previous`, start a new
   `Task` that awaits `previous?.value` before doing any work of its own, store
   that new `Task` as `inFlightReconcile`, and await it — so two overlapping
   calls to `open()`/`refreshCheckouts()` always run their reconciles in the
   order they were called, never in the order their own git reads happen to
-  finish (`ProjectController.swift` lines 89-102).
+  finish (`ProjectController.swift`).
 - **close-guard-brackets-reconcile-and-refresh**: The `Task` built by
   `serializedReconcile()` MUST check `isClosed` immediately before calling
   `reconcile()` and again immediately after it returns, skipping `reconcile()`
   entirely on the first check's failure and skipping the branch-controller
-  refresh loop entirely on the second's (`ProjectController.swift` lines 93,
-  95).
+  refresh loop entirely on the second's (`ProjectController.swift`).
 - **branch-controllers-refreshed-after-reconcile**: When both close guards
   pass, `serializedReconcile()`'s `Task` MUST call `await controller.refresh()`
-  on every value currently in `branchControllers` (`ProjectController.swift`
-  lines 96-98).
+  on every value currently in `branchControllers` (`ProjectController.swift`).
 - **mark-closed-is-synchronous-and-final**: `markClosed()` MUST be a
   synchronous (non-`async`) method that sets `isClosed = true` and unregisters
   every current branch controller's commands via `unregisterCommands(of:)`, so
   the flag takes effect in the same main-actor turn as the call that reaches
-  it (`ProjectController.swift` lines 115-120).
+  it (`ProjectController.swift`).
 - **shutdown-closes-then-stops-language-services**: `shutdown()` MUST call
   `markClosed()` and then `await workspace.languageServices?.shutdown()`, in
-  that order (`ProjectController.swift` lines 148-151).
+  that order (`ProjectController.swift`).
 - **reregister-commands-guard**: `reregisterCommands()` MUST return
   immediately, registering nothing, when `isClosed` is `true` or
-  `commandRegistry` is `nil` (`ProjectController.swift` line 140).
+  `commandRegistry` is `nil` (`ProjectController.swift`).
 - **reregister-commands-fills-only-gaps**: When that guard passes,
   `reregisterCommands()` MUST register, with `commandRegistry`, every command
   of every current branch controller whose id is not already found by
   `commandRegistry.command(id:)`, and MUST leave every already-registered id
-  untouched (`ProjectController.swift` lines 141-145).
+  untouched (`ProjectController.swift`).
 - **branch-controller-lookup-resolves-symlinks**: `branchController
   (forDirectory:)` MUST call `resolvingSymlinksInPath()` on its `directory`
   argument before comparing it against `branchControllers`' key directories,
   and MUST return the first match by directory equality
-  (`ProjectController.swift` lines 158-160).
+  (`ProjectController.swift`).
 - **reconcile-aborts-after-a-late-close**: `reconcile()` MUST await
   `readCheckouts()` and then, before mutating `checkouts`, `branchControllers`,
   or calling `workspace.persistTabs`, MUST return immediately if `isClosed`
-  has become `true` during that await (`ProjectController.swift` lines 176,
-  182-183).
+  has become `true` during that await (`ProjectController.swift`).
 - **reconcile-commits-fresh-checkouts**: Once past that guard, `reconcile()`
   MUST assign the freshly read checkouts to `checkouts` and MUST call
   `syncBranchControllers()` before computing a tab plan
-  (`ProjectController.swift` lines 184-185).
+  (`ProjectController.swift`).
 - **tab-plan-via-reconciler**: `reconcile()` MUST compute its plan by calling
   `ProjectTabReconciler.plan(stored:checkouts:projectDirectory:)` with
   `workspace.storedTabs()?.tabs ?? []`, the just-assigned `checkouts`, and
-  `workspace.directoryURL` (`ProjectController.swift` lines 187-192).
+  `workspace.directoryURL` (`ProjectController.swift`).
 - **unchanged-plan-writes-nothing**: When `stored != nil` and
   `plan.isUnchanged` is `true`, `reconcile()` MUST NOT call
   `workspace.persistTabs`, MUST NOT call `onWillChangeTabs`, and MUST NOT call
-  `onTabsDidChange` (`ProjectController.swift` lines 193-202).
+  `onTabsDidChange` (`ProjectController.swift`).
 - **unchanged-plan-still-signals-checkout-change**: On that same
   unchanged-plan path, `reconcile()` MUST call `onTabItemsNeedRefresh?()` if
   and only if `previousCheckouts != checkouts`, and MUST NOT call it otherwise
-  (`ProjectController.swift` line 200).
+  (`ProjectController.swift`).
 - **changed-plan-writes-and-signals-in-order**: When `stored == nil` or
   `plan.isUnchanged` is `false`, `reconcile()` MUST call `onWillChangeTabs?()`,
   then `workspace.persistTabs(tabs:activeTabID:enabledEdges:)`, then
-  `onTabsDidChange?()`, in that order (`ProjectController.swift` lines
-  219-221).
+  `onTabsDidChange?()`, in that order (`ProjectController.swift`).
 - **default-enabled-edge**: `reconcile()` MUST use `stored?.enabledEdges ??
   [.top]` as the enabled-edges list for any newly built tab record
-  (`ProjectController.swift` line 204).
+  (`ProjectController.swift`).
 - **new-checkout-tabs-copy-arrangement-or-blueprint**: For every checkout in
   `plan.add`, `reconcile()` MUST build its tab records with
   `ProjectTabReconciler.makeRecords(for:enabledEdges:blueprint:)`, where the
   blueprint closure MUST return `arrangement?.inFreshIDs()` when
   `ProjectTabReconciler.arrangement(of:activeTabID:)` over `plan.keep`
   produces one, and MUST otherwise return `workspace.layout.blueprint()`
-  (`ProjectController.swift` lines 206-217).
+  (`ProjectController.swift`).
 - **active-tab-falls-back-to-first**: `reconcile()` MUST set `activeTabID` to
   the tab in `tabs` whose id equals `stored?.activeTabID`, and MUST fall back
-  to `tabs.first?.id` when no tab matches (`ProjectController.swift` line
-  218).
+  to `tabs.first?.id` when no tab matches (`ProjectController.swift`).
 - **checkouts-from-worktrees**: On a successful `gitClient.worktrees(in:)`
   call, `readCheckouts()` MUST convert the result with
   `ProjectCheckout.checkouts(from:)` — which filters out every bare worktree
-  entry (`ProjectCheckout.swift` lines 41-45) — and MUST return a single
+  entry (`ProjectCheckout.swift`) — and MUST return a single
   synthetic `ProjectCheckout(directory: workspace.directoryURL, branch: nil,
   isMain: true)` when that conversion yields zero checkouts
-  (`ProjectController.swift` lines 235-238).
+  (`ProjectController.swift`).
 - **checkouts-ordered-main-first-then-git-order**: `readCheckouts()` MUST
   order a non-empty result as every main checkout followed by every non-main
   checkout, each half preserving the order `gitClient.worktrees(in:)` returned
   it in, and MUST NOT use `sorted(by:)` to do so, since Swift documents
-  `sorted(by:)` as not guaranteed stable (`ProjectController.swift` lines
-  239-243).
+  `sorted(by:)` as not guaranteed stable (`ProjectController.swift`).
 - **worktree-read-failure-keeps-last-known**: When `gitClient.worktrees(in:)`
   throws, `readCheckouts()` MUST log the failure — naming the directory but
   never the git output — and MUST return the previous `checkouts` unchanged
   when it is non-empty, or the single synthetic checkout described in
-  **checkouts-from-worktrees** when it is empty (`ProjectController.swift`
-  lines 244-254).
+  **checkouts-from-worktrees** when it is empty (`ProjectController.swift`).
 - **branch-controllers-reused-by-directory**: `syncBranchControllers()` MUST
   reuse an existing `BranchController` for any checkout whose `directory`
   matches an existing entry's key directory, even when the checkout's
-  `branch` differs from that key (`ProjectController.swift` lines 269-272).
+  `branch` differs from that key (`ProjectController.swift`).
 - **branch-controllers-created-with-injected-collaborators**: For a checkout
   with no existing controller, `syncBranchControllers()` MUST construct
   `BranchController(checkout:gitClient:statusProvider:)` with this
   controller's own `gitClient` and with `workspace.gitStatusProvider
   (forDirectory: checkout.directory)`, and MUST register every one of that
   new controller's `commands` with `commandRegistry`
-  (`ProjectController.swift` lines 273-283).
+  (`ProjectController.swift`).
 - **branch-controllers-dropped-with-their-commands**: `syncBranchControllers()`
   MUST unregister the commands of every existing branch controller whose
   checkout directory is absent from the new checkout set, via
   `unregisterCommands(of:)`, before replacing `branchControllers` with the
-  newly built dictionary (`ProjectController.swift` lines 285-289).
+  newly built dictionary (`ProjectController.swift`).
 - **unregister-mirrors-register**: `unregisterCommands(of:)` MUST call
   `commandRegistry?.unregister(id:)` for exactly the ids in the controller's
-  current `commands`, no more and no fewer (`ProjectController.swift` lines
-  296-299).
+  current `commands`, no more and no fewer (`ProjectController.swift`).
 - **tab-item-resolves-directory-then-branch-controller**:
   `composableTabsWindowController(_:tabItemFor:on:)` MUST resolve the
   directory as `(record.workingDirectory ?? workspace.directoryURL)
   .resolvingSymlinksInPath()`, MUST return `.title(record.title)` when
   `branchController(forDirectory:)` finds none for it, and MUST otherwise
   return `.viewController(branch.makeTabPane(edge:tabID: record.id))`
-  (`ProjectController.swift` lines 304-318).
-- **persist-failure-signal**: `workspace.persistTabs(...)` (`ProjectWorkspace.swift` lines 200-206) catches a save failure, logs it, and returns nothing; `reconcile()` (`ProjectController.swift` lines 219-221) calls `onTabsDidChange?()` unconditionally right after that call, so the window is told a new tab set was written even when the database write failed — the failure reaches only the log.
-- **branch-refresh-close-race**: `serializedReconcile()`'s `for controller in self.branchControllers.values { await controller.refresh() }` (`ProjectController.swift` lines 96-98) does not re-check `isClosed` between iterations, so a `markClosed()` call landing between two of those awaits lets the loop keep running `BranchController.refresh()` — and its git subprocess — for a controller whose commands were already unregistered; the extra refresh has no remaining observer.
+  (`ProjectController.swift`).
+- **persist-failure-signal**: `workspace.persistTabs(...)` (`ProjectWorkspace.swift`) catches a save failure, logs it, and returns nothing; `reconcile()` (`ProjectController.swift`) calls `onTabsDidChange?()` unconditionally right after that call, so the window is told a new tab set was written even when the database write failed — the failure reaches only the log.
+- **branch-refresh-close-race**: `serializedReconcile()`'s `for controller in self.branchControllers.values { await controller.refresh() }` (`ProjectController.swift`) does not re-check `isClosed` between iterations, so a `markClosed()` call landing between two of those awaits lets the loop keep running `BranchController.refresh()` — and its git subprocess — for a controller whose commands were already unregistered; the extra refresh has no remaining observer.
 
 ## Appearance
 
@@ -270,12 +262,12 @@ file renders itself.
 | git-client-projects-project-controller-013 | worktree-read-failure-keeps-last-known, derived-git-client | Open a controller whose `gitClient` reads its configuration from a flippable source; flip that configuration to a nonexistent executable path; call `await controller.refreshCheckouts()` (`testATransientGitFailureKeepsTheLastKnownCheckouts`). | `checkouts.map(\.displayName)` is still `["main", "feature"]`; `branchControllers.count` is still `2`; the stored tab ids are unchanged from before the flip — proving the injected `gitClient` (reached only through `workspace.gitClient`) is what actually governs the read. |
 | git-client-projects-project-controller-014 | reconcile-calls-chain-in-order, close-guard-brackets-reconcile-and-refresh | Using a fake `git` executable whose first `worktree list` call answers slowly with a stale single-checkout result and every later call answers immediately with the fresh two-checkout result: start `open()`, wait for proof its git call began, then start `refreshCheckouts()` concurrently, and await both (`testOverlappingOpenAndRefreshCannotLetAStaleWorktreeReadOverwriteAFreshOne`). | `checkouts.map(\.displayName) == ["main", "feature"]` and the stored tabs' titles equal `["main", "feature"]` — the later, fresher call's write is the one left standing, regardless of which git process happened to finish first. |
 | git-client-projects-project-controller-015 | main-actor-isolation | Under the project's `SWIFT_STRICT_CONCURRENCY: complete` build setting, attempt to call `controller.open()` or read `controller.checkouts` from a `nonisolated` context with no `await` and no `@MainActor` hop. | Compilation fails; there is no runtime path that reaches `ProjectController` off the main actor, so this MUST is verified at build time rather than by an XCTest assertion. |
-| git-client-projects-project-controller-016 | reconcile-aborts-after-a-late-close, close-guard-brackets-reconcile-and-refresh | Not present in `ProjectControllerTests.swift`; synthesized from `ProjectController.swift` lines 93, 95, 176, 182-183. Call `controller.open()`; while its `readCheckouts()` await is still pending, call `controller.markClosed()`; let `open()`'s task resume. | `checkouts`, `branchControllers`, and the workspace's stored tabs are left exactly as they were before `open()` was called; neither `onWillChangeTabs` nor `onTabsDidChange` fires. |
-| git-client-projects-project-controller-017 | branch-controllers-refreshed-after-reconcile | Not present in `ProjectControllerTests.swift`; synthesized from `ProjectController.swift` lines 96-98 (compare `BranchControllerTests.swift`'s `testRefreshReadsTheBranchFromGitAndReloadsPanes`, which exercises `BranchController.refresh()` in isolation). Rename the `feature` worktree's branch on disk (`git checkout -b renamed`), then call `await controller.refreshCheckouts()`. | `controller.branchController(forDirectory: worktreeRoot)?.currentBranch == "renamed"`, proving the per-branch-controller refresh loop ran even though the checkout list's shape did not change. |
-| git-client-projects-project-controller-018 | shutdown-closes-then-stops-language-services | Not present in `ProjectControllerTests.swift`; synthesized from `ProjectController.swift` lines 148-151. Build a `ProjectWorkspace` whose `languageServices` is a test double recording `shutdown()` calls; build a controller over it; call `await controller.shutdown()`. | `controller.isClosed == true`; the branch commands are unregistered exactly as `markClosed()` alone would leave them; the `languageServices` double records exactly one `shutdown()` call. |
-| git-client-projects-project-controller-019 | unchanged-plan-still-signals-checkout-change | Not present in `ProjectControllerTests.swift`; synthesized from `ProjectController.swift` line 200. After `open()`, set `onTabItemsNeedRefresh`; rename the `feature` worktree's branch on disk without adding or removing a worktree; call `await controller.refreshCheckouts()`. | The stored tab set is unchanged (so `onTabsDidChange` does not fire), but `onTabItemsNeedRefresh` fires exactly once because `previousCheckouts != checkouts`. |
-| git-client-projects-project-controller-020 | new-checkout-tabs-copy-arrangement-or-blueprint, active-tab-falls-back-to-first | Not present in `ProjectControllerTests.swift`; synthesized from `ProjectController.swift` lines 210-218. After `open()`, add a third worktree on disk, then call `await controller.refreshCheckouts()`. | The new worktree's tab record's `root` equals the existing arrangement copied with fresh node ids (`arrangement.inFreshIDs()`), not `workspace.layout.blueprint()`; `activeTabID` still names whichever tab was active before the refresh. |
-| git-client-projects-project-controller-021 | checkouts-from-worktrees | Not present in `ProjectControllerTests.swift`; synthesized from `ProjectController.swift` lines 236-238. Build a `ProjectWorkspace` whose `directoryURL` is a plain directory that has never been a git repository (so `git worktree list --porcelain` there succeeds with empty output); call `await controller.open()`. | `checkouts == [ProjectCheckout(directory: workspace.directoryURL, branch: nil, isMain: true)]`; exactly one `BranchController` is created, for that synthetic checkout. |
+| git-client-projects-project-controller-016 | reconcile-aborts-after-a-late-close, close-guard-brackets-reconcile-and-refresh | Not present in `ProjectControllerTests.swift`; synthesized from `ProjectController.swift`. Call `controller.open()`; while its `readCheckouts()` await is still pending, call `controller.markClosed()`; let `open()`'s task resume. | `checkouts`, `branchControllers`, and the workspace's stored tabs are left exactly as they were before `open()` was called; neither `onWillChangeTabs` nor `onTabsDidChange` fires. |
+| git-client-projects-project-controller-017 | branch-controllers-refreshed-after-reconcile | Not present in `ProjectControllerTests.swift`; synthesized from `ProjectController.swift` (compare `BranchControllerTests.swift`'s `testRefreshReadsTheBranchFromGitAndReloadsPanes`, which exercises `BranchController.refresh()` in isolation). Rename the `feature` worktree's branch on disk (`git checkout -b renamed`), then call `await controller.refreshCheckouts()`. | `controller.branchController(forDirectory: worktreeRoot)?.currentBranch == "renamed"`, proving the per-branch-controller refresh loop ran even though the checkout list's shape did not change. |
+| git-client-projects-project-controller-018 | shutdown-closes-then-stops-language-services | Not present in `ProjectControllerTests.swift`; synthesized from `ProjectController.swift`. Build a `ProjectWorkspace` whose `languageServices` is a test double recording `shutdown()` calls; build a controller over it; call `await controller.shutdown()`. | `controller.isClosed == true`; the branch commands are unregistered exactly as `markClosed()` alone would leave them; the `languageServices` double records exactly one `shutdown()` call. |
+| git-client-projects-project-controller-019 | unchanged-plan-still-signals-checkout-change | Not present in `ProjectControllerTests.swift`; synthesized from `ProjectController.swift`. After `open()`, set `onTabItemsNeedRefresh`; rename the `feature` worktree's branch on disk without adding or removing a worktree; call `await controller.refreshCheckouts()`. | The stored tab set is unchanged (so `onTabsDidChange` does not fire), but `onTabItemsNeedRefresh` fires exactly once because `previousCheckouts != checkouts`. |
+| git-client-projects-project-controller-020 | new-checkout-tabs-copy-arrangement-or-blueprint, active-tab-falls-back-to-first | Not present in `ProjectControllerTests.swift`; synthesized from `ProjectController.swift`. After `open()`, add a third worktree on disk, then call `await controller.refreshCheckouts()`. | The new worktree's tab record's `root` equals the existing arrangement copied with fresh node ids (`arrangement.inFreshIDs()`), not `workspace.layout.blueprint()`; `activeTabID` still names whichever tab was active before the refresh. |
+| git-client-projects-project-controller-021 | checkouts-from-worktrees | Not present in `ProjectControllerTests.swift`; synthesized from `ProjectController.swift`. Build a `ProjectWorkspace` whose `directoryURL` is a plain directory that has never been a git repository (so `git worktree list --porcelain` there succeeds with empty output); call `await controller.open()`. | `checkouts == [ProjectCheckout(directory: workspace.directoryURL, branch: nil, isMain: true)]`; exactly one `BranchController` is created, for that synthetic checkout. |
 
 ## Edge Cases
 
@@ -285,7 +277,7 @@ file renders itself.
   vector -021). A project with no stored tabs at all (`workspace.storedTabs()
   == nil`) MUST always take the "changed" persistence path, because
   `stored == nil` short-circuits the `plan.isUnchanged` guard regardless of
-  what the plan itself says (`ProjectController.swift` line 193, MUST).
+  what the plan itself says (`ProjectController.swift`, MUST).
 - **Boundary values**: `checkouts` may hold exactly one entry (a repository
   with no linked worktrees) or many; the loops over `plan.add` and
   `branchControllers.values` run zero, one, or many times with no special
@@ -318,8 +310,7 @@ file renders itself.
   no request to a remote. An unreadable or removed `workspace.directoryURL`
   is handled identically to any other `GitClientError` above.
 - **Cancellation and timeouts**: `serializedReconcile()` awaits its internal
-  `Task` to completion (`await task.value`, `ProjectController.swift` line
-  101) rather than racing it against a timeout of its own; `GitClientError
+  `Task` to completion (`await task.value`, `ProjectController.swift`) rather than racing it against a timeout of its own; `GitClientError
   .timedOut` reaches `readCheckouts()` through the same generic catch as
   every other error (see Error states above). Neither `open()` nor
   `refreshCheckouts()` checks `Task.isCancelled`; Swift's cooperative
@@ -390,9 +381,9 @@ network call of its own (see Offline or disconnected state above).
 ## Logging
 
 `ProjectController.swift` makes one logging call of its own, through its
-`Loggable` conformance (`ProjectController.swift` lines 321-323): `readCheckouts()`'s
+`Loggable` conformance (`ProjectController.swift`): `readCheckouts()`'s
 `catch` block, on a failed `gitClient.worktrees(in:)` call
-(`ProjectController.swift` lines 248-250). Subsystem defaults to
+(`ProjectController.swift`). Subsystem defaults to
 `Bundle.main.bundleIdentifier`; category is `ProjectController`.
 
 | Event | Level | Message |
@@ -470,7 +461,7 @@ mode this avoids: without chaining, "whichever's git call happens to finish
 last win\[s\], even when that is the earlier of the two calls." Chaining
 makes the *later caller's* write the one left standing, regardless of which
 git subprocess happens to finish first — call order, not completion order,
-is the contract (`ProjectController.swift` lines 42-52, verified by
+is the contract (`ProjectController.swift`, verified by
 **reconcile-calls-chain-in-order**, vector -014).
 **Approved**: pending
 
@@ -482,7 +473,7 @@ reconcile continuation already enqueued ahead of that hop would resume with
 the flag still down, pass the guard, and write a dead window's checkouts
 into the database." A synchronous `markClosed()`, called from the window's
 close handler in the same main-actor turn that drops the controller, closes
-that window (`ProjectController.swift` lines 55-70, 104-120).
+that window (`ProjectController.swift`).
 **Approved**: pending
 
 **Decision**: `readCheckouts()` orders a non-empty result with
@@ -492,7 +483,7 @@ that window (`ProjectController.swift` lines 55-70, 104-120).
 documented as not guaranteed stable, so a comparator that only orders
 main-before-non-main would not reliably keep the non-main checkouts in git's
 own order." Partitioning instead lets git's own order survive within each
-half (`ProjectController.swift` lines 239-243).
+half (`ProjectController.swift`).
 **Approved**: pending
 
 **Decision**: `onTabsDidChange` and `onTabItemsNeedRefresh` are mutually
@@ -503,7 +494,7 @@ Firing `onTabsDidChange` when nothing was actually written would make the
 window "throw away a live pane tree, and every shell and file-system watcher
 in it, for no reason at all"; firing `onTabItemsNeedRefresh` on the
 write path would be redundant work the write path's own rebuild already
-covers (`ProjectController.swift` lines 14-32, 193-202).
+covers (`ProjectController.swift`).
 **Approved**: pending
 
 **Decision**: `branchController(forDirectory:)` and the tab-item lookup both
@@ -513,8 +504,8 @@ checkout's stored (already-resolved) `directory`.
 this controller by: `git worktree list` reports a fully resolved path, while
 a caller's own `directory` may be "whatever a caller had lying around."
 Comparing without resolving both sides would turn a real match into a miss
-(`ProjectController.swift` lines 153-160, 309-313; see
-`ProjectCheckout.swift` lines 12-24 for the same rule applied to storage).
+(`ProjectController.swift`; see
+`ProjectCheckout.swift` for the same rule applied to storage).
 **Approved**: pending
 
 **Decision**: `syncBranchControllers()` reuses an existing `BranchController`
@@ -524,8 +515,7 @@ by matching on the checkout's `directory` alone, not on the whole
 branch must still find its controller." Matching on the full value type
 would treat a branch switch as a different checkout, discarding and
 rebuilding the `BranchController` — and its live `GitStatusProvider`
-subscription — on every branch change (`ProjectController.swift` lines
-257-268).
+subscription — on every branch change (`ProjectController.swift`).
 **Approved**: pending
 
 ## Compliance
@@ -578,3 +568,4 @@ actor while the subprocess runs.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | | | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

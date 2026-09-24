@@ -3,7 +3,7 @@ id: 5b0fea72-dbb8-4299-a54f-dc16486df1ae
 title: ExtensionIdentityComponent
 domain: agentictoolkit://recipes/extension-host-core-extensions-extension-identity-component
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -39,9 +39,7 @@ calls it before joining `identifier` and `version` into an install directory
 name, and `OpenVSXClient.requireSafeComponent` calls it before joining a
 namespace, name, and version onto a registry detail URL — one predicate
 shared by both splice sites (source:
-`packages/apple/AgenticToolkit/Core/Extensions/VSIXInstaller.swift` lines
-331–345; `packages/apple/AgenticToolkit/Core/Extensions/OpenVSXClient.swift`
-lines 273–281).
+`packages/apple/AgenticToolkit/Core/Extensions/VSIXInstaller.swift`; `packages/apple/AgenticToolkit/Core/Extensions/OpenVSXClient.swift`).
 
 ## Behavioral Requirements
 
@@ -352,3 +350,4 @@ control-character range.
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

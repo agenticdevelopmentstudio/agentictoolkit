@@ -3,7 +3,7 @@ id: d766c910-c7ec-4163-94a6-599cf103e85a
 title: SystemMemoryMonitor
 domain: agentictoolkit://recipes/ai-plugin-runtime-ai-plugin-kit-system-memory-monitor
 type: ingredient
-version: 1.0.1
+version: 1.0.2
 status: review
 language: en
 created: '2026-09-23'
@@ -54,64 +54,58 @@ itself.
 
 - **monitoring-protocol-shape**: `SystemMemoryMonitoring` MUST declare exactly
   two read-only properties, `physicalRAM: UInt64` and `pressureLevel:
-  MemoryPressureLevel`, and MUST conform to `Sendable` (lines 5-8).
+  MemoryPressureLevel`, and MUST conform to `Sendable`.
 - **physical-ram-source**: `SystemMemoryMonitor.physicalRAM` MUST be
   initialized from `ProcessInfo.processInfo.physicalMemory` and, being
   declared `public let`, MUST return that same value for the instance's
-  entire lifetime rather than re-querying `ProcessInfo` on each access (line
-  20).
+  entire lifetime rather than re-querying `ProcessInfo` on each access.
 - **initial-pressure-level**: A newly constructed `SystemMemoryMonitor`
   MUST report `pressureLevel == .normal` until its `DispatchSourceMemoryPressure`
-  delivers its first event, per the `latched` field's `.normal` default
-  (line 23).
+  delivers its first event, per the `latched` field's `.normal` default.
 - **pressure-level-is-latched**: `SystemMemoryMonitor.pressureLevel` MUST
   return the most recently latched value from the last delivered memory-pressure
-  event, not a live re-read of OS state on each access (lines 10-12, 26-28).
+  event, not a live re-read of OS state on each access.
 - **event-mask-subscription**: `SystemMemoryMonitor.init()` MUST create its
   `DispatchSourceMemoryPressure` with an event mask of exactly `.normal`,
   `.warning`, and `.critical`, and MUST call `source.activate()` so the
-  subscription is live for the instance's lifetime (lines 31-34, 40).
+  subscription is live for the instance's lifetime.
 - **dedicated-event-queue**: The memory-pressure source's event handler MUST
   run on a dedicated serial `DispatchQueue` labeled
   `"aipluginkit.memory-pressure"`, distinct from the queue of any caller of
-  `pressureLevel` (line 33).
+  `pressureLevel`.
 - **latch-write-serialization**: Every write to `latched` MUST occur inside
   `lock.withLock`, and every read of `latched` via `pressureLevel` MUST occur
   inside `lock.withLock`, so a concurrent read from one thread and a write
-  from the event-handler queue are serialized by the same `NSLock` (lines 26-28,
-  35-39).
+  from the event-handler queue are serialized by the same `NSLock`.
 - **coalesced-normal-precedence**: `SystemMemoryMonitor.level(for:)` MUST
   return `.normal` whenever the event mask contains the `.normal` bit,
   regardless of whether `.warning` or `.critical` bits are also set in the
   same coalesced mask — a fall is always the later event when a raise and a
-  fall coalesce into one delivery, so `.normal` MUST win the latch (lines
-  44, per the type's doc comment on lines 12-16).
+  fall coalesce into one delivery, so `.normal` MUST win the latch (per the type's doc comment).
 - **critical-precedence-over-warning**: When the event mask does not contain
   `.normal`, `level(for:)` MUST return `.critical` if the mask contains
-  `.critical`, even when `.warning` is also set (line 45).
+  `.critical`, even when `.warning` is also set.
 - **warning-when-only-warning-set**: When the event mask contains `.warning`
-  but neither `.normal` nor `.critical`, `level(for:)` MUST return `.warning`
-  (line 46).
+  but neither `.normal` nor `.critical`, `level(for:)` MUST return `.warning`.
 - **unmatched-mask-defaults-normal**: When the event mask contains none of
-  `.normal`, `.warning`, or `.critical`, `level(for:)` MUST return `.normal`
-  (line 47).
+  `.normal`, `.warning`, or `.critical`, `level(for:)` MUST return `.normal`.
 - **level-mapping-internal-visibility**: `level(for:)` MUST carry no access
   modifier (Swift's default `internal`), so it is reachable from the event
   handler and from `@testable import AIPluginKit` tests, but is not part of
-  the type's public API (line 43).
+  the type's public API.
 - **shared-singleton-instance**: `SystemMemoryMonitor.shared` MUST provide
   one process-wide default instance, constructed with `SystemMemoryMonitor()`
-  exactly once as a `static let` (line 18).
+  exactly once as a `static let`.
 - **public-constructibility**: `SystemMemoryMonitor.init()` MUST remain
   `public` and parameterless, so a caller MAY construct additional,
-  independent instances beyond `.shared` (line 30).
+  independent instances beyond `.shared`.
 - **unchecked-sendable-declaration**: `SystemMemoryMonitor` MUST be declared
   `final class SystemMemoryMonitor: SystemMemoryMonitoring, @unchecked
   Sendable`, asserting cross-actor safety that the compiler cannot verify on
-  its own, backed by the manual `NSLock` serialization of `latched` (line 17).
+  its own, backed by the manual `NSLock` serialization of `latched`.
 - **weak-self-in-event-handler**: The event handler closure MUST capture
   `self` weakly and MUST return without updating `latched` when `self` has
-  already been deallocated (lines 35-36).
+  already been deallocated.
 
 ## Appearance
 
@@ -132,17 +126,17 @@ visual component.
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| system-memory-monitor-001 | critical-precedence-over-warning | `SystemMemoryMonitor.level(for: .critical)` (`SystemMemoryMonitorTests.swift`, line 12). | Returns `.critical`. |
-| system-memory-monitor-002 | critical-precedence-over-warning | `SystemMemoryMonitor.level(for: [.warning, .critical])` (line 13). | Returns `.critical` — critical wins over warning when both bits are set without `.normal`. |
-| system-memory-monitor-003 | warning-when-only-warning-set | `SystemMemoryMonitor.level(for: .warning)` (line 14). | Returns `.warning`. |
-| system-memory-monitor-004 | coalesced-normal-precedence | `SystemMemoryMonitor.level(for: .normal)` (line 15). | Returns `.normal`. |
-| system-memory-monitor-005 | coalesced-normal-precedence | `SystemMemoryMonitor.level(for: [.warning, .normal])` (line 21). | Returns `.normal` — a coalesced raise+fall latches the later, normal event rather than the raise. |
-| system-memory-monitor-006 | coalesced-normal-precedence | `SystemMemoryMonitor.level(for: [.critical, .normal])` (line 22). | Returns `.normal`. |
-| system-memory-monitor-007 | coalesced-normal-precedence | `SystemMemoryMonitor.level(for: [.warning, .critical, .normal])` (line 23). | Returns `.normal` even with all three bits set. |
-| system-memory-monitor-008 | physical-ram-source | Construct `SystemMemoryMonitor()` and read `.physicalRAM` (`SystemMemoryMonitorTests.swift`, line 29). | Returns a value greater than `1_000_000_000` (the real host's physical RAM in bytes). |
-| system-memory-monitor-009 | initial-pressure-level | Construct a fresh `SystemMemoryMonitor()` and read `.pressureLevel` before any memory-pressure event has been delivered. | Returns `.normal`, from the `latched` field's default (source line 23; not directly asserted by the test file but the sole possible value before the source's queue delivers its first event). |
-| system-memory-monitor-010 | shared-singleton-instance | Read `SystemMemoryMonitor.shared` twice from different call sites. | Both reads yield the identical instance, since `shared` is a `static let` evaluated exactly once (source line 18). |
-| system-memory-monitor-011 | unmatched-mask-defaults-normal | `SystemMemoryMonitor.level(for: [])` (an empty `DispatchSource.MemoryPressureEvent` mask; not exercised by `SystemMemoryMonitorTests.swift`, derived directly from source line 47). | Returns `.normal`, the function's final fallthrough case. |
+| system-memory-monitor-001 | critical-precedence-over-warning | `SystemMemoryMonitor.level(for: .critical)` (`SystemMemoryMonitorTests.swift`). | Returns `.critical`. |
+| system-memory-monitor-002 | critical-precedence-over-warning | `SystemMemoryMonitor.level(for: [.warning, .critical])`. | Returns `.critical` — critical wins over warning when both bits are set without `.normal`. |
+| system-memory-monitor-003 | warning-when-only-warning-set | `SystemMemoryMonitor.level(for: .warning)`. | Returns `.warning`. |
+| system-memory-monitor-004 | coalesced-normal-precedence | `SystemMemoryMonitor.level(for: .normal)`. | Returns `.normal`. |
+| system-memory-monitor-005 | coalesced-normal-precedence | `SystemMemoryMonitor.level(for: [.warning, .normal])`. | Returns `.normal` — a coalesced raise+fall latches the later, normal event rather than the raise. |
+| system-memory-monitor-006 | coalesced-normal-precedence | `SystemMemoryMonitor.level(for: [.critical, .normal])`. | Returns `.normal`. |
+| system-memory-monitor-007 | coalesced-normal-precedence | `SystemMemoryMonitor.level(for: [.warning, .critical, .normal])`. | Returns `.normal` even with all three bits set. |
+| system-memory-monitor-008 | physical-ram-source | Construct `SystemMemoryMonitor()` and read `.physicalRAM` (`SystemMemoryMonitorTests.swift`). | Returns a value greater than `1_000_000_000` (the real host's physical RAM in bytes). |
+| system-memory-monitor-009 | initial-pressure-level | Construct a fresh `SystemMemoryMonitor()` and read `.pressureLevel` before any memory-pressure event has been delivered. | Returns `.normal`, from the `latched` field's default (not directly asserted by the test file but the sole possible value before the source's queue delivers its first event). |
+| system-memory-monitor-010 | shared-singleton-instance | Read `SystemMemoryMonitor.shared` twice from different call sites. | Both reads yield the identical instance, since `shared` is a `static let` evaluated exactly once. |
+| system-memory-monitor-011 | unmatched-mask-defaults-normal | `SystemMemoryMonitor.level(for: [])` (an empty `DispatchSource.MemoryPressureEvent` mask; not exercised by `SystemMemoryMonitorTests.swift`, derived directly from the source). | Returns `.normal`, the function's final fallthrough case. |
 
 ## Edge Cases
 
@@ -168,8 +162,7 @@ visual component.
   instances (e.g., `.shared` plus one created via `SystemMemoryMonitor()` in
   a test) each own an independent `latched` field and an independent
   `DispatchSourceMemoryPressure`; an event delivered to one instance's queue
-  has no effect on another instance's `pressureLevel` (source lines 22-24,
-  30-41).
+  has no effect on another instance's `pressureLevel`.
 - **Error states**: `DispatchSource.makeMemoryPressureSource` and
   `source.activate()` are not `throws` APIs in this source file, and
   `SystemMemoryMonitor.init()` has no error path — there is no dependency
@@ -337,3 +330,4 @@ Notes: separation-of-concerns passes because the `SystemMemoryMonitoring` protoc
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.0.1 | 2026-09-24 | Mike Fullerton | Compliance section rewritten as linked checks against the compliance catalog |
+| 1.0.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

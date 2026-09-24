@@ -3,7 +3,7 @@ id: fcff7387-19aa-49ab-b75d-f0c7bfcdf27c
 title: ProjectReconciler
 domain: agentictoolkit://recipes/git-client-projects-project-reconciler
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-24'
@@ -48,7 +48,7 @@ that, by directory name, then whatever is still unclaimed becomes a new
 insert, and whatever is still unaccounted for becomes a delete. The doc
 comment on the type states it is "Pure and `nonisolated`" so that "the
 interesting half of scanning" can be tested without a database, a filesystem,
-or a main actor (`ProjectReconciler.swift` lines 5-7). Nothing in this file
+or a main actor (`ProjectReconciler.swift`). Nothing in this file
 performs I/O beyond the injectable `isStillARepository` check; reading the
 scan results off disk is `GitRepoScanner`'s job (see the
 `git-client-projects-git-repo-scanner` recipe), and writing the resulting
@@ -60,74 +60,73 @@ scan results off disk is `GitRepoScanner`'s job (see the
   and MUST store four properties — `inserts`, `updates`, and `deletes`, each
   an array of `GitRepo` values defaulting to empty, and `summary`, a
   `ProjectScanSummary` defaulting to a freshly constructed instance
-  (`ProjectReconciler.swift` lines 10-15).
+  (`ProjectReconciler.swift`).
 - **exact-path-match-lookup**: `plan(existing:scanned:now:isStillARepository:)`
   MUST build a lookup keyed by every existing row's `path` before considering
   any scanned repository, so a scanned repository's fate is decided by an
-  exact string match against that lookup (`ProjectReconciler.swift` lines
-  50-51).
+  exact string match against that lookup (`ProjectReconciler.swift`).
 - **unmatched-scan-collection**: Every scanned repository whose `path` is not
   a key in that lookup MUST be added to the set of scans available to the
   later move and insert passes, in the order `scanned` was given
-  (`ProjectReconciler.swift` lines 56-60).
+  (`ProjectReconciler.swift`).
 - **exact-path-match-remote-update**: When a scanned repository's `path`
   exactly matches a known row and that row's stored `remote` differs from
   the scanned `remote`, `plan(...)` MUST overwrite the row's `remote` with
   the scanned value, MUST set its `lastSeen` to `now`, and MUST append the
   mutated row to `updates`; when the two `remote` values are equal,
   `plan(...)` MUST NOT append anything to `updates` for that row
-  (`ProjectReconciler.swift` lines 62-66).
+  (`ProjectReconciler.swift`).
 - **exact-path-match-increments-unchanged**: `plan(...)` MUST increment
   `summary.unchanged` by exactly one for every scanned repository whose path
   exactly matches a known row, regardless of whether that same row was also
   just appended to `updates` for a remote change — a row can count toward
   `unchanged` and appear in `updates` in the same call
-  (`ProjectReconciler.swift` line 67; verified by
+  (`ProjectReconciler.swift`; verified by
   `testARepointedRemoteIsWrittenBack`).
 - **missing-rows-exclude-seen**: After the exact-path pass, `plan(...)` MUST
   narrow the candidates for the skip, move, and delete passes to existing
   rows whose `id` was not marked seen during that pass
-  (`ProjectReconciler.swift` line 73).
+  (`ProjectReconciler.swift`).
 - **unreachable-path-skipped-not-deleted**: A missing row for which
   `isStillARepository` returns `true` for that row's `path` MUST be excluded
   from both the move pass and the delete pass, and the count of such rows
   MUST be added to `summary.skipped` rather than `summary.removed`
-  (`ProjectReconciler.swift` lines 74-76).
+  (`ProjectReconciler.swift`).
 - **move-by-remote-priority**: For a missing row whose `remote` is present
   and non-empty, `plan(...)` MUST consider only unclaimed scanned
   repositories whose `remote` equals that exact string as move candidates
   before ever consulting directory-name equality
-  (`ProjectReconciler.swift` lines 83-89).
+  (`ProjectReconciler.swift`).
 - **move-by-remote-requires-uniqueness**: `plan(...)` MUST use a remote-based
   candidate as the match only when exactly one unclaimed scanned repository
   shares the missing row's `remote`; when zero or more than one share it,
   `plan(...)` MUST fall back to the directory-name comparison instead
-  (`ProjectReconciler.swift` line 103).
+  (`ProjectReconciler.swift`).
 - **move-by-name-fallback**: `plan(...)` MUST match a missing row to an
   unclaimed scanned repository by directory-name equality — the scanned
   repository's `leafName` equal to `GitRepo.defaultName(forPath:)` of the
   missing row's path — only when both the missing row's `remote` and the
   candidate's `remote` are `nil` or the empty string, and only when exactly
-  one such candidate exists (`ProjectReconciler.swift` lines 97-103).
+  one such candidate exists (`ProjectReconciler.swift`).
 - **unmatched-move-becomes-delete**: A missing row for which neither the
   remote pass nor the name pass yields a unique candidate MUST remain
   unresolved after the move pass and MUST end up in `deletes`
-  (`ProjectReconciler.swift` lines 104, 132; verified by
+  (`ProjectReconciler.swift`; verified by
   `testAnAmbiguousMoveDeletesTheRow`).
 - **move-preserves-identity-and-name**: When a missing row is matched,
   `plan(...)` MUST keep that row's `id` and `name` unchanged, MUST overwrite
   its `path` and `remote` with the matched scan's values, MUST set its
   `lastSeen` to `now`, MUST append it to `updates`, and MUST NOT also append
-  it to `inserts` (`ProjectReconciler.swift` lines 104-112).
+  it to `inserts` (`ProjectReconciler.swift`).
 - **move-claims-target-path**: `plan(...)` MUST record a matched scan's
   `path` as claimed at the moment the match is made, so that no later
   iteration of the move pass, and no later evaluation of the insert pass,
   can match that same scanned path a second time
-  (`ProjectReconciler.swift` lines 78, 105, 118).
+  (`ProjectReconciler.swift`).
 - **move-precedes-insert**: `plan(...)` MUST resolve every possible move
   before evaluating any scanned repository for insertion, so a repository's
   destination path after a move is never also treated as a brand-new project
-  (`ProjectReconciler.swift` lines 80-81, 116-118; verified by
+  (`ProjectReconciler.swift`; verified by
   `testAMoveIsResolvedBeforeTheNewPathIsAdopted`).
 - **insert-unique-name**: For every scanned repository left unclaimed after
   the move pass, `plan(...)` MUST derive its name by calling
@@ -135,57 +134,57 @@ scan results off disk is `GitRepoScanner`'s job (see the
   current `name` and adding each newly assigned name to `taken` before
   processing the next unclaimed scan in the same call, so two repositories
   inserted by one `plan(...)` call MUST NOT receive the same name
-  (`ProjectReconciler.swift` lines 117-129; verified by
+  (`ProjectReconciler.swift`; verified by
   `testASecondRepoWithTheSameLeafNameIsQualifiedByItsParent`).
 - **insert-fresh-fields**: Each newly inserted `GitRepo` MUST take its `path`
   and `remote` from the unmatched scan and MUST set both `firstSeen` and
   `lastSeen` to `now`, leaving `id` to `GitRepo.init`'s default of a freshly
-  generated `UUID` (`ProjectReconciler.swift` lines 121-127).
+  generated `UUID` (`ProjectReconciler.swift`).
 - **delete-whatever-remains**: `plan(...)` MUST place every missing row that
   the skip pass and the move pass left unresolved into `deletes`, and MUST
   set `summary.removed` to the count of that final list
-  (`ProjectReconciler.swift` lines 131-133).
+  (`ProjectReconciler.swift`).
 - **plan-defaults**: `plan(existing:scanned:now:isStillARepository:)` MUST
   default `now` to `Date()` evaluated at the moment of the call and MUST
   default `isStillARepository` to `ProjectReconciler.repositoryExists` when
-  the caller supplies neither (`ProjectReconciler.swift` lines 43-48).
+  the caller supplies neither (`ProjectReconciler.swift`).
 - **repository-exists-check**: `repositoryExists(atPath:)` MUST return
   whether `FileManager.default` reports an entry named `.git` directly under
   `path`, and per its own doc comment — "its existence is the whole test" —
   MUST NOT additionally check whether that entry is a directory or contains
-  a `HEAD` file (`ProjectReconciler.swift` lines 140-147).
+  a `HEAD` file (`ProjectReconciler.swift`).
 - **unique-name-escalation**: `uniqueName(forPath:taken:)` MUST split `path`
   into its non-separator path components and MUST try, in order, the
   shortest trailing run of one component, then two, and so on, each joined
   with `/`, returning the first such candidate that is not a member of
-  `taken` (`ProjectReconciler.swift` lines 152-158; verified by
+  `taken` (`ProjectReconciler.swift`; verified by
   `testUniqueNameWalksUpUntilItIsFree`).
 - **unique-name-empty-path**: `uniqueName(forPath:taken:)` MUST return
   `path` unchanged when `path` has no non-separator components
-  (`ProjectReconciler.swift` line 154).
+  (`ProjectReconciler.swift`).
 - **unique-name-exhausted-fallback**: When every candidate through the full
   path, including the full path itself, is already present in `taken`,
   `uniqueName(forPath:taken:)` MUST return `path` unchanged, exactly as it
   was passed in, rather than appending a disambiguating suffix of any kind
-  (`ProjectReconciler.swift` line 159).
+  (`ProjectReconciler.swift`).
 - **plan-pure-and-side-effect-free**: `plan(...)`, `repositoryExists(atPath:)`,
   and `uniqueName(forPath:taken:)` MUST each be synchronous and non-throwing,
   and none MUST perform network access, read or write a database, or store
   anything on `ProjectReconciler` itself, which declares no stored property
-  of any kind (`ProjectReconciler.swift` lines 8, 43-160).
+  of any kind (`ProjectReconciler.swift`).
 - **reconciler-isolation-free**: `ProjectReconciler` MUST declare no `actor`
   or `@MainActor` isolation on itself or on any of its three static
   functions, so all three MUST be callable synchronously from any
   concurrency domain, matching the type doc comment's stated "Pure and
-  `nonisolated`" intent (`ProjectReconciler.swift` lines 5-8).
+  `nonisolated`" intent (`ProjectReconciler.swift`).
 - **plan-injection-closure-not-sendable-annotated**: The type of
   `isStillARepository` is a plain function value taking a `String` and
   returning a `Bool`; unlike `GitRepoScanner`'s `isCancelled` and
   `onProgress` parameters, it carries no `@Sendable` annotation, so nothing
   in this file's own signature obliges a caller-supplied closure to be safe
   to invoke from a different concurrency domain than the one that
-  constructed it (`ProjectReconciler.swift` line 47, contrast
-  `GitRepoScanner.swift` lines 93-94).
+  constructed it (`ProjectReconciler.swift`, contrast
+  `GitRepoScanner.swift`).
 - **duplicate-existing-path-handling**: `plan(existing:scanned:now:isStillARepository:)` does not validate that `existing` holds at most one row per `path`; it relies on its caller, and the `git_repo` table that `ProjectDatabase` reads `existing` from declares `path TEXT NOT NULL UNIQUE`, so database-supplied rows never repeat a path. A caller that passes hand-built rows with a repeated path gets the path-keyed lookup's last-wins behavior: the earlier row can never be matched by the exact-path pass and, if its own path still exists on disk, never appears in `inserts`, `updates`, or `deletes`.
 - **duplicate-scanned-path-handling**: NEEDS REVIEW: Not implemented in source. `plan(existing:scanned:now:isStillARepository:)` never validates that `scanned` holds at most one entry per `path`; two `ScannedGitRepo` values sharing one path — plausible when a caller configures overlapping scan roots — are each processed independently through the exact-path pass and the unmatched-scan pass, so they can produce two separate `updates` entries carrying the same existing row's `id`, or two separate `inserts` for what is really one directory. What is missing: whether `GitRepoScanner` guarantees unique paths across a whole multi-root scan, or whether `plan` is expected to deduplicate its own input before matching. What would settle it: a doc-comment statement of that precondition on `scanned`, or evidence that overlapping roots are never a supported configuration.
 
@@ -230,34 +229,33 @@ Not applicable — this is a matching algorithm, not a visual component.
   both empty MUST cause `plan(...)` to return a `Plan` whose `inserts`,
   `updates`, and `deletes` are all empty and whose `summary` has every count
   at its default of zero, since none of the four passes has anything to
-  iterate (`ProjectReconciler.swift` lines 49-136). MUST.
+  iterate (`ProjectReconciler.swift`). MUST.
   A scanned or existing `remote` of the empty string is treated as
   equivalent to `nil` for the purposes of `move-by-remote-priority` (the
   `!remote.isEmpty` guard rejects it) and for `move-by-name-fallback`'s
   eligibility check (`(remote ?? "").isEmpty`), even though `GitRepo` and
   `ScannedGitRepo` themselves store `nil` and `""` as distinct values
-  (`ProjectReconciler.swift` lines 85-89, 99-102). MUST.
+  (`ProjectReconciler.swift`). MUST.
 - **Boundary values**: A single-component relative path such as `"alpha"`
   (no leading separator) produces exactly one path component from
   `URL(fileURLWithPath:).pathComponents`, so `uniqueName(forPath:taken:)`'s
   loop runs exactly once and either returns `"alpha"` or falls through to
   the exhausted-fallback return of the same string
-  (`ProjectReconciler.swift` lines 152-159). MUST. When every possible
+  (`ProjectReconciler.swift`). MUST. When every possible
   suffix candidate — including the full path — is already in `taken`,
   `uniqueName(forPath:taken:)` returns the original `path` string verbatim
   rather than producing a numbered or otherwise disambiguated name, so two
   calls in the same `plan(...)` run can only collide if the caller
   populates `taken` with every level of one candidate's own ancestry in
   advance; ordinary use (seeding `taken` from existing row names) does not
-  reach this boundary in the given tests (`ProjectReconciler.swift` line
-  159). MUST.
+  reach this boundary in the given tests (`ProjectReconciler.swift`). MUST.
 - **Concurrent access**: `plan(...)`, `repositoryExists(atPath:)`, and
   `uniqueName(forPath:taken:)` hold all of their mutable state in local
   variables, and their parameter and return types (`GitRepo`,
   `ScannedGitRepo`, `ProjectReconciler.Plan`) are all `Sendable`, so multiple
   concurrent calls with independent inputs cannot race against each other
   or against any state owned by `ProjectReconciler` itself, which declares
-  none (`ProjectReconciler.swift` lines 8-15, 49-136). MUST. The
+  none (`ProjectReconciler.swift`). MUST. The
   `isStillARepository` closure parameter's type carries no `@Sendable`
   annotation (see `plan-injection-closure-not-sendable-annotated`), so a
   caller that hands `plan(...)` a closure capturing mutable state shared
@@ -269,9 +267,9 @@ Not applicable — this is a matching algorithm, not a visual component.
   throws either; a permission-denied ancestor directory, a `.git` path that
   never existed, and a path on an unmounted volume all collapse to the same
   `false` result, which `plan(...)` then treats identically to "genuinely
-  gone" (`ProjectReconciler.swift` lines 145-147, 74-76). This collapsing is
+  gone" (`ProjectReconciler.swift`). This collapsing is
   exactly what the doc comment on `repositoryExists` describes as the
-  intended, sole test ("its existence is the whole test," lines 140-141),
+  intended, sole test ("its existence is the whole test,"),
   not a swallowed error. MUST.
 - **Offline or disconnected state**: Not applicable — nothing in this file
   makes a network call; its only I/O is the local filesystem existence
@@ -280,7 +278,7 @@ Not applicable — this is a matching algorithm, not a visual component.
   longer exists at all on disk (the ordinary "vanished repository" case)
   causes `isStillARepository` to return `false`, so the row proceeds
   normally into the move pass and, absent a match, into `deletes`
-  (`ProjectReconciler.swift` lines 74-76, 131-133; verified by
+  (`ProjectReconciler.swift`; verified by
   `testAVanishedRepoIsDeleted`). MUST.
 - **Cancellation and timeouts**: Not applicable — `plan(...)`,
   `repositoryExists(atPath:)`, and `uniqueName(forPath:taken:)` are all
@@ -341,7 +339,7 @@ event-tracking call.
   absolute filesystem path) and `remote`/`ScannedGitRepo.remote` (a git
   remote URL read elsewhere and passed through) exactly as its inputs
   supply them, with no inspection, redaction, or transformation
-  (`ProjectReconciler.swift` lines 62-66, 106-112, 121-127).
+  (`ProjectReconciler.swift`).
 - **Storage**: None — this file returns a `Plan` value to its caller and
   persists nothing itself; writing the plan's rows to a database is a
   separate component's responsibility.
@@ -406,7 +404,7 @@ even though the file's own scanner sibling (`GitRepoScanner.isGitDirectory(_:)`)
 applies both of those stricter checks.
 **Rationale**: The doc comment states it directly: "`.git` is a directory in
 an ordinary checkout and a file in a worktree or a submodule, so its
-existence is the whole test" (`ProjectReconciler.swift` lines 140-141) —
+existence is the whole test" (`ProjectReconciler.swift`) —
 `repositoryExists` only needs to tell "still something here" from "gone,"
 not to classify what kind of git artifact is present the way the scanner's
 stricter detection does when deciding whether to report a new project.
@@ -417,7 +415,7 @@ with a default of `ProjectReconciler.repositoryExists`, rather than `plan`
 calling `repositoryExists` directly by name.
 **Rationale**: The doc comment ties this to `dependency-injection`
 explicitly: it keeps "the reconciler ... pure and testable without a
-filesystem" (`ProjectReconciler.swift` lines 141-144), which is exactly how
+filesystem" (`ProjectReconciler.swift`), which is exactly how
 every test in `ProjectReconcilerTests.swift` exercises the skip-versus-delete
 boundary without touching disk.
 **Approved**: pending
@@ -426,18 +424,18 @@ boundary without touching disk.
 directory-name equality when both sides have no remote to compare.
 **Rationale**: The doc comment gives the reasoning for the ordering (two
 checkouts of the same remote are "the same project moved, in the
-overwhelming case," `ProjectReconciler.swift` lines 19-21) and for the name
+overwhelming case," `ProjectReconciler.swift`) and for the name
 fallback's narrower condition: "a name is only evidence when there is no
 remote on either side to disagree about," since two unrelated directories
 can share a leaf name and re-pointing one at the other would hand its
-settings to a stranger (`ProjectReconciler.swift` lines 90-96).
+settings to a stranger (`ProjectReconciler.swift`).
 **Approved**: pending
 
 **Decision**: A move candidate must be unique or the row is deleted instead
 of guessed at.
 **Rationale**: The doc comment states the cost of guessing wrong directly:
 "a guess here silently re-points a project's settings at the wrong folder"
-(`ProjectReconciler.swift` lines 22-24), which the ambiguous-match test
+(`ProjectReconciler.swift`), which the ambiguous-match test
 confirms produces two fresh inserts and one deletion rather than one lucky
 guess.
 **Approved**: pending
@@ -449,18 +447,16 @@ moved nor deleted — rather than treated as absent.
 such a row might be missing only because "the user added a skip pattern, a
 parent directory turned unreadable, [or] a scan root moved," and deleting on
 that evidence "cascades the project's settings, layout, tabs, pane state and
-window frame away with no undo" (`ProjectReconciler.swift` lines 32-39). The
+window frame away with no undo" (`ProjectReconciler.swift`). The
 same comment accepts the opposite cost for a genuinely absent path — "a
-project on an unmounted volume is forgotten and comes back as new" (lines
-41-42) — as a deliberate, asymmetric trade-off rather than an oversight.
+project on an unmounted volume is forgotten and comes back as new" — as a deliberate, asymmetric trade-off rather than an oversight.
 **Approved**: pending
 
 **Decision**: The move pass runs, and claims its matched paths, before the
 insert pass considers any scanned repository new.
 **Rationale**: The doc comment states the ordering constraint plainly: "a
 moved repository must claim its new path before the adoption pass below
-turns that same path into a brand-new project" (`ProjectReconciler.swift`
-lines 80-81) — reversing the order would let a legitimately moved
+turns that same path into a brand-new project" (`ProjectReconciler.swift`) — reversing the order would let a legitimately moved
 repository lose its identity, settings, and layout to a fresh row.
 **Approved**: pending
 
@@ -497,7 +493,7 @@ but `repositoryExists(atPath:)` is only ever exercised incidentally, as the
 default `isStillARepository` argument hitting the real filesystem at
 ephemeral test paths, never by a dedicated test asserting its true/false
 contract against a constructed `.git` entry, and `uniqueName`'s
-exhausted-fallback branch (line 159) has no test at all. idempotent-operations
+exhausted-fallback branch has no test at all. idempotent-operations
 passes: the doc comment and `testAnUnchangedRepoProducesNoWrite`'s own name
 tie the exact-path pass's "no update when nothing changed" behavior directly
 to re-running a scan over an unchanged tree producing no database write.
@@ -512,3 +508,4 @@ table's `UNIQUE` path constraint rather than by this file.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | | | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

@@ -3,11 +3,11 @@ id: 0f65ea61-3b0f-4a9b-842e-912555b7af62
 title: AI Provider Config Keys
 domain: agentictoolkit://recipes/ai-plugin-runtime-ai-plugin-kit-ai-provider-config-keys
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -91,7 +91,7 @@ Not applicable — this is a storage-key namespace, not a visual component.
 | ai-provider-config-keys-002 | model-key-format | `modelKey(config: id)` (same `id` as above) | `"aiplugin.config.11111111-2222-3333-4444-555555555555.model"` — `AIProviderConfigKeysTests.testModelAndLedgerKeys` |
 | ai-provider-config-keys-003 | secret-fields-key-format | `secretFieldsKey(config: id)` | `"aiplugin.config.11111111-2222-3333-4444-555555555555.secretfields"` — `AIProviderConfigKeysTests.testModelAndLedgerKeys` |
 | ai-provider-config-keys-004 | fields-key-format | `fieldsKey(config: id)` | `"aiplugin.config.11111111-2222-3333-4444-555555555555.fields"` — `AIProviderConfigKeysTests.testModelAndLedgerKeys` |
-| ai-provider-config-keys-005 | registry-keys-fixed | Read `selectedConfigIdKey`, `configurationsKey`, `enabledKey`, `legacyCleanedKey` | `"ai_selected_config_id"`, `"ai_configurations"`, `"ai_summaries_enabled"`, `"ai_legacy_cleaned"` respectively — `AIProviderConfigKeys.swift` lines 35, 38, 41, 44 |
+| ai-provider-config-keys-005 | registry-keys-fixed | Read `selectedConfigIdKey`, `configurationsKey`, `enabledKey`, `legacyCleanedKey` | `"ai_selected_config_id"`, `"ai_configurations"`, `"ai_summaries_enabled"`, `"ai_legacy_cleaned"` respectively — `AIProviderConfigKeys.swift` |
 | ai-provider-config-keys-006 | key-namespace-isolation | `fieldKey(config: idA, field: "apiKey")` vs. `fieldKey(config: idB, field: "apiKey")` for `idA != idB` | Two distinct strings, since `idA.uuidString != idB.uuidString` |
 | ai-provider-config-keys-007 | fields-ledger-format | `DaemonAIChatTests.makeSettings` seeds `fieldsKey(config: id)` with `values.keys.joined(separator: "\n")`, then `DaemonAIChat.completeViaPlugin` reads it back via `fieldsLedger.split(separator: "\n")` | The recovered field-name set equals the original `values.keys` set — `DaemonAIChatTests.swift:29-34` and `DaemonAIChat.swift:265-269` |
 | ai-provider-config-keys-008 | secret-fields-key-consumer (open question) | Grep `packages/apple/AgenticToolkit` for `secretFieldsKey` | Only `AIProviderConfigKeys.swift`'s declaration and `AIProviderConfigKeysTests.testModelAndLedgerKeys`'s format check appear; no production writer or reader exists |
@@ -196,3 +196,4 @@ Not applicable: `AIProviderConfigKeys.swift` contains no `Logger`, `os_log`, `pr
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

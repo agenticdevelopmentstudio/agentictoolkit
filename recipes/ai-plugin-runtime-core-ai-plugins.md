@@ -3,11 +3,11 @@ id: f305da79-fa03-493e-9c08-7186530943c6
 title: Chat Stream Event & Tool Types
 domain: agentictoolkit://recipes/ai-plugin-runtime-core-ai-plugins
 type: ingredient
-version: 1.0.0
+version: 1.0.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -43,25 +43,25 @@ All three have counterparts elsewhere in the codebase that this recipe does not 
 
 ## Behavioral Requirements
 
-- **stream-event-case-set**: `ChatStreamEvent` MUST have exactly three cases — `textDelta(String)`, `toolUse(id: String, name: String, argumentsJSON: Data)`, and `end(stopReason: String?)` (`ChatStreamEvent.swift`, lines 14-18).
-- **stream-event-sendable**: `ChatStreamEvent` MUST conform to `Sendable` (`ChatStreamEvent.swift`, line 14).
-- **text-delta-payload**: `.textDelta`'s associated value MUST be exactly one `String` chunk of assistant text and carry no other data (line 15); the type imposes no constraint on chunk size or where a chunk boundary falls.
-- **tool-use-payload**: `.toolUse`'s associated values MUST be `id: String`, `name: String`, and `argumentsJSON: Data` (line 16).
+- **stream-event-case-set**: `ChatStreamEvent` MUST have exactly three cases — `textDelta(String)`, `toolUse(id: String, name: String, argumentsJSON: Data)`, and `end(stopReason: String?)` (`ChatStreamEvent.swift`).
+- **stream-event-sendable**: `ChatStreamEvent` MUST conform to `Sendable` (`ChatStreamEvent.swift`).
+- **text-delta-payload**: `.textDelta`'s associated value MUST be exactly one `String` chunk of assistant text and carry no other data; the type imposes no constraint on chunk size or where a chunk boundary falls.
+- **tool-use-payload**: `.toolUse`'s associated values MUST be `id: String`, `name: String`, and `argumentsJSON: Data`.
 - **tool-use-arguments-raw**: `argumentsJSON` on a `.toolUse` event MUST carry the model's tool-call arguments as raw, undecoded JSON bytes, unchanged from the `AIStreamEvent.toolUse` value it is mapped from — `AIPluginChatBackend.chatEvent(for:)` passes `argumentsJSON` straight through with no parsing, and `ChatStreamEvent.swift` itself performs no JSON decoding of the field.
-- **end-stop-reason-optional**: `.end`'s `stopReason` MUST be `Optional<String>`, so a producer MAY report `nil` when no reason is available (line 17).
-- **stream-emission-contract**: Per the type's doc comment, a text-only backend MUST emit only `.textDelta` and `.end` events on a stream it returns, and a tool-capable backend MUST additionally emit one `.toolUse` event for each call the model requests (lines 10-13: "Text-only backends only emit `.textDelta` and `.end`; tool-capable backends additionally emit `.toolUse` for each call the model wants to make").
+- **end-stop-reason-optional**: `.end`'s `stopReason` MUST be `Optional<String>`, so a producer MAY report `nil` when no reason is available.
+- **stream-emission-contract**: Per the type's doc comment, a text-only backend MUST emit only `.textDelta` and `.end` events on a stream it returns, and a tool-capable backend MUST additionally emit one `.toolUse` event for each call the model requests ("Text-only backends only emit `.textDelta` and `.end`; tool-capable backends additionally emit `.toolUse` for each call the model wants to make").
 - **tool-call-result-correlation**: The `id` carried by a `.toolUse` event MUST be the same identifier a caller later supplies when reporting that call's outcome, whether as `ToolResult.toolUseId` or as `AIChatMessage.toolUseId` on a `.toolResult`-role message — `LocalChatSession.runTurn` propagates the same `use.id` recorded from each pending tool call into the `AIChatMessage(role: .toolResult, ..., toolUseId: use.id, ...)` it later appends.
-- **definition-identity**: `ToolDefinition` MUST require `name: String`, `description: String`, and `parametersJSONSchema: Data`, none of which has a default value (`ToolDefinition.swift`, lines 14-16 and 18-22).
-- **definition-equality**: `ToolDefinition` MUST conform to `Hashable`; two instances MUST compare equal if and only if their `name`, `description`, and `parametersJSONSchema` are each equal — the compiler-synthesized memberwise conformance over all three stored properties (line 13).
-- **definition-sendable**: `ToolDefinition` MUST conform to `Sendable` (line 13).
-- **definition-immutability**: `ToolDefinition` MUST declare `name`, `description`, and `parametersJSONSchema` as immutable `let` properties and MUST provide no method that mutates an existing instance (lines 14-16; the type declares only the memberwise initializer at lines 18-22).
+- **definition-identity**: `ToolDefinition` MUST require `name: String`, `description: String`, and `parametersJSONSchema: Data`, none of which has a default value (`ToolDefinition.swift`).
+- **definition-equality**: `ToolDefinition` MUST conform to `Hashable`; two instances MUST compare equal if and only if their `name`, `description`, and `parametersJSONSchema` are each equal — the compiler-synthesized memberwise conformance over all three stored properties.
+- **definition-sendable**: `ToolDefinition` MUST conform to `Sendable`.
+- **definition-immutability**: `ToolDefinition` MUST declare `name`, `description`, and `parametersJSONSchema` as immutable `let` properties and MUST provide no method that mutates an existing instance (the type declares only the memberwise initializer).
 - **definition-schema-opaque**: `parametersJSONSchema` MUST be treated as an opaque, pre-serialized JSON Schema byte buffer — `ToolDefinition` MUST NOT parse, decode, or validate it; no method in `ToolDefinition.swift` reads or transforms the field beyond storing and returning it.
-- **definition-provider-translation-elsewhere**: Translating a `ToolDefinition` into a specific backend's provider tool schema (Anthropic `tools`, OpenAI `functions`, etc.) MUST happen in the consuming backend, not in `ToolDefinition` itself, per the type's doc comment (lines 10-12: "Backends translate this into the provider-specific shape... before sending the request") — `AIPluginChatBackend.aiToolSpec(for:)` and `LocalChatSession.withTools(_:)` each perform exactly this translation, copying the three fields unchanged into an `AIToolSpec`.
-- **result-identity**: `ToolResult` MUST require `toolUseId: String`, `content: String`, and `isError: Bool`, none of which has a default value (`ToolResult.swift`, lines 14-16 and 18-22).
-- **result-equality**: `ToolResult` MUST conform to `Hashable`; two instances MUST compare equal if and only if their `toolUseId`, `content`, and `isError` are each equal (line 13).
-- **result-sendable**: `ToolResult` MUST conform to `Sendable` (line 13).
-- **result-immutability**: `ToolResult` MUST declare `toolUseId`, `content`, and `isError` as immutable `let` properties and MUST provide no method that mutates an existing instance (lines 14-16).
-- **result-error-flag-independence**: `ToolResult` MUST NOT enforce any relationship between `isError` and `content` — the initializer stores both fields exactly as given, with no validation tying them together (lines 18-22); a caller MAY construct `isError: true` with non-empty `content` (an error message) or `isError: false` with empty `content`.
+- **definition-provider-translation-elsewhere**: Translating a `ToolDefinition` into a specific backend's provider tool schema (Anthropic `tools`, OpenAI `functions`, etc.) MUST happen in the consuming backend, not in `ToolDefinition` itself, per the type's doc comment ("Backends translate this into the provider-specific shape... before sending the request") — `AIPluginChatBackend.aiToolSpec(for:)` and `LocalChatSession.withTools(_:)` each perform exactly this translation, copying the three fields unchanged into an `AIToolSpec`.
+- **result-identity**: `ToolResult` MUST require `toolUseId: String`, `content: String`, and `isError: Bool`, none of which has a default value (`ToolResult.swift`).
+- **result-equality**: `ToolResult` MUST conform to `Hashable`; two instances MUST compare equal if and only if their `toolUseId`, `content`, and `isError` are each equal.
+- **result-sendable**: `ToolResult` MUST conform to `Sendable`.
+- **result-immutability**: `ToolResult` MUST declare `toolUseId`, `content`, and `isError` as immutable `let` properties and MUST provide no method that mutates an existing instance.
+- **result-error-flag-independence**: `ToolResult` MUST NOT enforce any relationship between `isError` and `content` — the initializer stores both fields exactly as given, with no validation tying them together; a caller MAY construct `isError: true` with non-empty `content` (an error message) or `isError: false` with empty `content`.
 - **cross-domain-safety**: Because `ChatStreamEvent`, `ToolDefinition`, and `ToolResult` are all `Sendable` and every stored or associated value is itself `Sendable` (`String`, `Data`, `Bool`, `String?`), an instance of any of the three types MAY cross a concurrency-domain boundary — e.g. from `AIPluginChatBackend`'s background `Task` into a `@MainActor` chat UI, or from `LocalChatSession`'s tool-dispatch loop into a `ChatToolSource` actor — with no additional synchronization.
 - **no-persistence-no-side-effects**: Constructing or reading any case or field of `ChatStreamEvent`, `ToolDefinition`, or `ToolResult` MUST NOT perform file, database, `UserDefaults`, Keychain, or network access, and none of the three files persists or caches a value beyond the caller's own variable lifetime — each file declares only a case list or stored properties plus an initializer, with no I/O of any kind.
 
@@ -81,7 +81,7 @@ Not applicable — this is a set of Sendable chat tool-calling value types, not 
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| chat-tool-types-001 | stream-event-case-set, stream-event-sendable | Inspect `ChatStreamEvent.swift` lines 14-18. | Exactly three cases — `textDelta`, `toolUse`, `end` — and the enum declares `Sendable` conformance. |
+| chat-tool-types-001 | stream-event-case-set, stream-event-sendable | Inspect `ChatStreamEvent.swift`. | Exactly three cases — `textDelta`, `toolUse`, `end` — and the enum declares `Sendable` conformance. |
 | chat-tool-types-002 | text-delta-payload | `ChatStreamEvent.textDelta("Hello")`, pattern-matched with `if case let .textDelta(text) = event`. | `text == "Hello"`, with no other payload carried. |
 | chat-tool-types-003 | tool-use-payload, tool-use-arguments-raw | `ChatStreamEvent.toolUse(id: "call_1", name: "search", argumentsJSON: Data("{\"q\":\"cats\"}".utf8))`, pattern-matched as `LocalChatSession.swift`'s `case .toolUse(let id, let name, let args):` does. | `id == "call_1"`, `name == "search"`, and `args` equals the exact `Data` given, byte for byte, unparsed. |
 | chat-tool-types-004 | end-stop-reason-optional | Construct `ChatStreamEvent.end(stopReason: nil)`. | Constructs without error; `stopReason` is `nil`. |
@@ -193,3 +193,4 @@ Not applicable: none of the three files contains an `os_log`, `Logger`, `print`,
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |

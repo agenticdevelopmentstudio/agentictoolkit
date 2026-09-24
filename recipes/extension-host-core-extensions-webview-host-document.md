@@ -3,7 +3,7 @@ id: a380ec4a-df3f-42ee-8b07-3a8838d753e9
 title: WebviewHostDocument
 domain: agentictoolkit://recipes/extension-host-core-extensions-webview-host-document
 type: ingredient
-version: 1.0.1
+version: 1.0.2
 status: review
 language: en
 created: '2026-09-24'
@@ -59,104 +59,99 @@ convenience.
 - **bootstrap-injection-point**: `html(wrapping:initialState:)` MUST return
   the extension's markup with a `<script>` element containing the bootstrap
   script inserted at the index immediately following the extension's own
-  opening `<head>` tag when `headStartTagEnd(in:)` locates one unambiguously
-  (lines 56-69, 159-179).
+  opening `<head>` tag when `headStartTagEnd(in:)` locates one unambiguously.
 - **bootstrap-prepend-fallback**: When `headStartTagEnd(in:)` returns `nil`,
   `html(wrapping:initialState:)` MUST prepend the bootstrap `<script>`
   element to the start of `extensionHTML` unmodified, rather than inserting
-  it anywhere else in the document (lines 59-64).
+  it anywhere else in the document.
 - **head-tag-match-case-insensitive**: `headStartTagEnd(in:)` MUST search for
-  the literal `<head` case-insensitively (line 162), so `<HEAD>`, `<Head>`,
+  the literal `<head` case-insensitively, so `<HEAD>`, `<Head>`,
   and `<head>` are each recognized as a candidate head start.
 - **head-vs-header-disambiguation**: `headStartTagEnd(in:)` MUST treat a
   `<head` match as a genuine head start only when the character immediately
   following it is `>` or whitespace; when it is any other character (as in
   `<header` or `<heading`), the match MUST be rejected and the search MUST
-  continue from just past that match (lines 165-176).
+  continue from just past that match.
 - **head-tag-closing-detection**: When `<head` is immediately followed by
   `>`, `headStartTagEnd(in:)` MUST return the index immediately after that
   `>`. When `<head` is followed by whitespace, it MUST scan forward for the
-  tag's closing `>` and return the index immediately after that character
-  (lines 165-166, 168, 171).
+  tag's closing `>` and return the index immediately after that character.
 - **quoted-attribute-ambiguity-bailout**: While scanning forward for a
   `<head ...>` tag's closing `>`, `headStartTagEnd(in:)` MUST return `nil`
   immediately on encountering a `"` or `'` character before an unquoted `>`,
   because a quoted attribute value could itself contain `>` and the true tag
-  boundary cannot be determined without full HTML parsing (line 170).
+  boundary cannot be determined without full HTML parsing.
 - **unterminated-head-tag-bailout**: `headStartTagEnd(in:)` MUST return `nil`
   when a `<head` match is found but no closing `>` is ever reached — either
-  because the match sits at the very end of the string (line 163) or the
-  whitespace-scan loop exhausts the string without finding an unquoted `>`
-  (line 173).
+  because the match sits at the very end of the string or the
+  whitespace-scan loop exhausts the string without finding an unquoted `>`.
 - **extension-markup-passthrough**: Every character of `extensionHTML`
   outside the single insertion point MUST appear unchanged in the returned
   document; `html(wrapping:initialState:)` MUST NOT reformat, re-encode, or
-  otherwise alter the extension's own markup (lines 64, 66-68).
+  otherwise alter the extension's own markup.
 - **initial-state-undefined-vs-value**: A `nil` `initialState` MUST render as
   the bare JavaScript token `undefined`; a non-nil `initialState` MUST
   render as `JSON.parse` applied to a double-quoted, escaped string literal
   wrapping that text, so a caller can distinguish "never called `setState`"
-  from "called `setState` with a JSON-encoded value" (lines 52-55, 73-75).
+  from "called `setState` with a JSON-encoded value".
 - **script-element-escaping**: `escapedForScriptElement(_:)` MUST escape
   every Unicode scalar of its input for safe embedding inside a
   double-quoted JavaScript string literal that itself lives inside an HTML
   `<script>` element: backslash to `\\`, `"` to `\"`, newline to `\n`,
   carriage return to `\r`, tab to `\t`; `<`, `>`, `&`, U+2028, and U+2029 to
   their `\u` hex escapes; every other scalar below U+0020 to its `\u` hex
-  escape; every other scalar passed through unescaped (lines 125-146).
+  escape; every other scalar passed through unescaped.
 - **script-close-tag-neutralized**: Because `escapedForScriptElement` escapes
   `<` and `>`, no value supplied as `initialState` can cause the sequence
   formed by a less-than sign, "script", and a greater-than sign to appear
   literally in the rendered document, so persisted state can never terminate
-  the injected `<script>` element early (lines 116-117, 135-136).
+  the injected `<script>` element early.
 - **html-comment-open-neutralized**: Because `escapedForScriptElement`
   escapes `<`, no value supplied as `initialState` can cause an HTML comment
   opener to appear literally in the rendered document, so persisted state
   can never open a comment that would swallow the rest of the bootstrap,
-  including the `acquireVsCodeApi` definition (lines 118-119, 135).
+  including the `acquireVsCodeApi` definition.
 - **message-handler-name-constant**: `messageHandlerName` MUST be the fixed
   string `"agenticWebview"`; the bootstrap script MUST address
   `window.webkit.messageHandlers.agenticWebview` by interpolating this exact
   constant rather than restating it, so the Swift value and the generated
-  JavaScript identifier cannot diverge (lines 30-36, 83).
+  JavaScript identifier cannot diverge.
 - **message-kind-closed-set**: `MessageKind` MUST expose exactly two cases,
   `postMessage` (raw value `"postMessage"`) and `setState` (raw value
   `"setState"`), and MUST conform to `Sendable` and `CaseIterable`; the
   bootstrap script MUST send only these two kind strings via
-  `send(kind:body:)` (lines 38-45, 81-84, 93, 98).
+  `send(kind:body:)`.
 - **acquire-once-guard**: The rendered `window.acquireVsCodeApi` function
   MUST return a frozen API object on its first call within a page, and MUST
   throw a JavaScript `Error` with the exact message "An instance of the VS
   Code API has already been acquired" on every subsequent call in that same
   page, mirroring the real `acquireVsCodeApi()` contract extensions are
-  written against (lines 86-91).
+  written against.
 - **post-message-relay-is-fire-and-forget**: The returned API's
   `postMessage(message)` MUST call `send('postMessage', message)`, which
   MUST post an object carrying `kind` and `body` to the `agenticWebview`
   message handler when `window.webkit.messageHandlers.agenticWebview`
   exists, and MUST do nothing else — no throw, no fallback delivery — when
-  it does not (lines 81-85, 92-94).
+  it does not.
 - **get-state-returns-in-memory-value**: The returned API's `getState()`
   MUST return the script's in-memory `state` variable exactly as it was last
   set — either the value decoded from `initialState` at page-load time or
-  the argument of the most recent `setState` call in that page's lifetime
-  (lines 79, 95).
+  the argument of the most recent `setState` call in that page's lifetime.
 - **set-state-updates-and-relays**: The returned API's `setState(newState)`
   MUST reassign the in-memory `state` variable to `newState`, MUST call
-  `send('setState', newState)`, and MUST return `newState` (lines 96-100).
+  `send('setState', newState)`, and MUST return `newState`.
 - **pure-synchronous-string-transform**: `html(wrapping:initialState:)` MUST
   be a synchronous function of its two arguments only, performing no file,
   network, or process I/O, and MUST NOT throw; it MUST return the same
-  `String` value for repeated calls given identical arguments (lines 56-69;
-  no `throws` clause and no I/O API anywhere in the file).
+  `String` value for repeated calls given identical arguments (no `throws` clause and no I/O API anywhere in the file).
 - **no-explicit-concurrency-isolation**: `WebviewHostDocument` MUST be
   declared with no `Sendable` conformance, no `actor`, and no `@MainActor`
   isolation; it declares zero cases and only `static` members, so it holds
   no stored instance state, and its lack of an isolation annotation has no
   observable effect — every member is callable from any actor or thread
   without crossing an isolation boundary a caller could violate. The nested
-  `MessageKind` MUST be declared explicitly `Sendable` (lines 28, 40).
-- **initial-state-json-validity**: NEEDS REVIEW: Not implemented in source. `html(wrapping:initialState:)`'s doc comment names `initialState` as "The JSON text of whatever the panel last passed to `setState`" (lines 52-55), but neither `html(wrapping:initialState:)` nor `escapedForScriptElement(_:)` validates that a non-nil `initialState` is syntactically valid JSON before wrapping it in a `JSON.parse` call; a non-nil value that is not valid JSON (an empty string, or state corrupted wherever it was persisted) makes the generated immediately-invoked function expression throw a `SyntaxError` at page-load time — uncaught inside that expression and never reaching the native host — so the page loads with no `window.acquireVsCodeApi` and no signal that this happened. What is missing: whether `html(wrapping:initialState:)` should validate `initialState` before embedding it, or fall back to `undefined` on invalid input. Evidence that would settle it: confirmation from whoever owns the pane-state persistence layer (`packages/apple/AgenticToolkit/Core/Extensions/WebviewPanelState.swift`) that it can only ever produce syntactically valid JSON text and never an empty string, or a decision on the fallback behavior here.
+  `MessageKind` MUST be declared explicitly `Sendable`.
+- **initial-state-json-validity**: NEEDS REVIEW: Not implemented in source. `html(wrapping:initialState:)`'s doc comment names `initialState` as "The JSON text of whatever the panel last passed to `setState`", but neither `html(wrapping:initialState:)` nor `escapedForScriptElement(_:)` validates that a non-nil `initialState` is syntactically valid JSON before wrapping it in a `JSON.parse` call; a non-nil value that is not valid JSON (an empty string, or state corrupted wherever it was persisted) makes the generated immediately-invoked function expression throw a `SyntaxError` at page-load time — uncaught inside that expression and never reaching the native host — so the page loads with no `window.acquireVsCodeApi` and no signal that this happened. What is missing: whether `html(wrapping:initialState:)` should validate `initialState` before embedding it, or fall back to `undefined` on invalid input. Evidence that would settle it: confirmation from whoever owns the pane-state persistence layer (`packages/apple/AgenticToolkit/Core/Extensions/WebviewPanelState.swift`) that it can only ever produce syntactically valid JSON text and never an empty string, or a decision on the fallback behavior here.
 
 ## Appearance
 
@@ -187,9 +182,9 @@ Not applicable — this is an HTML-document assembler, not a visual component.
 | webview-host-document-011 | initial-state-undefined-vs-value | `wrapping: "<html><head></head><body></body></html>", initialState: nil` | Returned document contains the bare token `undefined` (`absentStateIsUndefined`) |
 | webview-host-document-012 | message-handler-name-constant | `WebviewHostDocument.messageHandlerName` | Equals `"agenticWebview"`; first character is a letter; every character is a letter or digit (`messageHandlerNameIsStable`) |
 | webview-host-document-013 | message-kind-closed-set | `MessageKind.allCases` against a rendered bootstrap | Every case's `rawValue` appears in the rendered document (`messageKindsAreClosed`) |
-| webview-host-document-014 | quoted-attribute-ambiguity-bailout | `wrapping: "<p>x</p><head data-x=\">oops\">content</head>"` (a quoted attribute containing `>`) | `headStartTagEnd(in:)` returns `nil`; the bootstrap is prepended before `<p>x</p>` rather than inserted mid-attribute (derived directly from lines 168-170; not exercised by a named test in the given source) |
-| webview-host-document-015 | head-vs-header-disambiguation | `wrapping: "<header>nav</header><head></head>"` | The bootstrap is inserted inside the real `<head></head>`, not before `<header>` (derived directly from lines 165-176; not exercised by a named test in the given source) |
-| webview-host-document-016 | acquire-once-guard | The literal text of `bootstrapScript(initialState:)`'s generated string | Contains the exact substring `already been acquired` guarded by an `if (acquired)` check (derived directly from lines 86-91; the Swift test suite asserts only that the resulting document contains this JavaScript text, not that a JS engine actually throws on a second call) |
+| webview-host-document-014 | quoted-attribute-ambiguity-bailout | `wrapping: "<p>x</p><head data-x=\">oops\">content</head>"` (a quoted attribute containing `>`) | `headStartTagEnd(in:)` returns `nil`; the bootstrap is prepended before `<p>x</p>` rather than inserted mid-attribute (derived directly from the source; not exercised by a named test in the given source) |
+| webview-host-document-015 | head-vs-header-disambiguation | `wrapping: "<header>nav</header><head></head>"` | The bootstrap is inserted inside the real `<head></head>`, not before `<header>` (derived directly from the source; not exercised by a named test in the given source) |
+| webview-host-document-016 | acquire-once-guard | The literal text of `bootstrapScript(initialState:)`'s generated string | Contains the exact substring `already been acquired` guarded by an `if (acquired)` check (derived directly from the source; the Swift test suite asserts only that the resulting document contains this JavaScript text, not that a JS engine actually throws on a second call) |
 
 ## Edge Cases
 
@@ -235,19 +230,19 @@ Not applicable — this is an HTML-document assembler, not a visual component.
   (see Design Decisions).
 - **Offline/disconnected state**: Not applicable — this file performs no
   network access of any kind; it is pure, synchronous string assembly over
-  Foundation only (lines 6, 26-27), so connectivity plays no role in what
+  Foundation only, so connectivity plays no role in what
   `html(wrapping:initialState:)` returns.
 
 ## Configuration
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `extensionHTML` | `String` | none — required | The extension's own `webview.html` markup, exactly as it assigned it (lines 50-51). |
-| `initialState` | `String?` | `nil` | The JSON text of the panel's last `setState` call, or `nil` if it never called one (lines 52-55). |
+| `extensionHTML` | `String` | none — required | The extension's own `webview.html` markup, exactly as it assigned it. |
+| `initialState` | `String?` | `nil` | The JSON text of the panel's last `setState` call, or `nil` if it never called one. |
 
 No environment variable, settings key, feature flag, or injected dependency
-exists anywhere in this file. `messageHandlerName` (line 36) and the
-`postMessage`/`setState` raw values (lines 42, 44) are compile-time
+exists anywhere in this file. `messageHandlerName` and the
+`postMessage`/`setState` raw values are compile-time
 constants baked into every call, not runtime configuration a caller can
 vary.
 
@@ -255,19 +250,18 @@ vary.
 
 Not applicable: this file defines no URL scheme, universal link, or intent
 handling of any kind — it assembles an HTML string only, and reads no
-inbound request of any kind (whole file, lines 1-181).
+inbound request of any kind (whole file).
 
 ## Localization
 
 | String | Text | Source |
 |--------|------|--------|
-| acquire-once error message | An instance of the VS Code API has already been acquired | `bootstrapScript(initialState:)` (line 88) |
+| acquire-once error message | An instance of the VS Code API has already been acquired | `bootstrapScript(initialState:)` |
 
 The string above is hardcoded English embedded directly into the generated
 JavaScript, with no lookup table, ICU message, or locale parameter anywhere
 in this file. This is a deliberate compatibility fact, not a gap: the exact
-wording mirrors the error the real `acquireVsCodeApi()` throws (doc comment
-lines 8-9, 22-24 name replicating that API as this file's purpose), so
+wording mirrors the error the real `acquireVsCodeApi()` throws (doc comment name replicating that API as this file's purpose), so
 extensions that inspect `Error.message` continue to work unmodified; a port
 to a platform with an i18n layer MUST decide, as a design choice outside
 this contract, whether to keep the literal English text for that
@@ -284,7 +278,7 @@ document string that some other component later renders inside a
 
 Not applicable: no field, function, or comment in this file reads a
 feature-flag key — the bootstrap is injected unconditionally on every call
-to `html(wrapping:initialState:)` (lines 56-69).
+to `html(wrapping:initialState:)`.
 
 ## Analytics
 
@@ -298,25 +292,23 @@ traffic, addressed to the native host, not analytics instrumentation.
 - **Data collected**: This file collects nothing itself; it passes through
   whatever `initialState` (the JSON text of persisted pane state) and, once
   a page runs the generated bootstrap, whatever `postMessage`/`setState`
-  bodies the extension supplies — content this file never inspects (lines
-  52-55, 92-100).
+  bodies the extension supplies — content this file never inspects.
 - **Storage**: Not applicable to this file. `WebviewHostDocument` performs
   no persistence of its own; the pane-state database this file's doc
-  comment names (line 110,
-  `packages/apple/AgenticToolkit/Core/Extensions/WebviewPanelState.swift`)
+  comment names (`packages/apple/AgenticToolkit/Core/Extensions/WebviewPanelState.swift`)
   is a separate component outside this file's scope.
 - **Transmission**: The document this file produces is loaded into a
   `WKWebView` in the same process; the injected bootstrap relays
   `postMessage`/`setState` bodies to the native host via
   `WKUserContentController`'s `agenticWebview` handler, which is an
-  in-process call, not a network transmission (lines 81-85).
+  in-process call, not a network transmission.
 - **Retention**: Not applicable to this file — `html(wrapping:initialState:)`
   returns a `String` per call and retains nothing between calls.
 
 ## Logging
 
 Not applicable: no `print`, `os_log`, `Logger`, or `NSLog` call appears
-anywhere in this file (whole file, lines 1-181) — this component emits no
+anywhere in this file (whole file) — this component emits no
 log line of any kind.
 
 ## Platform Notes
@@ -327,25 +319,22 @@ log line of any kind.
   owns the `WKWebView` and calls
   `webView.loadHTMLString(WebviewHostDocument.html(wrapping:initialState:), baseURL:)`
   moves into the representable's `updateNSView`/`updateUIView`. The
-  `WKScriptMessageHandler` registration against `messageHandlerName` (line
-  36) has no SwiftUI equivalent and stays as imperative
+  `WKScriptMessageHandler` registration against `messageHandlerName` has no SwiftUI equivalent and stays as imperative
   `WKUserContentController` setup inside the representable's coordinator.
 - **Compose**: Android has no `WKWebView`/`WKUserContentController`
   equivalent; the nearest composition is Jetpack Compose's `AndroidView`
   wrapping a platform `android.webkit.WebView`, with
   `WebView.addJavascriptInterface` (a method annotated `@JavascriptInterface`)
   replacing the `WKScriptMessageHandler` bridge the bootstrap script
-  addresses through `window.webkit.messageHandlers.agenticWebview` (line
-  83). The head-insertion and escaping logic (lines 56-146) ports directly,
+  addresses through `window.webkit.messageHandlers.agenticWebview`. The head-insertion and escaping logic ports directly,
   since it is plain string manipulation with no WebKit dependency.
 - **React/Web**: If the "webview" is itself an `iframe` rather than a native
   WebView, the DOM's own `postMessage`/`onmessage` pair replaces the
   `WKScriptMessageHandler` bridge entirely, and there is no HTML-string
   injection step at all — the host page and the framed page communicate
-  directly. The `acquireVsCodeApi`-shaped bootstrap this file generates
-  (lines 73-105) is worth keeping only if the product wants VS Code
+  directly. The `acquireVsCodeApi`-shaped bootstrap this file generates is worth keeping only if the product wants VS Code
   extension source code to run unmodified inside a web-hosted panel.
-- **AppKit / UIKit (source)**: This file is Foundation-only (line 6; no
+- **AppKit / UIKit (source)**: This file is Foundation-only (no
   `AppKit`, `UIKit`, or `WebKit` import) — the `WKWebView` and
   `WKUserContentController.add(_:name:)` calls that actually consume
   `WebviewHostDocument.html(wrapping:initialState:)` and
@@ -355,17 +344,17 @@ log line of any kind.
   iOS/UIKit counterpart under this package.
 - **WinUI 3**: `Microsoft.Web.WebView2` (the `WebView2` control) replaces
   `WKWebView`. The closer match to this file's actual bridge shape — a
-  single named channel carrying a `kind`/`body` pair, lines 81-84 — is
+  single named channel carrying a `kind`/`body` pair — is
   `CoreWebView2.WebMessageReceived` paired with the page calling
   `chrome.webview.postMessage`/`window.chrome.webview.postMessage` (WebView2's
   own bridge global), rather than `AddHostObjectToScript`. The bootstrap
   script's `window.acquireVsCodeApi`/`postMessage`/`getState`/`setState`
-  shim (lines 73-105) is generated identically via C# string interpolation
+  shim is generated identically via C# string interpolation
   before being handed to `CoreWebView2.NavigateToString(html)`. The
-  head-insertion scan (`headStartTagEnd`, lines 159-179) ports as a
+  head-insertion scan (`headStartTagEnd`) ports as a
   `string`-index walk using `IndexOf`/`Span<char>` with the same
   case-insensitive `<head`-vs-`<header>` and quoted-attribute bailout rules;
-  `escapedForScriptElement` (lines 125-146) ports as a `switch` over `char`
+  `escapedForScriptElement` ports as a `switch` over `char`
   values feeding a `StringBuilder`, producing the equivalent `\u` hex
   escape for each blocked character. `System.Text.Json`'s
   `JsonSerializer.Serialize` is what a caller uses to produce `initialState`
@@ -385,7 +374,7 @@ extension's own scripts exactly as intended, without being able to disable
 the bridge it is delivered through; it also guarantees `acquireVsCodeApi` is
 defined before the extension's own first script runs, which matters because
 calling it there is the normal way a restored panel gets its state back
-(doc comment lines 17-24).
+(doc comment).
 **Approved**: pending
 
 **Decision**: An ambiguous or unterminated `<head ...>` match makes
@@ -393,13 +382,12 @@ calling it there is the normal way a restored panel gets its state back
 attempting a best-effort insertion at a guessed boundary.
 **Rationale**: Certainty is the whole point — a wrong insertion point would
 corrupt markup this function promised only to insert into, whereas
-prepending is always correct, merely less tidy (doc comment lines 153-158).
+prepending is always correct, merely less tidy (doc comment).
 **Approved**: pending
 
 **Decision**: Persisted state is escaped for safe embedding inside a
 `<script>` element rather than validated as JSON before being embedded.
-**Rationale**: The doc comment on `escapedForScriptElement(_:)` (lines
-107-124) explains the escaping exists to close HTML-parser-level break-outs
+**Rationale**: The doc comment on `escapedForScriptElement(_:)` explains the escaping exists to close HTML-parser-level break-outs
 (`</script>`, `<!--`) that JSON encoding alone does not close, since the
 HTML parser reads a script element's contents before JavaScript ever does.
 The function does not additionally verify that the escaped text parses as
@@ -446,3 +434,4 @@ honestly-reported gap in the source, not a hidden one.
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
+| 1.0.2 | 2026-09-24 | Mike Fullerton | Phase 6 lint: removed source line-number citations; recipes cite files and symbols, not lines. |
