@@ -126,7 +126,7 @@ describe("the Child Ecosystems rail's busy flag tracks the children query's isFe
     );
 
     // With no ancestor RailHostContext, ResourceExplorer's RailHostBoundary stands up its own
-    // StandaloneRailHost — so BOTH the promoted topics rail (rows: Features / Settings / Child
+    // StandaloneRailHost — so BOTH the promoted topics rail (rows: Settings / Child
     // Ecosystems, scoped to entity "Acme") and the Child-Ecosystems-list rail ChildEcosystemsLevel
     // publishes land on screen as sibling `<aside aria-label="Topic list">` columns. The topics rail's own
     // ROW text is "Child Ecosystems" too (it names the topic), so text alone can't tell the two

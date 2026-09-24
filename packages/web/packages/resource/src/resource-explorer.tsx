@@ -121,6 +121,8 @@ export function ResourceExplorer<T>({
   topicAliases,
   homeBarRight,
   renderNewControl,
+  topicsTitle,
+  topicsTitleActions,
 }: {
   all?: boolean;
   /** Promote the TOPICS to the first (and only) rail: no resource list, no "All" state. The
@@ -217,6 +219,16 @@ export function ResourceExplorer<T>({
    *  on at all. Unlike the default button it is NOT displaced by `homeBarRight`: the two now
    *  render in different places, so a host may pass both without them colliding. */
   renderNewControl?: (onNew: () => void) => ReactNode;
+  /** The topics level's heading, for a host whose topics ARE something with a name of its own
+   *  (a product's topics are the features it holds, so it heads them "Features"). Omit and the
+   *  level is named after the selected entity, as always. The breadcrumb is unaffected either
+   *  way: it is built from the selected rows' labels, not from level titles, so the entity's
+   *  name still reads there. */
+  topicsTitle?: string;
+  /** Controls for the topics level's own title row (`TopicLevel.titleActions`), handed the
+   *  scoped resource's id — e.g. a tool menu that acts on THAT entity. Rendered only once a
+   *  resource is scoped, since there is nothing for such a control to act on before. */
+  topicsTitleActions?: (scopedId: string) => ReactNode;
 }): ReactElement {
   const router = useRouter();
   // Every SELECT in this explorer routes through here, so `{ replace: true }` — which the stack
@@ -434,8 +446,10 @@ export function ResourceExplorer<T>({
     // here flipped this header (and the breadcrumb tail derived from it) from the entity's name
     // to the literal "Topics" while its pane was still on screen showing that entity's data.
     title:
+      topicsTitle ??
       allEntityItems.find((e) => e.id === scopedId)?.label ??
       (promoteTopics ? nameSuffix : "Topics"),
+    titleActions: scopedId && topicsTitleActions ? topicsTitleActions(scopedId) : undefined,
     // The frontier's select nudge: name the rows and say what choosing one does.
     itemNoun: "topic",
     overviewHelp: `Each topic is one working area of this ${nameSuffix.toLowerCase()} — its apps, users, settings, and so on. Picking one opens that area's list or pane here.`,

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   Settings, Table2, Users, KeyRound, Network, Boxes, Plus, Inbox, Send, Database,
-  ShieldCheck, LogIn, MailPlus, Puzzle,
+  ShieldCheck, LogIn, MailPlus,
 } from "lucide-react";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { Checkbox } from "@agenticdevelopertoolkit/ui/components/checkbox";
@@ -29,7 +29,7 @@ import {
   type Ecosystem,
 } from "@agentic-toolkit/data/ecosystems";
 import { EcosystemSettingsPane } from "./EcosystemSettingsPane";
-import { EcosystemFeaturesPane } from "./EcosystemFeaturesPane";
+import { FeaturesToolMenu } from "./FeaturesToolMenu";
 import {
   EcosystemDetail,
   ecoBlank,
@@ -83,24 +83,16 @@ export interface RenderTopicPaneCtx {
 }
 
 /**
- * The topic rows for the topics this package renders ENTIRELY in-package (the Features
- * picker, the entity Settings pane and the Child Ecosystems rail). The package is the SSoT
+ * The topic rows for the topics this package renders ENTIRELY in-package (the entity
+ * Settings pane and the Child Ecosystems rail). What an ecosystem is provisioned with is not
+ * a topic: the topics list IS its features, so managing them lives in that list's own title
+ * row (`FeaturesToolMenu`) rather than as one more row inside it. The package is the SSoT
  * for what it renders:
  * a host composing only these (a feature-site mount) spreads them instead of hand-copying
  * ids/labels/icons that would silently drift; the hub builds its fuller rail from its own
  * ECOSYSTEM_TOPICS catalog, where these two ids appear with the same meaning.
  */
 export const IN_PACKAGE_TOPICS: EcosystemsTopicConfig[] = [
-  {
-    // FIRST, because it is now what an ecosystem IS. A new one is created empty and every
-    // other topic in the rail describes something a feature added here put there, so a rail
-    // that opened anywhere else would open on the consequences before the cause.
-    id: "features",
-    label: "Features",
-    icon: <Puzzle size={16} aria-hidden />,
-    description: "What this ecosystem has been provisioned with.",
-    dividerAfter: false,
-  },
   {
     id: "settings",
     label: "Settings",
@@ -199,7 +191,6 @@ function ChildEcosystemsLevel({
     items: (items ?? []).map((e) => ({
       id: e.id,
       label: e.name,
-      sublabel: e.identifier,
       icon: <Boxes size={16} aria-hidden />,
     })),
     selectedId: null,
@@ -503,6 +494,14 @@ export function EcosystemsFeature({
     </div>
   );
 
+  // The topics list's tool menu, scoped to the ecosystem those topics belong to. Withheld where
+  // the pane would be the not-manageable notice: a menu whose one verb would fail is worse
+  // than no menu.
+  const featuresToolMenu = (ecoId: string): ReactNode =>
+    canManageScoped(ecoId) ? (
+      <FeaturesToolMenu ecosystemId={ecoId} label={`${singular} features tools`} />
+    ) : null;
+
   const topics: ResourceTopic[] = topicsConfig.map((t) => ({
     id: t.id,
     label: t.label,
@@ -526,17 +525,6 @@ export function EcosystemsFeature({
         subLeafFor,
       });
       if (hostPane) return hostPane;
-      if (t.id === "features") {
-        // Editable exactly when the topic pane itself is reachable: `canManageScoped` above has
-        // already turned an unmanageable ecosystem into one honest notice, so anyone who gets
-        // this far may add and remove. A read-only reader would need a distinction the rail
-        // does not draw yet.
-        return ecoId ? (
-          <EcosystemFeaturesPane ecosystemId={ecoId} />
-        ) : (
-          <TopicSelectHint noun={lowerSingular} />
-        );
-      }
       if (t.id === "settings") {
         return (
           <EcosystemSettingsPane
@@ -837,11 +825,11 @@ export function EcosystemsFeature({
             title: plural,
             help: `Open ${an(lowerSingular)} to manage it, or create a new one.`,
             emptyLabel: `No ${lowerPlural} yet.`,
-            // The rdid, not the display name, is the identity: `name` is free text a rename can
-            // duplicate, while the reverse-domain identifier is the stored handle every address
-            // derives from. Two rows with the same name are otherwise indistinguishable.
-            getSublabel: (e) => e.identifier,
           }}
+          // The selected entity's topics are the features it holds, so the list is headed
+          // "Features" — the entity's own name still reads in the breadcrumb.
+          topicsTitle="Features"
+          topicsTitleActions={featuresToolMenu}
           renderDialog={(onClose, onCreated) => (
             // The workspace New Product form: Display Name + Slug are typed; the
             // identifier is READ-ONLY, derived as <the workspace's home ecosystem>.<slug>
@@ -906,6 +894,7 @@ export function EcosystemsFeature({
         topics={topics}
         topicAliases={GROUP_MEMBER_GROUP}
         newLabel={`New ${singular}…`}
+        topicsTitleActions={featuresToolMenu}
       />
       {createDialog}
     </>

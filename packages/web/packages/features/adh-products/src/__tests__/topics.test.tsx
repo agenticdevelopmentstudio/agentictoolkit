@@ -52,9 +52,8 @@ describe("the host-rendered seam", () => {
     // Rendered by EcosystemsFeature itself, asked of NEITHER seam: the three GROUP topics, whose
     // nested sub-rails it owns (their members come back through the seams — Buckets/Access/Users
     // and User Auth/Sign-in apps/Storage Access Tokens to the switch above, All Data and Email
-    // Signup to the host), the product's own entity pane, and "features" (EcosystemFeaturesPane —
-    // the same in-package id IN_PACKAGE_TOPICS reserves for EcosystemsFeature's own mount).
-    const FEATURE_OWNED = ["storage", "invitations", "authentication", "settings", "features"];
+    // Signup to the host), and the product's own entity pane.
+    const FEATURE_OWNED = ["storage", "invitations", "authentication", "settings"];
     const owned = new Set<string>([...PACKAGE_PANES, ...FEATURE_OWNED, ...HOST_RENDERED_TOPIC_IDS]);
     const unowned = PRODUCT_TOPICS.map((t) => t.id).filter((id) => !owned.has(id));
     expect(unowned).toEqual([]);

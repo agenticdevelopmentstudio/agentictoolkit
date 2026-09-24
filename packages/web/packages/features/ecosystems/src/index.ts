@@ -12,13 +12,15 @@ export type {
   RenderTopicPaneCtx,
 } from "./EcosystemsFeature";
 
-// The feature picker + the pane that owns it — how an ecosystem, which starts empty, gets
-// anything in it. Exported because the HUB opens the same picker from its /home rail: the
-// user's own features live on the user's ecosystem, so both surfaces add through this one
-// dialog rather than each growing its own.
+// The feature picker, the dialog that wires it to one ecosystem, and the tool menu that opens
+// it — how an ecosystem, which starts empty, gets anything in it. Exported because the HUB
+// draws the same menu on its /home rail: the user's own features live on the user's ecosystem,
+// so every features list adds and removes through this one dialog rather than each growing
+// its own.
 export { FeaturePickerDialog } from "./FeaturePickerDialog";
 export type { FeaturePickerDialogProps } from "./FeaturePickerDialog";
-export { EcosystemFeaturesPane } from "./EcosystemFeaturesPane";
+export { ManageFeaturesDialog } from "./ManageFeaturesDialog";
+export { FeaturesToolMenu } from "./FeaturesToolMenu";
 
 // The URL grammar lives at the SERVER-SAFE ./parse subpath ONLY — deliberately NOT
 // re-exported here: this barrel's dist is a "use client" module, so an RSC page that
