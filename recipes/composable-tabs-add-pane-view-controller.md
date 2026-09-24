@@ -3,7 +3,7 @@ id: aea5e7b2-00d2-4f23-bfc5-8dc64e8d0d2a
 title: ComposableTabsAddPaneViewController
 domain: agentictoolkit://recipes/composable-tabs-add-pane-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
@@ -469,17 +469,11 @@ not need to reproduce a "what if Right is missing" branch.
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [source-fidelity](agenticdevelopercookbook://compliance/recipe-quality#source-fidelity) | passed | recipe-quality |
-| [behavioral-requirements](agenticdevelopercookbook://compliance/recipe-quality#behavioral-requirements) | passed | recipe-quality |
-| [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | passed | recipe-quality |
-| [template-conformance](agenticdevelopercookbook://compliance/recipe-quality#template-conformance) | passed | recipe-quality |
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
 | [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
-| [modal-dismissal-and-focus](agenticdevelopercookbook://compliance/accessibility#modal-dismissal-and-focus) | passed | accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
+| [focus-management](agenticdevelopercookbook://compliance/accessibility#focus-management) | passed | accessibility |
 | [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
 | [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
 
 Keyboard-navigable passes because Cancel/OK carry the Escape/Return key
 equivalents and every other control is a stock, natively keyboard-accessible
@@ -487,17 +481,15 @@ equivalents and every other control is a stock, natively keyboard-accessible
 identifiers back automation on every control and the SF Symbol images carry
 descriptions, but neither popup is associated with its row caption via
 `setAccessibilityTitleUIElement` (see **associates-popup-with-row-caption**).
-Modal-dismissal-and-focus passes on the strength of AppKit's native sheet
+Focus-management passes on the strength of AppKit's native sheet
 presentation and dismissal, which this file does not override.
-Differentiate-without-color passes because no state here is conveyed by
-color alone. Contrast-ratio is partial because colors come entirely from
+Contrast-ratio is partial because colors come entirely from
 `ThemeRole` tokens resolved by the shared theme system, whose actual
 contrast values are not stated in this file (see Accessibility Options'
 Increase Contrast). String-externalization is failed because every label
 in this file ("Add:",
 "Where:", "Left", "Right", "Above", "Below", "Cancel", "OK") is a hardcoded
-English literal with no localization key. Main-actor-confined passes because
-the class is declared `@MainActor`.
+English literal with no localization key.
 
 ## Change History
 
@@ -505,3 +497,4 @@ the class is declared `@MainActor`.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Claude Sonnet 5 | Initial ingredient recipe for ComposableTabsAddPaneViewController: two-popup Add/Where sheet, fixed direction order and Right default, dismiss-before-invoke confirm ordering, fixed-at-load OK enablement, and one open accessibility question (popup-to-caption label association) for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded the confirm-dismisses-before-invoking-onadd requirement and its vector to assert that `dismiss(_:)` is invoked rather than completed; added a SHOULD requirement for popup-to-caption accessibility association, cited by the existing open-question marker; reformatted all Design Decisions into the canonical three-line block and trimmed the unreachable-fallback rationale to an observed path; added the ComposableTabsViewController recipe to depends-on; removed the inapplicable touch-target-size compliance row and reconciled the contrast-ratio/Increase Contrast cross-reference; fixed the AppKit / UIKit platform-note label and removed the WinUI 3 aside; clarified the Compose note's empty-choices seeding; relabeled two unreachable boundary-value edge cases as observations; gave literal key-equivalent values for add-pane-012/013; and named the confirm-action selector for add-pane-017. |
+| 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog, remapped modal-dismissal-and-focus to focus-management |

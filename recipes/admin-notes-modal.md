@@ -3,7 +3,7 @@ id: 589babce-b66e-447f-8049-f81af380bbef
 title: AdminNotesModal
 domain: agentictoolkit://recipes/admin-notes-modal
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
@@ -441,19 +441,12 @@ Not applicable: the source contains no logging call.
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [source-fidelity](agenticdevelopercookbook://compliance/recipe-quality#source-fidelity) | passed | recipe-quality |
-| [behavioral-requirements](agenticdevelopercookbook://compliance/recipe-quality#behavioral-requirements) | passed | recipe-quality |
-| [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | passed | recipe-quality |
-| [template-conformance](agenticdevelopercookbook://compliance/recipe-quality#template-conformance) | passed | recipe-quality |
-| [modal-dismissal-and-focus](agenticdevelopercookbook://compliance/accessibility#modal-dismissal-and-focus) | passed | accessibility |
-| [no-raw-hex-tokens-only](agenticdevelopercookbook://compliance/ui#no-raw-hex-tokens-only) | passed | ui |
+| [focus-management](agenticdevelopercookbook://compliance/accessibility#focus-management) | passed | accessibility |
 
 The source shows no override of `Dialog`'s default focus-trap/dismissal
 handling on either dialog (no custom keydown handling, no manual `.focus()`
-calls), so `modal-dismissal-and-focus` passes on the strength of `Dialog`'s
-own unmodified behavior; the color-token and structural-fidelity/completeness
-checks pass because every color in the source is an `apt-*`/theme token and
-every requirement above is grounded directly in the `.tsx` file.
+calls), so `focus-management` passes on the strength of `Dialog`'s
+own unmodified behavior.
 
 ## Change History
 
@@ -461,3 +454,4 @@ every requirement above is grounded directly in the `.tsx` file.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from source. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: rewrote the concurrent-access edge case as a non-normative documented limitation, clarified the `onSave` id contract and the id-collision risk, added the `AdminNote` shape and `New note` control location, listed all `AdminNote` fields in the dirty comparison, added a WinUI 3 Escape/close override for the shared-`ContentDialog` structure with a matching Design Decision, reformatted Design Decisions to the bold three-line form, added `textarea` to `depends-on`, completed the Localization string list, fixed the `modal-dismissal-and-focus` compliance status, and added test vectors for editor Escape/close dismissal, busy+dismissal, submitted-id-prefix, and Save-time id assignment. |
+| 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog, remapped modal-dismissal-and-focus to focus-management |

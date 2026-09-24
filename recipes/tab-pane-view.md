@@ -3,7 +3,7 @@ id: d906afe1-a621-42f1-87c5-c71ec9d43c1e
 title: TabPaneView
 domain: agentictoolkit://recipes/tab-pane-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
@@ -603,23 +603,12 @@ Not applicable: source contains no logging call (no `print`, `os_log`, or
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [theme-token-only-colors](agenticdevelopercookbook://compliance/ui#theme-token-only-colors) | passed | ui |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | partial | accessibility |
 | [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
-| [live-region-announcements](agenticdevelopercookbook://compliance/accessibility#live-region-announcements) | failed | accessibility |
-| [reduce-motion-support](agenticdevelopercookbook://compliance/accessibility#reduce-motion-support) | failed | accessibility |
+| [reduced-motion](agenticdevelopercookbook://compliance/accessibility#reduced-motion) | failed | accessibility |
 | [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | internationalization |
 
-Main-actor-confined passes because `TabPaneView`, `TabCardBackgroundView`,
-`CardSides`, and `InsetBox` are all declared `@MainActor`. Theme-token-only-colors
-passes because every color painted or read (`projectPaneBackdrop`,
-`projectPaneOutline`, `windowBackground`, `border`, `.accent`, `.primaryText`,
-`.secondaryText`, `.tertiaryText`) is a semantic palette role, never a raw hex
-or system color literal. Differentiate-without-color passes because the
-front/behind distinction always carries a geometry cue (`recession`,
-`workspaceOverhang`) alongside its color change. Keyboard-navigable is partial
+Keyboard-navigable is partial
 because `closeButton` is a real `NSButton` and gets standard key-view-loop
 operability for free, but selecting the card itself has no keyboard path in
 this file — that is the hosting `TabItemHostView`'s concern (see the
@@ -627,8 +616,7 @@ this file — that is the hosting `TabItemHostView`'s concern (see the
 finding). Screen-reader-support is partial because accessibility identifiers
 and status-symbol labels are set explicitly, but the card sets no
 `accessibilityRole` and groups nothing for VoiceOver (see Accessibility).
-Live-region-announcements and reduce-motion-support are failed for the gaps
-documented in Accessibility and Accessibility Options respectively.
+Reduced-motion is failed for the gap documented in Accessibility Options.
 String-externalization is failed because `closeButton`'s "Close" accessibility
 description is a hardcoded English literal (see Localization).
 
@@ -638,3 +626,4 @@ description is a hardcoded English literal (see Localization).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded the truncation-default requirement to name only its three non-overridden labels; fixed the Default and Front state descriptions; restated two internal-call test vectors as observable outcomes and the recession-slack vector to clear the size clamp; added missing test vectors for a nil context-menu provider and empty status symbols; corrected the WinUI 3 header layout and close-glyph and the Compose truncation/Reduce-Motion notes; documented `TabPaneStatusSymbol` in Configuration; moved a cookbook cross-reference from `references` to `related`; trimmed one tag over the 1-5 limit; and removed the two accessibility compliance rows that used a disallowed `not-applicable` status. |
+| 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog, remapped reduce-motion-support to reduced-motion |

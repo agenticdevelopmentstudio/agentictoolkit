@@ -3,7 +3,7 @@ id: 8ed694b4-e238-48c5-9589-81ce6aaebb32
 title: WindowController
 domain: agentictoolkit://recipes/window-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
@@ -287,17 +287,14 @@ only fails at runtime when actually invoked.
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | Architecture |
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
 | [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | Accessibility |
 
-Statuses rest on `WindowController` inheriting `@MainActor` isolation from
-`SingleWindowController` and `WindowContentViewController` inheriting it from
-`NSViewController`, which the AppKit overlay marks `@MainActor` in the SDK;
-on both types being built entirely from stock `NSWindowController`/
-`NSViewController` plumbing with no custom-drawn chrome; and on the file
-adding no accessibility identifier or label of its own while not obstructing
-whatever the caller-supplied `ViewControllerType`/`ViewType` provides.
+Statuses rest on both types being built entirely from stock
+`NSWindowController`/`NSViewController` plumbing with no custom-drawn chrome;
+and on the file adding no accessibility identifier or label of its own while
+not obstructing whatever the caller-supplied `ViewControllerType`/`ViewType`
+provides.
 
 ## Change History
 
@@ -305,3 +302,4 @@ whatever the caller-supplied `ViewControllerType`/`ViewType` provides.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from the Apple `WindowController.swift` source (`WindowController<ViewControllerType>` and `WindowContentViewController<ViewType>`). |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reformat Design Decisions to bold three-line form; fix the Compliance table's Category column and drop inapplicable checks (no-raw-hex, differentiate-without-color, localizable-strings, idempotent-operations); rename the AppKit Platform Notes bullet to AppKit / UIKit and add the UIKit equivalent; remove Accessibility Options template residue; state `NSViewController`'s inherited `@MainActor` isolation outright instead of hedging; add a Conformance Test Vectors Action column and rework vectors 004 and 008 into a compile-time check and a death-test check; rename the States column to Behavior; and rewrite file-coupled "Not applicable" justifications to describe the component's behavior. |
+| 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog |

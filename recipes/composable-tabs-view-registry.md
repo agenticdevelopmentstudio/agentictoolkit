@@ -3,7 +3,7 @@ id: 52e34f70-c3d8-4ec6-a753-d9d3cea11789
 title: ComposableTabsViewRegistry
 domain: agentictoolkit://recipes/composable-tabs-view-registry
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
@@ -506,24 +506,17 @@ from the conforming type's name, `ComposableTabsViewRegistry`.
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [source-fidelity](agenticdevelopercookbook://compliance/recipe-quality#source-fidelity) | passed | recipe-quality |
-| [behavioral-requirements](agenticdevelopercookbook://compliance/recipe-quality#behavioral-requirements) | passed | recipe-quality |
-| [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | passed | recipe-quality |
-| [template-conformance](agenticdevelopercookbook://compliance/recipe-quality#template-conformance) | passed | recipe-quality |
-| [meaningful-labels](agenticdevelopercookbook://compliance/accessibility#meaningful-labels) | passed | accessibility |
-| [text-contrast](agenticdevelopercookbook://compliance/accessibility#text-contrast) | partial | accessibility |
-| [theme-token-only-colors](agenticdevelopercookbook://compliance/ui#theme-token-only-colors) | passed | ui |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
 | [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | internationalization |
 
-`meaningful-labels` passes because the placeholder's only text, "Pane N", is
+`screen-reader-support` passes because the placeholder's only text, "Pane N", is
 also its default AppKit accessibility label, with nothing shown that the
-label omits. `text-contrast` is `partial` for the reason given in
+label omits. `contrast-ratio` is `partial` for the reason given in
 Accessibility > Contrast: the actual color values behind
 `chartSeriesNSColors` and `.primaryText` are chosen per theme, outside this
 file, so the pairing cannot be confirmed to pass or shown to fail from this
-source alone. `theme-token-only-colors` passes because every color this file
-reads (`chartSeriesNSColors`, `ThemedLabel`'s `.primaryText` role) is a
-`SemanticPalette`-derived token, never a raw literal. `no-hardcoded-strings`
+source alone. `no-hardcoded-strings`
 fails because `PlaceholderPaneViewController`'s title is the literal
 `"Pane \(paneNumber)"`, with no localization mechanism, per Localization.
 
@@ -533,3 +526,4 @@ fails because `PlaceholderPaneViewController`'s title is the literal
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from source. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: replace the uncited HIG root reference with the two pages the contrast and containment claims actually rely on; drop the unsupported WinUI "reason this recipe exists" line; rename every requirement to a subject-only name and update every citation; fix the `text-contrast` status to `partial` and add a `no-hardcoded-strings` internationalization row marked `failed`; remove the leftover template instruction line from Accessibility Options; add a `stale-tint-persistence` requirement, edge case, and CTVR-25 for the non-empty-to-empty series transition; correct CTVR-06's expected sort order against `.placeholder`'s actual `"whippet.placeholder"` `rawValue`; rewrite CTVR-17/18 to test only this file's protocol shape instead of pane discard/close behavior owned elsewhere; fix the fractioned-holding-priority requirement's type to `NSLayoutConstraint.Priority(rawValue:)`; correct the WinUI member count to six and its retint bullet to the app's own theme-store event; and resolve the SwiftUI port's placeholder font from the environment's `.heading` token instead of a hardcoded `.font(.title)`. |
+| 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog, remapped meaningful-labels to screen-reader-support, remapped text-contrast to contrast-ratio |

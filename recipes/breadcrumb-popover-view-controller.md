@@ -3,7 +3,7 @@ id: c79094d2-1f4b-4c3f-8005-8fb095fb1b40
 title: BreadcrumbPopoverViewController
 domain: agentictoolkit://recipes/breadcrumb-popover-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: 2026-09-23
@@ -493,8 +493,6 @@ logger reference anywhere in this file).
 |-------|--------|----------|
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
 | [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
-| [live-region-announcements](agenticdevelopercookbook://compliance/accessibility#live-region-announcements) | failed | Accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | Accessibility |
 | [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
 | [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
 
@@ -502,11 +500,7 @@ Keyboard navigation is fully wired via `PickerKeyboardController` and the
 search field's `doCommandBy:` delegation, hence passed. Screen-reader support
 is partial: `accessibilityID` values are set on the search field and table
 for automation, but no explicit `accessibilityLabel` override exists beyond
-`NSTextField`'s own text content. Live-region-announcements is failed: no
-notification is posted when the filtered result set changes (see
-**Announce state changes** under Accessibility). Differentiate Without Color
-passes because matched characters are conveyed by bold font weight, not
-color. Touch-target-size is omitted from this table because it does not
+`NSTextField`'s own text content. Touch-target-size is omitted from this table because it does not
 apply to this pointer/keyboard-driven macOS list — the 44×44pt/48×48dp
 threshold applies only to the touch-platform translations in Platform
 Notes, not to this source. Contrast-ratio is partial because row and
@@ -521,3 +515,4 @@ placeholder is a hardcoded English literal with no localization key.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Claude Sonnet 5 | Initial ingredient recipe for BreadcrumbPopoverViewController, covering directory loading, live filtering with bold match highlighting, clamped/relative selection, PickerKeyboardController wiring, the directory-is-inert choose guard, and one open accessibility question (filtered-result announcement) for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: stated the case-insensitive substring-match algorithm in filter-by-name-match and fixed test vector 004, which was wrong under that algorithm; replaced the AppKit-wiring requirements (callback assignment, escape-monitor start/stop, command-selector delegation, cell reuse) with behavior-first requirements for arrow-key/Return/Escape routing and row-view reuse, moving the AppKit mechanism detail into Platform Notes; rewrote four test vectors to assert observable table/callback behavior instead of private state or methods; fixed the Compliance table (dropped the non-catalog architecture/main-actor-confined row and the inapplicable touch-target-size row, capitalized categories, changed the disallowed `flagged` status to `failed`); added a `related` link to breadcrumb-view; recommended a `TextBox`/`TextChanged` WinUI 3 control over `AutoSuggestBox` to avoid a conflicting suggestion list; removed an unsupported UIKit claim in favor of a `UIKeyCommand` note; named the fixed content size once and cross-referenced it from every Platform Notes bullet instead of restating it; reformatted Design Decisions into the three-line bold form; and unquoted the frontmatter dates. |
+| 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog |

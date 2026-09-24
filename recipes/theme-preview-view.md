@@ -3,7 +3,7 @@ id: 15e66a2e-9ee1-4f5f-aeb0-c804078b4f78
 title: ThemePreviewView
 domain: agentictoolkit://recipes/theme-preview-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
@@ -568,13 +568,9 @@ here.
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | Platform Compliance |
 | [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | Platform Compliance |
 | [platform-theming](agenticdevelopercookbook://compliance/platform-compliance#platform-theming) | passed | Platform Compliance |
-| [theme-token-only-colors](agenticdevelopercookbook://compliance/ui#theme-token-only-colors) | passed | UI |
-| [no-raw-hex-tokens-only](agenticdevelopercookbook://compliance/ui#no-raw-hex-tokens-only) | passed | UI |
-| [meaningful-labels](agenticdevelopercookbook://compliance/accessibility#meaningful-labels) | partial | Accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | Accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
 | [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
 | [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | Reliability |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | Architecture |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | Best Practices |
 
 `keyboard-navigable` and `reduced-motion` are omitted: `ThemePreviewView.swift`
@@ -586,9 +582,8 @@ and role-styled font is read through `SemanticPalette`/`TerminalAppearance`
 role lookups, never a raw literal (the passed checks above); no
 `setAccessibilityRole`/`setAccessibilityElement`/label override is set on any
 container view, leaving VoiceOver labeling only partially met by AppKit's
-default static-text role on each label (`meaningful-labels`, partial); the
-four status badges pair color with an explicit text label
-(`differentiate-without-color`, passed); and every visible string is a
+default static-text role on each label (`screen-reader-support`, partial);
+and every visible string is a
 literal passed to `NSTextField(labelWithString:)`, never routed through
 `NSLocalizedString` (`no-hardcoded-strings`, failed).
 
@@ -598,3 +593,4 @@ literal passed to `NSTextField(labelWithString:)`, never routed through
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for ThemePreviewView, covering the chrome/list/controls/status/terminal sample builders, the embedded SwatchGridView composition, TerminalAppearance resolution, and open questions on accessibility grouping and demo-content localization for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed all 30 requirements to subject-only kebab-case; moved private-implementation citations (`Self.pinToEdges`, `fill(_:with:)`, the arranged-subview teardown call) out of requirements and into AppKit Platform Notes; fixed the Overview's sample-card count and the terminal-font exemption in semantic-palette-derivation; corrected test vectors 028 and 030 and grounded empty-initial-state to cover the background paint for vector 002; reformatted Design Decisions to the bold three-line convention, dropped the requirement-count decision, and reworded the badge decision to record the Badge-ingredient duplication as a known DRY gap; relabeled Localization as proposed keys; rewrote the WinUI 3 and React/Web platform notes to scope theming to the given ColorTheme instead of the app's active theme; moved the misplaced cookbook `references` entry to `related` and deduped `swatch-grid-view`; and reworked Compliance to title-case categories, drop the two inapplicable accessibility checks, and add a sourcing sentence. |
+| 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog, remapped meaningful-labels to screen-reader-support |

@@ -3,7 +3,7 @@ id: 2cfe57f0-cdd4-4723-a6e0-2ce4f136ce7f
 title: Badge
 domain: agentictoolkit://recipes/badge
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
@@ -413,18 +413,9 @@ or `print`).
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | ui-tokens |
-| [theme-driven-typography](agenticdevelopercookbook://compliance/ui-tokens#theme-driven-typography) | passed | ui-tokens |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
 | [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
 
-These statuses rest on `Badge.swift`: colors are caller-supplied `NSColor`
-values with no raw hex literals (`no-raw-hex`); the label's font is kept in
-sync with the theme via `observeTheme`/`palette.font(.caption)`
-(`theme-driven-typography`); the class and its public API are `@MainActor`
-(`main-actor-confined`); every badge pairs its `color` with a `text` label
-(`differentiate-without-color`); and `contrastingTextColor(on:)` uses an
+This status rests on `Badge.swift`: `contrastingTextColor(on:)` uses an
 unverified perceptual-luminance heuristic rather than a WCAG contrast-ratio
 computation, so a specific minimum ratio cannot be confirmed from the source
 alone (`contrast-ratio`).
@@ -435,3 +426,4 @@ alone (`contrast-ratio`).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `Badge` (AppKit, macOS) source. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: qualify the luminance-based contrasting-text-color and update-style-reset requirements against their open questions; fix `**Approved**:` formatting and edge-case `(MUST, per …)` tags to `#requirements/<name>` citations; correct badge-005/005b RGB values and add a luminance-0.6 boundary vector; note fixed-appearance test assumption and mark badge-014 as a compile-time check; fix the SwiftUI `.background`/`.clipShape` note; move the cookbook guideline citation from `references` to `related` and add external WCAG/HIG references; set `contrast-ratio` compliance status to `partial`; add Design Decisions for the luminance-heuristic choice and the lack of a distinguishing accessibility role. |
+| 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog |

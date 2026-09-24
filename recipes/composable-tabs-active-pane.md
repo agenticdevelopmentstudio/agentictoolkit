@@ -3,7 +3,7 @@ id: 08bfb299-851b-4b01-a84a-6a2a13e07c12
 title: ComposableTabsActivePane
 domain: agentictoolkit://recipes/composable-tabs-active-pane
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: 2026-09-23
@@ -624,35 +624,20 @@ or `print`) anywhere in this file.
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [source-fidelity](agenticdevelopercookbook://compliance/recipe-quality#source-fidelity) | partial | recipe-quality |
-| [behavioral-requirements](agenticdevelopercookbook://compliance/recipe-quality#behavioral-requirements) | passed | recipe-quality |
-| [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | partial | recipe-quality |
-| [template-conformance](agenticdevelopercookbook://compliance/recipe-quality#template-conformance) | passed | recipe-quality |
-| [keyboard-focus-routing](agenticdevelopercookbook://compliance/accessibility#keyboard-focus-routing) | passed | accessibility |
-| [non-text-contrast](agenticdevelopercookbook://compliance/accessibility#non-text-contrast) | partial | accessibility |
-| [theme-token-only-colors](agenticdevelopercookbook://compliance/ui#theme-token-only-colors) | passed | ui |
+| [focus-management](agenticdevelopercookbook://compliance/accessibility#focus-management) | passed | accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
 
-`keyboard-focus-routing` passes because every pointer-driven activation is
+`focus-management` passes because every pointer-driven activation is
 paired with a standard `NSResponder` focus change, with no private
-accessibility-bypassing mechanism. `non-text-contrast` is `partial` because
+accessibility-bypassing mechanism. `contrast-ratio` is `partial` because
 the actual color values behind `projectPaneBackdrop`, `projectPaneOutline`,
 and `projectActivePaneOutline` are chosen per theme, outside this file, per
-the marker in Accessibility > Contrast. `theme-token-only-colors` passes
-because every color this file reads is a `SemanticPalette` role, never a raw
-literal. `source-fidelity` and `completeness` are `partial`, not `passed`,
-because `palette.projectActivePaneOutline` — read by `applyTheme(_:)` — is
-not defined anywhere in the `external/agenticdevelopertoolkit` submodule at
-its currently pinned commit (that file's `SemanticPalette` extension defines
-only `projectPaneBackdrop` and `projectPaneOutline`); the property is added by
-upstream commit `62aa1e4ea5208f91c5f6f60d2cffe17e932ca415`
-("feat(theme): separate the project frame's line from the active pane's"),
-which this repository's submodule pointer needs to be bumped to at or past
-before this file's active-pane accent color can compile and resolve
-correctly.
+the marker in Accessibility > Contrast.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: cited specific APIs and WCAG 1.4.11 instead of the HIG landing page; defined "live" pane and cross-referenced it from the arrival/departure requirements; added five untested behaviors (key-window blindness, nil-window and nil-content-view guards, the local-not-global monitor, and the main-queue dispatch for close/highlight changes) as MUST requirements with conformance vectors; clarified that `applyTheme` compares `activeNodeID(in:)` directly rather than calling `isInActivePane` and added a vector for an unclaimed window; corrected the SwiftUI platform note's per-scene/app-wide contradiction and its `RoundedRectangle(cornerRadius: 0)` stroke; corrected the WinUI 3 note's strong-dictionary lifecycle; tightened CTA-27 and CTA-31 to concrete, reproducible setups; named the `elevatedSurface` fallback for the pane backdrop color; moved the vendored-submodule gap out of Design Decisions, named the upstream commit that supplies it, and marked `source-fidelity`/`completeness`/`non-text-contrast` `partial` accordingly; populated `depends-on`/`related` with the sibling ingredients this file actually composes and observes; and fixed the frontmatter date quoting. |
+| 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog, remapped keyboard-focus-routing to focus-management, remapped non-text-contrast to contrast-ratio |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from source. |

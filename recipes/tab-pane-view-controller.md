@@ -3,7 +3,7 @@ id: a30725ca-fa2f-4a04-8cb0-8beddf264a0a
 title: TabPaneViewController
 domain: agentictoolkit://recipes/tab-pane-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
@@ -257,17 +257,13 @@ Not applicable: no logging call (`os_log`, `Logger`, `print`, or `NSLog`) appear
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | Architecture |
-| [accessibility-identifiers](agenticdevelopercookbook://compliance/ui#accessibility-identifiers) | passed | UI |
-| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | UI Tokens |
 | [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | partial | Accessibility |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | Accessibility |
-| [reduce-motion-support](agenticdevelopercookbook://compliance/accessibility#reduce-motion-support) | failed | Accessibility |
+| [reduced-motion](agenticdevelopercookbook://compliance/accessibility#reduced-motion) | failed | Accessibility |
 | [touch-target-size](agenticdevelopercookbook://compliance/accessibility#touch-target-size) | failed | Accessibility |
 | [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
 
-`screen-reader-support` and `keyboard-navigable` are `partial` because the card has no focus behavior or accessibility role of its own, no combined accessibility label across its fields, and the close button's `accessibilityDescription` is an unlocalized literal (see **close-button-callback** and the open question in Localization above); `differentiate-without-color` is `passed` on the size/position cues in `recession`/`workspaceOverhang`; `reduce-motion-support` and `touch-target-size` are `failed` on the confirmed absence of a Reduce Motion check and a fixed `14`pt close-button hit area below the 44pt minimum; `string-externalization` is `failed` on the hardcoded `Close` literal.
+`screen-reader-support` and `keyboard-navigable` are `partial` because the card has no focus behavior or accessibility role of its own, no combined accessibility label across its fields, and the close button's `accessibilityDescription` is an unlocalized literal (see **close-button-callback** and the open question in Localization above); `reduced-motion` and `touch-target-size` are `failed` on the confirmed absence of a Reduce Motion check and a fixed `14`pt close-button hit area below the 44pt minimum; `string-externalization` is `failed` on the hardcoded `Close` literal.
 
 ## Change History
 
@@ -275,3 +271,4 @@ Not applicable: no logging call (`os_log`, `Logger`, `print`, or `NSLog`) appear
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only names, merged the duplicate selection/depth requirements, added an explicit per-label role/color table, fixed frontmatter references and moved the misplaced cookbook link to `related`, added missing test vectors and corrected several test-vector-to-requirement mappings, moved the edge-dependent measurement quirk from Design Decisions to Edge Cases, reformatted Design Decisions to the bold three-line form, deleted leftover template instructions, corrected Platform Notes for Compose/React header reordering and Compose's easing curve, and marked two Compliance checks `partial` with a supporting sentence |
+| 1.1.1 | 2026-09-23 | Mike Fullerton | Compliance: removed rows for checks absent from the cookbook catalog, remapped reduce-motion-support to reduced-motion |
