@@ -1,8 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Trash2, Plus } from "lucide-react";
 
 import {
   Dialog,
@@ -14,8 +13,12 @@ import {
 import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import { DialogErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { UnsavedChangesAlert } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-alert";
-import { PLATFORM_LABELS } from "@agenticdevelopertoolkit/ui/blocks";
-import { List, ListItem } from "@agenticdevelopertoolkit/ui/components/list";
+import {
+  EditableList,
+  PLATFORM_LABELS,
+  useEditableList,
+  type EditableListColumn,
+} from "@agenticdevelopertoolkit/ui/blocks";
 import { Field } from "@agenticdevelopertoolkit/ui/blocks";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
@@ -29,7 +32,7 @@ import {
   type SocialLink,
   type PrivacyGrant,
 } from "@agentic-toolkit/data/profile";
-import { DetailSection, useReportSettingsDirty } from "@agentic-toolkit/resource";
+import { DetailSection, ListBarActions, useReportSettingsDirty } from "@agentic-toolkit/resource";
 import { PrivacyLevelControl } from "./PrivacyLevelControl";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -97,6 +100,8 @@ export interface SocialLinksSectionProps {
   workspaceSlug?: string;
   /** When true, hides the per-item privacy tier control (orgs have no public card). */
   hidePrivacy?: boolean;
+  /** The list read's failure — handed to the table so a failed load never reads as "no links yet". */
+  error?: unknown;
 }
 
 export function SocialLinksSection({
@@ -106,12 +111,14 @@ export function SocialLinksSection({
   hideSectionTitle = false,
   workspaceSlug,
   hidePrivacy = false,
+  error,
 }: SocialLinksSectionProps) {
   const qc = useQueryClient();
   const [dialogState, setDialogState] = useState<DialogState>({ mode: "closed" });
   const [draft, setDraft] = useState<FormDraft>(emptyDraft());
   const [formError, setFormError] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<SocialLink | null>(null);
+  // The rows the bar's Delete was pressed for — every ticked link, not one row's trash can.
+  const [deleteTargets, setDeleteTargets] = useState<SocialLink[] | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   // The unsaved-changes alert raised by a close attempt on a dirty draft.
   const [confirmingClose, setConfirmingClose] = useState(false);
@@ -147,14 +154,17 @@ export function SocialLinksSection({
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteSocialLink(id, wsOpts),
+    mutationFn: (ids: string[]) => Promise.all(ids.map((id) => deleteSocialLink(id, wsOpts))),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: linksKey });
-      setDeleteTarget(null);
+      list.clearSelection();
+      setDeleteTargets(null);
       setDeleteError(null);
     },
     onError: (err: unknown) => {
-      // Keep the dialog open so the user sees the failure.
+      // Keep the dialog open so the user sees the failure. Re-read anyway: in a multi-row
+      // delete some rows may already be gone, and the table must not keep showing them.
+      qc.invalidateQueries({ queryKey: linksKey });
       setDeleteError(
         err instanceof Error ? err.message : "Could not delete. Try again.",
       );
@@ -236,100 +246,115 @@ export function SocialLinksSection({
   // dirty && valid ONLY — the in-flight term is applied at the button below.
   const canSave = dirty && blockedReason === null;
 
-  // ── Shared content ─────────────────────────────────────────────────────────
+  // ── Table ──────────────────────────────────────────────────────────────────
 
-  const addButton = (
-    <Button
-      variant="ghost"
-      size="sm"
-      onClick={openAdd}
-      aria-label="Add social link"
-    >
-      <Plus data-icon="inline-start" />
-      Add
-    </Button>
-  );
+  // The same table admin's Users page draws: one-line rows, sortable resizable columns, a search
+  // box, and every verb on the BAR above it. No pencil and trash can per row — a verb repeated on
+  // every row is two competing models (one row vs. the ticked ones). The one control a row keeps
+  // is its own audience menu, which means nothing across a selection.
+  const columns: EditableListColumn<SocialLink>[] = useMemo(() => {
+    const cols: EditableListColumn<SocialLink>[] = [
+      {
+        key: "platform",
+        header: "Platform",
+        width: "10rem",
+        value: (link) => PLATFORM_LABELS[link.platform] ?? link.platform,
+        render: (link) => (
+          <span className="truncate font-medium text-apt-text">
+            {PLATFORM_LABELS[link.platform] ?? link.platform}
+          </span>
+        ),
+      },
+      {
+        key: "handle",
+        header: "Handle",
+        width: "12rem",
+        value: (link) => link.handle,
+        render: (link) =>
+          link.handle ? (
+            <span className="truncate font-mono text-xs text-apt-text-muted">{link.handle}</span>
+          ) : (
+            <span className="text-apt-text-dim">—</span>
+          ),
+      },
+      {
+        key: "url",
+        header: "URL",
+        value: (link) => link.url,
+        render: (link) => (
+          <a
+            href={link.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="truncate rounded font-mono text-xs text-apt-text-muted transition-colors hover:text-apt-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apt-gold/40"
+          >
+            {link.url}
+          </a>
+        ),
+      },
+    ];
+    if (!hidePrivacy) {
+      cols.push({
+        key: "visibility",
+        header: "Visibility",
+        width: "10rem",
+        resizable: false,
+        render: (link) => (
+          <PrivacyLevelControl
+            targetTable="social_links"
+            targetId={link.id}
+            level={resolvePrivacyLevel(grants, "social_links", link.id)}
+            ariaLabel={`${PLATFORM_LABELS[link.platform] ?? link.platform} visibility`}
+          />
+        ),
+      });
+    }
+    return cols;
+  }, [grants, hidePrivacy]);
 
-  const listContent = isLoading ? (
-    <p className="py-2 text-sm text-apt-text-muted">Loading…</p>
-  ) : links.length === 0 ? (
-    <p className="py-2 text-sm text-apt-text-muted">
-      No social links yet. Add one to show it on your card.
-    </p>
-  ) : (
-    <List>
-      {links.map((link) => {
-        const level = hidePrivacy ? "only-me" : resolvePrivacyLevel(grants, "social_links", link.id);
-        const label = PLATFORM_LABELS[link.platform] ?? link.platform;
-        return (
-          <ListItem key={link.id} className="flex-wrap gap-2 py-2">
-            <div className="min-w-0 flex-1">
-              <span className="text-sm font-medium text-apt-text">
-                {label}
-              </span>
-              {link.handle && (
-                <span className="ml-2 font-mono text-xs text-apt-text-dim">
-                  {link.handle}
-                </span>
-              )}
-              <a
-                href={link.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="ml-2 truncate text-xs text-apt-text-muted transition-colors hover:text-apt-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-apt-gold/40 rounded"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {link.url}
-              </a>
-            </div>
-            <div className="flex shrink-0 items-center gap-1.5">
-              {!hidePrivacy && (
-                <PrivacyLevelControl
-                  targetTable="social_links"
-                  targetId={link.id}
-                  level={level}
-                  ariaLabel={`${label} visibility`}
-                />
-              )}
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => openEdit(link)}
-                aria-label={`Edit ${label}`}
-              >
-                <Pencil className="size-3.5" aria-hidden="true" />
-              </Button>
-              <Button
-                variant="destructive-ghost"
-                size="icon-sm"
-                onClick={() => setDeleteTarget(link)}
-                aria-label={`Delete ${label}`}
-              >
-                <Trash2 className="size-3.5" aria-hidden="true" />
-              </Button>
-            </div>
-          </ListItem>
-        );
-      })}
-    </List>
+  const list = useEditableList<SocialLink>({
+    rows: isLoading ? undefined : links,
+    getRowId: (link) => link.id,
+    columns,
+  });
+  const selected = list.selectedRows;
+
+  const table = (
+    <EditableList
+      list={list}
+      ariaLabel="Social links"
+      loading={isLoading}
+      error={error}
+      errorTitle="Couldn't load social links"
+      columnWidthsKey="settings-social-links"
+      describeRow={(link) => PLATFORM_LABELS[link.platform] ?? link.platform}
+      onRowActivate={(id) => {
+        const link = links.find((l) => l.id === id);
+        if (link) openEdit(link);
+      }}
+      searchPlaceholder="Platform, handle or URL"
+      emptyLabel="No social links yet. Add one to show it on your card."
+      emptyFilteredLabel="No social links match this search."
+      actions={
+        <ListBarActions
+          noun="social link"
+          selectedCount={selected.length}
+          onAdd={openAdd}
+          onEdit={() => selected[0] && openEdit(selected[0])}
+          onDelete={() => {
+            setDeleteError(null);
+            setDeleteTargets(selected);
+          }}
+        />
+      }
+    />
   );
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <>
-      {hideSectionTitle ? (
-        <div className="flex flex-col gap-4">
-          <div className="flex min-h-8 items-center justify-end">
-            {addButton}
-          </div>
-          {listContent}
-        </div>
-      ) : (
-        <DetailSection title="Social links" action={addButton}>
-          {listContent}
-        </DetailSection>
-      )}
+      {hideSectionTitle ? table : <DetailSection title="Social links">{table}</DetailSection>}
 
       {/* Add/Edit dialog */}
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) requestCloseDialog(); }}>
@@ -430,16 +455,24 @@ export function SocialLinksSection({
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirm */}
+      {/* Delete confirm — for every ticked row the bar's Delete was pressed with. */}
       <AlertModal
-        open={deleteTarget != null}
+        open={deleteTargets != null}
         tone="error"
-        title="Remove social link?"
+        title={
+          deleteTargets && deleteTargets.length > 1
+            ? `Remove ${deleteTargets.length} social links?`
+            : "Remove social link?"
+        }
         description={
-          deleteTarget ? (
+          deleteTargets ? (
             <>
               <span>
-                {`Remove ${PLATFORM_LABELS[deleteTarget.platform] ?? deleteTarget.platform} from your card?`}
+                {deleteTargets.length === 1
+                  ? `Remove ${PLATFORM_LABELS[deleteTargets[0].platform] ?? deleteTargets[0].platform} from your card?`
+                  : `Remove ${deleteTargets
+                      .map((l) => PLATFORM_LABELS[l.platform] ?? l.platform)
+                      .join(", ")} from your card?`}
               </span>
               <DialogErrorText error={deleteError} />
             </>
@@ -450,13 +483,13 @@ export function SocialLinksSection({
         cancelLabel="Cancel"
         busy={deleteMutation.isPending}
         onConfirm={() => {
-          if (deleteTarget) {
+          if (deleteTargets) {
             setDeleteError(null);
-            deleteMutation.mutate(deleteTarget.id);
+            deleteMutation.mutate(deleteTargets.map((l) => l.id));
           }
         }}
         onCancel={() => {
-          setDeleteTarget(null);
+          setDeleteTargets(null);
           setDeleteError(null);
         }}
       />

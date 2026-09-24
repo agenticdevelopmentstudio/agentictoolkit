@@ -61,8 +61,10 @@ function renderSection() {
   );
 }
 
+/** Edit is a BAR verb now, like admin's tables: tick the row, then press Edit. */
 function openEdit() {
-  fireEvent.click(screen.getByRole("button", { name: "Edit GitHub" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select GitHub" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 }
 
 function openAdd() {

@@ -35,6 +35,10 @@ export { RailHostBoundary, StandaloneRailHost } from "./standalone-rail-host";
 export { ResourceLanding } from "./resource-landing";
 export { CreateResourceDialog } from "./create-resource-dialog";
 export { RecordSettingsPane } from "./record-settings-pane";
+// The body every User Settings section scrolls in — see its doc for why it never centres.
+export { SettingsBody } from "./settings-body";
+// The Add / Edit / Delete strip every settings list carries in its EditableList bar.
+export { ListBarActions } from "./list-bar-actions";
 
 // The rail-host contract + the publisher hooks a feature uses to feed a host's stack.
 export {
