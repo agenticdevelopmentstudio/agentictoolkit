@@ -3,11 +3,11 @@ id: c3269cfa-a8ec-4ba9-bc68-9cdf98e7e1fc
 title: PermissionRowView
 domain: agentictoolkit://recipes/permission-row-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -176,27 +176,18 @@ completes.
   so a UI test can address it per permission; the row and its other
   subviews (icon, title, description, status dot/label) receive no
   accessibility identifier.
-- Announce state changes: NEEDS REVIEW: `apply(status:)` updates
-  `statusLabel.stringValue` with a plain assignment; no call to
+- Announce state changes: `apply(status:)` updates `statusLabel.stringValue`
+  with a plain assignment; `PermissionRowView.swift` never calls
   `NSAccessibility.post(element:notification:)` (for example `.valueChanged`
-  or `.titleChanged`) appears anywhere in source. Whether AppKit's default
-  `NSTextField` behavior alone announces this change to VoiceOver when the
-  view is not focused cannot be confirmed from the source; it needs a
-  VoiceOver pass exercised against an actual `refresh()` transition.
+  or `.titleChanged`) anywhere in source, so it does not itself announce a
+  status change to VoiceOver.
 - Minimum tap target: Not applicable in the iOS/touch sense — this is a
   macOS, pointer-driven `NSButton`, and Apple's Human Interface Guidelines'
   44×44pt minimum touch target guidance applies to iOS/iPadOS/tvOS/watchOS,
   not to macOS AppKit controls. The action button's `bezelStyle: .rounded`
   plus `controlSize: .small` sizing is AppKit's own system-determined click
   target, not measured or floored by `PermissionRowView`.
-- Contrast: NEEDS REVIEW: title, description, and status text sit over the
-  card's near-transparent white overlay (3%/6% alpha), which is itself
-  composited over whatever background the host window supplies. Whether
-  that combination meets a 4.5:1 (or 3:1 large-text) contrast ratio per
-  `agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages`
-  cannot be determined from source alone, since the effective background
-  color is not fixed; it needs an accessibility audit against the actual
-  host background.
+- **contrast**: NEEDS REVIEW: Not implemented in source. Title, description, and status text sit over the card's near-transparent white overlay (3%/6% alpha), which is itself composited over whatever background the host window supplies; whether that combination meets a 4.5:1 (or 3:1 large-text) contrast ratio per `agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages` cannot be determined from source alone, since the effective background color is not fixed, and it needs an accessibility audit against the actual host background.
 
 ## Conformance Test Vectors
 
@@ -290,9 +281,9 @@ catalog) anywhere in `PermissionRowView.swift` or `Permission.swift`; every
 user-facing string is a hardcoded English `String` literal, or a `switch`
 returning literals.
 
-NEEDS REVIEW: Not implemented in source. Every string below reaches the UI
-unlocalized; a port should decide whether to route them through its string
-catalog (the source gives no keys to carry over).
+Every string below reaches the UI unlocalized; a port should decide whether
+to route them through its own string catalog, since the source gives no
+keys to carry over.
 
 | String Key | Default (en) | Context |
 |-----------|-------------|---------|
@@ -310,8 +301,9 @@ catalog (the source gives no keys to carry over).
 | Option | Behavior |
 |--------|----------|
 | Reduce Motion | Not applicable: `PermissionRowView.swift` performs no animation of any kind — every state change (`statusLabel.stringValue =`, `statusDot.layer?.backgroundColor =`, `actionButton.title =`) is an instantaneous property assignment. There is no `animator()` call, `CATransaction`, or `NSAnimationContext` anywhere in source for Reduce Motion to affect. |
-| Increase Contrast | NEEDS REVIEW: `statusDot`, `statusLabel`, and the action button's title color use semantic dynamic colors (`.systemGreen`, `.systemOrange`, `.secondaryLabelColor`) that adjust automatically under Increase Contrast. But the card's `layer?.backgroundColor` / `layer?.borderColor` are fixed `NSColor.white.withAlphaComponent(0.03)` / `(0.06)` values, not semantic colors, so they do not participate in that automatic adjustment. Whether the resulting low-contrast card outline and fill stay acceptable with Increase Contrast on cannot be settled from source alone; it needs an accessibility pass with the setting enabled. |
+| Increase Contrast | `statusDot`, `statusLabel`, and the action button's title color use semantic dynamic colors (`.systemGreen`, `.systemOrange`, `.secondaryLabelColor`) that adjust automatically under Increase Contrast, but the card's fixed `layer?.backgroundColor`/`layer?.borderColor` do not and the component does not respond to Increase Contrast for them. |
 | Differentiate Without Color | Grant status is always communicated by `statusDot`'s color together with `statusLabel`'s text (`Granted` / `Not Granted` / `Unknown`) and the action button's title — never by color alone, per `apply(status:)` — so no additional adjustment is required. |
+
 
 ## Feature Flags
 
@@ -478,8 +470,8 @@ Not applicable: `PermissionRowView.swift` contains no `os.Logger`,
 `NSButton`/`NSTextField`/`NSImageView`/`NSStackView`; `platform-design-language`
 and `contrast-ratio` are `partial` because `buildLayout()` fills and borders
 the card with fixed, non-semantic `NSColor.white.withAlphaComponent(...)`
-values (see the dark-only Design Decision above and the Contrast item under
-Accessibility) rather than an appearance-adaptive token, so neither HIG
+values (see the dark-only Design Decision above and the open question on
+contrast) rather than an appearance-adaptive token, so neither HIG
 conformance nor a 4.5:1 contrast ratio can be confirmed for every host
 background; `keyboard-navigable` is `passed` because the action button is an
 unmodified `NSButton`, which keeps AppKit's native keyboard focus and
@@ -491,3 +483,4 @@ activation (see **keyboard-activates-action**).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation, extracted from `PermissionRowView.swift`. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: added pre-refresh-action, keyboard-activation, and test-observable-surface requirements with vectors; reworded concurrent-access as caller-owned/undefined ordering; detailed the empty-keychain edge case; fixed vector 013 to use `.keychain` and extended vectors 004/019 with icon/card-color assertions; bolded Design Decisions and added one for the dark-only card overlay; marked `platform-design-language`/`contrast-ratio` partial, title-cased Compliance categories, and dropped two checks with no catalog match. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

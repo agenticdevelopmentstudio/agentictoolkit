@@ -3,11 +3,11 @@ id: faf4ec69-7b5c-44c2-a8c2-d7e81dc94ea8
 title: PanelHostView
 domain: agentictoolkit://recipes/panel-host-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -211,26 +211,14 @@ button or opening a second drawer.
   `PanelHostView` sets no label on the content container; whatever
   content is installed via `setContent(_:)` is responsible for its own
   labeling.
-- **Announce state changes (e.g., loading, disabled)**: NEEDS REVIEW: Not
-  implemented in source. `updateHelpButton()` changes the button's image,
-  `contentTintColor`, and `toolTip` when help is disclosed or dismissed,
-  but the accessibility label stays the fixed string `"Help"` for both
-  states, and no `NSAccessibility.post(element:notification:)` call
-  appears anywhere in `PanelHostView.swift`. Whether a VoiceOver user is
-  told the drawer/popover just opened or closed — beyond whatever
-  AppKit's default image-change handling surfaces on its own — cannot be
-  determined from this file alone; it would need to be settled by driving
-  `toggleHelp()` under VoiceOver and observing whether a change is
-  announced.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source.
-  `contentTintColor` is set from `palette.accentColor` or
-  `palette.secondaryTextColor`; neither color's contrast against whatever
-  the button is drawn over is computed or enforced anywhere in
-  `PanelHostView.swift`. Whether either color reaches WCAG AA's 3:1
-  non-text contrast minimum for every theme this component ships with
-  cannot be determined from this file or from `SemanticPalette` alone — it
-  depends on each theme's concrete color values and would be settled by
-  auditing the computed contrast ratio per theme.
+- **Announce state changes (e.g., loading, disabled)**: Not satisfied.
+  `updateHelpButton()` changes the button's image, `contentTintColor`, and
+  `toolTip` when help is disclosed or dismissed, but the accessibility
+  label stays the fixed string `"Help"` for both states, and no
+  `NSAccessibility.post(element:notification:)` call appears anywhere in
+  `PanelHostView.swift` — VoiceOver is told nothing beyond whatever
+  AppKit's default image-change handling surfaces on its own.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. `contentTintColor` is set from `palette.accentColor` or `palette.secondaryTextColor` with neither color's contrast against whatever the button is drawn over computed or enforced in `PanelHostView.swift`; whether either color reaches WCAG AA's 3:1 non-text contrast minimum for every theme this component ships with depends on each theme's concrete color values and needs auditing per theme.
 - **Minimum tap target**: Not applicable in the iOS 44×44pt sense —
   `PanelHostView` targets macOS only, where controls are pointer-operated,
   and Apple's Human Interface Guidelines do not set a single numeric
@@ -360,16 +348,12 @@ anywhere in `PanelHostView.swift`.
 | — (hardcoded literal, no key) | `Show Help` | Help button's `toolTip` while help is not visible |
 | — (hardcoded literal, no key) | `Hide Help` | Help button's `toolTip` while help is visible |
 
-NEEDS REVIEW: Not implemented in source. All four strings above are set as
-plain `String` literals through AppKit APIs (`setAccessibilityLabel`,
-`NSImage`'s `accessibilityDescription:` parameter, and `toolTip`) — none
-of these is a SwiftUI `Text`/`LocalizedStringKey` position, so a literal
-here is not automatically localizable the way SwiftUI's is. No
-`NSLocalizedString` call or string-catalog reference appears anywhere in
-`PanelHostView.swift`. Whether these four strings are localized elsewhere
-in the build pipeline (e.g. a `genstrings`-based extraction that scans
-Swift string literals) cannot be determined from this file alone and would
-need confirmation from whoever owns the app's localization process.
+All four strings above are set as plain `String` literals through AppKit
+APIs (`setAccessibilityLabel`, `NSImage`'s `accessibilityDescription:`
+parameter, and `toolTip`) — none of these is a SwiftUI
+`Text`/`LocalizedStringKey` position, so a literal here is not
+automatically localizable the way SwiftUI's is. No `NSLocalizedString`
+call or string-catalog reference appears anywhere in `PanelHostView.swift`.
 
 ## Accessibility Options
 
@@ -381,9 +365,9 @@ need confirmation from whoever owns the app's localization process.
   colors come entirely from the active `SemanticPalette`
   (`accentColor`/`secondaryTextColor`); if Increase Contrast should raise
   either color's contrast, that is the palette/theme system's
-  responsibility, not `PanelHostView`'s. The open question about whether
-  these colors reach an adequate ratio is tracked once, under
-  Accessibility above.
+  responsibility, not `PanelHostView`'s. Whether these colors reach an
+  adequate ratio is the open question on minimum-contrast-ratio, tracked
+  once under Accessibility above.
 - **Differentiate Without Color**: Supported — the help-visible and
   help-hidden states are distinguished by both the button's symbol shape
   (`questionmark.circle.fill` vs. `questionmark.circle`) and its tint
@@ -556,3 +540,4 @@ string-catalog reference anywhere in `PanelHostView.swift`
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: moved private source identifiers (`buttonInset`, `NSView.pinToEdges`) and AppKit-specific mechanics (`constraint-based-layout-only`, `help-button-momentary-type`) out of requirement bodies and into Platform Notes; merged and renamed condition-laden requirement names to subject-only form (`help-button-visibility`, `presenter-reassignment`, `shows-help-button-toggle`); promoted the implicit keyboard-focus guarantee to a named requirement (`help-button-keyboard-focusable`) with a conformance vector; moved the stale-presenter-callback observation out of Design Decisions (it was a bug, not an approved choice) and left it as the single Edge Case description; trimmed the popover edge case to what this component guarantees; reformatted Design Decisions to the bold three-line form; fixed Compliance statuses and pruned Compliance rows to checks that exist in the catalog; named concrete conformance-vector fixtures (Solarized Dark/Light, `ThemeManager.selectTheme(id:)`) and precise call sequences; removed the unsupported WinUI 3 parenthetical; and listed related ingredients in frontmatter. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

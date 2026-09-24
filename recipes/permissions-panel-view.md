@@ -3,11 +3,11 @@ id: 07388a5c-901d-4cf3-b818-bf52c180be08
 title: Permissions Panel View
 domain: agentictoolkit://recipes/permissions-panel-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -151,14 +151,11 @@ ambiguity.
   AppKit derives automatically from the arranged-subview hierarchy
   applies unmodified.
 
-NEEDS REVIEW: Not implemented in source — the component calls no
-accessibility-grouping API of its own (no `setAccessibilityElement`,
-`setAccessibilityRole`, or `setAccessibilityLabel`), so VoiceOver gets no
-grouping cue for the row list beyond the plain view hierarchy and
-traverses straight into each row. Settling this needs a decision on
-whether the panel should call `setAccessibilityRole(.group)` with a label
-such as "Permissions" (`PermissionsPanelView.swift`'s `buildLayout()`,
-lines 67-95).
+- Grouping: The component calls no accessibility-grouping API of its own
+  (no `setAccessibilityElement`, `setAccessibilityRole`, or
+  `setAccessibilityLabel`) on itself, so VoiceOver gets no grouping cue for
+  the row list beyond the plain view hierarchy and traverses straight into
+  each row's own accessibility elements (`buildLayout()`).
 
 ## Conformance Test Vectors
 
@@ -409,8 +406,8 @@ by the current minimum-deployment behavior.
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
 
 `screen-reader-support` is partial because the component registers no
-accessibility-grouping role for its row list (see the open question in
-Accessibility); `keyboard-navigable` passed because the source overrides
+accessibility-grouping role for its row list (see Accessibility);
+`keyboard-navigable` passed because the source overrides
 no key-view loop, first responder, or key-equivalent, leaving AppKit's
 automatic tab order across the arranged rows intact.
 
@@ -420,3 +417,4 @@ automatic tab order across the arranged rows intact.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded file-centric phrasing ("this file", `PermissionsPanelView.swift`, "source comments state") to describe the component's observable behavior and moved private identifiers (`buildLayout()`, `scheduleRefresh()`, `refreshTask`, `isObserving`) into the AppKit/UIKit Platform Notes bullet; noted the `AgenticToolkitPermissions.Permission` module-qualification needed alongside ADT; added `permission-row-view` to `depends-on`; moved the platform-design-languages guideline from `references` to `related`; renamed the `checker-injected-with-system-default`, `starts-observing-activation-on-window-attach`, and `presents-then-refreshes-after-action` requirements to subject-only names (`checker-default`, `activation-observer`, `action-refresh`) and updated their citations; reworded the duplicate-permissions edge case to drop its "Not applicable" lead-in; rewrote vectors 011 and 012 to assert observable outcomes through a fake checker and a call-order log, and moved vector 014 (a compile-time check) to a note; corrected the Reduce Motion note that contradicted `layout-built-once`; flagged the panel's missing VoiceOver grouping role as an open question; bolded the Design Decisions labels and named the exact `NotificationCenter` observer API; and filled in the Compliance table. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

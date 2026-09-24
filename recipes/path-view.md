@@ -3,11 +3,11 @@ id: c7201487-b696-43b9-a4f9-d1a9e6141f7c
 title: PathView
 domain: agentictoolkit://recipes/path-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -154,23 +154,13 @@ be copied.
   or its `label`. The label is AppKit's standard read-only `NSTextField`
   (`isEditable = false`, set by `ThemedLabel.init`), which AppKit exposes to
   assistive technology as static text by default.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source. The
-  visible text (`renders-path-non-wrapping-single-line`,
-  `prefixes-optional-caption`) says what the path *is* by putting `caption`
-  at the head — the source's own doc comment states the caption "sits at the
-  head... so the row still says what it is at any width." But
-  `setAccessibilityValue(path)` is called with the raw `path` only
-  (`exposes-raw-path-as-accessibility-value`), never the caption-prefixed
-  string, and no `setAccessibilityLabel` call appears anywhere in
-  `PathView.swift`. So a sighted user reading a captioned row sees
-  `"Folder: /Users/…"`, while VoiceOver announces only `"/Users/…"` with no
-  indication of what the path is. Whether this is intentional — the path is
-  the one thing meant to be reachable, verbatim, everywhere — or an
-  oversight that should fold `caption` into the accessible representation is
-  a product decision the source does not resolve. Evidence that would settle
-  it: confirmation from the accessibility/design owner of `ComposableSettings`
-  rows on whether a captioned `PathView` should expose the caption to
-  assistive technology.
+- **Label requirements**: `PathView.swift` sets no accessibility label; no
+  `setAccessibilityLabel` call appears anywhere in the file. The visible text
+  puts `caption` at the head (`prefixes-optional-caption`) so a sighted user
+  reading a captioned row sees `"Folder: /Users/…"`, but
+  `setAccessibilityValue(path)` exposes only the raw `path`
+  (`exposes-raw-path-as-accessibility-value`), so VoiceOver announces only
+  `"/Users/…"` with nothing filling in what that path is.
 - **Announce state changes (e.g., loading, disabled)**: Not applicable — `path`
   and `label` are both `let` properties assigned once in
   `init(withPath:caption:)`; `PathView` performs no reassignment after
@@ -180,21 +170,7 @@ be copied.
   standard `NSTextField` text selection (click-drag, double-click-word-select)
   across the label's full displayed area, which is a text-selection
   affordance, not a discrete tap target subject to a minimum size.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
-  label's `.secondaryText` color is derived with an enforced *minimum*
-  contrast ratio of 3.0 against the background
-  (`SemanticPalette`'s `dimmed(towards:by:minContrast:)`), but the caption
-  text role this label uses defaults to 11pt regular — small text under
-  [WCAG 2.1 SC 1.4.3](https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html)'s
-  size threshold for the relaxed 3:1 large-text ratio — so the guaranteed
-  floor of 3.0 does not by itself establish the 4.5:1 that SC 1.4.3's AA
-  small-text criterion calls for. Whether any given theme's actual resolved
-  `secondaryText`-on-background ratio reaches 4.5:1 cannot be determined from
-  `PathView.swift` or `SemanticPalette.swift` alone — it depends on each
-  theme's concrete foreground/background color pair. This would be settled
-  by auditing the computed contrast ratio of `.secondaryText` at `.caption`
-  size against the background it is placed on, for every theme this
-  component ships with.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. `.secondaryText` is derived with only an enforced *minimum* contrast ratio of 3.0 against the background (`SemanticPalette`'s `dimmed(towards:by:minContrast:)`), below the 4.5:1 that [WCAG 2.1 SC 1.4.3](https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum.html) requires for the 11pt regular `.caption` text role this label uses (too small for the relaxed 3:1 large-text ratio); whether any given theme's actual resolved `secondaryText`-on-background ratio reaches 4.5:1 depends on that theme's concrete foreground/background pair and cannot be determined from `PathView.swift` or `SemanticPalette.swift` alone.
 
 ## Conformance Test Vectors
 
@@ -293,27 +269,22 @@ appears anywhere in `PathView.swift`.
 
 ## Localization
 
-NEEDS REVIEW: Not implemented in source. `path` and `caption` are entirely
-caller-supplied at the call site as `String`/`String?` parameters, not
-literals owned by this type. But `PathView.swift:35`
-(`caption.map { "\($0): \(path)" }`) hardcodes the `": "` separator as a
-literal, user-visible glue string, not routed through
-`String(localized:)`/`NSLocalizedString`, and its punctuation is
-locale-sensitive: French convention inserts a space before the colon
-(`" : "`), and an RTL locale would need the caption/path order and
-punctuation to mirror rather than simply concatenate left-to-right. Whether
-this is intentional — programmer-facing glue exempt from translation — or a
-gap that should become a per-locale format string is a decision the source
-does not make. Evidence that would settle it: confirmation from the
-localization owner of `ComposableSettings` rows on whether the separator
-should be externalized as a localizable format key.
+`path` and `caption` are entirely caller-supplied at the call site as
+`String`/`String?` parameters, not literals owned by this type. But
+`PathView.swift:35` (`caption.map { "\($0): \(path)" }`) hardcodes the `": "`
+separator as a literal, user-visible glue string, not routed through
+`String(localized:)`/`NSLocalizedString`. Its punctuation is locale-sensitive
+— French convention inserts a space before the colon (`" : "`), and an RTL
+locale would need the caption/path order and punctuation to mirror rather
+than simply concatenate left-to-right — and the source does nothing to
+account for either.
 
 ## Accessibility Options
 
 | Option | Behavior |
 |--------|----------|
 | Reduce Motion | Not applicable — the source performs no animation, transition, or `NSAnimationContext`/`CATransaction` call; `path`, `caption`, and `label` are all assigned once, synchronously, in `init(withPath:caption:)`. |
-| Increase Contrast | Not applicable to this component directly — `PathView.swift` sets no custom `NSColor`; its coloring comes entirely from the theme's `.secondaryText` role, resolved through `SemanticPalette`. Whether the resulting per-theme contrast is sufficient is tracked once under Accessibility above, not duplicated here — the open question there is the same one that would apply here. |
+| Increase Contrast | Not applicable to this component directly — `PathView.swift` sets no custom `NSColor`; its coloring comes entirely from the theme's `.secondaryText` role, resolved through `SemanticPalette`. Whether the resulting per-theme contrast is sufficient is tracked once under Accessibility above, not duplicated here — see the open question on minimum-contrast-ratio there. |
 | Differentiate Without Color | Not applicable — the view conveys no state through color at all; it renders only `path` (and an optional caption) in a single, fixed secondary-text color, with no color-coded meaning to differentiate. |
 
 ## Feature Flags
@@ -456,8 +427,9 @@ or logger reference anywhere in `PathView.swift`).
   tooltip and accessibility value strip the caption while copy-via-selection
   keeps it, because copying reads `NSTextField.stringValue` (the full
   `shown` string) rather than a separately-tracked "path" value. This
-  asymmetry is unchanged for this recipe; the open question in Accessibility
-  above is whether the accessibility value should include the caption.
+  asymmetry is unchanged for this recipe; per Accessibility above, the
+  caption is not exposed through any accessibility label, so the accessible
+  representation carries the same gap tooltip and accessibility value do.
   **Approved**: pending
 - **Decision**: the label's horizontal content-compression-resistance and
   content-hugging priorities are both lowered to `.defaultLow`.
@@ -487,10 +459,11 @@ or logger reference anywhere in `PathView.swift`).
 Statuses rest on: the label's font tracking the theme's `.caption` role and
 `sizeScale` (`dynamic-type-support`, per Appearance above); the enforced
 3.0-minimum `.secondaryText` contrast that cannot be confirmed at 4.5:1 for
-every theme (`contrast-ratio`, per the Accessibility section's open
-question); the caption-prefixed visible text versus the raw-`path`-only
-accessibility value (`screen-reader-support`, per the Accessibility
-section's Label requirements open question); and the hardcoded `": "`
+every theme (`contrast-ratio`, per the open question on
+minimum-contrast-ratio in Accessibility above); the caption-prefixed visible
+text versus the raw-`path`-only accessibility value, with no accessibility
+label filling the gap (`screen-reader-support`, per the Accessibility
+section's Label requirements above); and the hardcoded `": "`
 separator literal at `PathView.swift:35` (`no-hardcoded-strings`, per
 Localization above).
 
@@ -500,3 +473,4 @@ Localization above).
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: corrected the unsupported WinUI-3 motivation claim and the accessibility-value platform mappings (Compose, React/Web, WinUI 3) to use value analogs instead of name/label analogs; added a WCAG 2.1 SC 1.4.3 reference; downgraded two accidental Edge Cases from MUST to MAY; reformatted Design Decisions' Approved syntax and dropped the requirement-count-comparison decision; flagged the caption separator as an open localization gap; revised test vectors 003 and 010 and added two edge-case vectors; corrected the UIKit edit-menu API and initializer-split platform notes and the Compose version claim; and rebuilt the Compliance table against the real catalog, dropping checks with no catalog category and fixing statuses/category casing. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `PathView` (AppKit, macOS) source. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
