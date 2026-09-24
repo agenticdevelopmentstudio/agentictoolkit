@@ -18,6 +18,7 @@ vi.mock('../ProfileView', () => ({
   ProfileView: ({ children }: { children?: ReactNode }) => (
     <div data-testid="profile-view">{children}</div>
   ),
+  ProfileSkeleton: () => <div data-testid="profile-skeleton" />,
 }))
 
 const { viewerResult } = vi.hoisted(() => ({
@@ -149,7 +150,7 @@ describe('ProfileFallback', () => {
     expect(section).not.toHaveBeenCalled()
   })
 
-  it('race: both anonymous endpoints settle to a 404 while the viewer lookup is still pending — renders NOTHING, not ProfileNotFound', async () => {
+  it('race: both anonymous endpoints settle to a 404 while the viewer lookup is still pending — renders the skeleton, not ProfileNotFound', async () => {
     fetchMock.mockImplementation((url: string) => {
       if (url.includes('/api/public/users/')) return Promise.resolve(jsonResponse({}, 404))
       if (url.includes('/api/public/orgs/')) return Promise.resolve(jsonResponse({}, 404))
@@ -163,7 +164,17 @@ describe('ProfileFallback', () => {
     // case is that the still-pending viewer lookup holds that outcome back, not that the fetch
     // pair never ran.
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
-    expect(container).toBeEmptyDOMElement()
+    expect(container).not.toBeEmptyDOMElement()
+    expect(screen.getByTestId('profile-skeleton')).toBeInTheDocument()
     expect(screen.queryByText('Profile not found')).toBeNull()
+  })
+
+  it('loading: before the anonymous pair answers, renders the skeleton rather than a blank page', () => {
+    fetchMock.mockImplementation(() => new Promise<Response>(() => {}))
+
+    render(<ProfileFallback slug="slow" siteId="hub" />)
+
+    expect(screen.getByTestId('profile-skeleton')).toBeInTheDocument()
+    expect(screen.queryByTestId('profile-view')).toBeNull()
   })
 })

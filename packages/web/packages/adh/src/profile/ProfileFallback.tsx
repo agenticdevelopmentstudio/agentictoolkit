@@ -5,7 +5,7 @@ import type { SiteId } from '@agentic-toolkit/adh-registry'
 import { principalFromOrgCard, principalFromUserCard, type OrgCardBody, type UserCardBody } from './normalize'
 import { ProfileNotFound } from './ProfileNotFound'
 import { PROFILE_FRAME_CLASS } from './frame'
-import { ProfileView } from './ProfileView'
+import { ProfileSkeleton, ProfileView } from './ProfileView'
 import type { ProfilePrincipal } from './types'
 import { useViewerPrincipal } from './useViewerPrincipal'
 
@@ -129,7 +129,11 @@ export function ProfileFallback({ slug, siteId, section }: ProfileFallbackProps)
         {viewerSection}
       </ProfileView>
     )
-  if (state.status === 'loading') return null
+  // The skeleton, not nothing, while either lookup is out: a bare `/<slug>` that resolves to a
+  // profile used to sit on a blank page until the fetch pair settled, where `/<slug>/profile`
+  // showed its loading boundary's card — one profile, two loading states. ProfileSkeleton is
+  // drawn in ProfileView's own frame, so the card replaces it in place.
+  if (state.status === 'loading') return <ProfileSkeleton />
   if (state.status === 'found')
     return (
       <ProfileView principal={state.principal} siteId={siteId} upgrade={false}>
@@ -139,7 +143,7 @@ export function ProfileFallback({ slug, siteId, section }: ProfileFallbackProps)
   // Neither "not found" nor "we are down" is final while the viewer's own lookup is still
   // running: a `hub` profile is a 404 on the anonymous route BY DESIGN, so the public miss
   // is the expected first answer for the very viewers the setting exists to admit.
-  if (viewerPending) return null
+  if (viewerPending) return <ProfileSkeleton />
   if (state.status === 'missing') return <ProfileNotFound />
   return (
     <main className={PROFILE_FRAME_CLASS}>

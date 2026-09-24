@@ -311,10 +311,10 @@ function ProfileFallback({ slug, siteId, section }) {
   }, [slug]);
   if (viewer)
     return /* @__PURE__ */ jsx3(ProfileView, { principal: viewer, siteId, upgrade: false, children: viewerSection });
-  if (state.status === "loading") return null;
+  if (state.status === "loading") return /* @__PURE__ */ jsx3(ProfileSkeleton, {});
   if (state.status === "found")
     return /* @__PURE__ */ jsx3(ProfileView, { principal: state.principal, siteId, upgrade: false, children: section?.(state.principal) });
-  if (viewerPending) return null;
+  if (viewerPending) return /* @__PURE__ */ jsx3(ProfileSkeleton, {});
   if (state.status === "missing") return /* @__PURE__ */ jsx3(ProfileNotFound, {});
   return /* @__PURE__ */ jsx3("main", { className: PROFILE_FRAME_CLASS, children: /* @__PURE__ */ jsx3("p", { className: "text-apt-text-muted", children: "Couldn't load this profile. Reload the page to try again." }) });
 }
