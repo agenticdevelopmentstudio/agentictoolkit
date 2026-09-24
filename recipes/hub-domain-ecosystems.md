@@ -3,7 +3,7 @@ id: 201572ee-2e0f-4839-94f5-252f8044c4bf
 title: 'Hub Domain: Ecosystems'
 domain: agentictoolkit://recipes/hub-domain-ecosystems
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-24'
@@ -12,8 +12,8 @@ author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
 summary: 'Products/ecosystems domain logic: the Apple Hub rail (topics, forms,
-  and an HTDVDataSource) and the web ecosystemsApi/identifiersApi clients,
-  unified by the rdid slug/address contract.'
+  and an HTDVDataSource) and the web ecosystemsApi/identifiersApi/ecosystemFeaturesApi
+  clients, unified by the rdid slug/address contract.'
 platforms:
 - swift
 - macos
@@ -29,6 +29,7 @@ tags:
 - forms
 - htdv
 - react-query
+- features
 depends-on: []
 related:
 - agentictoolkit://recipes/auth-client
@@ -48,11 +49,13 @@ references:
 - packages/web/packages/data/src/ecosystems/identifiers.ts (agentictoolkit)
 - packages/web/packages/data/src/ecosystems/use-workspace-default-ecosystem.ts (agentictoolkit)
 - packages/web/packages/data/src/ecosystems/ecosystem-invitations.ts (agentictoolkit)
+- packages/web/packages/data/src/ecosystems/ecosystem-features.ts (agentictoolkit)
 - packages/web/packages/data/src/ecosystems/wire.ts (agentictoolkit)
 - packages/web/packages/data/src/http.ts (agentictoolkit)
 - packages/web/packages/data/src/client-helpers.ts (agentictoolkit)
 - packages/web/packages/data/src/ecosystems/__tests__/ecosystems.test.ts (agentictoolkit)
 - packages/web/packages/data/src/ecosystems/__tests__/use-workspace-default-ecosystem.test.tsx (agentictoolkit)
+- packages/web/packages/data/src/ecosystems/__tests__/ecosystem-features.test.tsx (agentictoolkit)
 approved-by: ''
 approved-date: ''
 ---
@@ -85,8 +88,14 @@ opposite ends of one system:
   rename-in-place and availability probe against
   `/api/registry/identifiers`), `useWorkspaceDefaultEcosystemId`
   (`use-workspace-default-ecosystem.ts` — the react-query resolver every
-  workspace-scoped pane and create-dialog preview shares), and the
-  Invitations topic's react-query hooks (`ecosystem-invitations.ts`).
+  workspace-scoped pane and create-dialog preview shares), the
+  Invitations topic's react-query hooks (`ecosystem-invitations.ts`), and
+  `ecosystemFeaturesApi` plus its react-query hooks
+  (`ecosystem-features.ts` — the data behind the ecosystem feature picker:
+  the catalog of addable features, including "Coming soon" unbuilt ones,
+  what an ecosystem is provisioned with, adding a batch, and removing one,
+  against the bespoke `/api/ecosystem/features` route). The feature picker
+  has no Apple counterpart in these sources.
 
 Both sides model the same backend fact: an ecosystem's public identity is a
 *stored, mutable* rdid (`id` / `identifier`), but the row's *own* address is
@@ -384,9 +393,11 @@ caller on the correct side of that distinction.
 - **ecosystem-id-for-slug-ownership-first**: `ecosystemIdForSlug(slug)`
   MUST call `workspaceDefaultEcosystemId(slug)` first; on any error other
   than `isNotFound`, it MUST rethrow without falling back to a list scan;
-  only a 404 (the slug names no workspace) MUST license the fallback raw
-  `list()` scan, which returns the first row matching `slug`, else the
-  first `isDefault` row, else the first row, else `null`
+  when that call resolves a row it MUST return that row's `id`; only a 404
+  (the slug names no workspace) or a resolved `null` (no infrastructure
+  row) MUST license the fallback raw scan of the unfiltered base route,
+  which returns the first row matching `slug`, else the first `isDefault`
+  row, else the first row, else `null`
   (`ecosystems.ts`; pinned by the `ecosystemsApi.ecosystemIdForSlug`
   describe block in `ecosystems.test.ts`, including "rethrows a non-404
   instead of picking a row").
@@ -470,6 +481,125 @@ caller on the correct side of that distinction.
   `invitationItem`) by `kind`, and on success MUST invalidate exactly the
   one list query key matching that same `kind` (`ecosystem-invitations.ts`).
 
+### Web — feature picker data (`ecosystem-features.ts`)
+
+- **features-bespoke-route**: every `ecosystemFeaturesApi` call MUST target
+  the hand-written `/api/ecosystem/features` base route (`catalog`,
+  `<ecosystemId>`, `<ecosystemId>/<featureKey>`), never the generic
+  ecosystems CRUD base, because provisioning a feature has server-side side
+  effects (its storage bucket, child ecosystem and roles are created when
+  the feature is added and at no other time) (`ecosystem-features.ts`,
+  header comment).
+- **features-path-segments-encoded**: `list`, `provision` and `remove` MUST
+  URL-encode `ecosystemId` (an rdid or uuid) and `featureKey` via `enc`
+  (`encodeURIComponent`) before placing them in the path
+  (`ecosystem-features.ts`).
+- **features-catalog-order-preserved**: `ecosystemFeaturesApi.catalog()`
+  MUST GET `/api/ecosystem/features/catalog` and return the response's
+  `features` array unchanged, in the backend's own order — the client
+  MUST NOT sort or filter it (alphabetising by `label` is the picker's and
+  the rail's job) (`ecosystem-features.ts`).
+- **features-catalog-entry-shape**: a `CatalogFeature` MUST carry `key`
+  (stable, permanent; what a provisioned row is keyed by), `label`,
+  `description`, `subscriptionTier`, and the optional flags `featureSite`
+  and `comingSoon` (`ecosystem-features.ts`).
+- **features-subscription-tier-open-string**: `FeatureSubscriptionTier`
+  MUST be typed as a plain `string`, not a closed union, so a tier the
+  backend adds later renders instead of failing to parse; the client MUST
+  only display it, never branch on it (`ecosystem-features.ts`, doc
+  comment on `FeatureSubscriptionTier`).
+- **features-coming-soon-passthrough**: a catalog entry with
+  `comingSoon: true` MUST be returned by `catalog()` like any other entry —
+  this client MUST NOT filter it out; it is listed so the owner can see it
+  is coming, the picker shows it under "Coming soon" with its checkbox
+  disabled, and the backend refuses to provision it
+  (`ecosystem-features.ts`, doc comment on `comingSoon`).
+- **features-list-all-states**: `ecosystemFeaturesApi.list(ecosystemId)`
+  MUST GET `/api/ecosystem/features/<ecosystemId>` and return every
+  `ProvisionedFeature` in every `FeatureState` (`provisioning`, `active`,
+  `removed`) unfiltered — callers filter (`ecosystem-features.ts`).
+- **features-provisioned-shape**: a `ProvisionedFeature` MUST carry
+  `featureKey`, `state: FeatureState`, `provisionedAt`,
+  `provisionedBy: string | null`, and `updatedAt`
+  (`ecosystem-features.ts`).
+- **features-provision-one-request**: `ecosystemFeaturesApi.provision
+  (ecosystemId, keys)` MUST send exactly one POST to
+  `/api/ecosystem/features/<ecosystemId>` with header
+  `Content-Type: application/json` and body `{ "keys": [...] }` carrying
+  the whole batch, never one request per key (`ecosystem-features.ts`).
+- **features-provision-returns-full-list**: `provision` MUST resolve to the
+  response's `features` array — the ecosystem's FULL provisioned list after
+  the add, not only the added rows (`ecosystem-features.ts`).
+- **features-remove-single-delete**: `ecosystemFeaturesApi.remove
+  (ecosystemId, featureKey)` MUST send one DELETE to
+  `/api/ecosystem/features/<ecosystemId>/<featureKey>` with no body and
+  resolve to `void` (`ecosystem-features.ts`; pinned by "resolves normally
+  when the DELETE succeeds outright" in `ecosystem-features.test.tsx`).
+- **features-remove-404-is-success**: `remove` MUST resolve (not throw) when
+  the DELETE fails with `isNotFound` (404), because the row is already
+  gone (`ecosystem-features.ts`; pinned by "treats a 404 as success" in
+  `ecosystem-features.test.tsx`).
+- **features-remove-rethrows-other-errors**: `remove` MUST rethrow every
+  non-404 failure unchanged (`ecosystem-features.ts`; pinned by "still
+  throws on a real failure" in `ecosystem-features.test.tsx`).
+- **features-query-keys**: the catalog query key MUST be
+  `["eco-features", "catalog"]` (no ecosystem id — the catalog is a
+  property of the server build, shared by every ecosystem), and the
+  provisioned query key MUST be `["eco-features", ecosystemId ?? ""]`
+  (`ecosystem-features.ts`).
+- **features-catalog-stale-time**: `useFeatureCatalog()` MUST configure
+  `staleTime` as 30 minutes (1,800,000 ms) so opening the picker again
+  within that window does not refetch the catalog
+  (`ecosystem-features.ts`).
+- **features-provisioned-query-gated**: `useProvisionedFeatures(ecosystemId)`
+  MUST be `enabled: Boolean(ecosystemId)` — no request MUST run while the
+  id is `null`, `undefined`, or `""` (`ecosystem-features.ts`).
+- **features-hooks-context-client**: the feature hooks MUST use the query
+  client from React context (`useQuery` without an explicit client,
+  `useQueryClient()` in the mutations) — unlike
+  `useWorkspaceDefaultEcosystemId`, which passes the module singleton
+  explicitly (`ecosystem-features.ts`).
+- **features-provision-writes-cache-then-invalidates**:
+  `useProvisionFeatures`'s mutation, on success, MUST first write the
+  returned full list into the provisioned query's cache via `setQueryData`
+  and then invalidate that same key, so the rail redraws on the same tick
+  and still picks up a concurrent session's changes
+  (`ecosystem-features.ts`).
+- **features-remove-hook-invalidates**: `useRemoveFeature`'s mutation, on
+  success, MUST invalidate the provisioned query key and MUST NOT write the
+  cache (the DELETE returns no list) (`ecosystem-features.ts`).
+- **features-apply-adds-first**: `useApplyFeatureChange`'s mutation MUST
+  await the single `provision` POST for `add` before issuing any removal,
+  so a failed removal never costs the owner the features just added; a
+  failed POST MUST reject the mutation before any DELETE is sent
+  (`ecosystem-features.ts`).
+- **features-apply-skips-empty-add**: `useApplyFeatureChange` MUST NOT send
+  a POST when `add` is empty (`ecosystem-features.ts`).
+- **features-apply-removals-all-settled**: `useApplyFeatureChange` MUST
+  issue one `remove` per key in `remove` concurrently and wait for all of
+  them via `Promise.allSettled`, so one rejected removal MUST NOT prevent
+  the others from being attempted (`ecosystem-features.ts`; pinned by
+  "runs every removal even when one fails" in
+  `ecosystem-features.test.tsx`).
+- **features-apply-names-failed-keys**: when one or more removals reject,
+  `useApplyFeatureChange` MUST reject with an `Error` whose message is
+  `Couldn't remove: ` followed by the failed keys, in `remove` order,
+  joined by `, ` (`ecosystem-features.ts`; pinned by the
+  `"Couldn't remove: b"` assertion in `ecosystem-features.test.tsx`).
+- **features-apply-404-removal-succeeds**: a removal that 404s MUST count
+  as success, so a change whose only removal failures are 404s MUST
+  resolve (`ecosystem-features.ts`; pinned by "succeeds when every removal
+  succeeds (or is a 404, already-gone)").
+- **features-apply-invalidates-on-settle**: `useApplyFeatureChange` MUST
+  invalidate the provisioned query key in `onSettled` — after success AND
+  after failure, since a failure partway still changed part of the list
+  (`ecosystem-features.ts`).
+- **features-no-client-dedupe**: `useApplyFeatureChange` MUST pass `add`
+  and `remove` through as given — it does not deduplicate keys or reject a
+  key present in both lists; because adds run first, such a key is
+  provisioned and then removed (`ecosystem-features.ts`).
+- **features-mutation-null-id**: NEEDS REVIEW: Not implemented in source. `useProvisionFeatures`, `useRemoveFeature` and `useApplyFeatureChange` accept `ecosystemId: string | null | undefined` but cast it `as string` without a guard, so a mutation fired before the id resolves sends a request to a path segment of `null`/`undefined` (encoded as that literal text) instead of failing fast client-side; a guard (or a non-nullable parameter type) in `ecosystem-features.ts` would settle it.
+
 ## Appearance
 
 Not applicable — this is domain logic (a data source protocol, a form/rail
@@ -533,15 +663,32 @@ which owns accessibility presentation.
 | hub-domain-ecosystems-034 | ecosystem-id-for-slug-ownership-first | `ecosystemIdForSlug("zed")` where the workspace lookup 404s | Falls back to a raw list scan and returns the row whose `slug == "zed"` (`ecosystems.test.ts`) |
 | hub-domain-ecosystems-035 | ecosystem-id-for-slug-ownership-first | `ecosystemIdForSlug("fishlamp")` where the workspace lookup 403s | Rethrows `"HTTP 403"`; exactly one request made (no fallback scan) (`"rethrows a non-404 instead of picking a row"`, `ecosystems.test.ts`) |
 | hub-domain-ecosystems-036 | workspace-default-hook-always-enabled, workspace-default-hook-no-retry | Render `useWorkspaceDefaultEcosystemId(undefined)` | Query runs immediately (not disabled); `retry: false` configured (`use-workspace-default-ecosystem.ts`) |
+| hub-domain-ecosystems-037 | features-remove-404-is-success | `ecosystemFeaturesApi.remove("eco-1", "widgets")`; DELETE rejects with `{status: 404}` | Resolves `undefined` ("treats a 404 as success", `ecosystem-features.test.tsx`) |
+| hub-domain-ecosystems-038 | features-remove-rethrows-other-errors | `remove("eco-1", "widgets")`; DELETE rejects with `{status: 500}` | Rejects with `"HTTP 500"` ("still throws on a real failure", `ecosystem-features.test.tsx`) |
+| hub-domain-ecosystems-039 | features-remove-single-delete, features-bespoke-route | `remove("eco-1", "widgets")`; DELETE resolves | One DELETE to `/api/ecosystem/features/eco-1/widgets`; resolves `undefined` ("resolves normally when the DELETE succeeds outright", `ecosystem-features.test.tsx`) |
+| hub-domain-ecosystems-040 | features-apply-removals-all-settled, features-apply-names-failed-keys, features-apply-skips-empty-add | `useApplyFeatureChange("eco-1").mutate({add: [], remove: ["a","b","c"]})`; DELETE for `b` rejects 500, `a` and `c` resolve | Exactly 3 DELETEs issued, no POST; mutation status `error`; error message `"Couldn't remove: b"` (`ecosystem-features.test.tsx`) |
+| hub-domain-ecosystems-041 | features-apply-404-removal-succeeds | Same mutation; `b` rejects 404, `a` and `c` resolve | Mutation status `success`; no error (`ecosystem-features.test.tsx`) |
+| hub-domain-ecosystems-042 | features-provision-one-request, features-provision-returns-full-list | `provision("org.acme.shop", ["storage","users"])`; server answers `{features: [storage, users, research]}` | One POST to `/api/ecosystem/features/org.acme.shop`, `Content-Type: application/json`, body `{"keys":["storage","users"]}`; resolves the 3-row list (`ecosystem-features.ts`) |
+| hub-domain-ecosystems-043 | features-catalog-order-preserved, features-coming-soon-passthrough | `catalog()`; server answers `{features: [zeta, alpha(comingSoon:true)]}` | Resolves `[zeta, alpha]` in that order, `alpha` still present with `comingSoon: true` (`ecosystem-features.ts`) |
+| hub-domain-ecosystems-044 | features-list-all-states | `list("eco-1")`; server answers rows in states `active`, `provisioning`, `removed` | All three rows returned unfiltered (`ecosystem-features.ts`) |
+| hub-domain-ecosystems-045 | features-provisioned-query-gated, features-query-keys | Render `useProvisionedFeatures(null)` | No request issued; query key `["eco-features", ""]` (`ecosystem-features.ts`) |
+| hub-domain-ecosystems-046 | features-provision-writes-cache-then-invalidates | `useProvisionFeatures("eco-1").mutate(["storage"])`; POST returns list `L` | Cache for `["eco-features","eco-1"]` equals `L` immediately on success, then that key is invalidated (`ecosystem-features.ts`) |
+| hub-domain-ecosystems-047 | features-apply-adds-first, features-apply-invalidates-on-settle | `useApplyFeatureChange("eco-1").mutate({add:["storage"], remove:["users"]})`; POST rejects 500 | Mutation rejects with the POST's error; no DELETE sent; `["eco-features","eco-1"]` still invalidated (`ecosystem-features.ts`) |
+| hub-domain-ecosystems-048 | features-catalog-stale-time, features-query-keys | Render `useFeatureCatalog()` twice within 30 minutes | Query key `["eco-features","catalog"]`; one catalog fetch, second mount served from cache (`staleTime` 1,800,000 ms) (`ecosystem-features.ts`) |
+| hub-domain-ecosystems-049 | features-path-segments-encoded | `remove("eco 1", "a/b")` | DELETE URL `/api/ecosystem/features/eco%201/a%2Fb` (`ecosystem-features.ts`) |
+| hub-domain-ecosystems-050 | features-remove-hook-invalidates | `useRemoveFeature("eco-1").mutate("storage")`; DELETE resolves | `["eco-features","eco-1"]` invalidated; no `setQueryData` write (`ecosystem-features.ts`) |
+| hub-domain-ecosystems-051 | ecosystem-id-for-slug-ownership-first | `ecosystemIdForSlug("fishlamp")` where the workspace lookup resolves `null` (empty array) | Falls back to the raw base-route scan (`ecosystems.ts`) |
 
 ## Edge Cases
 
 - **Null/empty input**: A slug of `""` after lowercasing — `Slug.pattern`
   requires at least one leading/trailing alphanumeric, so both
   `FormValidator`'s pattern check and `Slug.isValid` reject it before any
-  network call. `ecosystemIdForSlug` and `workspaceDefaultEcosystemId`
-  with an empty result array — MUST resolve to `null`, never `undefined`
-  or a thrown error (hub-domain-ecosystems-031).
+  network call. `workspaceDefaultEcosystemId` with an empty result array
+  MUST resolve to `null`, never `undefined` or a thrown error
+  (hub-domain-ecosystems-031); `ecosystemIdForSlug` then falls back to the
+  raw scan, and MUST resolve to `null` only when that scan is also empty
+  (hub-domain-ecosystems-051).
 - **Boundary/malformed values**: A slug at exactly 64 characters — MUST be
   accepted; at 65 — MUST be rejected with the fixed message
   (hub-domain-ecosystems-015). A non-rdid `identifier` passed to
@@ -583,6 +730,40 @@ which owns accessibility presentation.
   slug change (`chosen` → `adh`, matching the stale handle) that a naive
   diff-against-`id` would have silently skipped
   (update-slug-sent-on-presence, hub-domain-ecosystems-026).
+- **Feature removal already done**: a `remove` whose DELETE 404s (a
+  double-click, a stale list, a second tab racing the same removal) MUST
+  resolve as success, and inside `useApplyFeatureChange` it MUST count as
+  a successful removal (hub-domain-ecosystems-037, -041).
+- **Feature batch partial failure**: a `useApplyFeatureChange` whose adds
+  succeed but some removals fail with a non-404 error MUST keep the adds,
+  still attempt every other removal, reject naming only the failed keys,
+  and invalidate the provisioned list (hub-domain-ecosystems-040). A
+  failed add POST MUST reject before any removal is sent
+  (hub-domain-ecosystems-047); whether the backend's batch transaction
+  rolls back whole is the backend's contract, which this client relies on
+  and does not verify.
+- **Empty feature change**: `useApplyFeatureChange` with `add: []` MUST send
+  no POST; with `remove: []` it MUST send no DELETE and resolve (an
+  `allSettled` over zero promises). With both empty it sends nothing and
+  still invalidates the provisioned list. `useProvisionFeatures` has no
+  such guard: `mutate([])` MUST send a POST with `{"keys": []}`.
+- **Already-active or stale feature keys**: provisioning a key that is
+  already `active` is a backend no-op, not a conflict — the client sends it
+  unchanged and surfaces whatever the backend answers; a `provisioning`-state
+  row is the picker's concern to show as already taken.
+- **Coming-soon feature submitted**: `provision` sends a `comingSoon` key
+  unchanged if a caller supplies one; the backend refuses it and the
+  rejection surfaces unchanged to the caller — this client performs no
+  client-side refusal.
+- **Feature hooks with no ecosystem id**: `useProvisionedFeatures` MUST NOT
+  fetch while the id is `null`/`undefined`/`""`; the mutation hooks do not
+  guard it (see the open question on features-mutation-null-id).
+- **Concurrent feature changes**: the removals inside one
+  `useApplyFeatureChange` run in parallel; they touch distinct keys, so
+  their completion order does not affect the result, and the list is
+  re-read once on settle. Two sessions changing the same ecosystem are
+  reconciled only by the post-mutation invalidation re-reading the
+  server's list.
 
 ## Configuration
 
@@ -595,6 +776,11 @@ which owns accessibility presentation.
 | `opts.parent` / `opts.workspace` | `string \| undefined` (web, `ecosystemsApi.create`) | both `undefined` | Scope a create to a parent ecosystem or a workspace's principal; `parent` wins if both are given |
 | `BASE` (`/api/ecosystem/ecosystems`) | internal constant (web, `ecosystems.ts`) | fixed | Base route for every generic-CRUD ecosystems call |
 | `BASE` (`/api/registry/identifiers`) | internal constant (web, `identifiers.ts`) | fixed | Base route for rdid rename/availability |
+| `BASE` (`/api/ecosystem/features`) | internal constant (web, `ecosystem-features.ts`) | fixed | Base route for the feature catalog, provisioned list, add and remove |
+| `ecosystemId` | `string \| null \| undefined` (web, feature hooks) | none — required | The ecosystem (rdid or uuid) whose features are listed or changed; the list query is disabled while it is falsy |
+| `keys` | `string[]` (web, `provision`/`useProvisionFeatures`) | none — required | Catalog `key`s to add in one batch |
+| `FeatureChange` `{ add, remove }` | `string[]` each (web, `useApplyFeatureChange`) | none — required | One picker visit: keys to add (one POST), provisioned keys to remove (one DELETE each) |
+| catalog `staleTime` | internal constant (web, `useFeatureCatalog`) | `30 * 60 * 1000` ms | How long the session-wide catalog is served from cache before a refetch |
 
 ## Deep Linking
 
@@ -621,7 +807,10 @@ routes, not front-end deep links.
   validation message this recipe's requirements quote.
 - **Web hardcoded strings**: every thrown-error friendly message
   (`rethrowConflict`'s "An ecosystem with identifier ... already exists.",
-  "The identifier ... is already in use.").
+  "The identifier ... is already in use."), and `useApplyFeatureChange`'s
+  `Couldn't remove: <keys>` error. Catalog `label`/`description`/
+  `subscriptionTier` text is served by the backend and passed through
+  untranslated.
 
 Neither implementation has a lookup table, i18n key, or locale parameter
 anywhere in these files — every user-facing string above is fixed English.
@@ -668,9 +857,11 @@ analytics or telemetry event.
 - **Retention**: Apple retains nothing between calls. Web's react-query
   cache entries persist per their query key until invalidated by the
   matching mutation (as documented per hook above) or garbage-collected by
-  react-query's own cache lifetime; this component sets no custom
-  `staleTime`/`gcTime` of its own beyond the workspace-default hook's
-  `retry: false`.
+  react-query's own cache lifetime; the only custom cache settings are the
+  workspace-default hook's `retry: false` and the feature catalog's
+  30-minute `staleTime`, and no `gcTime` is set anywhere. Provisioned
+  feature rows carry `provisionedBy` (a principal id or `null`), held only
+  in that in-memory cache.
 
 ## Logging
 
@@ -694,16 +885,23 @@ this domain component.
 - **React/Web**: This is the other reference implementation.
   `ecosystemsApi`/`identifiersApi` are plain async functions over `fetch`
   (via `authedJson`/`authedRequest`); `useWorkspaceDefaultEcosystemId` and
-  the Invitations hooks are `@tanstack/react-query` wrappers around them,
-  with the query-client-as-explicit-argument pattern documented in their
-  own requirements above.
+  the Invitations and feature hooks are `@tanstack/react-query` wrappers
+  around them. Only `useWorkspaceDefaultEcosystemId` passes the module
+  query-client singleton explicitly; the Invitations and feature hooks read
+  the client from context. `ecosystem-features.ts` (with its test
+  `ecosystem-features.test.tsx`) is web-only: the Apple Hub has no feature
+  picker data source in these sources, so a port of the picker starts from
+  the web contract.
 - **Compose / Android**: `OkHttp`/`Ktor` (or `Retrofit`) would replace
   `fetch`/`URLSession` for the web/Apple network calls respectively; a
   `ViewModel` exposing a `StateFlow`/`LiveData` of the resolved ecosystem
   list is the idiomatic equivalent of both `EcosystemsModule.rootLevel()`
   and the react-query list hooks. `androidx.lifecycle.SavedStateHandle` or
   a `Room`-backed repository would be where a native Android port adds a
-  local cache neither reference implementation currently has.
+  local cache neither reference implementation currently has. For the
+  feature picker, `coroutineScope { keys.map { async { runCatching {
+  remove(it) } } }.awaitAll() }` is the equivalent of `Promise.allSettled`,
+  run after the provision call returns.
 - **WinUI 3**: `HttpClient` with `System.Text.Json` replaces both
   `fetch` and `URLSession` for every ecosystems/identifiers request this
   recipe documents. A `NavigationView`/`TreeView` with a
@@ -720,7 +918,26 @@ this domain component.
   `HubError`-equivalent exception hierarchy (or a `Result<T, HubError>`)
   should carry the same `notFound`/`conflict`/`validation` distinctions
   this recipe's error-mapping requirements rely on, since WinUI has no
-  built-in typed-error convention of its own to inherit.
+  built-in typed-error convention of its own to inherit. For the feature
+  picker: a `FeaturesClient` over `HttpClient` exposes `GetCatalogAsync`
+  (deserialize `{ features }` with `System.Text.Json`, keep server order),
+  `ListAsync`, `ProvisionAsync` (one `PostAsJsonAsync` with
+  `{ keys }`, returning the full list) and `RemoveAsync` (`DeleteAsync`,
+  treating `HttpStatusCode.NotFound` as success), with path segments
+  escaped by `Uri.EscapeDataString`. The picker is a `ContentDialog`
+  hosting a `ListView` of `CheckBox` items bound to an
+  `ObservableCollection<FeatureRow>` whose rows implement
+  `INotifyPropertyChanged`; a `comingSoon` row goes in a separate
+  "Coming soon" group (a `CollectionViewSource` with `IsSourceGrouped`) with
+  `IsEnabled="False"`, and a `provisioning` row shows as already checked.
+  Applying a change awaits `ProvisionAsync` first, then
+  `Task.WhenAll` over per-key tasks that each catch their own exception
+  and return a success flag (plain `Task.WhenAll` throws on the first
+  fault, unlike `Promise.allSettled`), then throws
+  `Couldn't remove: <keys>` for the failures and always re-reads the list
+  in a `finally`. The 30-minute catalog cache has no built-in equivalent:
+  keep the catalog and a fetched-at `DateTimeOffset` in a
+  session-lifetime service.
 
 ## Design Decisions
 
@@ -813,6 +1030,35 @@ the mappers' internal field-by-field shape as a different component's
 concern, out of scope here.
 **Approved**: pending
 
+**Decision**: Features are added as one plural POST per batch, while
+removals are one DELETE per key, run concurrently and collected with
+`Promise.allSettled`, adds first.
+**Rationale**: The picker confirms a batch of adds behind one "Add N
+features?" prompt and the backend runs the batch in one transaction, so a
+partial failure never leaves the owner with three of five features and no
+way to tell which. The DELETE route removes one key, so removals cannot
+share a request; `allSettled` keeps one 5xx from silently aborting the
+rest the way a sequential `for … await` would, and naming the failed keys
+tells the caller which features are still provisioned. Adds go first so a
+failed removal never costs the features just added.
+**Approved**: pending
+
+**Decision**: `ecosystemFeaturesApi.remove` treats a 404 as success.
+**Rationale**: The caller's goal is that the row is gone; a double-click, a
+stale list, or a second tab racing the same removal would otherwise report
+failure for an outcome that already happened. Every other status still
+throws.
+**Approved**: pending
+
+**Decision**: The feature catalog is cached under a key with no ecosystem id
+and a 30-minute `staleTime`, and "Coming soon" entries stay in it.
+**Rationale**: The catalog is a property of the server build, not of any
+ecosystem, so one list serves the whole session; refetching it on every
+picker open would re-download the same rows each time. Unbuilt features are
+kept so the owner can see what is coming; the picker disables them and the
+backend refuses to provision them, so the client needs no filter.
+**Approved**: pending
+
 ## Compliance
 
 | Check | Status | Category |
@@ -827,6 +1073,7 @@ concern, out of scope here.
 | [input-sanitization](agenticdevelopercookbook://compliance/security#input-sanitization) | partial | Security |
 | [data-minimization](agenticdevelopercookbook://compliance/privacy-and-data#data-minimization) | passed | Privacy and Data |
 | [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+| [fault-tolerance](agenticdevelopercookbook://compliance/reliability#fault-tolerance) | partial | Reliability |
 
 `separation-of-concerns` **passed**: `EcosystemsDataSource` is a pure I/O
 boundary the module never bypasses; topics compose via the
@@ -842,7 +1089,10 @@ every public path this recipe documents (root listing, manageability
 gate, topic dispatch, settings save/delete, child-ecosystem recursion,
 create-form validation and prefix resolution), and `ecosystems.test.ts`
 does the same for the web client's mapper, create/update body shapes, and
-`ecosystemIdForSlug`'s ownership-first resolution. `error-response-handling`
+`ecosystemIdForSlug`'s ownership-first resolution; `ecosystem-features.test.tsx`
+pins `remove`'s 404-as-success and rethrow paths and `useApplyFeatureChange`'s
+all-settled removal and failed-key message (the catalog, list and provision
+calls and their hooks' cache writes have no direct test). `error-response-handling`
 **passed**: `isNotFound`/`isConflict` and `HubError.notFound`/`.conflict`
 consistently distinguish "missing" from "already exists" from every other
 failure on both platforms, and `ecosystemIdForSlug` explicitly rethrows a
@@ -855,7 +1105,10 @@ domain's own operations. `offline-behavior` **failed**: neither
 implementation defines an offline-cache-first read path or a
 queued-write-when-offline behavior; every operation is a live round-trip
 that fails outright when the network is unavailable.
-`idempotent-operations` **partial**: `ecosystemsApi.update`'s PUT is
+`idempotent-operations` **partial**: the feature client is idempotent on
+both mutating paths — `remove` treats an already-gone row (404) as success,
+and `provision` of an already-active key is a backend no-op — and
+`ecosystemsApi.update`'s PUT is
 documented as idempotent by the backend's own locked-value diff (sending
 an unchanged `slug` is a no-op, per the source's `addressPatchMoves`
 comment), but `create` has no idempotency key on either platform — a
@@ -872,10 +1125,16 @@ end-user personal data. `no-hardcoded-strings` **failed**: every
 user-facing string this recipe documents (labels, warnings, validation
 messages) is fixed English with no lookup table or locale parameter on
 either platform (see Localization) — a plain, honestly-reported gap, not
-a hidden one.
+a hidden one. `fault-tolerance` **partial**: `useApplyFeatureChange`
+keeps going past a failed removal and reports it by name rather than
+aborting, and `FeatureSubscriptionTier` is an open string so an unknown
+tier cannot break parsing; but the feature mutation hooks accept a
+nullable `ecosystemId` and send it unguarded (see the open question on
+features-mutation-null-id).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-24 | Claude | Add the web feature picker data (`ecosystem-features.ts`): catalog with "Coming soon" entries, provisioned list, batch add, 404-tolerant remove, all-settled apply; correct `ecosystemIdForSlug`'s null-result fallback and the cache-settings note. |
 | 1.0.0 | 2026-09-24 | Mike Fullerton | Initial recipe: Apple `EcosystemsModule`/topics/data source/models and the web `ecosystemsApi`/`identifiersApi`/`useWorkspaceDefaultEcosystemId`/Invitations-hooks contract. |

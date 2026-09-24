@@ -1140,6 +1140,7 @@
     "packages/web/packages/data/src/ecosystem-config/signin-apps.ts": "hub-domain-ecosystem-config",
     "packages/web/packages/data/src/ecosystem-config/storage-tokens.ts": "hub-domain-ecosystem-config",
     "packages/web/packages/data/src/ecosystem-config/wire.ts": "hub-domain-ecosystem-config",
+    "packages/web/packages/data/src/ecosystems/ecosystem-features.ts": "hub-domain-ecosystems",
     "packages/web/packages/data/src/ecosystems/ecosystem-invitations.ts": "hub-domain-ecosystems",
     "packages/web/packages/data/src/ecosystems/ecosystems.ts": "hub-domain-ecosystems",
     "packages/web/packages/data/src/ecosystems/identifiers.ts": "hub-domain-ecosystems",
