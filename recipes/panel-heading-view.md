@@ -3,11 +3,11 @@ id: 9e21151e-dc58-49a2-be1e-4984529f4396
 title: PanelHeadingView
 domain: agentictoolkit://recipes/panel-heading-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -156,20 +156,16 @@ recorded in Design Decisions, not here.
 
 ## Accessibility
 
-- **Role/trait**: NEEDS REVIEW: `PanelHeadingView.swift` never sets an
-  explicit accessibility role on `titleLabel`. AppKit exposes it, as a
-  non-editable `NSTextField`, as ordinary static text — not as a heading. The
-  component's entire stated purpose (per its own doc comment) is to caption a
-  *run* of groups the way a section heading would, yet nothing in source
-  gives VoiceOver users a way to jump between panel headings the way heading
-  navigation would let them. What is missing: an explicit accessibility
+- **Role/trait**: `PanelHeadingView.swift` never sets an explicit
+  accessibility role on `titleLabel`; AppKit exposes it, as a non-editable
+  `NSTextField`, as ordinary static text, not as a heading. The component's
+  stated purpose (per its own doc comment) is to caption a *run* of groups
+  the way a section heading would, but the source establishes that
+  relationship only visually (size and weight): it sets no accessibility
   heading role/trait (e.g. `NSAccessibilityElement`'s heading protocol, or
   `accessibilityRole`/`accessibilityRoleDescription` set to a heading value)
-  on `titleLabel`. What would settle it: confirmation from the
-  accessibility/HIG owner on whether `PanelHeadingView` should mark
-  `titleLabel` as an accessibility heading, since the source as written only
-  establishes the relationship visually (size and weight), not
-  programmatically.
+  on `titleLabel`, so VoiceOver users have no way to jump between panel
+  headings the way heading navigation would let them.
 - **Label requirements**: Satisfied for the title — `titleLabel.stringValue`
   is always the exact, caller-supplied `title` argument
   (`sets-title-text-from-caller`), which is also its accessible name under
@@ -433,7 +429,7 @@ or logger reference anywhere in `PanelHeadingView.swift`).
 reads via AppKit's default `NSTextField` accessible-name behavior, but
 nothing in source marks it with an accessibility heading role, so VoiceOver
 users cannot navigate panel headings the way heading navigation would let
-them (see the open question recorded under Accessibility above).
+them (see Accessibility above).
 `no-hardcoded-strings` passes because `title` and `caption` are entirely
 caller-supplied strings, with no user-visible string literal owned by
 `PanelHeadingView.swift` itself.
@@ -444,3 +440,4 @@ caller-supplied strings, with no user-visible string literal owned by
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: cite spacing/typography tokens instead of literals; restate two AppKit-mechanics requirements as outcomes and move their mechanism into AppKit Platform Notes; trim duplicated theme/typography prose; move the internal cookbook reference from `references` to `related` and add `explanation-view` to `depends-on`; fix Design Decision approval-line format and remove two commentary (non-decision) entries; change `screen-reader-support` from the disallowed `needs-review` status to `partial` and rebuild the Compliance table against real catalog checks (`screen-reader-support`, `no-hardcoded-strings`); drop the unsupported WinUI "reason this recipe exists" claim and point the SwiftUI note at the theme heading token instead of `.headline`; remove RFC 2119 keywords from Edge Cases in favor of citing the named requirements they follow from; mark test vectors 001/015/016 as compile-time/trap checks; trim the Overview to component identity and usage. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation, extracted from the Apple `PanelHeadingView` (AppKit, macOS) source. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

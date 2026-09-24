@@ -3,11 +3,11 @@ id: acd561ca-90a4-4303-a411-cfe23410b42a
 title: NumberFieldView
 domain: agentictoolkit://recipes/number-field-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -251,13 +251,7 @@ including the parsing contract that wrapper delegates to.
   `controlSize` is set on `textField`, so it keeps `NSTextField`'s regular
   system metrics; its clickable width is the fixed `fieldWidth` (72pt
   default) set by **fixes-field-width**.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
-  `label` and `textField` text colors resolve from the active theme's
-  `.primaryText` role against the hosting background at runtime; the
-  component performs no contrast check, so whether a given theme's resolved
-  pair meets 4.5:1 cannot be determined from this file. This would be
-  settled by a theme-level contrast audit of `.primaryText` against the
-  settings-row backgrounds it sits on.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. `label` and `textField` text colors resolve from the active theme's `.primaryText` role against the hosting background at runtime, and the component performs no contrast check, so whether a given theme's resolved pair meets 4.5:1 cannot be determined from this file; settling it needs a theme-level contrast audit of `.primaryText` against the settings-row backgrounds it sits on.
 
 ## Conformance Test Vectors
 
@@ -592,3 +586,4 @@ focused is left to AppKit's own, unverified-in-source, default behavior.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: cites IntegerFieldView by domain URL instead of file path and drops the out-of-scope, duplicative Design Decision about this recipe's requirement count; reformats Design Decisions to the three-line form and corrects an inaccurate parsing example in the POSIX-first decision; trims tags to five; rewords clamps-to-bounds' guard as a positive cross-reference; drops dangling trailing MUST keywords from Edge Cases; corrects the Concurrent Access edge case's actor-isolation claim; strengthens three test vectors (007, 020, 027, 030) to name a real trigger API or assert only observable outcomes; corrects WinUI 3's NumberBox.Minimum/Maximum defaults and documents its contradictory-bounds and locale-first-parsing divergence from this source; drops the web input's locale-hostile pattern attribute; marks screen-reader-support partial and documents why; backfills the missing 1.0.0 history row; remaps Compliance citations to the catalog; records the unverified theme-token contrast as an open question. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

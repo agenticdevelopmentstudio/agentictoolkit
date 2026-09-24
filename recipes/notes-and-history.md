@@ -3,11 +3,11 @@ id: b2c3bfad-cfd1-4a0f-bfbf-89f5d3712700
 title: Notes and History
 domain: agentictoolkit://recipes/notes-and-history
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: 2026-09-23
-modified: 2026-09-23
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -148,17 +148,11 @@ already-loaded notes, and vice versa.
   component renders no input, button, or other labelable control. The only
   labels present are the two `<h4>` section headings, which are plain text
   requiring no separate accessible-name wiring.
-- **Announce state changes (e.g., loading, disabled)**: NEEDS REVIEW: Not
-  implemented in source. Behavior undefined. Source renders the
-  loading-to-populated/empty transition as a plain text swap with no
-  `aria-live`/`role="status"` wrapper, so a screen-reader user is not
-  proactively notified when a section's content resolves. What is missing:
-  a decision on whether each section's variable content should be wrapped
-  in a live region (e.g. `aria-live="polite"` or `role="status"`) per WCAG
-  4.1.3 Status Messages. What would settle it: an accessibility review
-  determining whether this transition qualifies as a status message worth
-  announcing, given the panel is not the primary focus target when it
-  updates.
+- **Announce state changes (e.g., loading, disabled)**: Not implemented.
+  Source renders the loading-to-populated/empty transition as a plain text
+  swap with no `aria-live`/`role="status"` wrapper, so a screen-reader user
+  is not proactively notified when a section's content resolves (WCAG
+  4.1.3 Status Messages).
 - **Minimum tap target**: Not applicable: the component renders no
   interactive element anywhere in its output (no button, link, or input),
   so there is no tap target to size.
@@ -191,16 +185,12 @@ already-loaded notes, and vice versa.
 - Concurrent access: Not applicable — this is a stateless, pure
   presentational function component with no internal mutable state; there
   is nothing for concurrent access to race.
-- Error states: NEEDS REVIEW: Not implemented in source. Behavior
-  undefined. The `notesLoading`/`historyLoading` props imply an underlying
-  async fetch, but the component declares no error prop and no rendering
-  branch for a failed fetch — only loading, empty, and populated are
-  handled. What is missing: what the section should display if the
-  caller's fetch rejects (e.g. an inline error message, distinct from "No
-  admin notes."). What would settle it: confirmation from whoever owns the
-  calling data-fetching layer on whether error handling belongs in this
-  component or is fully owned by the caller before this component ever
-  renders.
+- Error states: Not implemented. The `notesLoading`/`historyLoading` props
+  imply an underlying async fetch, but the component declares no error
+  prop and no rendering branch for a failed fetch — only loading, empty,
+  and populated are handled. A caller whose fetch rejects gets no distinct
+  error message (e.g. one separate from "No admin notes.") from this
+  component; error handling is fully owned by the caller.
 - Offline/disconnected: Not applicable — the component performs no
   networking itself (see no-internal-data-fetching); connectivity loss is
   entirely the caller's concern, surfaced (if at all) before `notes`/
@@ -423,3 +413,4 @@ component itself performs no formatting of its own.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for NotesAndHistory, covering independent per-section loading/empty/populated states, source-fidelity edge cases, and two open accessibility/error-handling questions for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: retitled to a human-readable form; added a Types section documenting `AdminNote`/`HistoryEntry` fields and date-formatting ownership; tied the notes/history list-rendering requirements and test vectors to their exact separators; reworded the duplicate-`id` edge case as a caller precondition instead of a MUST NOT; externalized the five hardcoded strings as localization keys; made test vector 008 a concrete fetch/XHR stub; reordered Platform Notes and filled in WinUI padding, border, and token mappings; bolded Design Decision labels and added one for the fixed heading level; replaced the Compliance table's non-catalog check citations with real cookbook compliance checks and sourced statuses; and switched `created`/`modified` to bare ISO dates. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

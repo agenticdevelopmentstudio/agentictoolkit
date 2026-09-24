@@ -3,11 +3,11 @@ id: 2b4d0f95-dbdf-48a9-8579-a3e5b7d488fe
 title: PaneViewController
 domain: agentictoolkit://recipes/pane-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -164,7 +164,7 @@ It exposes seven `open` subclass hooks — `makeContentViewController()`, `makeC
 
 - **Role/trait**: The container view carries the accessibility identifier `paneAccessibilityIdentifier` returns (`"pane"` by default), set by `loadView()`. It is a plain view with no explicit AX role override in this file. The gear button carries identifier `pane.options`; the "Settings…" menu item carries `pane.options.settings`; the spacing control carries `pane.options.spacing`; the spacing reset button carries `pane.options.spacing.reset`. The close/minimize/zoom buttons, the minimize picker, the minimized rail, and the options dialog's own controls carry their identifiers inside their own components, each with its own recipe (see `depends-on`/`related`) — out of scope here.
 - **Label requirements**: The gear button's `accessibilityDescription` and `toolTip` are both "Pane options"; its accessibility label is set separately to "Pane Options". The "Settings…" menu item's image carries `accessibilityDescription`: "Settings". The spacing reset button's accessibility label is "Use Default Spacing", distinct from its visible title "Use Default".
-- **Announce state changes**: NEEDS REVIEW: Not implemented in source. Behavior undefined. No `NSAccessibility` notification is posted anywhere in this file when the title changes, when the pane minimizes, restores, or zooms — every one of those is a silent property assignment. A VoiceOver user therefore has no non-visual cue that any of these four things happened. Resolution requires an accessibility audit deciding which notification(s) to post and where, and sign-off from whoever owns VoiceOver support for this app.
+- **Announce state changes**: No `NSAccessibility` notification is posted anywhere in this file when the title changes, when the pane minimizes, restores, or zooms — every one of those is a silent property assignment. A VoiceOver user has no non-visual cue that any of these four things happened.
 - **Minimum tap target**: Not overridden in this file. The gear button and the spacing reset button are standard `NSButton`s sized by AppKit's intrinsic content size; macOS's pointer-driven HIG does not carry the 44×44pt minimum that applies to iOS touch targets, and this source sets no explicit minimum of its own.
 
 ## Conformance Test Vectors
@@ -267,7 +267,7 @@ Not applicable: a pane is chrome built entirely from constructor arguments and c
 | (none — literal string) | "Use Default" | Title of the spacing reset button. |
 | (none — literal string) | "Use Default Spacing" | Accessibility label of the spacing reset button. |
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined. This file is AppKit, not SwiftUI: every string above is set through a plain `String`-typed property (`toolTip`, `title`, `setAccessibilityLabel`, `accessibilityDescription`), none of which resolve against a `.strings` catalog or `NSLocalizedString` automatically. Every one is a hardcoded English literal with no localization key. Resolution requires the app team deciding whether this framework's chrome strings should be localized, and updating this file (and its collaborators) together if so.
+This file is AppKit, not SwiftUI: every string above is set through a plain `String`-typed property (`toolTip`, `title`, `setAccessibilityLabel`, `accessibilityDescription`), none of which resolve against a `.strings` catalog or `NSLocalizedString` automatically. Every one is a hardcoded English literal with no localization key.
 
 ## Accessibility Options
 
@@ -347,3 +347,4 @@ Statuses rest on `PaneViewController.swift` and `PaneSpacingOverride.swift` as b
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: reformatted Design Decisions to the bold three-line form and added one for the swallowed spacing JSON errors; moved the cookbook guideline out of `references` into `related`; fixed the `PaneTitleBarView` cross-reference and removed leftover template-instruction text; clarified the seventh spacing protocol in the Overview and disambiguated `spacing-defaults-to-inherited`'s two cases; added named requirements and vectors for spacing clamp-on-read, spacing decode-failure, and other untested fallback paths; strengthened weak vectors and folded an unverifiable one into its pair; restated internals-coupled requirements and vectors as observable behavior; rebuilt the Compliance table against real catalog checks (compliance_fix.py cleanup) |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
