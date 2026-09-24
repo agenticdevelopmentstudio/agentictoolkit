@@ -3,11 +3,11 @@ id: 21cbbc1c-38a0-4e7a-8ca0-06e2f29429f5
 title: SiteWordmark
 domain: agentictoolkit://recipes/site-wordmark
 type: ingredient
-version: 1.2.0
+version: 1.2.1
 status: review
 language: en
 created: '2026-06-26'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -111,12 +111,7 @@ STORE & REVIEW RESEARCH           <- font-mono, uppercase, tracked, apt-text-dim
   text, not color alone (it is the site name).
 - Carries no landmark role of its own — the consumer places it within its own
   `<header>` / heading structure (e.g. above the page `<h1>`).
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
-  the wordmark and tagline text color resolves from the active theme's apt-gold/apt-text/apt-text-dim role against
-  the hosting background at runtime; the component performs no contrast
-  check, so whether a given theme's resolved pair meets 4.5:1 cannot be
-  determined from this file. This would be settled by a theme-level
-  contrast audit of apt-gold/apt-text/apt-text-dim against the backgrounds it sits on.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. The wordmark and tagline text color resolves from the active theme's apt-gold/apt-text/apt-text-dim role against the hosting background at runtime; the component performs no contrast check, so whether a given theme's resolved pair meets 4.5:1 cannot be determined from this file; this would be settled by a theme-level contrast audit of apt-gold/apt-text/apt-text-dim against the backgrounds it sits on.
 
 ## Conformance Test Vectors
 
@@ -233,3 +228,4 @@ property of the active theme, not measured or asserted by this component (contra
 | 1.2.0 | 2026-09-23 | Mike Fullerton | Lint pass: reworded the unknown-`siteId` fallback and the empty-tagline case for consistency across Requirements/States/Edge Cases/vectors; reworded the contrast claim in Accessibility to what the source controls (theme token roles) instead of an unverified contrast assertion; added concrete T5 input/output, an off-pattern-brand vector (T6), and an empty-`tagline` vector (T7); filled in all five Platform Notes bullets; reformatted Design Decisions to the three-line form with `Approved: pending` and moved the superseded Tailwind `@source` history into a note; named the `@agenticdevelopertoolkit/*` scope for `ui`/`themes`/`controls`; rebuilt the Compliance table onto real catalog checks (screen-reader-support, contrast-ratio); records the unverified theme-token contrast as an open question. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Renamed every requirement to subject-only kebab-case, dropping the old prefix everywhere it is cited. |
 | 1.0.0 | 2026-06-26 | Mike Fullerton | Initial recipe — shared brand wordmark, first used on the research author index. |
+| 1.2.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

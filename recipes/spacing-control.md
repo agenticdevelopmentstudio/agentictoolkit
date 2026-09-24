@@ -3,11 +3,11 @@ id: f064de5a-b117-4147-96a9-c1ed11d5c976
 title: SpacingControl
 domain: agentictoolkit://recipes/spacing-control
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -234,7 +234,7 @@ began, per `drags-gutter-two-to-one-outward`).
   (e.g. `spacing.top`, `spacing.edge.top.more`,
   `spacing.gutter.betweenColumns.narrower.handle`) — these are UI-test
   identifiers (`setAccessibilityIdentifier`), not VoiceOver labels.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source. The four or two number fields
+- **Label requirements**: The four or two number fields
   (`edgeFields`/`gutterFields`, depending on `style`) and their steppers
   carry no `setAccessibilityLabel`/`setAccessibilityTitleUIElement` call
   anywhere in source — only a numeric value and a test identifier — so a
@@ -243,16 +243,10 @@ began, per `drags-gutter-two-to-one-outward`).
   this gap: each is built from an
   `NSImage(systemSymbolName:accessibilityDescription:)` whose
   `accessibilityDescription` is the same string as its tooltip (e.g. "More
-  top space"), which VoiceOver reads as the button's label. What is
-  missing: whether a field should announce something like "Top, 8" (the
-  edge's `displayName` plus its value); what would settle it: a VoiceOver
-  pass over an instantiated control, or a decision to call
-  `field.setAccessibilityLabel(edge.displayName)` (and the matching call for
-  gutters and for each stepper) inside `buildEdgeControls`/
-  `buildDividerControls`. This mirrors an open question already flagged on
-  the sibling ingredient `CaptionedSliderView`
-  (`agentictoolkit://recipes/captioned-slider-view#accessibility/label-requirements`),
-  where the same kind of control-to-title linkage is missing.
+  top space"), which VoiceOver reads as the button's label. This mirrors
+  the same control-to-title linkage gap already noted on the sibling
+  ingredient `CaptionedSliderView`
+  (`agentictoolkit://recipes/captioned-slider-view#accessibility/label-requirements`).
 - **Announce state changes (e.g., loading, disabled)**: Not applicable — the
   component has no loading or disabled state (see States) for a change to
   announce.
@@ -260,19 +254,7 @@ began, per `drags-gutter-two-to-one-outward`).
   trackpad-driven `NSView`/`NSControl` composition with no touch input path
   in source; the 44×44pt minimum is iOS/touch guidance, not a macOS
   pointer-interface requirement.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. Every
-  color this file draws for text or a tint comes from a `SemanticPalette`
-  role — field text (`palette.nsColor(.primaryText)`), arrow glyphs
-  (`palette.nsColor(.accent)`), the outer frame's stroke
-  (`palette.nsColor(.border)`) against `palette.projectPaneBackdrop`, and
-  each pane's stroke (`palette.projectPaneOutline`) against
-  `palette.nsColor(.windowBackground)`) — and no check anywhere in
-  `SpacingControl.swift` verifies any of those pairs against a minimum
-  contrast ratio. What is missing: whether `.primaryText`- and
-  `.accent`-on-field-background, and the two border/fill pairs, meet a
-  4.5:1 (text) / 3:1 (non-text) contrast floor; what would settle it: a
-  theme-level contrast audit of `SemanticPalette`'s roles (see also the
-  open question under **Accessibility Options: Increase Contrast**).
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. Every color this file draws for text or a tint comes from a `SemanticPalette` role — field text (`palette.nsColor(.primaryText)`), arrow glyphs (`palette.nsColor(.accent)`), the outer frame's stroke (`palette.nsColor(.border)`) against `palette.projectPaneBackdrop`, and each pane's stroke (`palette.projectPaneOutline`) against `palette.nsColor(.windowBackground)`) — none of which carry a guaranteed contrast floor in `SemanticPalette.derive(_:theme:)` (`.primaryText` returns the theme's raw foreground, `.accent` returns a raw ANSI slot or the raw foreground, and `.border` blends foreground into background at a fixed 0.18 fraction, unlike `.secondaryText`'s `minContrast: 3.0`), and no check anywhere in `SpacingControl.swift` verifies any of those pairs against the 4.5:1 (text) / 3:1 (non-text) floor; settling it needs a theme-level contrast audit of `SemanticPalette`'s roles against real theme values (see also Accessibility Options: Increase Contrast).
 
 ## Conformance Test Vectors
 
@@ -371,14 +353,13 @@ anywhere in `SpacingControl.swift`.
 
 ## Localization
 
-NEEDS REVIEW: Not implemented in source. Behavior undefined. Every
-user-facing string below is an AppKit `String` literal assigned to
+Every user-facing string below is an AppKit `String` literal assigned to
 `toolTip`, `title`, or an `NSImage`'s `accessibilityDescription` — never a
 `LocalizedStringKey`, `NSLocalizedString`, or a String Catalog lookup — so
-none of them can be localized without a source change. What is missing: a
-localization key per string; what would settle it: routing each literal
-below through this app's existing localization mechanism, the same way any
-other user-facing AppKit string in the framework is externalized.
+none of them can be localized without a source change; each would need a
+localization key routed through this app's existing localization
+mechanism, the same way any other user-facing AppKit string in the
+framework is externalized.
 
 | String Key | Default (en) | Context |
 |-----------|-------------|---------|
@@ -398,8 +379,8 @@ other user-facing AppKit string in the framework is externalized.
   layout pass (`needsDisplay`, `needsLayout`) is an instantaneous property
   assignment applied on the next display cycle, so there is no motion for a
   Reduce Motion substitute to replace.
-- **Increase Contrast**: See the open question under **Accessibility:
-  Minimum contrast ratio** — `SemanticPalette`
+- **Increase Contrast**: See the open question on minimum-contrast-ratio —
+  `SemanticPalette`
   (`external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperToolkit/Sources/Theme/SemanticPalette.swift`)
   exposes no Increase-Contrast-aware variant of the tokens this file draws
   from, on top of the baseline contrast question raised there; extending
@@ -615,13 +596,13 @@ entry uses stock `NSTextField`/`NSStepper`, and Reset uses a stock
 because every number is reachable and editable by Tab plus the arrow keys
 (tab-order-is-picture-order, arrow-keys-adjust-focused-field).
 Screen-reader-support is partial because the arrow buttons carry an
-accessible description but the number fields and steppers do not (see the
-open question under Accessibility). Contrast-ratio is partial because the
+accessible description but the number fields and steppers do not (see
+Accessibility: Label requirements). Contrast-ratio is partial because the
 diagram's borders and fills are theme-token-driven but have no verified or
-Increase-Contrast-aware path (see the open question under Accessibility
-Options). String-externalization fails because every user-facing string in
-this file is a hardcoded literal with no localization mechanism (see
-Localization).
+Increase-Contrast-aware path (see the open question on
+minimum-contrast-ratio). String-externalization fails because every
+user-facing string in this file is a hardcoded literal with no
+localization mechanism (see Localization).
 
 ## Change History
 
@@ -629,3 +610,4 @@ Localization).
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from `SpacingControl.swift` (with `Spacing.swift` and `SpacingControlLayout.swift` consulted for the value type, enums, and layout metrics it uses): behavioral requirements for both diagram styles, drag/keyboard/arrow-repeat interaction, appearance and states, and two open questions (number-field VoiceOver labeling, Increase Contrast support) for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: added a per-edge drag axis/gain/growing-direction table; cited the CaptionedSliderView accessibility fragment in `related`; reworded the `boundToSettings` Configuration row to drop its unscoped MUST; trimmed `tags` to five and moved `references` into `related`; reformatted Design Decisions to bold labels; cleaned up the Compliance table to real catalog checks, remapping `theme-token-only-colors` to `platform-theming` and renaming `meaningful-labels`/`non-text-contrast` to their catalog names; removed commentary from the WinUI Platform Notes bullet; fixed the `style` row's backwards field-count description and the eight-field miscount throughout; rewrote Conformance Test Vectors 020 and 024 for validity and added vector 027 for a gutter drag crossing centre; tightened `repeats-held-arrow`, `preserves-other-fields-mid-edit`, and `drags-gutter-two-to-one-outward` for precision; corrected the React and Compose Platform Notes to record drag-start position/value instead of accumulating deltas, and noted the WinUI NumberBox revert gap; clarified the diagram's min/max Appearance note and the Null/empty input Edge Case; and added an open question on minimum contrast ratio for the theme-token colors this control draws. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

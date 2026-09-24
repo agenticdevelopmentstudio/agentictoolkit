@@ -3,11 +3,11 @@ id: a11f34ff-116c-47d6-bffa-edd0799cbcb2
 title: SplitViewController
 domain: agentictoolkit://recipes/split-view-controller
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -317,9 +317,8 @@ This recipe documents only what this file itself declares.
   is unmodified.
 - **Label requirements**: Supported for the search field: `NSSearchField`
   exposes its `placeholderString` as the field's accessible description by
-  default, and this file sets no additional label of its own. Whether that
-  placeholder text is itself localized is the open question under
-  Localization.
+  default, and this file sets no additional label of its own. That
+  placeholder text is not itself localized (see Localization).
 - **Announce state changes (e.g., loading, disabled)**: Not applicable —
   this file has no loading or disabled state to announce (see States).
 - **Minimum tap target**: Not applicable — this is a pointer-driven macOS
@@ -471,13 +470,10 @@ anywhere in `SplitViewController.swift`.
 |-----------|-------------|---------|
 | `"Search"` | Search | Placeholder text for the sidebar's search field, passed as `ThemedSearchField(placeholder: "Search")` and stored as AppKit's `placeholderString` — a literal `String`, not routed through any localization lookup in this file. |
 
-NEEDS REVIEW: Not implemented in source. The `"Search"` placeholder is a hardcoded literal, not passed
-through `NSLocalizedString`/`String(localized:)`, both of which are used
-elsewhere in this Swift package (outside this file). It cannot be determined
-from `SplitViewController.swift` alone whether this is an intentional
-default meant for callers to override, or an oversight; resolving it
-requires either localization-team input or auditing every call site that
-sets `showsSidebarSearch = true`.
+The `"Search"` placeholder is not localized: `SplitViewController.swift`
+passes it as a hardcoded literal to `ThemedSearchField(placeholder:)`,
+never routing it through `NSLocalizedString`/`String(localized:)`, both of
+which are used elsewhere in this Swift package (outside this file).
 
 ## Accessibility Options
 
@@ -690,8 +686,8 @@ unmodified standard `NSSplitViewController` tab order (keyboard-navigable);
 custom-drawn chrome. `screen-reader-support` is `partial`: the search
 field's accessible description is the AppKit-default `placeholderString`,
 but that placeholder is the unlocalized `"Search"` literal documented under
-Localization (the open question there), so a non-English VoiceOver user
-would hear an English word regardless of the app's language.
+Localization, so a non-English VoiceOver user would hear an English word
+regardless of the app's language.
 
 ## Change History
 
@@ -699,3 +695,4 @@ would hear an English word regardless of the app's language.
 |---------|------|--------|---------|
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: restate five implementation-mechanics requirements (private(set), fatalError(), holdingPriority, detail-container read, parent-chain walk) as observable outcomes and move their mechanics into the AppKit Platform Notes bullet; downgrade the removePanel-on-non-member edge case from a MUST-relied-upon contract to a documented observation; add an edge case, a test vector, and Design-Decisions wording for a nil sidebarAutosaveName; add test vectors pinning the removePanel-on-non-member and stale-nested-detail-floor behaviors; tighten test vector 021 to assert holdingPriority directly instead of an unstated width change; reformat Design Decisions to the bold three-line form; split the Overview into a short description plus Owns/Delegates-to lists; move the platform-design-languages reference into related and the three composed-ingredient recipes into depends-on; trim tags to 5 and summary to ~120 characters; and reconcile the Compliance table against the catalog, dropping seven cited checks that have no corresponding category or check in the compliance catalog. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |

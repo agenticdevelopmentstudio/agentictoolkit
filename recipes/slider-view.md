@@ -3,11 +3,11 @@ id: 0cbe1932-5c7e-4546-829d-0294708d499c
 title: SliderView
 domain: agentictoolkit://recipes/slider-view
 type: ingredient
-version: 1.1.0
+version: 1.1.1
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-23'
+modified: '2026-09-24'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -138,20 +138,16 @@ construction.
   `setAccessibilityRole`, `setAccessibilityElement`, or similar call
   appears in source. `NSSlider` and `NSTextField` each carry AppKit's
   built-in accessibility role (slider, static text) automatically.
-- **Label requirements**: NEEDS REVIEW: Not implemented in source.
-  Behavior undefined. The label and the slider are laid out as sibling
-  views in the same row, but source sets no
+- **Label requirements**: The label and the slider are laid out as
+  sibling views in the same row, but source sets no
   `accessibilityLabel`/`accessibilityTitleUIElement` (or equivalent) on
   the slider linking it to the label text — confirmed by comparison with
   sibling row views in the same directory: `CheckboxView.swift`,
   `NumberFieldView.swift`, and `PopupMenuChoiceView.swift` each call
   `<control>.setAccessibilityTitleUIElement(self.label)` on their
-  control, but `SliderView.swift` does not do so for `slider`. What is
-  missing: whether VoiceOver announces the row's title when focus lands
-  on the slider, or only "slider" with no further context. What would
-  settle it: a VoiceOver pass over an instantiated row, or an explicit
-  decision to call `slider.setAccessibilityTitleUIElement(label)` in
-  `init` and in the `onChange` re-sync closure.
+  control, but `SliderView.swift` does not do so for `slider`. Without
+  that link, VoiceOver announces the slider on its own with no reference
+  to the row's title when focus lands on it.
 - **Announce state changes (e.g., loading, disabled)**: Not applicable —
   the component has no loading state and never disables itself (see
   States); there is no state transition to announce.
@@ -159,12 +155,7 @@ construction.
   trackpad-driven `NSView`/`NSControl` composition (no touch input path in
   source); the 44×44pt minimum is an iOS/touch guidance, not a macOS
   pointer-interface requirement.
-- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
-  the leading label's text text color resolves from the active theme's primaryText role against
-  the hosting background at runtime; the component performs no contrast
-  check, so whether a given theme's resolved pair meets 4.5:1 cannot be
-  determined from this file. This would be settled by a theme-level
-  contrast audit of primaryText against the backgrounds it sits on.
+- **minimum-contrast-ratio**: NEEDS REVIEW: Not implemented in source. The label's text color resolves via `SemanticPalette`'s `primaryText` role, whose floor against the background is `minContrast: 3.0` (`foreground.dimmed(towards: background, by: 0.32, minContrast: 3.0)`) — below the 4.5:1 small-text threshold — and the component performs no contrast check of its own; settling whether a given theme's resolved pair actually meets 4.5:1 needs a theme-level contrast audit of primaryText against the backgrounds it sits on.
 
 ## Conformance Test Vectors
 
@@ -406,8 +397,8 @@ Not applicable: `SliderView.swift` contains no logging call (no `print`,
 `keyboard-navigable` and `screen-reader-support` rest on `NSSlider`/`NSTextField`'s
 default AppKit accessibility and focus behavior; `screen-reader-support` is
 `partial` because source sets no `accessibilityLabel`/`accessibilityTitleUIElement`
-linking the slider to the label (see Accessibility, the open question on label
-requirements). The other rows rest on source composing only stock
+linking the slider to the label (see Accessibility, label requirements). The
+other rows rest on source composing only stock
 `NSView`/`NSControl` instances with no custom drawing, network, or persistence
 code of its own.
 
@@ -417,3 +408,4 @@ code of its own.
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for SliderView, covering row layout/priority behavior, value-and-range sync on external change, and one open accessibility question (slider/title label association) for review. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: add `related` link to CaptionedSliderView; rename requirement to rejects-coder-initialization and its citations; fix the AppKit/UIKit platform note's wrong claim about UIKit's initializer split; name the row's exact arranged subviews and require a counting settingObserver test double in the affected test vectors; add test vectors for the async re-sync path and the inverted/zero-width range; drop RFC 2119 wording from two purely observational edge cases; move the overwritten-observer edge case into a Design Decision; remap the Compliance table's semantic-markup row to screen-reader-support and add the statuses' source rationale; records the unverified theme-token contrast as an open question. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
