@@ -76,10 +76,8 @@ export interface RailHostRegistry {
   setDetailTitle?: (id: string, title: string | null) => void;
   /** The DOM node of the shell's full-width button-bar slot; feature editors portal their action
    *  bar here so it spans the top instead of sitting inside the detail. Null with no host.
-   *  Deliberately not the home bar (`HomeBarPortal`/`HomeBarHost`, `./home-bar`): that strip
-   *  belongs to the PAGE's own controls, this one to whichever EDITOR is open (its save/cancel
-   *  bar) — the two can be on screen together, and sharing one strip would have each silently
-   *  displace the other. */
+   *  It belongs to whichever EDITOR is open (its save/cancel bar); a list's own controls ride
+   *  that list's rail toolbar instead. */
   toolbarSlot: HTMLElement | null;
 }
 

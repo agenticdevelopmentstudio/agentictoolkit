@@ -12,7 +12,6 @@ import {
   MasterDetailLeaf,
   useRecordAffordance,
   CreateResourceDialog,
-  HomeBarPortal,
   useResourceItem,
   type MasterDetailActions,
 } from "@agentic-toolkit/resource";
@@ -46,8 +45,7 @@ import { UNCATEGORIZED_SLUG } from "./parse-path";
 import { NOTES_CORPUS, type NotebookCorpus } from "./corpus";
 import { usePreviewLines } from "./preview-lines";
 import { NoteDetail, NoteFields } from "./NoteDetail";
-import { NoteButtonBar, type FilterState } from "./NoteButtonBar";
-import { NoteListOptions } from "./NoteListOptions";
+import { NoteListOptions, type FilterState } from "./NoteListOptions";
 import { CategoryManagerDialog } from "./CategoryManagerDialog";
 import { TagManagerDialog } from "./TagManagerDialog";
 
@@ -81,13 +79,13 @@ function sameFilters(a: FilterState, b: FilterState): boolean {
  *     the whole notebook, which is the useful landing: you open the notebook and see your
  *     notes, not an empty pane demanding a folder.
  *
- * Everything that acts on the LIST rather than on one note lives in {@link NoteButtonBar},
- * published into the HOME BAR (`HomeBarPortal`) — search, the two filters, the two taxonomy
- * editors and Create Note. The rail's headers hold nothing but navigation, so the only `+`
- * left in the notebook is the one that creates a category from inside the category editor.
+ * Everything that acts on the LIST rather than on one note lives on the notes level's own
+ * toolbar — Create Note as its `+`, the pop-over search, and {@link NoteListOptions}' gear with
+ * the two filters and the two taxonomy editors. They were a button bar in the page-wide home bar
+ * until that strip was removed as clunky (Mike, 2026-09-24).
  *
- * The rail and the bar both speak about categories, and they are NOT the same axis: the rail
- * SCOPES (which part of the notebook you are standing in) while the bar NARROWS within it.
+ * The rail and the gear both speak about categories, and they are NOT the same axis: the rail
+ * SCOPES (which part of the notebook you are standing in) while the gear NARROWS within it.
  * `resolveListCategory` folds the two into one request and reports the contradiction rather
  * than letting either quietly win.
  *
@@ -540,7 +538,29 @@ export function NotebookPane({
             : activeCategory
               ? `No ${noun.many} in this category yet.`
               : `No ${noun.many} yet.`,
-    titleActions: <NoteListOptions />,
+    // UNCONDITIONAL, as the bar's button was: an empty list is exactly when the first create
+    // matters most.
+    onNew: () => setNewNoteOpen(true),
+    newLabel: `Create ${noun.One}`,
+    newActive: newNoteOpen,
+    // CONTROLLED: the query goes to the backend (debounced into `applied`), which searches the
+    // bodies the rows never show — so the rail must not filter them a second time.
+    search: {
+      query: filters.q,
+      onQueryChange: (q) => setFilters((prev) => ({ ...prev, q })),
+      placeholder: `Search ${noun.many}`,
+    },
+    titleActions: (
+      <NoteListOptions
+        filters={filters}
+        onChange={setFilters}
+        categories={categoryOptions}
+        tags={tagOptions}
+        onEditCategories={() => setEditingCategories(true)}
+        onEditTags={() => setEditingTags(true)}
+        label={`${noun.Many} list options`}
+      />
+    ),
   };
 
   // Registered only while DIRTY so the host's guard count is a render-value dirty signal.
@@ -597,21 +617,6 @@ export function NotebookPane({
 
   return (
     <>
-      {/* Published into the home bar, the strip under the workspace bar. It sits outside the rail
-          because it acts on the LIST as a whole, not on the level the rail happens to be showing. */}
-      <HomeBarPortal>
-        <NoteButtonBar
-          filters={filters}
-          onChange={setFilters}
-          categories={categoryOptions}
-          tags={tagOptions}
-          onEditCategories={() => setEditingCategories(true)}
-          onEditTags={() => setEditingTags(true)}
-          onCreateNote={() => setNewNoteOpen(true)}
-          noun={noun}
-        />
-      </HomeBarPortal>
-
       {/* Every level in one publication: the category chain, then the notes. StackLevels (not
           useStackLevel) because the count VARIES with the depth walked into, and it advances the
           depth for the leaf below by exactly that many.

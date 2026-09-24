@@ -4,7 +4,6 @@ import { useCallback, type ReactElement } from 'react'
 import { usePathname } from 'next/navigation'
 import { TopicSelectHint } from '@agenticdevelopertoolkit/ui/blocks'
 import { useResourceList, workspacesApi, type Workspace } from '@agentic-toolkit/data'
-import { HomeBarHost } from '@agentic-toolkit/resource'
 import { ProfileFallback } from '../profile/ProfileFallback'
 import { useSiteIdOrNull } from '@agentic-toolkit/adh/site/site-id'
 import { WorkspaceBar } from './WorkspaceBar'
@@ -157,12 +156,6 @@ export function SiteHomeShell({
         selected={resolved ?? null}
         onSelect={onSelect}
       />
-      {/* The home bar hosts every page-level control this site has — its search, its filters, its
-          primary "Add" — in the strip between this bar and the breadcrumb bar below. It is mounted
-          UNCONDITIONALLY and draws nothing until a feature claims it, so the ~24 sites that publish
-          no controls are pixel-identical to before. It wraps `children` rather than sitting beside
-          it because the feature that publishes into it is inside `children`. */}
-      <HomeBarHost>
         {/* Said only while the list is genuinely missing: a reload that fails AFTER a successful one
             leaves the workspaces on screen, and replacing a working page with an error would be a
             worse answer than the slightly stale one it already has. */}
@@ -190,7 +183,6 @@ export function SiteHomeShell({
             scopedBase: `/${resolved}`,
             workspace,
           })}
-      </HomeBarHost>
     </>
   )
 }

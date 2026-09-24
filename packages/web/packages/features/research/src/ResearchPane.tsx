@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Globe, Plus } from "lucide-react";
+import { Globe } from "lucide-react";
 
 import { reportUnexpectedAuthError, useAuth } from "@agentic-toolkit/auth";
 import { deriveDocumentTitle, setFrontmatterTitle } from "@agenticdevelopertoolkit/markdown";
@@ -12,7 +12,6 @@ import {
   DocumentIdentityField,
   useSlugAvailability,
 } from "@agenticdevelopertoolkit/ui/blocks/document-identity-field";
-import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { useDualModeSelection } from "@agenticdevelopertoolkit/ui/hooks/useDualModeSelection";
 import { slugify } from "@agenticdevelopertoolkit/ui/lib/slug";
@@ -25,8 +24,6 @@ import {
   useRecordAffordance,
   CreateResourceDialog,
   useResourceItem,
-  HomeBar,
-  HomeBarPortal,
   type MasterDetailActions,
 } from "@agentic-toolkit/resource";
 import {
@@ -131,10 +128,8 @@ function writesPublicRoute(
  * navigating away. NOTHING mounts that second mode today: the hub's `renderFeaturePanel("research")`
  * arm (`sites/hub/src/components/workspace/feature-panels.tsx`) is unreached — `research` is in no
  * ecosystem or product topic list and is off the hub's workspace feature rail — so this pane is a
- * LEVEL-0 surface in practice, which is what lets it publish into the page's home bar
- * unconditionally (see the `HomeBarPortal` below). An embedded mount would put a deeper,
- * selection-scoped pane's filters into the HOST page's bar beside that page's own controls; if one
- * is ever added, gate the publish on `urlSelection` before wiring it.
+ * LEVEL-0 surface in practice. Its search, filters and create ride the Documents level's own
+ * toolbar, so an embedded mount would carry them with the list rather than into a host's chrome.
  *
  * CATEGORY CHAIN is the SAME dual-mode idea, one prop pair rather than one object: pass
  * `onSelectCategory` (with `categorySlugs`) and the rail's chain lives in the URL, exactly as
@@ -721,10 +716,10 @@ export function ResearchPane({
   const editing = selectedId !== null;
 
   // PUBLISH the documents list into the workspace shell's ONE merged stack (like the sibling
-  // ecosystem panes) instead of a self-contained nested master/detail pane: the list is a rail
-  // LEVEL and NOTHING ELSE — selection, prefetch, the busy spinner and the empty text. Its two
-  // page-level controls (the search/category/tag filters and the "New document" create) are
-  // published into the HOME BAR instead; see the `HomeBarPortal` at the top of the return below.
+  // ecosystem panes) instead of a self-contained nested master/detail pane. Its controls are the
+  // list's own toolbar: `+` to create, the pop-over search, and the gear holding the category/tag
+  // filters. They sat in the page-wide home bar until that strip was removed as clunky (Mike,
+  // 2026-09-24).
   const documentsLevel: TopicLevel = {
     id: "research-documents",
     title: "Documents",
@@ -740,6 +735,26 @@ export function ResearchPane({
     onClear: onCancel,
     // `emptyLabel` STAYS: it is the rail's own text for an empty list, not a control.
     emptyLabel: docs === null ? "Loading…" : "No documents yet.",
+    // UNCONDITIONAL, as the bar's button was: an empty list is exactly when the first create
+    // matters most.
+    onNew: () => setNewOpen(true),
+    newLabel: "Create Document",
+    newActive: newOpen,
+    // CONTROLLED: the query goes to the backend list endpoint (debounced into `applied`), which
+    // also searches bodies the rail's rows never show — so the rail must not filter them again.
+    search: {
+      query: filters.q,
+      onQueryChange: (q) => setFilters((prev) => ({ ...prev, q })),
+      placeholder: "Search research documents",
+    },
+    titleActions: (
+      <ResearchFilters
+        filters={filters}
+        onChange={setFilters}
+        categories={categoriesOf(universe)}
+        tags={tagsOf(universe)}
+      />
+    ),
     // A document row's identity is its title; it has no icon worth a column of its own, and the
     // published state it used to show there is now the row's `trailing` mark.
     hideItemIcons: true,
@@ -777,48 +792,6 @@ export function ResearchPane({
 
   return (
     <>
-      {/* The page's own controls, published into the HOME BAR — the strip between the workspace bar
-          and the breadcrumb bar. They sit outside the rail because they act on the LIST AS A WHOLE
-          (this pane IS the research site's /home), not on whichever level the rail happens to be
-          showing, which is the fleet's placement rule for the bar. `left` is search/filters,
-          `right` the primary action; `HomeBar` owns that arrangement so no caller re-derives it.
-
-          `ResearchFilters` goes in bare, with no wrapper of its own: `SearchFilterBar` draws only a
-          `role="search"` flex row — no border, no background, no padding — so it does not repeat
-          the strip `HomeBarHost` already draws around it (the doubled-border trap documented at
-          `resource-explorer.tsx`'s own left slot).
-
-          UNCONDITIONAL, exactly as the level's `onNew`/`railSlot` were: an empty document list is
-          precisely when the first create matters most, and a filter with nothing to narrow yet is
-          harmless. Portalled children stay in this component's REACT tree, so both controls still
-          drive `filters`/`newOpen` from here. */}
-      <HomeBarPortal>
-        <HomeBar
-          left={
-            <ResearchFilters
-              filters={filters}
-              onChange={setFilters}
-              categories={categoriesOf(universe)}
-              tags={tagsOf(universe)}
-            />
-          }
-          right={
-            // `apt-highlight` is the site's "the marked thing" token — the one colour a site
-            // re-points to say THIS is the action. The default variant's brand gold would make
-            // Create Document look like every other primary button on the platform.
-            <Button
-              className="bg-apt-highlight hover:bg-apt-highlight/90"
-              onClick={() => setNewOpen(true)}
-            >
-              {/* `data-icon="inline-start"` and no `size`: `Button` sizes its own icons and
-                  tightens the padding on the icon's side. See `resource-explorer.tsx`. */}
-              <Plus data-icon="inline-start" aria-hidden />
-              Create Document
-            </Button>
-          }
-        />
-      </HomeBarPortal>
-
       {/* Every level in one publication: the category chain, then the documents. StackLevels
           (not useStackLevel) because the count VARIES with the depth walked into, and it
           advances the depth for the leaf below by exactly that many. Nothing precedes the

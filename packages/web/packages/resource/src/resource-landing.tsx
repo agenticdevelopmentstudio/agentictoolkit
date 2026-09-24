@@ -19,7 +19,6 @@ import {
 } from "@agenticdevelopertoolkit/ui/components/toggle-group";
 import { FeatureTitle } from "./master-detail/MasterDetailLayout";
 import { readViewMode, writeViewMode, type ViewMode } from "@agentic-toolkit/data";
-import { HomeBar, HomeBarPortal } from "./home-bar";
 
 /**
  * The "All" landing for a resource tab: a filterable index of every resource,
@@ -83,17 +82,14 @@ export function ResourceLanding<T>({
       <FeatureTitle title={title} help={help} />
       <div className="flex flex-col gap-4 px-6 pt-2 pb-6">
         {(onNew || hasItems) && (
-          <HomeBarPortal>
-            {/* The sides SWAP here relative to the row this replaces. That row put Add on the left
-                and search on the right; the fleet rule is the other way round, and this landing was
-                the fleet's only exception to it. */}
-            <HomeBar
-              left={
-                hasItems ? (
-                  <>
+          // The pane's own toolbar, in the pane. It was published into the page-wide home bar until
+          // that strip was removed as clunky (Mike, 2026-09-24); a landing is a WIDE pane, not a
+          // narrow rail, so its field has room to sit open here. Filters left, create right.
+          <div className="flex w-full min-w-0 items-center gap-2">
+            {hasItems && (
+              <div className="flex min-w-0 items-center gap-2">
                     {/* Named landmark: an unnamed `role="search"` is announced as a bare
-                        "search", and a page can hold more than one (a nested feature standing
-                        down under `HomeBarTaken` renders its own field inline). The name is the
+                        "search", and a page can hold more than one. The name is the
                         collection. The `Input` keeps its own `aria-label` — that names the
                         CONTROL, and is what the tests query by. */}
                     <div
@@ -130,21 +126,17 @@ export function ResourceLanding<T>({
                         <List size={16} aria-hidden />
                       </ToggleGroupItem>
                     </ToggleGroup>
-                  </>
-                ) : undefined
-              }
-              right={
-                onNew ? (
-                  <Button variant="outline" size="sm" onClick={onNew}>
+              </div>
+            )}
+            {onNew && (
+                  <Button variant="outline" size="sm" onClick={onNew} className="ml-auto">
                     {/* `data-icon="inline-start"` and no `size`: `Button` sizes its own icons and
                         tightens the padding on the icon's side. See `resource-explorer.tsx`. */}
                     <Plus data-icon="inline-start" aria-hidden />
                     {newLabel ?? "New"}
                   </Button>
-                ) : undefined
-              }
-            />
-          </HomeBarPortal>
+            )}
+          </div>
         )}
 
         {items === null ? (

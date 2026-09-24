@@ -4,14 +4,14 @@
 // worked hardest on. Only the data subpaths (teams, ecosystems) and next/navigation are
 // mocked; the list/rail wiring (useResourceList + ResourceExplorer + the rail-host
 // publish path) runs for real inside the same minimal host harness the sibling features'
-// tests use. ResourceExplorer's "New Team…" button is not on the published rail level — it is
-// a page-level control published into the home bar (home-bar.tsx), so the harness also wraps
-// in HomeBarHost to draw that strip, the same way the hub's workspace shell does.
+// tests use. ResourceExplorer's "New Team…" button rides the published resource level's own
+// `onNew`/`search` — that list's own TOOLBAR — after the page-wide home bar it used to publish
+// into was removed as clunky (Mike, 2026-09-24); the harness's `<Rail>` below renders each
+// level's toolbar controls itself, scoped per level id.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { useMemo, useState, type ReactNode } from "react";
 import {
-  HomeBarHost,
   RailHostContext,
   type RailHostRegistry,
   type RegisteredLevels,
@@ -78,11 +78,23 @@ function Rail({ levels }: { levels: TopicLevel[] }) {
               {item.label}
             </button>
           ))}
-          {l.onNew && (
-            <button type="button" onClick={() => l.onNew?.()}>
-              {l.newLabel}
-            </button>
-          )}
+          {/* Toolbar stand-in, scoped per level id (mirrors the real rail's `data-htd-toolbar`)
+              so a test can tell "wired to THIS level" from "wired to some other one". */}
+          <div data-testid={`toolbar-${l.id}`}>
+            {l.onNew && (
+              <button type="button" onClick={() => l.onNew?.()}>
+                {l.newLabel}
+              </button>
+            )}
+            {l.search && (
+              <input
+                type="search"
+                aria-label={l.search.placeholder}
+                value={l.search.query}
+                onChange={(e) => l.search?.onQueryChange(e.target.value)}
+              />
+            )}
+          </div>
         </div>
       ))}
     </div>
@@ -117,12 +129,10 @@ function Harness({ children }: { children: ReactNode }) {
     .sort((a, b) => a.depth - b.depth)
     .flatMap((e) => e.levels);
   return (
-    <HomeBarHost>
-      <RailHostContext.Provider value={registry}>
-        <Rail levels={mergedLevels} />
-        {children}
-      </RailHostContext.Provider>
-    </HomeBarHost>
+    <RailHostContext.Provider value={registry}>
+      <Rail levels={mergedLevels} />
+      {children}
+    </RailHostContext.Provider>
   );
 }
 
@@ -160,20 +170,20 @@ describe("TeamsFeature host-scoping states", () => {
     expect(screen.getByText(/new team/i)).toBeTruthy();
   });
 
-  // The assertion above queries "new team" with an unscoped `screen.*`, which HomeBarPortal's
-  // inline fallback satisfies just as well as a real bar would — it cannot tell a working
-  // publish from a broken one. This test scopes into the strip itself, so it fails if the home
-  // bar host above ever stops being the thing that draws the filter field and the create button.
-  it("publishes the filter field and the New Team… button into the home bar, not inline", async () => {
+  // The assertion above queries "new team" with an unscoped `screen.*`, which would pass whether
+  // the control is wired to the resource level or floating disconnected somewhere else on the
+  // page. This test scopes into the resource level's own toolbar, so it fails if the create
+  // button and filter field ever stop being wired to that level.
+  it("publishes the filter field and the New Team button onto the resource level's toolbar", async () => {
     render(
       <Harness>
         <TeamsFeature basePath="/acme/teams" workspaceSlug="acme" all />
       </Harness>,
     );
     expect((await screen.findAllByText("Core Team")).length).toBeGreaterThan(0);
-    const strip = await screen.findByTestId("home-bar");
-    expect(within(strip).getByRole("searchbox")).toBeTruthy();
-    expect(within(strip).getByRole("button", { name: "New Team" })).toBeTruthy();
+    const toolbar = within(await screen.findByTestId("toolbar-resource"));
+    expect(toolbar.getByRole("searchbox")).toBeTruthy();
+    expect(toolbar.getByRole("button", { name: "New Team" })).toBeTruthy();
   });
 
   it("scoped host whose slug resolves to NO ecosystem: defined empty state, creation suppressed", async () => {

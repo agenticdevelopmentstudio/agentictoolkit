@@ -9,16 +9,17 @@
 // ResourceExplorer PUBLISHES its resource + topic rail levels into a rail HOST (via
 // StackLevels) rather than rendering them itself, so a tiny <Rail> harness backed by the
 // toolkit's RailHostContext renders the published rows the same way the hub's workspace shell
-// would. The filter field and the "New Project" button are NOT on those levels — both are
-// page-level controls ResourceExplorer publishes into the home bar instead (home-bar.tsx), so
-// the harness also wraps in HomeBarHost to draw that strip, the same way the hub's workspace
-// shell does. Selection is driven by props (the URL state the route shell would supply), since
-// navigation is mocked.
+// would. The filter field and the "New Project" button are NOT rendered by this harness's own
+// generic level loop — they ride the resource level's `search`/`onNew`, i.e. that list's own
+// TOOLBAR (the row under a rail's title; see `topic-detail.tsx`'s `data-htd-toolbar`), after the
+// page-wide home bar they used to publish into was removed as clunky (Mike, 2026-09-24). The
+// harness's <Rail> below renders each level's toolbar controls itself, scoped per level id, so
+// a test can tell "wired to this level" from "wired to some other one". Selection is driven by
+// props (the URL state the route shell would supply), since navigation is mocked.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import { useMemo, useState, type ReactNode } from "react";
 import {
-  HomeBarHost,
   RailHostContext,
   type RailHostRegistry,
   type RegisteredLevels,
@@ -111,11 +112,13 @@ beforeEach(() => {
 // local statement of intent; do not "fix" the config to match the claim that was here.
 afterEach(cleanup);
 
-/** Renders the published rail — its rows, its empty label, and any deeper level's own `onNew`
- *  affordance — the way the workspace shell would. The rows matter since the "All" card landing
- *  was removed: the rail is now the only surface listing the projects. The top-level resource
- *  list's own "New Project" affordance is NOT among these — it is a page-level control published
- *  into the home bar (see `Harness` below), not onto this level. */
+/** Renders the published rail — its rows, its empty label, and each level's own toolbar (the
+ *  `+` and the pop-over search) — the way the workspace shell would. The rows matter since the
+ *  "All" card landing was removed: the rail is now the only surface listing the projects. Each
+ *  level's toolbar controls render inside a `data-testid={\`toolbar-${l.id}\`}` wrapper so a test
+ *  can scope into ONE level's controls rather than trusting that nothing else on the page could
+ *  satisfy an unscoped query — mirrors the real rail's `data-htd-toolbar` (`topic-detail.tsx`),
+ *  standing in for it since this harness draws its own minimal rail rather than the real one. */
 function Rail({ levels }: { levels: TopicLevel[] }) {
   return (
     <div>
@@ -127,11 +130,21 @@ function Rail({ levels }: { levels: TopicLevel[] }) {
               {item.label}
             </button>
           ))}
-          {l.onNew ? (
-            <button type="button" onClick={() => l.onNew?.()}>
-              {l.newLabel}
-            </button>
-          ) : null}
+          <div data-testid={`toolbar-${l.id}`}>
+            {l.onNew ? (
+              <button type="button" onClick={() => l.onNew?.()}>
+                {l.newLabel}
+              </button>
+            ) : null}
+            {l.search ? (
+              <input
+                type="search"
+                aria-label={l.search.placeholder}
+                value={l.search.query}
+                onChange={(e) => l.search?.onQueryChange(e.target.value)}
+              />
+            ) : null}
+          </div>
         </div>
       ))}
     </div>
@@ -142,11 +155,9 @@ function Rail({ levels }: { levels: TopicLevel[] }) {
  *  stack the way the hub's workspace shell would (the shell owns `mergedLevels`; this package owns
  *  only the RailHostContext contract). Stands in for the host so the rail rows are drivable.
  *
- *  Also wraps in `HomeBarHost`: ResourceExplorer's filter field and its "New Project" button are
- *  no longer on the published rail level at all — both are page-level controls published into the
- *  home bar (`home-bar.tsx`) instead. Without a host drawing that strip, `HomeBarPortal` falls back
- *  to rendering them inline, which is not the path the hub's workspace shell (which mounts a real
- *  `HomeBarHost`) actually takes. */
+ *  No `HomeBarHost` here any more: ResourceExplorer's filter field and its "New Project" button
+ *  ride the resource level's own `search`/`onNew` now, so the harness's `<Rail>` above is the
+ *  whole story — there is no separate page-wide strip left to stand a host in for. */
 function Harness({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<Map<string, RegisteredLevels>>(new Map());
   const registry: RailHostRegistry = useMemo(
@@ -175,12 +186,10 @@ function Harness({ children }: { children: ReactNode }) {
     .sort((a, b) => a.depth - b.depth)
     .flatMap((e) => e.levels);
   return (
-    <HomeBarHost>
-      <RailHostContext.Provider value={registry}>
-        <Rail levels={mergedLevels} />
-        {children}
-      </RailHostContext.Provider>
-    </HomeBarHost>
+    <RailHostContext.Provider value={registry}>
+      <Rail levels={mergedLevels} />
+      {children}
+    </RailHostContext.Provider>
   );
 }
 
@@ -197,11 +206,10 @@ describe("ProjectsFeature", () => {
   });
 
   // No other test in this file queries the filter field, and the two "creates a project…" tests
-  // below query the "New Project" button with an unscoped `screen.*` — which HomeBarPortal's
-  // inline fallback satisfies just as well as a real bar would, so neither can tell a working
-  // publish from a broken one. This test is the one that can: it scopes into the strip itself,
-  // so it fails if the home bar host above ever stops being the thing that draws these controls.
-  it("publishes the filter field and the New Project button into the home bar, not inline", async () => {
+  // below query the "New Project" button with an unscoped `screen.*`, which would pass whether
+  // the control is wired to the resource level or floating disconnected somewhere else on the
+  // page. This test is the one that can tell: it scopes into the resource level's OWN toolbar.
+  it("publishes the filter field and the New Project button onto the resource level's toolbar", async () => {
     render(
       <Harness>
         <ProjectsFeature basePath="/w1/projects" all />
@@ -209,9 +217,9 @@ describe("ProjectsFeature", () => {
     );
 
     expect(await screen.findByText("Website relaunch")).not.toBeNull();
-    const strip = await screen.findByTestId("home-bar");
-    expect(within(strip).getByRole("searchbox")).toBeTruthy();
-    expect(within(strip).getByRole("button", { name: "New Project" })).toBeTruthy();
+    const toolbar = within(await screen.findByTestId("toolbar-resource"));
+    expect(toolbar.getByRole("searchbox")).toBeTruthy();
+    expect(toolbar.getByRole("button", { name: "New Project" })).toBeTruthy();
   });
 
   it("creates a project through the New Project dialog", async () => {

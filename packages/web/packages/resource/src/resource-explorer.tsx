@@ -17,12 +17,8 @@ import {
   type TopicSelectOptions,
 } from "@agenticdevelopertoolkit/ui/blocks";
 import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
-import { Button } from "@agenticdevelopertoolkit/ui/components/button";
-import { Input } from "@agenticdevelopertoolkit/ui/components/input";
-import { Plus, Search } from "lucide-react";
 import { StackLevels } from "./rail-host";
 import { RailHostBoundary } from "./standalone-rail-host";
-import { HomeBar, HomeBarPortal, HomeBarTaken } from "./home-bar";
 
 /** The deep-linkable LEAF inside a topic (e.g. the selected application within the
  *  Applications topic): the id lives in the URL, and `onSelect` re-routes to it. Topics
@@ -119,7 +115,6 @@ export function ResourceExplorer<T>({
   reload,
   prefetchItem,
   topicAliases,
-  homeBarRight,
   renderNewControl,
   topicsTitle,
   topicsTitleActions,
@@ -187,37 +182,15 @@ export function ResourceExplorer<T>({
    *  Write-only, like the route half: it must return nothing and never throw, or resting on a
    *  row becomes a user-visible event. */
   prefetchItem?: (id: string) => void;
-  /** The host's OWN control for the home bar's right side, for a host that creates by
-   *  NAVIGATION rather than through `newLabel`/`renderDialog` (e.g. games' Create Game link,
-   *  which pushes a reserved URL segment and opens the host's own dialog off it, never this
-   *  component's `newOpen`). Takes over the bar's right slot instead of a `newLabel` button —
-   *  see the render below for why passing both would be asking for two create controls in the
-   *  same slot — and, unlike `newLabel`, keeps the bar published even while `items` is empty or
-   *  still loading, since a host publishing this way has no OTHER way to show the control. Also
-   *  bypasses the `!promoteTopics` guard that gates the filter field below: that guard exists
-   *  because the filter narrows `resourceLevel`, which a promoteTopics host never renders, but a
-   *  host's own right-side action has nothing to do with `resourceLevel` — so a promoteTopics
-   *  host passing this prop still gets a bar, on purpose. A falsy value (`false`, `null`,
-   *  `undefined`) counts as "not given" everywhere below, the same as omitting the prop, so a
-   *  host writing `homeBarRight={condition && <X/>}` does not publish an empty bar. */
-  homeBarRight?: ReactNode;
-  /** The host's own SHAPE for the create affordance, where `homeBarRight` above is the host's
-   *  own create MECHANISM. The explorer still owns `newLabel`, `renderDialog`, `newOpen` and
-   *  the reload-then-route it does on success — it hands the host only the trigger, so a host
-   *  that wants the create verb inside a gear menu (rather than as a standalone `+` button)
-   *  gets it without re-implementing the create flow the way a `homeBarRight` host must.
+  /** The host's own SHAPE for the create affordance. The explorer still owns `newLabel`,
+   *  `renderDialog`, `newOpen` and the reload-then-route it does on success — it hands the host
+   *  only the trigger, so a host that wants the create verb inside a gear menu (rather than as the
+   *  rail toolbar's `+`) gets it without re-implementing the create flow.
    *
-   *  IT RENDERS IN THE RESOURCE RAIL'S OWN TITLE ROW (`TopicLevel.titleActions`), not in the
-   *  home bar — which is the whole reason a host reaches for it. The default `newLabel` button
-   *  is page chrome: it sits in the strip above every rail, so it reads as belonging to the
-   *  page rather than to the list it creates into, and a second one appears the moment a
-   *  nested feature publishes its own. A gear beside the rail's heading is attached to the
-   *  list it acts on, and stays attached when the page grows another bar.
-   *
-   *  Gated by `canCreate` exactly like the default button, so a host cannot accidentally
-   *  publish a create control in promoteTopics mode — which has no resource rail to hang it
-   *  on at all. Unlike the default button it is NOT displaced by `homeBarRight`: the two now
-   *  render in different places, so a host may pass both without them colliding. */
+   *  It renders among the resource rail's own tools (`TopicLevel.titleActions`) IN PLACE OF the
+   *  `+`, never beside it — two create controls on one list is the bug this replaces. Gated by
+   *  `canCreate` exactly like the `+`, so promoteTopics mode, which has no resource rail to hang
+   *  it on, never gets one. */
   renderNewControl?: (onNew: () => void) => ReactNode;
   /** The topics level's heading, for a host whose topics ARE something with a name of its own
    *  (a product's topics are the features it holds, so it heads them "Features"). Omit and the
@@ -260,10 +233,11 @@ export function ResourceExplorer<T>({
   );
   const [newOpen, setNewOpen] = useState(false);
   // The resource rail's filter. The removed card landing carried the only search over this
-  // list (docs/ui/fleet-ui-audit.md §1.5 took the landing, not the FUNCTION), so the field
-  // moved on to the rail's own `headerSlot` — and from there into the home bar (below), a
-  // page-level strip above every rail. The state itself never moved: it is still read by
-  // `query`/`entityItems` below, exactly as before either move.
+  // list (docs/ui/fleet-ui-audit.md §1.5 took the landing, not the FUNCTION), so the field moved
+  // to the rail's `headerSlot`, then to the page-wide home bar — and, once that strip was judged
+  // clunky (Mike, 2026-09-24), back onto the rail as its toolbar's pop-over search. Held HERE
+  // rather than by the rail because the match reads more than a row shows and must keep the open
+  // entity; the rail is handed it controlled (`resourceLevel.search`).
   const [filter, setFilter] = useState("");
 
   const validTopics = new Set(topics.map((t) => t.id));
@@ -373,8 +347,8 @@ export function ResourceExplorer<T>({
   // the `renderDialog` prop doc above), so a second one here would be a duplicate — and there is
   // no resource rail in that mode for `titleActions` to render into either.
   //
-  // Declared HERE, above `resourceLevel`, because both readers need it: the rail's own title row
-  // (`titleActions`, just below) and the home bar's fallback button (in the return).
+  // Declared HERE, above `resourceLevel`, which is its only reader: the rail's `+`, or the host's
+  // own control in its place (`titleActions`).
   const canCreate = !promoteTopics && newLabel != null;
 
   const resourceLevel: TopicLevel = {
@@ -390,8 +364,7 @@ export function ResourceExplorer<T>({
     // but only while there is something to pick: `overviewHelp` also FORCES the hint onto an
     // EMPTY list, and "Select a team" beside a rail reading "No teams yet." is a dead end.
     //
-    // Gated on the UNFILTERED list, like the home bar's filter/New pair (in the component's
-    // return, below): "there is nothing to pick" is a fact about the tenant's data, not about the
+    // Gated on the UNFILTERED list, like the rail's search: "there is nothing to pick" is a fact about the tenant's data, not about the
     // box the user just typed in. Reading the filtered count here suppressed the blurb — and with
     // it the whole nudge, since the frame's gate is `items.length > 0 || overviewHelp != null` —
     // the moment a query matched nothing, and this pane's other branch is `null`, so a mistyped
@@ -410,13 +383,25 @@ export function ResourceExplorer<T>({
       prefetchItem?.(id);
     },
     onClear: () => router.push(basePath, { scroll: false }),
-    // The host's own create control, beside this rail's heading — see `renderNewControl`'s doc.
-    // The trigger is all the host supplies; the dialog, the reload and the route-to-the-new-row
-    // stay here, which is what separates this seam from `homeBarRight`. A host that passes
-    // neither gets no control here at all: the DEFAULT create affordance is still the home bar's
-    // button, because it is page chrome and every other feature's sits there.
+    // Create, in the rail's toolbar: the default `+`, or the host's own control in its place —
+    // see `renderNewControl`'s doc. The trigger is all the host supplies; the dialog, the reload
+    // and the route-to-the-new-row stay here.
+    onNew: canCreate && !renderNewControl ? () => setNewOpen(true) : undefined,
+    newLabel: newButtonLabel,
+    newActive: newOpen,
     titleActions:
       canCreate && renderNewControl ? renderNewControl(() => setNewOpen(true)) : undefined,
+    // A filter over nothing is noise, and over a list that has not loaded is a control that cannot
+    // work yet — so the magnifier appears once there are rows to narrow. Gated on the UNFILTERED
+    // list, or a query matching nothing would take away the very field that could clear it.
+    search:
+      loaded && allEntityItems.length > 0
+        ? {
+            query: filter,
+            onQueryChange: setFilter,
+            placeholder: `Filter ${(rail?.title ?? nameSuffix).toLowerCase()}`,
+          }
+        : undefined,
     // FOUR different reasons for an empty rail, and they must not be spoken as one. An un-loaded
     // list is `items === null`, which maps to zero rows exactly like a genuinely empty one — so
     // without this the rail asserts "No teams yet." at a host that has teams, for as long as the
@@ -429,13 +414,6 @@ export function ResourceExplorer<T>({
       : query
         ? `No matches for “${filter.trim()}”.`
         : (rail?.emptyLabel ?? ""),
-    // The filter field and the "New …" button are NOT on this level any more — both are page-level
-    // controls over the whole list, so both are published into the home bar (below) rather than
-    // drawn inside the rail this level renders. Both stay on TopicLevel, but not for the same
-    // reason: `onNew` stays IN USE — 20+ deeper levels a feature publishes still call it (e.g. a
-    // topic's own master/detail list), and those are contextual to their level in a way the
-    // top-level pair never was. `headerSlot` stays on the type too, as a supported seam, but this
-    // was its last producer in the repo — nothing currently sets it.
   };
   const topicLevel: TopicLevel = {
     id: "topic",
@@ -549,135 +527,10 @@ export function ResourceExplorer<T>({
   // and publish through the SAME StackLevels path, so a topic pane's publishers — the master/detail
   // list level AND, crucially, its leaf editor's unsaved-work guard — reach the HTD exactly as they
   // do in the hub shell (without a host they silently no-op and edits are discarded unprompted).
-  // The filter field's own condition, separate from the bar's: a filter over nothing to filter
-  // is noise, and over a list that has not loaded it is a control that cannot work yet — the
-  // same reasons the rail header applied before the field moved here. `!promoteTopics` preserves
-  // an invariant the OLD code got for free: `resourceLevel` — the object this field used to live
-  // on — was only ever spliced into `levels` when `!promoteTopics` (see the `levels` array built
-  // ABOVE, `promoteTopics ? [topicLevel] : [resourceLevel, topicLevel]`), so its `headerSlot`
-  // never rendered in promoteTopics mode regardless of this condition. A filter field
-  // wired to `filter`/`setFilter` narrows a `resourceLevel` no promoteTopics host ever renders.
-  const hasEntities = !promoteTopics && loaded && allEntityItems.length > 0;
-  // Whether the create affordance lands in the BAR. A host that supplied `renderNewControl` has
-  // already had it rendered into the rail's title row (see `resourceLevel.titleActions` above),
-  // so the bar must not draw a second one — and must not be published at all on its account,
-  // which is what would otherwise put an empty strip above a rail whose only tenant had moved.
-  const createInBar = canCreate && !renderNewControl;
   const published = (
     <>
-      {/* Three INDEPENDENT reasons to publish the bar, each gating its own slot: there is
-          something to filter (`hasEntities` → the field on the left), there is a create
-          affordance (`canCreate` → the button on the right), or the host handed us its own
-          right-side control (`homeBarRight`, which takes that same slot). None of the three
-          implies another, and that is the point: a brand-new tenant's list is empty and is
-          exactly when the first create matters most, and a host that creates by navigation, like
-          games, has no OTHER place to put its control, so its bar must appear with zero items or
-          before the list has loaded. `hasEntities` gates ONLY the filter field: an empty or
-          still-loading list has nothing to filter, whatever the other two say.
-
-          `Boolean(homeBarRight)`, not `homeBarRight != null`: a host writing the natural
-          `homeBarRight={condition && <X/>}` hands this `false` when `condition` is false, and
-          `false != null` is true — with `hasEntities` and `canCreate` both false that would
-          publish a bar with nothing whatsoever in it. (`HomeBar` skips a slot whose content is
-          falsy, so the empty-SLOT half of this hazard is handled there now, once for every
-          caller; what these operators still buy is not publishing an empty BAR at all.)
-          Truthiness treats a falsy `homeBarRight` exactly like the prop being omitted. */}
-      {(hasEntities || createInBar || Boolean(homeBarRight)) && (
-        <HomeBarPortal>
-          <HomeBar
-            left={
-              hasEntities ? (
-                // A bare field, NOT `ListHeader`: that block IS a `ButtonBar` — the same recessed
-                // strip (border-y + bg + px-6/py-2) every rail toolbar uses — and `HomeBar` already
-                // draws that exact strip. Nesting one inside the other doubled the border and the
-                // padding on every site whose home feature runs through `ResourceExplorer`.
-                // `NoteButtonBar`'s search field (the fleet's other bare field in a strip shaped
-                // like this one) is the precedent this mirrors: a plain positioning div around
-                // the field and nothing else. The `Input` keeps its own border and padding —
-                // those are the FIELD's, and always were; what goes away is the second toolbar
-                // strip around it, which the bar already draws.
-                //
-                // The width is deliberate, not incidental: `ListHeader`'s own field wrapper is
-                // `flex-1 max-w-xs`, which read predictably inside the rail's fixed-width header but
-                // has nothing to grow against inside `HomeBar`'s `left` slot (a shrink-to-fit flex
-                // item, not a sized column) — the field would collapse to its intrinsic min-content
-                // width instead. `w-64 min-w-40 shrink`, copied from `NoteButtonBar`, is the fleet's
-                // existing answer to sizing a field in this exact kind of strip.
-                //
-                // `role="search"` is a LANDMARK, and an unnamed landmark is announced as bare
-                // "search" — indistinguishable from any other on the page, and this page can hold
-                // more than one (an explorer standing down under `HomeBarTaken` renders its field
-                // inline below the outer one's). The name is the resource, so the two announce as
-                // "Organizations search" and "Teams search" rather than twice as "search". It sits
-                // on the landmark, not the field: the `Input`'s own `aria-label` names the CONTROL
-                // and is what every test queries by.
-                <div
-                  role="search"
-                  aria-label={rail?.title ?? nameSuffix}
-                  className="relative w-64 min-w-40 shrink"
-                >
-                  <Search
-                    aria-hidden
-                    className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-apt-text-muted"
-                  />
-                  <Input
-                    type="search"
-                    value={filter}
-                    aria-label={`Filter ${(rail?.title ?? nameSuffix).toLowerCase()}`}
-                    placeholder="Filter…"
-                    className="pl-8"
-                    onChange={(e) => setFilter(e.target.value)}
-                  />
-                </div>
-              ) : undefined
-            }
-            right={
-              // `homeBarRight` wins outright rather than sitting beside `newLabel`'s button: a
-              // host that passed both would be asking for two create controls in the same slot,
-              // the exact hazard `homeBarRight` exists to avoid (see its doc above). NO host
-              // passes `homeBarRight` at all today: games was the only one, and its Create Game
-              // control left with the games-owned create dialog when a game stopped being
-              // something you create. The seam and the precedence rule are kept — and pinned by
-              // `__tests__/resource-explorer.homeBar.test.tsx` — because the next host that
-              // creates through its own control needs exactly this, and re-deriving it is how
-              // the two-`HomeBar`s bug got written the first time.
-              //
-              // `||`, not `??`: mirrors the gate above — a falsy `homeBarRight` (most likely
-              // `false`, from a host's own `condition && <X/>`) falls through to `newLabel`'s
-              // button instead of suppressing it, which `??` would do for `false`.
-              homeBarRight ||
-              (createInBar ? (
-                <Button variant="outline" size="sm" onClick={() => setNewOpen(true)}>
-                  {/* `data-icon="inline-start"`, and no `size`: `Button` sizes its own icons
-                      (`[&_svg:not([class*='size-'])]:size-3.5`) and tightens the padding on the
-                      side the icon sits (`has-data-[icon=inline-start]:pl-1.5`). A `size={16}`
-                      here was already dead — the class wins over lucide's width/height attributes
-                      — while the missing `data-icon` left this button wearing symmetric padding,
-                      so it did not match the fleet's other icon buttons. (This used to cite games'
-                      `CreateGameAction` as the pattern; that component went with the create-game
-                      dialog in `product-gaming-modes`, and the pattern is now just the two
-                      attributes above.) */}
-                  <Plus data-icon="inline-start" aria-hidden />
-                  {newButtonLabel}
-                </Button>
-              ) : undefined)
-            }
-          />
-        </HomeBarPortal>
-      )}
-      {/* Everything below the bar stands under this explorer's claim. Organizations renders a whole
-          TeamsFeature inside its teams topic, and the hub's Products list mounts ProjectsFeature the
-          same way — each with its own `ResourceExplorer` and its own bar. Two publishers, one strip:
-          the controls interleave and the outer `ml-auto` shoves the inner filter against the right
-          edge. `HomeBarTaken` makes the nested one render its controls inline instead, where the
-          nested feature actually is.
-
-          `taken` mirrors the publish gate exactly, so an explorer that publishes NOTHING (no items,
-          no create, no host control) leaves the bar for whatever it hosts rather than blocking it. */}
-      <HomeBarTaken taken={hasEntities || createInBar || Boolean(homeBarRight)}>
-        <StackLevels levels={levels}>{content}</StackLevels>
-        {dialog}
-      </HomeBarTaken>
+      <StackLevels levels={levels}>{content}</StackLevels>
+      {dialog}
     </>
   );
   return <RailHostBoundary>{published}</RailHostBoundary>;

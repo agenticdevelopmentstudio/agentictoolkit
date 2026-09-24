@@ -33,10 +33,8 @@ import {
  * re-click prompts Discard/Stay instead of silently discarding). Mirrors the hub's
  * WorkspaceChromeProvider semantics (local registry + composite guard + depth-merged stack + the
  * breadcrumb bar), trimmed to the standalone case: no shell workspace/feature levels above the
- * feature's own. It owns the rails and the exit gate only — the
- * page's own controls (search, filters, its primary action) go through the HOME bar instead
- * (`HomeBarPortal`/`HomeBarHost`, `./home-bar`), hosted above this component by `SiteHomeShell`
- * on a feature site, or by the hub's `WorkspaceShellInner` inside the hub shell.
+ * feature's own. It owns the rails and the exit gate only — a list's own controls (search,
+ * filters, create) ride that list's rail toolbar (`TopicLevel.onNew` / `search` / `titleActions`).
  * Extracted from ResourceExplorer (which always self-hosted this way) so the
  * publisher-only feature entries — research/dashboards/knowledgebases/personas — get the same
  * standalone behavior through {@link RailHostBoundary}.
@@ -147,9 +145,6 @@ export function StandaloneRailHost({
   // context would publish `null` on the mount that matters and the pane's `ToolbarPortal` would
   // fall back to rendering inline forever. Panes that portal nothing are unaffected: the strip
   // collapses while the slot is empty (see `data-adh-toolbar-slot`).
-  //
-  // This is still NOT the home bar (`HomeBarPortal`/`HomeBarHost`, `./home-bar`), which belongs to
-  // the page and can be on screen at the same time — see `RailHostRegistry.toolbarSlot`.
   const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null);
 
   const host = useMemo<RailHostRegistry>(

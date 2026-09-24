@@ -132,6 +132,7 @@ export const PRODUCT_TOPIC_CONFIGS: EcosystemsTopicConfig[] = PRODUCT_TOPICS.map
   icon: ICONS[t.id],
   description: helpFor(`ecosystems/${t.id}`),
   dividerAfter: t.dividerAfter,
+  features: "features" in t ? t.features : undefined,
 }));
 
 // The per-product Tokens pane. `ctx` (RenderTopicPaneCtx) carries no workspace slug and the topic

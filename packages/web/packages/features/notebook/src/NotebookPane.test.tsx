@@ -8,15 +8,16 @@
 // stands in for the rail host twice over: it renders the published levels (so their rows are
 // clickable) and it hands the test the level OBJECTS, because half of what this change is about
 // is which affordances a level no longer carries — and an absent `+` has no DOM to assert on.
-// The button bar publishes into the home bar instead (a separate context — see
-// `resource/src/home-bar.tsx`); the harness mounts a real `HomeBarHost` so that move is pinned by
-// an assertion against `home-bar`'s own DOM node, not just exercised through the portal's
-// no-host fallback.
+// Everything that acts on the notes LIST — Create Note, the pop-over search, and the gear's
+// filters and taxonomy editors — now rides that level's own toolbar (`onNew`/`search`/
+// `titleActions`), after the page-wide home bar they used to publish into was removed as clunky
+// (Mike, 2026-09-24). The harness's `<Rail>` below renders each level's toolbar controls itself,
+// scoped per level id via `data-testid={\`toolbar-${l.id}\`}`, so a test can tell "wired to this
+// level" from "wired to some other one" rather than trusting an unscoped `screen.*` query.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useMemo, useState, type ReactNode } from "react";
 import {
-  HomeBarHost,
   RailHostContext,
   type RailHostRegistry,
   type RegisteredLevels,
@@ -139,12 +140,25 @@ function Rail({ published }: { published: TopicLevel[] }) {
         <div key={l.id}>
           <h3>{l.title}</h3>
           {l.busy && <span data-testid={`busy-${l.id}`} />}
-          {l.onNew && (
-            <button type="button" onClick={() => l.onNew?.()}>
-              {l.newLabel}
-            </button>
-          )}
-          {l.titleActions}
+          {/* Scoped per level id, the way the real `TopicRail`'s own `data-htd-toolbar` row is:
+           *  every `+`, search box and gear this pane publishes lives on ITS level's toolbar, so a
+           *  test can tell "wired to the notes level" from "wired to some other one". */}
+          <div data-testid={`toolbar-${l.id}`}>
+            {l.onNew && (
+              <button type="button" onClick={() => l.onNew?.()}>
+                {l.newLabel}
+              </button>
+            )}
+            {l.search && (
+              <input
+                type="search"
+                aria-label={l.search.placeholder}
+                value={l.search.query}
+                onChange={(e) => l.search?.onQueryChange(e.target.value)}
+              />
+            )}
+            {l.titleActions}
+          </div>
           <ul>
             {l.items.map((item) => (
               <li key={item.id}>
@@ -165,10 +179,8 @@ function Rail({ published }: { published: TopicLevel[] }) {
   );
 }
 
-/** A minimal rail host, plus a real `HomeBarHost` so the button bar's move onto the home bar is
- *  actually pinned (see the file header) rather than merely exercised via its no-host fallback.
- *  `toolbarSlot` is `null` since no test here opens an editor; the feature-bar fields that used
- *  to sit beside it are gone from `RailHostRegistry` entirely. */
+/** A minimal rail host. `toolbarSlot` is `null` since no test here opens an editor; the
+ *  feature-bar fields that used to sit beside it are gone from `RailHostRegistry` entirely. */
 function Harness({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<Map<string, RegisteredLevels>>(new Map());
   const registry: RailHostRegistry = useMemo(
@@ -196,10 +208,8 @@ function Harness({ children }: { children: ReactNode }) {
   levels = [...entries.values()].sort((a, b) => a.depth - b.depth).flatMap((e) => e.levels);
   return (
     <RailHostContext.Provider value={registry}>
-      <HomeBarHost>
-        <Rail published={levels} />
-        {children}
-      </HomeBarHost>
+      <Rail published={levels} />
+      {children}
     </RailHostContext.Provider>
   );
 }
@@ -244,15 +254,21 @@ describe("the rail", () => {
     }
   });
 
-  it("no longer offers a `+` on the categories or the notes level", async () => {
+  it("offers no `+` on the categories level, but keeps Create Note on the notes level", async () => {
     renderPane();
     await screen.findByRole("button", { name: "Standup" });
 
-    // Both creates moved to the button bar / the category editor, so the rail headers hold
-    // nothing but navigation and the notes level's display gear.
+    // Category creation moved to the category editor, so that level's header holds nothing but
+    // navigation. The notes level is the opposite case: Create Note rode the button bar until it
+    // was removed as clunky (Mike, 2026-09-24), and came back as that level's own `+` rather than
+    // staying gone — so both halves of this assertion matter, not just the categories' absence.
     expect(levelById("notebook-categories").onNew).toBeUndefined();
-    expect(levelById("notebook-notes").onNew).toBeUndefined();
+    expect(levelById("notebook-notes").onNew).toBeDefined();
+    expect(levelById("notebook-notes").newLabel).toBe("Create Note");
     expect(levelById("notebook-notes").titleActions).not.toBeUndefined();
+
+    const toolbar = within(screen.getByTestId("toolbar-notebook-notes"));
+    expect(toolbar.getByRole("button", { name: "Create Note" })).not.toBeNull();
   });
 
   it("prepends All and Uncategorized to the root category list", async () => {
@@ -292,14 +308,35 @@ describe("the rail", () => {
   });
 });
 
-describe("the button bar", () => {
+// This bar's filters and taxonomy editors were a button bar in the page-wide home bar until
+// that strip was removed as clunky (Mike, 2026-09-24). They now live in `NoteListOptions`, the
+// gear on the notes level's own toolbar — see that file's header comment. Search stayed a plain
+// field on the toolbar rather than folding into the gear, since typing is not a menu action.
+describe("the notes list's gear and search", () => {
   it("searches, and filters by category and tag", async () => {
     renderPane();
     await screen.findByRole("button", { name: "Standup" });
 
     fireEvent.change(screen.getByLabelText("Search notes"), { target: { value: "migration" } });
-    fireEvent.change(screen.getByLabelText("Filter by category"), { target: { value: "Work" } });
-    fireEvent.change(screen.getByLabelText("Filter by tag"), { target: { value: "meeting" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Notes list options" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Category:/ }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Work" }));
+
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(
+        { q: "migration", tag: "", category: "Work" },
+        { workspace: "acme" },
+      ),
+    );
+
+    // Selecting a radio closes the menu (`closeOnClick`), and choosing a category makes the
+    // gear's own accessible name grow "(filtered)" — so the reopen has to match that, not the
+    // plain label from the first open.
+    fireEvent.click(screen.getByRole("button", { name: /^Notes list options/ }));
+    expect(await screen.findByRole("menuitem", { name: "Category: Work" })).not.toBeNull();
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Tag:/ }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "meeting" }));
 
     await waitFor(() =>
       expect(list).toHaveBeenLastCalledWith(
@@ -309,16 +346,17 @@ describe("the button bar", () => {
     );
   });
 
-  it("publishes into the home bar, not inline where the pane sits", async () => {
+  it("publishes onto the notes level's own toolbar, not some shared strip", async () => {
     renderPane();
     await screen.findByRole("button", { name: "Standup" });
 
-    // The bar's own DOM node, not just "somewhere in the document" — pins the move onto the
-    // home bar (`HomeBarPortal` in NotebookPane.tsx) rather than the portal's no-host fallback,
-    // which this same query would satisfy either way.
-    const strip = await screen.findByTestId("home-bar");
-    expect(strip).toContainElement(screen.getByLabelText("Search notes"));
-    expect(strip).toContainElement(screen.getByRole("button", { name: "Create Note" }));
+    // Scoped to the notes level's own toolbar node, not just "somewhere in the document" — an
+    // unscoped query would pass just as well if these had landed on the categories level's
+    // toolbar instead.
+    const toolbar = within(screen.getByTestId("toolbar-notebook-notes"));
+    expect(toolbar.getByLabelText("Search notes")).not.toBeNull();
+    expect(toolbar.getByRole("button", { name: "Create Note" })).not.toBeNull();
+    expect(toolbar.getByRole("button", { name: "Notes list options" })).not.toBeNull();
   });
 
   it("asks for nothing when the rail and the filter name different categories", async () => {
@@ -327,9 +365,9 @@ describe("the button bar", () => {
     await screen.findByRole("button", { name: "Standup" });
     const before = list.mock.calls.length;
 
-    fireEvent.change(screen.getByLabelText("Filter by category"), {
-      target: { value: "Personal" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Notes list options" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Category:/ }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Personal" }));
 
     // A note has one category, so the intersection is empty — and an empty answer needs no
     // request. The list has to actually empty out, not keep showing the pre-filter rows.
@@ -341,7 +379,8 @@ describe("the button bar", () => {
     renderPane();
     await screen.findByRole("button", { name: "Standup" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit tags" }));
+    fireEvent.click(screen.getByRole("button", { name: "Notes list options" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Edit tags…" }));
     const field = await screen.findByLabelText("Name of tag meeting");
     fireEvent.change(field, { target: { value: "standup" } });
     fireEvent.keyDown(field, { key: "Enter" });

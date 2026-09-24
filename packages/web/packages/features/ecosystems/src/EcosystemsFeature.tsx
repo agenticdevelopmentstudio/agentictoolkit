@@ -25,9 +25,11 @@ import {
 import { useResourceList, makeEntityDeleteHandler, writeLastId } from "@agentic-toolkit/data";
 import {
   ecosystemsApi,
+  useProvisionedFeatures,
   useWorkspaceDefaultEcosystemId,
   type Ecosystem,
 } from "@agentic-toolkit/data/ecosystems";
+import { heldTopics } from "./heldTopics";
 import { EcosystemSettingsPane } from "./EcosystemSettingsPane";
 import { FeaturesToolMenu } from "./FeaturesToolMenu";
 import {
@@ -61,6 +63,11 @@ export interface EcosystemsTopicConfig {
    *  an unselected frontier is gone (docs/ui/fleet-ui-audit.md §1.5). See `TopicDetailItem`. */
   description?: string;
   dividerAfter?: boolean;
+  /** The catalog feature keys behind this row. When set, the row is drawn only while the scoped
+   *  ecosystem holds at least one of them (see `heldTopics`), so the Features list and the Manage
+   *  features dialog read the same set. Omit for a row that is not a catalog feature (Settings,
+   *  Child Ecosystems, a feature site's own rows) — it is always drawn. */
+  features?: readonly string[];
 }
 
 /** What `renderTopicPane` needs to reconstruct a host-owned config pane's exact call
@@ -502,7 +509,16 @@ export function EcosystemsFeature({
       <FeaturesToolMenu ecosystemId={ecoId} label={`${singular} features tools`} />
     ) : null;
 
-  const topics: ResourceTopic[] = topicsConfig.map((t) => ({
+  // Only the topics the scoped ecosystem holds. Read only when some row is feature-keyed, so a
+  // host whose rows name no features (a feature site's own rail) never pays for the request.
+  const featureKeyed = topicsConfig.some((t) => t.features != null);
+  const provisionedQuery = useProvisionedFeatures(featureKeyed ? scopedId : undefined);
+  const shownTopics = heldTopics(
+    topicsConfig,
+    provisionedQuery.isError ? null : provisionedQuery.data,
+  );
+
+  const topics: ResourceTopic[] = shownTopics.map((t) => ({
     id: t.id,
     label: t.label,
     icon: t.icon,
@@ -553,7 +569,7 @@ export function EcosystemsFeature({
               writeLastId(basePath, newId);
               await reload();
               router.replace(
-                `${basePath}/${newId}/${topicsConfig[0]?.id}`,
+                `${basePath}/${newId}/${shownTopics[0]?.id}`,
                 { scroll: false },
               );
             }}

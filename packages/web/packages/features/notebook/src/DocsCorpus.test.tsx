@@ -9,8 +9,8 @@
 // that differs, and it is the thing a regression would silently break: which client the pane
 // reads and writes through. A corpus wired to `notesApi` by accident would still render, still
 // filter, still save — and quietly file every document into the wrong bucket. So these tests
-// assert the seam: `docsApi` is called, `notesApi` is not, and the rail level and the bar carry
-// the document nouns rather than the note ones.
+// assert the seam: `docsApi` is called, `notesApi` is not, and the rail level and its toolbar
+// carry the document nouns rather than the note ones.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   act,
@@ -23,7 +23,6 @@ import {
 } from "@testing-library/react";
 import { useMemo, useState, type ReactNode } from "react";
 import {
-  HomeBarHost,
   RailHostContext,
   type RailHostRegistry,
   type RegisteredLevels,
@@ -141,7 +140,9 @@ function levelById(id: string): TopicLevel {
 }
 
 /** The same minimal rail host `NotebookPane.test.tsx` uses: it renders the published levels and
- *  hands the test the level objects, so a level's SHAPE can be asserted on. */
+ *  hands the test the level objects, so a level's SHAPE can be asserted on. Each level's `+`,
+ *  search and gear render on ITS OWN toolbar, scoped via `data-testid={`toolbar-${l.id}`}` —
+ *  they rode the page-wide home bar until that strip was removed as clunky (Mike, 2026-09-24). */
 function Harness({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<Map<string, RegisteredLevels>>(
     new Map(),
@@ -173,25 +174,39 @@ function Harness({ children }: { children: ReactNode }) {
     .flatMap((e) => e.levels);
   return (
     <RailHostContext.Provider value={registry}>
-      <HomeBarHost>
-        <div>
-          {levels.map((l) => (
-            <div key={l.id}>
-              <h3>{l.title}</h3>
-              <ul>
-                {l.items.map((item) => (
-                  <li key={item.id}>
-                    <button type="button" onClick={() => l.onSelect?.(item.id)}>
-                      {item.label}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+      <div>
+        {levels.map((l) => (
+          <div key={l.id}>
+            <h3>{l.title}</h3>
+            <div data-testid={`toolbar-${l.id}`}>
+              {l.onNew && (
+                <button type="button" onClick={() => l.onNew?.()}>
+                  {l.newLabel}
+                </button>
+              )}
+              {l.search && (
+                <input
+                  type="search"
+                  aria-label={l.search.placeholder}
+                  value={l.search.query}
+                  onChange={(e) => l.search?.onQueryChange(e.target.value)}
+                />
+              )}
+              {l.titleActions}
             </div>
-          ))}
-        </div>
-        {children}
-      </HomeBarHost>
+            <ul>
+              {l.items.map((item) => (
+                <li key={item.id}>
+                  <button type="button" onClick={() => l.onSelect?.(item.id)}>
+                    {item.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+      {children}
     </RailHostContext.Provider>
   );
 }
@@ -235,14 +250,16 @@ describe("the docs corpus", () => {
     expect(level.items.map((i) => i.label)).toEqual(["Onboarding checklist"]);
   });
 
-  it("carries the document nouns onto the home bar", async () => {
+  it("carries the document nouns onto the documents level's own toolbar", async () => {
     renderDocsPane();
-    const strip = await screen.findByTestId("home-bar");
+    await screen.findByRole("button", { name: "Onboarding checklist" });
 
-    expect(strip).toContainElement(screen.getByLabelText("Search documents"));
-    expect(strip).toContainElement(
-      screen.getByRole("button", { name: "Create Document" }),
-    );
+    // Its own level's toolbar, not "somewhere in the document" — pins the search box and the
+    // create button to the documents level specifically, since an unscoped query would pass
+    // just as well if these had landed on the categories level's toolbar instead.
+    const toolbar = within(screen.getByTestId("toolbar-docs-documents"));
+    expect(toolbar.getByLabelText("Search documents")).not.toBeNull();
+    expect(toolbar.getByRole("button", { name: "Create Document" })).not.toBeNull();
   });
 
   it("creates through the docs client", async () => {

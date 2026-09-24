@@ -1,31 +1,23 @@
 // @vitest-environment jsdom
 //
-// Pins where PersonasSection's "New Persona" lives: the HOME BAR — the strip between the workspace
-// bar and the breadcrumb bar — and NOT the persona rail level's own right-justified `+`, which is
-// where it used to render (`onNew`/`newLabel` on the level). Creating a persona acts on the PAGE
-// (this component supplies level 0 of both the personas and personabuilder sites' /home route), so
-// by the fleet's placement rule it belongs to the page's chrome.
-//
-// EVERY query below is scoped with `within(await screen.findByTestId("home-bar"))`, never a bare
-// `screen.*`, and that is what makes these tests capable of failing. `HomeBarPortal` renders its
-// children INLINE when there is no `HomeBarHost` above it, so an unscoped
-// `screen.getByRole("button", { name: "New Persona" })` finds the button whether it was published
-// into the strip or left exactly where it was. Both harnesses below therefore mount a real
-// `HomeBarHost`, the way `SiteHomeShell` (templated fleet) and the hub's `WorkspaceShellInner` do.
+// Pins where PersonasSection's "New Persona" lives: the persona list's own toolbar `+`, beside its
+// search. It was published into the page-wide home bar until that strip was removed as clunky
+// (Mike, 2026-09-24). EVERY query is scoped `within` the toolbar, so a create drawn anywhere else
+// on the page cannot satisfy it.
 //
 // The component is DUAL-MODE, and both modes are covered here: under a rail host it publishes its
 // level and renders only the leaf; with no host above it renders its own HierarchicalDetailView.
 // The two sites that mount it reach the first branch — `PersonasFeature` wraps it in
 // `RailHostBoundary`, which self-hosts a `StandaloneRailHost` when nothing above it does — while
-// an embedded launcher takes the second. A bar published from only one branch is a missing create
-// button on whichever set of callers takes the other, and nothing else in the suite would say so.
+// an embedded launcher takes the second. A `+` on only one branch is a missing create button on
+// whichever set of callers takes the other, and nothing else in the suite would say so.
 //
 // Mocks are the module boundaries only: the personas data client, auth's error reporter, and the
 // two heavy children this file is not about (`PersonaEditor`, whose module pulls in the CRUD
 // catalog, and `useUserServices`, which would otherwise spend a real services read on every mount).
-// The home-bar mechanism itself runs for real.
+// The rail itself runs for real.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, within, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 vi.mock("@agentic-toolkit/auth", () => ({
@@ -54,7 +46,7 @@ vi.mock("./useUserServices", () => ({
   useUserServices: () => ({ items: [], error: null, reload: vi.fn() }),
 }));
 
-import { HomeBarHost, RailHostBoundary } from "@agentic-toolkit/resource";
+import { RailHostBoundary } from "@agentic-toolkit/resource";
 import { ToolkitQueryProvider } from "@agentic-toolkit/data/query";
 import { PersonasSection } from "./PersonasSection";
 import { api, type Persona } from "@agentic-toolkit/data/personas";
@@ -79,71 +71,75 @@ beforeEach(() => {
 afterEach(cleanup);
 
 /** The page chrome the two sites put above this feature: the toolkit's own react-query provider
- *  (PersonasSection reads the toolkit's QueryClient, not a host's) and a real `HomeBarHost`.
+ *  (PersonasSection reads the toolkit's QueryClient, not a host's).
  *  `railHost` picks the branch: `true` adds the `RailHostBoundary` `PersonasFeature` supplies,
  *  which self-hosts a rail host, so the component takes its published-level branch. */
 function Chrome({ children, railHost }: { children: ReactNode; railHost: boolean }) {
   return (
     <ToolkitQueryProvider>
-      <HomeBarHost>
-        {railHost ? <RailHostBoundary>{children}</RailHostBoundary> : children}
-      </HomeBarHost>
+      {railHost ? <RailHostBoundary>{children}</RailHostBoundary> : children}
     </ToolkitQueryProvider>
   );
 }
 
-describe("PersonasSection publishes New Persona into the home bar", () => {
+/** The persona list's toolbar — the row under its title. Found by its marker, not a role, because
+ *  the query is what makes every assertion below capable of failing. */
+async function toolbar() {
+  const el = await waitFor(() => {
+    const found = document.querySelector("[data-htd-toolbar]") as HTMLElement | null;
+    expect(found).not.toBeNull();
+    return found!;
+  });
+  return within(el);
+}
+
+describe("PersonasSection puts New Persona on the list's toolbar", () => {
   // The branch the personas and personabuilder sites actually take.
-  it("publishes the button into the strip under a rail host", async () => {
+  it("draws the + on the toolbar under a rail host", async () => {
     render(
       <Chrome railHost>
         <PersonasSection />
       </Chrome>,
     );
 
-    const bar = within(await screen.findByTestId("home-bar"));
+    const bar = await toolbar();
     expect(bar.getByRole("button", { name: "New Persona" })).not.toBeNull();
-    // And ONLY there. The rail's own `+` takes its accessible name from `newLabel`
-    // (`topic-detail.tsx`: `aria-label={newLabel ?? "New"}`), so a create left on the level as well
-    // as published here would show up as a second match — which every `within(strip)` assertion
-    // above would happily ignore.
+    expect(bar.getByRole("button", { name: "Search personas" })).not.toBeNull();
+    // And ONLY there: one create affordance for the list.
     expect(screen.getAllByRole("button", { name: "New Persona" })).toHaveLength(1);
   });
 
   // The other branch: no host above, so PersonasSection renders its own HierarchicalDetailView.
-  it("publishes the button into the strip with no rail host above", async () => {
+  it("draws the + on the toolbar with no rail host above", async () => {
     render(
       <Chrome railHost={false}>
         <PersonasSection />
       </Chrome>,
     );
 
-    const bar = within(await screen.findByTestId("home-bar"));
+    const bar = await toolbar();
     expect(bar.getByRole("button", { name: "New Persona" })).not.toBeNull();
     expect(screen.getAllByRole("button", { name: "New Persona" })).toHaveLength(1);
   });
 
-  it("opens the create modal from the strip's button — the portal keeps it in the React tree", async () => {
-    // A portal moves children out of the DOM subtree but NOT out of the React tree, which is the
-    // whole reason a control in the page's chrome can still drive this component's state. Clicking
-    // the button where the user finds it must set `newOpen` here; a button that rendered in the
-    // strip but no longer reached `setNewOpen` would pass both placement tests above.
+  it("opens the create modal from the toolbar's +", async () => {
+    // A `+` that rendered on the toolbar but no longer reached `setNewOpen` would pass both
+    // placement tests above.
     render(
       <Chrome railHost>
         <PersonasSection />
       </Chrome>,
     );
 
-    const bar = within(await screen.findByTestId("home-bar"));
+    const bar = await toolbar();
     expect(screen.queryByRole("dialog", { name: "New persona" })).toBeNull();
     fireEvent.click(bar.getByRole("button", { name: "New Persona" }));
     expect(await screen.findByRole("dialog", { name: "New persona" })).not.toBeNull();
   });
 
-  it("publishes the button with an EMPTY persona list", async () => {
-    // Unconditional, exactly as `onNew` was: no personas is precisely when the first create
-    // matters most, so gating the bar on a loaded or non-empty list would strand a new tenant with
-    // no way to create anything at all.
+  it("keeps the + with an EMPTY persona list", async () => {
+    // Unconditional: no personas is precisely when the first create matters most, so gating the
+    // `+` on a loaded or non-empty list would strand a new tenant with no way to create anything.
     listPersonas.mockResolvedValue([]);
     render(
       <Chrome railHost>
@@ -151,7 +147,7 @@ describe("PersonasSection publishes New Persona into the home bar", () => {
       </Chrome>,
     );
 
-    const bar = within(await screen.findByTestId("home-bar"));
+    const bar = await toolbar();
     expect(bar.getByRole("button", { name: "New Persona" })).not.toBeNull();
   });
 });

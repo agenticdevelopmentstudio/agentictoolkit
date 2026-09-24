@@ -17,17 +17,16 @@
 // — none of them exercise walking into a real category, which is covered by
 // `@agentic-toolkit/categories`' own suite and by NotebookPane.test.tsx.
 //
-// The pane's two PAGE-level controls are no longer part of that level: the search/category/tag
-// filters and the "Create Document" create are published into the HOME BAR (the strip between the
-// workspace bar and the breadcrumb bar) via HomeBarPortal, not handed to the rail as `railSlot`
-// and `onNew`. The Harness therefore mounts a real `HomeBarHost` the way SiteHomeShell does — and
-// it MUST: without a host, HomeBarPortal renders its children inline as a fallback, so every
-// unscoped `screen.*` query would pass identically whether the publish works or not.
+// The pane's two page-level controls (search/category/tag filters and the "Create Document"
+// create) are no longer a page-wide strip: that HOME BAR was removed as clunky (Mike,
+// 2026-09-24), and both now ride the documents level's own TOOLBAR (the row under a rail's
+// title, `search`/`onNew`/`titleActions` on the published `TopicLevel` — see `topic-detail.tsx`'s
+// `data-htd-toolbar`). This file's `Rail` stand-in (below) renders each level's toolbar itself,
+// scoped per level id, so a test can tell "wired to this level" from "wired to some other one".
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor, within, cleanup } from "@testing-library/react";
 import { useMemo, useState, type ReactNode } from "react";
 import {
-  HomeBarHost,
   RailHostContext,
   useHostDetailTitle,
   type RailHostRegistry,
@@ -169,9 +168,13 @@ afterEach(cleanup);
 // correctly. The tests below therefore each start from an empty cache.
 
 /** Renders the published rail level (the document rows) the way the hub's workspace shell would,
- *  so the test can drive the rows. It draws NO create button and NO filter slot: those are the
- *  page's controls now and reach the home bar instead, so a rail stub that still rendered
- *  `l.onNew`/`l.railSlot` would quietly keep a regression to the old arrangement passing.
+ *  so the test can drive the rows — plus each level's own TOOLBAR (the `+` from `onNew`/
+ *  `newLabel`, a controlled search box from `search`, and `titleActions`, the gear menu), scoped
+ *  inside a `data-testid={`toolbar-${l.id}`}` wrapper so a test can scope `within()` it rather
+ *  than trusting that nothing else on the page could satisfy an unscoped query. Mirrors the real
+ *  rail's `data-htd-toolbar` (`topic-detail.tsx`), standing in for it since this harness draws its
+ *  own minimal rail rather than the real one — the page-wide home bar these controls used to
+ *  publish into was removed as clunky (Mike, 2026-09-24).
  *
  *  It also stands in for the two signals the real `TopicRail` owns: the header spinner it shows
  *  while `busy`, and the hover dwell after which it calls `onPrefetch`. The dwell's TIMING is the
@@ -186,6 +189,22 @@ function Rail({ levels }: { levels: TopicLevel[] }) {
           {/* Wiring-level stand-in for the real rail's icon column: not rendering one is the
            *  observable effect of `hideItemIcons`, which nothing here otherwise reads. */}
           <span data-testid={`hide-item-icons-${l.id}`}>{String(Boolean(l.hideItemIcons))}</span>
+          <div data-testid={`toolbar-${l.id}`}>
+            {l.search ? (
+              <input
+                type="search"
+                aria-label={l.search.placeholder}
+                value={l.search.query}
+                onChange={(e) => l.search?.onQueryChange(e.target.value)}
+              />
+            ) : null}
+            {l.titleActions}
+            {l.onNew ? (
+              <button type="button" onClick={() => l.onNew?.()}>
+                {l.newLabel}
+              </button>
+            ) : null}
+          </div>
           <ul>
             {l.items.map((item) => (
               <li key={item.id}>
@@ -207,9 +226,10 @@ function Rail({ levels }: { levels: TopicLevel[] }) {
 
 /** A minimal rail HOST: it registers ResearchPane's published documents level and exposes the
  *  merged stack the way the hub's workspace shell would (the shell owns `mergedLevels`; this
- *  package owns only the RailHostContext contract), plus a real {@link HomeBarHost} above both —
- *  the two hosts SiteHomeShell / the hub shell mount around this feature. Stands in for them so
- *  the published document rows AND the home bar's own controls are drivable.
+ *  package owns only the RailHostContext contract). Stands in for the host so the published
+ *  document rows AND their toolbar's own controls (rendered by `Rail` above) are drivable. No
+ *  `HomeBarHost` any more: the controls ride the documents level's own `search`/`onNew`/
+ *  `titleActions` now, so `Rail` above is the whole story.
  *
  *  `setDetailTitle`/`detailTitle` are wired through the package's own {@link useHostDetailTitle} —
  *  the REAL host-side hook every production host (StandaloneRailHost, the hub's
@@ -250,15 +270,13 @@ function Harness({ children }: { children: ReactNode }) {
     .flatMap((e) => e.levels);
   return (
     <RailHostContext.Provider value={registry}>
-      <HomeBarHost>
-        {/* Stand-in for HTDV's title strip: same string {@link useHostDetailTitle} would hand
-            the real detail header, rendered here so a test can read it back. Empty (not
-            missing) when no pane is publishing, so "cleared" and "never rendered" both read as
-            the same empty string rather than a testid that disappears from the DOM. */}
-        <div data-testid="detail-title">{detailTitle ?? ""}</div>
-        <Rail levels={mergedLevels} />
-        {children}
-      </HomeBarHost>
+      {/* Stand-in for HTDV's title strip: same string {@link useHostDetailTitle} would hand
+          the real detail header, rendered here so a test can read it back. Empty (not
+          missing) when no pane is publishing, so "cleared" and "never rendered" both read as
+          the same empty string rather than a testid that disappears from the DOM. */}
+      <div data-testid="detail-title">{detailTitle ?? ""}</div>
+      <Rail levels={mergedLevels} />
+      {children}
     </RailHostContext.Provider>
   );
 }
@@ -275,22 +293,21 @@ describe("ResearchFeature", () => {
     expect(list).toHaveBeenCalled();
   });
 
-  it("creates a document through the home bar's Create Document button", async () => {
+  it("creates a document through the Documents list's toolbar Create Document button", async () => {
     render(
       <Harness>
         <ResearchFeature basePath="/w1/research" />
       </Harness>,
     );
 
-    // Clicked THROUGH the strip, not through `screen`: this is the button the user now has, and
-    // driving it from inside `home-bar` is also what proves the portal keeps its children in this
-    // component's REACT tree — a button that left the DOM subtree but still closes over
-    // `setNewOpen`. It opens the CREATE MODAL (HTD `must-create-in-modal`): the title, plus the
-    // category that places it. The title is asked for here rather than a body left to the editor
-    // because it is now the document's NAME — its first heading — so an empty create would mint
-    // an "Untitled" row the user then has to go and find.
-    const strip = within(await screen.findByTestId("home-bar"));
-    fireEvent.click(strip.getByRole("button", { name: "Create Document" }));
+    // Clicked THROUGH the toolbar, not through `screen`: this is the button the user now has,
+    // scoped to the documents level's own toolbar rather than trusting that nothing else on the
+    // page could satisfy an unscoped query. It opens the CREATE MODAL (HTD `must-create-in-modal`):
+    // the title, plus the category that places it. The title is asked for here rather than a body
+    // left to the editor because it is now the document's NAME — its first heading — so an empty
+    // create would mint an "Untitled" row the user then has to go and find.
+    const toolbar = within(await screen.findByTestId("toolbar-research-documents"));
+    fireEvent.click(toolbar.getByRole("button", { name: "Create Document" }));
 
     // Scope to the dialog: the editor's portaled action bar has its own Save button.
     const dialog = within(screen.getByRole("dialog", { name: "New document" }));
@@ -878,47 +895,66 @@ describe("ResearchFeature", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
-  // ── The home bar ─────────────────────────────────────────────
-  // Both of this pane's page-level controls moved OUT of the rail level's header and INTO the home
-  // bar. Every query below goes through `within(home-bar)` rather than `screen`, which is the only
-  // thing that makes these tests capable of failing: `HomeBarPortal` renders inline when no
-  // `HomeBarHost` is above it, so a bare `screen.getByRole("button", { name: "Create Document" })`
-  // finds the button whether it was published into the strip or left where it was.
+  // ── The Documents list's toolbar ────────────────────────────────────────────────
+  // Both of this pane's page-level controls now ride the documents level's own toolbar (the row
+  // under the rail's title), not a page-wide home bar — that strip was removed as clunky (Mike,
+  // 2026-09-24). Every query below goes through `within(toolbar-research-documents)` rather than
+  // `screen`, which is the only thing that makes these tests capable of failing: an unscoped
+  // `screen.getByRole("button", { name: "Create Document" })` finds the button whether it was
+  // published onto this level's toolbar or floating disconnected somewhere else on the page.
 
-  it("publishes the filters and Create Document INTO the home bar, filters before the button", async () => {
+  it("publishes the filters and Create Document onto the Documents list's toolbar, filters before the button", async () => {
     render(
       <Harness>
         <ResearchFeature basePath="/w1/research" />
       </Harness>,
     );
 
-    const strip = await screen.findByTestId("home-bar");
-    const bar = within(strip);
-    const search = bar.getByRole("searchbox", { name: "Search research documents" });
-    const create = bar.getByRole("button", { name: "Create Document" });
-    // The whole filter cluster, not just the search field: `railSlot` carried all three axes, so
-    // all three have to arrive.
-    bar.getByRole("combobox", { name: "Filter by category" });
-    bar.getByRole("combobox", { name: "Filter by tag" });
+    const toolbarEl = await screen.findByTestId("toolbar-research-documents");
+    const toolbar = within(toolbarEl);
+    const search = toolbar.getByRole("searchbox", { name: "Search research documents" });
+    const create = toolbar.getByRole("button", { name: "Create Document" });
+    // The whole filter cluster, not just the search field: `titleActions` carries both axes
+    // behind one gear now, so the gear has to arrive too.
+    const gear = toolbar.getByRole("button", { name: "Document filters" });
 
     // The fleet's placement rule — filters left, primary action right — which "both are present"
     // cannot see. MASKED, not `toBe(4)`: `compareDocumentPosition` returns a BITMASK, and the
     // FOLLOWING bit arrives OR-ed with others (CONTAINED_BY, IMPLEMENTATION_SPECIFIC) depending on
     // the nesting, so an equality assertion on it passes or fails for reasons unrelated to order.
-    expect(search.compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(search.compareDocumentPosition(gear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(gear.compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    // And nowhere ELSE. A control published into the bar but ALSO still handed to the rail as
-    // `onNew`/`railSlot` would satisfy every assertion above; only counting the whole document
+    // And nowhere ELSE. A control published onto this toolbar but ALSO still handed to the rail
+    // some other way would satisfy every assertion above; only counting the whole document
     // catches it.
     expect(screen.getAllByRole("button", { name: "Create Document" })).toHaveLength(1);
     expect(screen.getAllByRole("searchbox")).toHaveLength(1);
   });
 
-  it("still publishes the bar with ZERO documents — the first create is when it matters most", async () => {
-    // An empty list, and the create must survive it: gating the bar on having something to list is
-    // precisely the trap this branch exists to close (a brand-new tenant with no way to create
-    // anything at all). The unfiltered universe read is empty here too, so the category/tag
-    // dropdowns hold only their all-pass entries — the search field is what has to be there.
+  it("opens the category and tag axes from the toolbar's gear — the whole filter cluster arrives", async () => {
+    categories.mockResolvedValue(["Physics"]);
+    tags.mockResolvedValue(["alpha"]);
+    render(
+      <Harness>
+        <ResearchFeature basePath="/w1/research" />
+      </Harness>,
+    );
+
+    const toolbar = within(await screen.findByTestId("toolbar-research-documents"));
+    fireEvent.click(toolbar.getByRole("button", { name: "Document filters" }));
+    const menu = await screen.findByRole("menu");
+    // Both axes, each announcing its own current (all-pass) value — the replacement for the two
+    // plain `<select>`s this gear folded into one control.
+    within(menu).getByRole("menuitem", { name: "Category: all categories" });
+    within(menu).getByRole("menuitem", { name: "Tag: all tags" });
+  });
+
+  it("still publishes the toolbar with ZERO documents — the first create is when it matters most", async () => {
+    // An empty list, and the create must survive it: gating the toolbar on having something to
+    // list is precisely the trap this branch exists to close (a brand-new tenant with no way to
+    // create anything at all). The unfiltered universe read is empty here too, so the gear's
+    // menu holds only its all-pass entries — the search field is what has to be there.
     list.mockResolvedValue([]);
     render(
       <Harness>
@@ -926,16 +962,16 @@ describe("ResearchFeature", () => {
       </Harness>,
     );
 
-    const bar = within(await screen.findByTestId("home-bar"));
-    expect(bar.getByRole("button", { name: "Create Document" })).not.toBeNull();
-    expect(bar.getByRole("searchbox", { name: "Search research documents" })).not.toBeNull();
+    const toolbar = within(await screen.findByTestId("toolbar-research-documents"));
+    expect(toolbar.getByRole("button", { name: "Create Document" })).not.toBeNull();
+    expect(toolbar.getByRole("searchbox", { name: "Search research documents" })).not.toBeNull();
   });
 
-  it("filters the list from the home bar's search field", async () => {
-    // The publish is a PORTAL, not a move: the field left this pane's DOM subtree but still sits in
-    // its React tree, so typing in the strip must still drive the pane's `filters` state and reach
-    // the list request. A field that rendered in the bar but no longer fed the list would pass
-    // every placement assertion above.
+  it("filters the list from the toolbar's search field", async () => {
+    // The search box is the level's own controlled `search`, not a separate copy: typing in the
+    // toolbar must still drive the pane's `filters` state and reach the list request. A field
+    // that rendered on the toolbar but no longer fed the list would pass every placement
+    // assertion above.
     list.mockImplementation(async (f) => (f?.q ? [] : [structuredClone(SUMMARY)]));
     render(
       <Harness>
@@ -944,8 +980,8 @@ describe("ResearchFeature", () => {
     );
     expect(await screen.findByText("Federated learning notes")).not.toBeNull();
 
-    const bar = within(await screen.findByTestId("home-bar"));
-    fireEvent.change(bar.getByRole("searchbox", { name: "Search research documents" }), {
+    const toolbar = within(await screen.findByTestId("toolbar-research-documents"));
+    fireEvent.change(toolbar.getByRole("searchbox", { name: "Search research documents" }), {
       target: { value: "fed" },
     });
     await waitFor(() =>

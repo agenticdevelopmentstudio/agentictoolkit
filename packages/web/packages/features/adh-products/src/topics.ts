@@ -10,6 +10,10 @@
  * stability) = Users / Requests / Pending users / Invites, Authentication = User Auth /
  * Sign-in apps / Storage Access Tokens / Email Signup.
  *
+ * `features` names the catalog feature(s) behind each row: the rail draws a row only while the
+ * product holds one of them, so the list and its Manage features dialog always agree. "Users" and
+ * "Customers" both answer to `users` — the catalog's own copy says they are the same thing.
+ *
  * These rows are all scoped to the OPEN PRODUCT's ecosystem. Several of them name a surface
  * that ALSO exists at workspace level, scoped to the workspace's default ecosystem instead —
  * Storage on agenticdeveloperstorage.com, Integrations on agenticdeveloperintegrations.com,
@@ -24,15 +28,15 @@
 export const PRODUCT_TOPICS = [
   // No "features" row: this list IS the product's features (EcosystemsFeature heads it
   // "Features"), and adding or removing them is the list's own title-row tool menu.
-  { id: "storage", label: "Storage", dividerAfter: false },
-  { id: "integrations", label: "Integrations", dividerAfter: false },
+  { id: "storage", label: "Storage", dividerAfter: false, features: ["storage"] },
+  { id: "integrations", label: "Integrations", dividerAfter: false, features: ["integrations"] },
   // Messaging: send email/SMS to this product's customers via its OWN connected
   // Postmark/Twilio integration (the promoted admin Messaging tool). Always shown; each
   // channel is disabled until its provider is connected on Integrations.
-  { id: "messaging", label: "Messaging", dividerAfter: false },
-  { id: "applications", label: "Applications", dividerAfter: false },
-  { id: "dashboards", label: "Dashboards", dividerAfter: true },
-  { id: "invitations", label: "Users", dividerAfter: false },
+  { id: "messaging", label: "Messaging", dividerAfter: false, features: ["messaging"] },
+  { id: "applications", label: "Applications", dividerAfter: false, features: ["applications"] },
+  { id: "dashboards", label: "Dashboards", dividerAfter: true, features: ["dashboards"] },
+  { id: "invitations", label: "Users", dividerAfter: false, features: ["users"] },
   // Everything about HOW someone gets in, as one GROUP rather than four rows spread down the
   // rail: the product's own auth policy (User Auth), the sign-in clients it vends
   // (oauth.clients — the apps a developer registers so their site can sign its own customers in
@@ -44,7 +48,12 @@ export const PRODUCT_TOPICS = [
   // view." — an apparently empty product, no 404, nothing in the console. EcosystemsFeature's
   // `GROUP_MEMBER_GROUP` (derived from `groupMembers`) is what closes it, via the explorer's
   // `topicAliases`. Members themselves live in EcosystemsFeature's `groupMembers`.
-  { id: "authentication", label: "Authentication", dividerAfter: false },
+  {
+    id: "authentication",
+    label: "Authentication",
+    dividerAfter: false,
+    features: ["user-authentication", "signin-apps", "storage-access-tokens", "email-signup"],
+  },
   // (Communities sat here, was removed for having no surface on any host, and came back below
   // with the rest of the hub's Products group — parked deliberately this time, because the
   // workspace rail offered it and moving that rail down whole is what dropping it would undo.)
@@ -52,12 +61,12 @@ export const PRODUCT_TOPICS = [
   // productTopicPaneRenderer) whose member list depends on the realm's mode ('none' /
   // 'gamification' / 'game'): badges/levels/streaks engagement on a regular product, or a
   // full dedicated game (engine/content/connections/effects) with gamification tuned for it.
-  { id: "gaming", label: "Gaming", dividerAfter: false },
+  { id: "gaming", label: "Gaming", dividerAfter: false, features: ["gaming", "gamification"] },
   // Per-product feature flags + server bags — named on/off toggles and arbitrary
   // key → JSON config values this product's apps / backend read at runtime.
-  { id: "feature-flags", label: "Feature flags", dividerAfter: false },
-  { id: "server-bags", label: "Server bags", dividerAfter: false },
-  { id: "billing", label: "Billing", dividerAfter: false },
+  { id: "feature-flags", label: "Feature flags", dividerAfter: false, features: ["feature-flags"] },
+  { id: "server-bags", label: "Server bags", dividerAfter: false, features: ["server-bags"] },
+  { id: "billing", label: "Billing", dividerAfter: false, features: ["billing"] },
   // ── The rows that came DOWN from the hub's workspace rail (2026-08-24) ──────────────────────
   // Each one is a surface OF a product — a product has customers, devices, domains, a store;
   // a workspace does not — so the hub stopped offering them workspace-wide and they are topics
@@ -65,14 +74,14 @@ export const PRODUCT_TOPICS = [
   // arrive without panes: every one is a fleet site whose own workspace implementation is still
   // the shared placeholder, so {@link PLACEHOLDER_TOPIC_IDS} answers all eight in-package rather
   // than making both hosts write the same "coming soon" eight times.
-  { id: "communities", label: "Communities", dividerAfter: false },
-  { id: "customers", label: "Customers", dividerAfter: false },
-  { id: "devices", label: "Devices", dividerAfter: false },
-  { id: "domains", label: "Domains", dividerAfter: false },
-  { id: "education", label: "Education", dividerAfter: false },
-  { id: "notifications", label: "Notifications", dividerAfter: false },
-  { id: "sites", label: "Sites", dividerAfter: false },
-  { id: "stores", label: "Stores", dividerAfter: true },
+  { id: "communities", label: "Communities", dividerAfter: false, features: ["communities"] },
+  { id: "customers", label: "Customers", dividerAfter: false, features: ["users"] },
+  { id: "devices", label: "Devices", dividerAfter: false, features: ["devices"] },
+  { id: "domains", label: "Domains", dividerAfter: false, features: ["domains"] },
+  { id: "education", label: "Education", dividerAfter: false, features: ["education"] },
+  { id: "notifications", label: "Notifications", dividerAfter: false, features: ["notifications"] },
+  { id: "sites", label: "Sites", dividerAfter: false, features: ["sites"] },
+  { id: "stores", label: "Stores", dividerAfter: true, features: ["stores"] },
   // The product's own entity/settings pane (name/slug/description + Danger). Last in the
   // rail; selected by id === "settings" in the toolkit's EcosystemsFeature.
   { id: "settings", label: "Ecosystem Settings", dividerAfter: false },

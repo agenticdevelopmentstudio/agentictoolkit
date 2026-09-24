@@ -1,17 +1,17 @@
 "use client";
 
-import { Settings } from "lucide-react";
-
-import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuLabel,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from "@agenticdevelopertoolkit/ui/components/dropdown-menu";
+import { GearMenuTrigger } from "@agenticdevelopertoolkit/ui/blocks";
 
 import {
   PREVIEW_LINES_MAX,
@@ -19,6 +19,22 @@ import {
   setPreviewLines,
   usePreviewLines,
 } from "./preview-lines";
+
+/**
+ * The three axes the notes list narrows on. All three are FILTERS over whatever the rail is
+ * already showing — `category` in particular is NOT the rail's category selection: the rail
+ * scopes (which part of the notebook you are standing in) and this narrows within it. Naming
+ * two different categories therefore yields nothing, which is the honest answer to what was
+ * asked; see `resolveListCategory` in note-model.ts.
+ */
+export interface FilterState {
+  /** Free-text search over the note bodies — the list's own pop-over search, not this menu. */
+  q: string;
+  /** Exact category name, or `""` for no narrowing. */
+  category: string;
+  /** Exact tag label, or `""` for no narrowing. */
+  tag: string;
+}
 
 const CHOICES = Array.from(
   { length: PREVIEW_LINES_MAX - PREVIEW_LINES_MIN + 1 },
@@ -31,39 +47,93 @@ function choiceLabel(n: number): string {
 }
 
 /**
- * The notes list's gear: how much of each note's body its row shows.
+ * The notes list's gear, on its own toolbar: the category/tag filters, the two taxonomy
+ * editors, and how much of each note's body a row shows.
  *
- * It sits in the level's `titleActions` rather than in the button bar below the workspace
- * bar, because it is about THIS LIST'S APPEARANCE, not about which notes are in it. The bar
- * holds the axes that change the set (search, category, tags); the gear changes nothing a
- * reader would see as a different result. Keeping the two apart is what makes the `+` the
- * only thing that left this header.
+ * The filters and editors were a button bar in the page-wide home bar until that strip was
+ * removed as clunky (Mike, 2026-09-24). A rail is too narrow to hold two selects open, so they
+ * fold in here beside the appearance setting that was already the gear's; search became the
+ * toolbar's pop-over and Create Note its `+`. The option sets are the caller's, taken from the
+ * UNFILTERED note universe, so narrowing the list can never empty the menus that got it there.
  *
- * The value lives in `preview-lines.ts` — every list in the tab follows a change here
+ * The preview value lives in `preview-lines.ts` — every list in the tab follows a change here
  * immediately, and it survives a reload.
  */
-export function NoteListOptions() {
+export function NoteListOptions({
+  filters,
+  onChange,
+  categories,
+  tags,
+  onEditCategories,
+  onEditTags,
+  label = "Notes list options",
+}: {
+  filters: FilterState;
+  onChange: (next: FilterState) => void;
+  /** Category names to offer. */
+  categories: readonly string[];
+  /** Tag labels to offer. */
+  tags: readonly string[];
+  onEditCategories: () => void;
+  onEditTags: () => void;
+  /** The gear's accessible name; the corpus names its own list. */
+  label?: string;
+}) {
   const lines = usePreviewLines();
+  const axes = [
+    { name: "category", title: "Category", allLabel: "All categories", options: categories },
+    { name: "tag", title: "Tag", allLabel: "All tags", options: tags },
+  ] as const;
+  // The gear says whether it is narrowing anything: a filter chosen here is otherwise invisible
+  // once the menu closes, and a list that silently hides rows reads as a list that lost them.
+  const active = filters.category !== "" || filters.tag !== "";
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={<Button variant="ghost" size="icon-sm" aria-label="Notes list options" />}
-      >
-        <Settings className="adh-button__icon" />
-      </DropdownMenuTrigger>
+      <GearMenuTrigger
+        label={active ? `${label} (filtered)` : label}
+        className={active ? "text-apt-gold" : undefined}
+      />
       <DropdownMenuContent align="end">
-        <DropdownMenuLabel>Preview lines</DropdownMenuLabel>
+        {axes.map((axis) => (
+          <DropdownMenuSub key={axis.name}>
+            <DropdownMenuSubTrigger>
+              {axis.title}: {filters[axis.name] || axis.allLabel.toLowerCase()}
+            </DropdownMenuSubTrigger>
+            {/* No <DropdownMenuPortal> wrapper: this engine's SubContent portals itself. */}
+            <DropdownMenuSubContent>
+              <DropdownMenuRadioGroup
+                value={filters[axis.name]}
+                onValueChange={(value) => onChange({ ...filters, [axis.name]: value })}
+              >
+                <DropdownMenuRadioItem value="">{axis.allLabel}</DropdownMenuRadioItem>
+                {axis.options.map((opt) => (
+                  <DropdownMenuRadioItem key={opt} value={opt}>
+                    {opt}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        ))}
         <DropdownMenuSeparator />
-        <DropdownMenuRadioGroup
-          value={String(lines)}
-          onValueChange={(next) => setPreviewLines(Number(next))}
-        >
-          {CHOICES.map((n) => (
-            <DropdownMenuRadioItem key={n} value={String(n)}>
-              {choiceLabel(n)}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
+        <DropdownMenuItem onClick={onEditCategories}>Edit categories…</DropdownMenuItem>
+        <DropdownMenuItem onClick={onEditTags}>Edit tags…</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Preview: {choiceLabel(lines).toLowerCase()}</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuRadioGroup
+              value={String(lines)}
+              onValueChange={(next) => setPreviewLines(Number(next))}
+            >
+              {CHOICES.map((n) => (
+                <DropdownMenuRadioItem key={n} value={String(n)}>
+                  {choiceLabel(n)}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
       </DropdownMenuContent>
     </DropdownMenu>
   );

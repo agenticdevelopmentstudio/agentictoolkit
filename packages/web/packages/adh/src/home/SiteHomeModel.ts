@@ -107,10 +107,11 @@ export interface SiteHomeShellProps {
  * One site's workspace-route declaration. `View` is inferred from `parse`, so a site never names
  * it.
  *
- * There is no slot here for a page's controls. A site's search, filters, and its primary "Add"
- * go in the HOME BAR — the strip between the workspace bar and the breadcrumb bar — which the
- * FEATURE publishes into with `HomeBarPortal`, from inside `render`. That keeps a control in the
- * same React tree as the state it drives, which the model's own slot could never do.
+ * There is no slot here for a page's controls. A list's search, filters and create live on that
+ * list's own rail toolbar (`TopicLevel.onNew` / `search` / `titleActions`), set by the FEATURE
+ * from inside `render`. That keeps a control in the same React tree as the state it drives, which
+ * the model's own slot could never do. (A page-wide home bar held them until 2026-09-24, when it
+ * was removed as clunky.)
  */
 export interface SiteHomeModel<View, Host extends SiteHomeHostSeams = SiteHomeHostSeams> {
   /**
