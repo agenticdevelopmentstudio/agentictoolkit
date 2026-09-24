@@ -21,6 +21,7 @@ import { Checkbox } from "@agenticdevelopertoolkit/ui/components/checkbox";
 import { Label } from "@agenticdevelopertoolkit/ui/components/label";
 
 import { SettingRow } from "@agentic-toolkit/account";
+import { SettingsBody } from "@agentic-toolkit/resource";
 
 /**
  * Appearance: accessibility preferences, plus a dev-only theme picker. Each control writes
@@ -189,63 +190,61 @@ export function AppearancePanel(): ReactElement {
   const { prefs, set } = useAppearanceSettings();
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-      <div className="max-w-3xl space-y-7">
-        <p className="text-sm text-apt-text-muted">
-          “Default” follows your device’s own setting where possible. These
-          preferences are saved to your account, so they follow you to every site
-          in the family.
-        </p>
+    <SettingsBody>
+      <p className="text-sm text-apt-text-muted">
+        “Default” follows your device’s own setting where possible. These
+        preferences are saved to your account, so they follow you to every site
+        in the family.
+      </p>
 
-        <ThemePickerRow />
+      <ThemePickerRow />
 
-        <SegmentedRow
-          label="Reduce motion"
-          description="Minimise animations and transitions."
-          value={prefs.reduceMotion}
-          options={REDUCE_MOTION_OPTIONS}
-          onChange={(reduceMotion) => set({ reduceMotion })}
+      <SegmentedRow
+        label="Reduce motion"
+        description="Minimise animations and transitions."
+        value={prefs.reduceMotion}
+        options={REDUCE_MOTION_OPTIONS}
+        onChange={(reduceMotion) => set({ reduceMotion })}
+      />
+
+      <SegmentedRow
+        label="Contrast"
+        description="Strengthen text and border contrast."
+        value={prefs.contrast}
+        options={CONTRAST_OPTIONS}
+        onChange={(contrast) => set({ contrast })}
+      />
+
+      <SegmentedRow
+        label="Text size"
+        value={prefs.textSize}
+        options={TEXT_SIZE_OPTIONS}
+        onChange={(textSize) => set({ textSize })}
+      />
+
+      <SegmentedRow
+        label="Spacing"
+        description="Density of layout spacing."
+        value={prefs.spacing}
+        options={SPACING_OPTIONS}
+        onChange={(spacing) => set({ spacing })}
+      />
+
+      <div className="space-y-4 border-t border-apt-border pt-6">
+        <CheckboxRow
+          id="appearance-focus-outlines"
+          label="Always show focus outlines"
+          description="Show the focus ring even when navigating with a mouse."
+          checked={prefs.focusOutlines}
+          onCheckedChange={(focusOutlines) => set({ focusOutlines })}
         />
-
-        <SegmentedRow
-          label="Contrast"
-          description="Strengthen text and border contrast."
-          value={prefs.contrast}
-          options={CONTRAST_OPTIONS}
-          onChange={(contrast) => set({ contrast })}
+        <CheckboxRow
+          id="appearance-underline-links"
+          label="Always underline links"
+          checked={prefs.underlineLinks}
+          onCheckedChange={(underlineLinks) => set({ underlineLinks })}
         />
-
-        <SegmentedRow
-          label="Text size"
-          value={prefs.textSize}
-          options={TEXT_SIZE_OPTIONS}
-          onChange={(textSize) => set({ textSize })}
-        />
-
-        <SegmentedRow
-          label="Spacing"
-          description="Density of layout spacing."
-          value={prefs.spacing}
-          options={SPACING_OPTIONS}
-          onChange={(spacing) => set({ spacing })}
-        />
-
-        <div className="space-y-4 border-t border-apt-border pt-6">
-          <CheckboxRow
-            id="appearance-focus-outlines"
-            label="Always show focus outlines"
-            description="Show the focus ring even when navigating with a mouse."
-            checked={prefs.focusOutlines}
-            onCheckedChange={(focusOutlines) => set({ focusOutlines })}
-          />
-          <CheckboxRow
-            id="appearance-underline-links"
-            label="Always underline links"
-            checked={prefs.underlineLinks}
-            onCheckedChange={(underlineLinks) => set({ underlineLinks })}
-          />
-        </div>
       </div>
-    </div>
+    </SettingsBody>
   );
 }

@@ -27,7 +27,7 @@ import {
   PRIVACY_LEVEL_FROM_WIRE,
   type PrivacyLevel,
 } from "@agenticdevelopertoolkit/ui/components/privacy-level-select";
-import { useSettingsDirty } from "@agentic-toolkit/resource";
+import { useSettingsDirty, SettingsBody } from "@agentic-toolkit/resource";
 import { Card, CardContent } from "@agenticdevelopertoolkit/ui/components/card";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Label } from "@agenticdevelopertoolkit/ui/components/label";
@@ -340,16 +340,17 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
   // ── Loading / error guards ─────────────────────────────────────────────────
   if (meQuery.isLoading) {
     return (
-      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center py-12">
+      // In the body every section scrolls in, not centred: a status line sits where the form will.
+      <SettingsBody>
         <p className="text-sm text-apt-text-muted">Loading…</p>
-      </div>
+      </SettingsBody>
     );
   }
   if (meQuery.isError || !me) {
     return (
-      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center py-12">
+      <SettingsBody>
         <ErrorText error="Could not load profile. Refresh to try again." />
-      </div>
+      </SettingsBody>
     );
   }
 
@@ -371,124 +372,122 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
         }
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-        <div className="max-w-3xl space-y-8">
+      <SettingsBody>
 
-          {/* ── Identity ─────────────────────────────────────────────── */}
-          <DetailSection title="Public profile">
-            <Card>
-              <CardContent className="flex flex-col gap-5">
-                {/* Display name */}
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="profile-display-name">Display name</Label>
-                  <Input
-                    id="profile-display-name"
-                    value={name}
-                    onChange={(e) => {
-                      setEdits((prev) => ({ ...prev, name: e.target.value }));
-                      setSaveError(null);
-                    }}
-                    placeholder="Your name"
-                    autoComplete="name"
-                  />
-                  <p className="text-xs text-apt-text-muted">
-                    Shown on your public profile and personas.
-                  </p>
-                </div>
+        {/* ── Identity ─────────────────────────────────────────────── */}
+        <DetailSection title="Public profile">
+          <Card>
+            <CardContent className="flex flex-col gap-5">
+              {/* Display name */}
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="profile-display-name">Display name</Label>
+                <Input
+                  id="profile-display-name"
+                  value={name}
+                  onChange={(e) => {
+                    setEdits((prev) => ({ ...prev, name: e.target.value }));
+                    setSaveError(null);
+                  }}
+                  placeholder="Your name"
+                  autoComplete="name"
+                />
+                <p className="text-xs text-apt-text-muted">
+                  Shown on your public profile and personas.
+                </p>
+              </div>
 
-                {/* Slug */}
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="profile-slug">Slug</Label>
-                  <Input
-                    id="profile-slug"
-                    value={slug}
-                    onChange={(e) => {
-                      setEdits((prev) => ({
-                        ...prev,
-                        slug: e.target.value.toLowerCase(),
-                      }));
-                      setSaveError(null);
-                    }}
-                    placeholder={suggestedSlug || "your-handle"}
-                    aria-invalid={Boolean(shownSlugError)}
-                    aria-describedby="profile-slug-hint"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
-                  />
-                  <p id="profile-slug-hint" className="text-xs">
-                    {shownSlugError ? (
-                      <span className="text-apt-red">{shownSlugError}</span>
-                    ) : slugStatus === "checking" ? (
-                      <span className="text-apt-text-muted">Checking…</span>
-                    ) : slugStatus === "available" ? (
-                      <span className="text-apt-green">Available.</span>
-                    ) : slugStatus === "unavailable" ? (
-                      <span className="text-apt-red">
-                        {slugUnavailReason === "taken"
-                          ? "That slug is already taken."
-                          : "Invalid slug format."}
-                      </span>
-                    ) : slugStatus === "avail-error" ? (
-                      <span className="text-apt-red">
-                        Couldn&apos;t check availability — try again
-                      </span>
-                    ) : (
-                      <span className="text-apt-text-muted">
-                        Your public URL:{" "}
-                        <span className="text-apt-text">
-                          {profileUrlFor(displaySlug || "…")}
-                        </span>
-                      </span>
-                    )}
-                  </p>
-                </div>
-
-                {/* Profile visibility */}
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex flex-col gap-1">
-                    <Label className="leading-snug">
-                      Profile visibility
-                    </Label>
-                    <p className="text-xs text-apt-text-muted">
-                      Your profile is at{" "}
+              {/* Slug */}
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="profile-slug">Slug</Label>
+                <Input
+                  id="profile-slug"
+                  value={slug}
+                  onChange={(e) => {
+                    setEdits((prev) => ({
+                      ...prev,
+                      slug: e.target.value.toLowerCase(),
+                    }));
+                    setSaveError(null);
+                  }}
+                  placeholder={suggestedSlug || "your-handle"}
+                  aria-invalid={Boolean(shownSlugError)}
+                  aria-describedby="profile-slug-hint"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+                <p id="profile-slug-hint" className="text-xs">
+                  {shownSlugError ? (
+                    <span className="text-apt-red">{shownSlugError}</span>
+                  ) : slugStatus === "checking" ? (
+                    <span className="text-apt-text-muted">Checking…</span>
+                  ) : slugStatus === "available" ? (
+                    <span className="text-apt-green">Available.</span>
+                  ) : slugStatus === "unavailable" ? (
+                    <span className="text-apt-red">
+                      {slugUnavailReason === "taken"
+                        ? "That slug is already taken."
+                        : "Invalid slug format."}
+                    </span>
+                  ) : slugStatus === "avail-error" ? (
+                    <span className="text-apt-red">
+                      Couldn&apos;t check availability — try again
+                    </span>
+                  ) : (
+                    <span className="text-apt-text-muted">
+                      Your public URL:{" "}
                       <span className="text-apt-text">
                         {profileUrlFor(displaySlug || "…")}
                       </span>
-                    </p>
-                  </div>
-                  <div className="w-44">
-                    <PrivacyLevelSelect
-                      value={profileVisibility}
-                      ariaLabel="Profile visibility"
-                      onChange={(next) => {
-                        setEdits((prev) => ({ ...prev, profileVisibility: next }));
-                        setSaveError(null);
-                      }}
-                    />
-                  </div>
+                    </span>
+                  )}
+                </p>
+              </div>
+
+              {/* Profile visibility */}
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col gap-1">
+                  <Label className="leading-snug">
+                    Profile visibility
+                  </Label>
+                  <p className="text-xs text-apt-text-muted">
+                    Your profile is at{" "}
+                    <span className="text-apt-text">
+                      {profileUrlFor(displaySlug || "…")}
+                    </span>
+                  </p>
                 </div>
-              </CardContent>
-            </Card>
-          </DetailSection>
+                <div className="w-44">
+                  <PrivacyLevelSelect
+                    value={profileVisibility}
+                    ariaLabel="Profile visibility"
+                    onChange={(next) => {
+                      setEdits((prev) => ({ ...prev, profileVisibility: next }));
+                      setSaveError(null);
+                    }}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </DetailSection>
 
-          {/* ── Avatar ───────────────────────────────────────────────── */}
-          <AvatarSection me={me} grants={grants} />
+        {/* ── Avatar ───────────────────────────────────────────────── */}
+        <AvatarSection me={me} grants={grants} />
 
-          {/* ── Live preview ──────────────────────────────────────────── */}
-          <DetailSection title="Card preview">
-            <p className="text-xs text-apt-text-muted">
-              This is how your profile card looks to you. Visibility settings
-              above control what others see.
-            </p>
-            {previewDto ? (
-              <UserCard user={previewDto} />
-            ) : (
-              <UserCardSkeleton />
-            )}
-          </DetailSection>
-        </div>
-      </div>
+        {/* ── Live preview ──────────────────────────────────────────── */}
+        <DetailSection title="Card preview">
+          <p className="text-xs text-apt-text-muted">
+            This is how your profile card looks to you. Visibility settings
+            above control what others see.
+          </p>
+          {previewDto ? (
+            <UserCard user={previewDto} />
+          ) : (
+            <UserCardSkeleton />
+          )}
+        </DetailSection>
+      </SettingsBody>
     </div>
   );
 }

@@ -8,7 +8,7 @@ import Link from "next/link";
 import { useAuth } from "@agentic-toolkit/auth";
 import { changePassword } from "../api/auth";
 import { reportUnexpectedAuthError } from "@agentic-toolkit/auth";
-import { useSettingsDirty } from "@agentic-toolkit/resource";
+import { useSettingsDirty, SettingsBody } from "@agentic-toolkit/resource";
 import { Card, CardContent } from "@agenticdevelopertoolkit/ui/components/card";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Label } from "@agenticdevelopertoolkit/ui/components/label";
@@ -93,102 +93,100 @@ export function AccountPanel() {
           ) : null
         }
       />
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-        <div className="max-w-3xl space-y-8">
-          <DetailSection title="Email">
-            <Card>
-              <CardContent className="flex flex-col gap-2">
-                <p className="text-sm text-apt-text-muted">
-                  Current:{" "}
-                  <span className="text-apt-text">{user.email}</span>
-                </p>
-                <p className="text-xs text-apt-text-muted">
-                  To add or change email addresses, go to{" "}
-                  {/* The ACCOUNT's Notifications section, where the email addresses this
-                      paragraph is about are edited — a SIBLING of this panel in the same
-                      rail, not a route.
+      <SettingsBody>
+        <DetailSection title="Email">
+          <Card>
+            <CardContent className="flex flex-col gap-2">
+              <p className="text-sm text-apt-text-muted">
+                Current:{" "}
+                <span className="text-apt-text">{user.email}</span>
+              </p>
+              <p className="text-xs text-apt-text-muted">
+                To add or change email addresses, go to{" "}
+                {/* The ACCOUNT's Notifications section, where the email addresses this
+                    paragraph is about are edited — a SIBLING of this panel in the same
+                    rail, not a route.
 
-                      Twice a URL, twice wrong. `/<slug>/notifications` was a workspace
-                      feature path no feature ever claimed and it 404'd on hub; changing it to
-                      `/settings/notifications` fixed hub and broke the other 44 sites, where
-                      no `app/settings/` directory exists at all — and there the 404 costs the
-                      user the modal AND the page it was layered over. There is no href that
-                      is right on every host, because on most of them the section has no URL.
+                    Twice a URL, twice wrong. `/<slug>/notifications` was a workspace
+                    feature path no feature ever claimed and it 404'd on hub; changing it to
+                    `/settings/notifications` fixed hub and broke the other 44 sites, where
+                    no `app/settings/` directory exists at all — and there the 404 costs the
+                    user the modal AND the page it was layered over. There is no href that
+                    is right on every host, because on most of them the section has no URL.
 
-                      So ask the host to switch sections instead (settings-nav.tsx).
-                      `goToTopic` is null only where the panel is rendered outside a
-                      SettingsLayout rail — hub's workspace-settings stack, which is hub-only,
-                      and where /settings/notifications does resolve. */}
-                  {goToTopic ? (
-                    <button
-                      type="button"
-                      onClick={() => goToTopic("notifications")}
-                      className="text-apt-text underline hover:text-apt-text-muted"
-                    >
-                      Notifications
-                    </button>
-                  ) : (
-                    <Link
-                      href="/settings/notifications"
-                      className="text-apt-text underline hover:text-apt-text-muted"
-                    >
-                      Notifications
-                    </Link>
-                  )}
-                  .
-                </p>
-              </CardContent>
-            </Card>
-          </DetailSection>
+                    So ask the host to switch sections instead (settings-nav.tsx).
+                    `goToTopic` is null only where the panel is rendered outside a
+                    SettingsLayout rail — hub's workspace-settings stack, which is hub-only,
+                    and where /settings/notifications does resolve. */}
+                {goToTopic ? (
+                  <button
+                    type="button"
+                    onClick={() => goToTopic("notifications")}
+                    className="text-apt-text underline hover:text-apt-text-muted"
+                  >
+                    Notifications
+                  </button>
+                ) : (
+                  <Link
+                    href="/settings/notifications"
+                    className="text-apt-text underline hover:text-apt-text-muted"
+                  >
+                    Notifications
+                  </Link>
+                )}
+                .
+              </p>
+            </CardContent>
+          </Card>
+        </DetailSection>
 
-          <DetailSection title="Password">
-            <Card>
-              <CardContent className="flex flex-col gap-4">
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="account-current-password">Current password</Label>
-                  <Input
-                    id="account-current-password"
-                    type="password"
-                    value={current}
-                    onChange={(e) => {
-                      setCurrent(e.target.value);
-                      setStatus(null);
-                    }}
-                    autoComplete="current-password"
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="account-new-password">New password</Label>
-                  <Input
-                    id="account-new-password"
-                    type="password"
-                    value={next}
-                    onChange={(e) => {
-                      setNext(e.target.value);
-                      setStatus(null);
-                    }}
-                    autoComplete="new-password"
-                  />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="account-confirm-password">Confirm new password</Label>
-                  <Input
-                    id="account-confirm-password"
-                    type="password"
-                    value={confirm}
-                    onChange={(e) => {
-                      setConfirm(e.target.value);
-                      setStatus(null);
-                    }}
-                    autoComplete="new-password"
-                  />
-                </div>
-                <ErrorText error={pwError} className="text-xs" />
-              </CardContent>
-            </Card>
-          </DetailSection>
-        </div>
-      </div>
+        <DetailSection title="Password">
+          <Card>
+            <CardContent className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="account-current-password">Current password</Label>
+                <Input
+                  id="account-current-password"
+                  type="password"
+                  value={current}
+                  onChange={(e) => {
+                    setCurrent(e.target.value);
+                    setStatus(null);
+                  }}
+                  autoComplete="current-password"
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="account-new-password">New password</Label>
+                <Input
+                  id="account-new-password"
+                  type="password"
+                  value={next}
+                  onChange={(e) => {
+                    setNext(e.target.value);
+                    setStatus(null);
+                  }}
+                  autoComplete="new-password"
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="account-confirm-password">Confirm new password</Label>
+                <Input
+                  id="account-confirm-password"
+                  type="password"
+                  value={confirm}
+                  onChange={(e) => {
+                    setConfirm(e.target.value);
+                    setStatus(null);
+                  }}
+                  autoComplete="new-password"
+                />
+              </div>
+              <ErrorText error={pwError} className="text-xs" />
+            </CardContent>
+          </Card>
+        </DetailSection>
+      </SettingsBody>
     </div>
   );
 }

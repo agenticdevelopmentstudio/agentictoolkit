@@ -23,6 +23,7 @@ import {
   setSiteMenuShortcut,
   useHubPreferences,
 } from "@agentic-toolkit/adh/header/hub-preferences";
+import { SettingsBody } from "@agentic-toolkit/resource";
 
 /** The site menu's own registration, so the conflict check does not report the shortcut
  *  colliding with itself. Must match the `label` SiteMenu passes as `openShortcut`. */
@@ -104,75 +105,73 @@ export function HubPreferencesPanel(): ReactElement {
   const isOff = siteMenuShortcut === "";
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-      <div className="max-w-3xl space-y-7">
-        <p className="text-sm text-apt-text-muted">
-          Preferences for the hub&rsquo;s own chrome. Unlike the rest of your settings,
-          these are saved to this browser rather than to your account &mdash; a keyboard
-          shortcut belongs to the keyboard in front of you.
-        </p>
+    <SettingsBody>
+      <p className="text-sm text-apt-text-muted">
+        Preferences for the hub&rsquo;s own chrome. Unlike the rest of your settings,
+        these are saved to this browser rather than to your account &mdash; a keyboard
+        shortcut belongs to the keyboard in front of you.
+      </p>
 
-        <SettingRow
-          label="Site menu shortcut"
-          description="Opens and closes the site menu from anywhere, including while you are typing."
-        >
-          <div className="flex items-center gap-2">
-            <span
-              className="min-w-24 rounded-md border border-apt-border px-3 py-1.5 text-center font-mono text-sm text-apt-text"
-              aria-live="polite"
-            >
-              {recording.state === "listening"
-                ? "Press keys…"
-                : !mounted
-                  ? " "
-                  : isOff
-                    ? "Off"
-                    : formatChord(siteMenuShortcut)}
-            </span>
-            {recording.state === "listening" ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setRecording({ state: "idle" })}
-              >
-                Cancel
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setRecording({ state: "listening" })}
-              >
-                {isOff ? "Set" : "Change"}
-              </Button>
-            )}
+      <SettingRow
+        label="Site menu shortcut"
+        description="Opens and closes the site menu from anywhere, including while you are typing."
+      >
+        <div className="flex items-center gap-2">
+          <span
+            className="min-w-24 rounded-md border border-apt-border px-3 py-1.5 text-center font-mono text-sm text-apt-text"
+            aria-live="polite"
+          >
+            {recording.state === "listening"
+              ? "Press keys…"
+              : !mounted
+                ? " "
+                : isOff
+                  ? "Off"
+                  : formatChord(siteMenuShortcut)}
+          </span>
+          {recording.state === "listening" ? (
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              disabled={isDefault}
-              onClick={() => save(DEFAULT_SITE_MENU_SHORTCUT)}
+              onClick={() => setRecording({ state: "idle" })}
             >
-              Reset
+              Cancel
             </Button>
-            <Button variant="ghost" size="sm" disabled={isOff} onClick={() => save("")}>
-              Turn off
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRecording({ state: "listening" })}
+            >
+              {isOff ? "Set" : "Change"}
             </Button>
-          </div>
-        </SettingRow>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={isDefault}
+            onClick={() => save(DEFAULT_SITE_MENU_SHORTCUT)}
+          >
+            Reset
+          </Button>
+          <Button variant="ghost" size="sm" disabled={isOff} onClick={() => save("")}>
+            Turn off
+          </Button>
+        </div>
+      </SettingRow>
 
-        {recording.state === "listening" && (
-          <p className="text-xs text-apt-text-muted">
-            Press the combination you want. Escape cancels; Escape and Tab cannot be bound.
-          </p>
-        )}
+      {recording.state === "listening" && (
+        <p className="text-xs text-apt-text-muted">
+          Press the combination you want. Escape cancels; Escape and Tab cannot be bound.
+        </p>
+      )}
 
-        {recording.state === "conflict" && (
-          <p className="text-xs text-apt-red" role="alert">
-            {formatChord(recording.keys)} is already{" "}
-            <span className="font-medium">{recording.with}</span>. Pick another combination.
-          </p>
-        )}
-      </div>
-    </div>
+      {recording.state === "conflict" && (
+        <p className="text-xs text-apt-red" role="alert">
+          {formatChord(recording.keys)} is already{" "}
+          <span className="font-medium">{recording.with}</span>. Pick another combination.
+        </p>
+      )}
+    </SettingsBody>
   );
 }

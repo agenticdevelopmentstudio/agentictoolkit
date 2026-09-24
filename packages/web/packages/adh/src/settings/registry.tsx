@@ -67,8 +67,8 @@ import {
 //   • ICONS and PANELS are `Record<SettingsTopicId, …>` — every section must have both.
 //     Keyed by `string` (as they were), adding a 14th topic to topics.ts compiled clean
 //     and shipped a rail row with no icon that rendered an EMPTY details pane.
-//   • HELP, API_PATHS and SELF_TITLED are `Partial`/a set — an absent entry is a real
-//     answer there (no help line, no backing endpoint, not self-titled), so requiring
+//   • HELP and API_PATHS are `Partial` — an absent entry is a real answer there (no help
+//     line, no backing endpoint), so requiring
 //     them would force placeholder junk.
 const ICONS: Record<SettingsTopicId, ReactNode> = {
   account: <User size={16} aria-hidden />,
@@ -89,6 +89,8 @@ const ICONS: Record<SettingsTopicId, ReactNode> = {
 
 const HELP: Partial<Record<SettingsTopicId, string>> = {
   account: "Your sign-in email and password.",
+  security: "Two-factor authentication, passkeys and recovery codes.",
+  notifications: "What the hub tells you about, and on which channel.",
   subscription: "Your plan and billing.",
   usage: "This period’s calls, data, tokens and spend, per principal.",
   profile: "Your public display name and profile URL.",
@@ -131,21 +133,19 @@ const PANELS: Record<SettingsTopicId, ReactNode> = {
   preferences: <HubPreferencesPanel />,
 };
 
-// Panels that render their OWN gold-mono section title (SectionHeader, which matches
-// FeatureTitle) — relocated whole from their former feature routes, so the layout stays
-// pixel-faithful. They skip the wrapper's FeatureTitle to avoid a doubled heading.
-const SELF_TITLED: ReadonlySet<SettingsTopicId> = new Set<SettingsTopicId>([
-  "notifications",
-  "security",
-]);
-
 // Backend endpoint each settings section maps to — drives the FeatureTitle "API"
 // button. Self endpoints (/auth/me) and collections take no path params. Sections
 // with no backing endpoint (appearance = local theme, preferences = this browser only,
-// subscription = placeholder) are omitted, so no button shows. SELF_TITLED sections wire the button in their own
-// panel instead (they skip FeatureTitle here).
+// subscription = placeholder) are omitted, so no button shows.
+//
+// EVERY section gets its title and API button from here. Security and Notifications used to
+// draw their own (a SectionHeader plus a RecordApiButton inside the panel, relocated whole from
+// their old feature routes) and skip this one — which put their API link in a different place,
+// their content centred, and made them read as pages from another site. One title, one place.
 const API_PATHS: Partial<Record<SettingsTopicId, string>> = {
   account: "/auth/me",
+  security: "/account/mfa",
+  notifications: "/notifications/preferences",
   usage: "/usage/summary",
   profile: "/auth/me",
   social: "/content/social-links",
@@ -174,17 +174,15 @@ export function buildSettingsTopics(): Topic[] {
       href: `/settings/${t.id}`,
       content: (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {!SELF_TITLED.has(t.id) && (
-            <FeatureTitle
-              title={t.label}
-              help={HELP[t.id]}
-              trailing={
-                apiPath ? (
-                  <RecordApiButton path={apiPath} pathValues={{}} title={`${t.label} API`} />
-                ) : undefined
-              }
-            />
-          )}
+          <FeatureTitle
+            title={t.label}
+            help={HELP[t.id]}
+            trailing={
+              apiPath ? (
+                <RecordApiButton path={apiPath} pathValues={{}} title={`${t.label} API`} />
+              ) : undefined
+            }
+          />
           {PANELS[t.id]}
         </div>
       ),
