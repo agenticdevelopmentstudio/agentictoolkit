@@ -3,7 +3,7 @@ id: 7cac2263-94fe-47ec-ab1d-6cf5a12baf14
 title: SettingsWindow
 domain: agentictoolkit://recipes/settings-window
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -20,10 +20,13 @@ tags:
 - window-controller
 - settings
 - split-view
-- macos
 - appkit
-depends-on: []
-related: []
+depends-on:
+- agentictoolkit://recipes/split-view-controller
+- agentictoolkit://recipes/single-window-controller
+related:
+- agentictoolkit://recipes/settings-panel-view-controller
+- agentictoolkit://recipes/composable-tabs-window-controller
 references: []
 approved-by: ''
 approved-date: ''
@@ -41,10 +44,9 @@ right, with the sidebar running the window's full height under a transparent,
 unified toolbar. The toolbar carries a two-segment back/forward control, the
 name of the panel currently on screen, and a help toggle that discloses a
 per-window help drawer. A host subclasses `SettingsWindow` and supplies its
-panels through the `settingPanels` property (see Configuration); the class's
-own doc comment illustrates this with an `override func makeSettingsPanels()`
-hook that does not exist anywhere in this class — the only subclass-facing
-configuration surface this version actually exposes is `settingPanels`.
+panels through the `settingPanels` property (see Configuration); see Design
+Decisions for a source-fidelity note on the class's own doc comment, which
+still illustrates configuration a different way.
 
 ## Behavioral Requirements
 
@@ -141,8 +143,11 @@ configuration surface this version actually exposes is `settingPanels`.
   `onHelpVisibilityChange` fires, the help button's glyph, tint, and tooltip
   MUST be refreshed to match the drawer's current visibility.
 - **updates-help-glyph-on-navigation-change**: Whenever `onNavigationChange`
-  fires, the help button's glyph, tint, and tooltip MUST also be refreshed
-  (`updateToolbarState()` calls the same refresh unconditionally).
+  fires, the help button's glyph, tint, and tooltip MAY also be refreshed,
+  since the current implementation shares one refresh path with navigation
+  enablement and the panel title; an implementer is not required to refresh
+  the help button on navigation alone (see Platform Notes, AppKit / UIKit,
+  for the shared private method this rides on).
 - **wires-help-only-for-inserted-item**: The help toolbar item's button
   reference, its live theme observer, and the help-anchor-view assignment
   MUST be attached only when the toolbar factory's
@@ -214,7 +219,7 @@ configuration surface this version actually exposes is `settingPanels`.
 | Loading | Not applicable — panel and toolbar installation are synchronous; no loading/spinner state exists in this file. |
 | Help drawer open | Help button shows the filled `questionmark.circle.fill` glyph, accent tint, and tooltip "Hide Help". |
 | Help drawer closed | Help button shows the outline `questionmark.circle` glyph, secondary-text tint, and tooltip "Show Help". |
-| Activation disabled (`activatesOnShow == false`) | `showWindow()` shows the window through the inherited base behavior only; this override neither activates the app nor makes the window key. |
+| Activation disabled (`activatesOnShow == false`) | `showWindow()` calls `super.showWindow()` and returns; this override itself neither calls `NSApp.activate` nor makes the window key — whatever key/visible state results comes entirely from the inherited base behavior. |
 | Quiet presentation enabled | `showWindow()` makes the window key without activating the app or ordering it above other applications' windows. |
 
 ## Accessibility
@@ -252,6 +257,15 @@ configuration surface this version actually exposes is `settingPanels`.
   palette (`ThemePaletteObserver`); contrast is a design-system-level
   concern this file does not decide, per
   `agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages`.
+- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
+  panel-title label draws its text in the `.primaryText` role and the help
+  button tints itself with `secondaryTextColor`/`accentColor`, each against
+  whichever theme surface renders behind it under the transparent, unified
+  toolbar (see Appearance, Background); no contrast ratio between those
+  roles and their background is computed or asserted anywhere in this file.
+  Settling this needs a theme-level contrast audit of `SemanticPalette`'s
+  roles against the surfaces they are drawn over, not a change to
+  `SettingsWindow.swift` itself.
 
 ## Conformance Test Vectors
 
@@ -267,11 +281,11 @@ configuration surface this version actually exposes is `settingPanels`.
 | settings-window-008 | exposes-setting-panels | Assign `settingPanels = [panelB, panelA]` | `viewController?.panels` reflects the assignment via `setPanels(_:)`. |
 | settings-window-009 | activates-app-on-show-by-default | Construct a `SettingsWindow` subclass with no override | `activatesOnShow == true`. |
 | settings-window-010 | allows-subclass-to-disable-activation | Subclass overrides `activatesOnShow` to `false` | The override value is honored (`activatesOnShow == false`). |
-| settings-window-011 | skips-activation-when-disabled | `activatesOnShow == false`; call `showWindow()` | `NSApp.activate` and `window.makeKeyAndOrderFront` are not called by this override. |
+| settings-window-011 | skips-activation-when-disabled | `activatesOnShow == false`; call `showWindow()` | `NSApp.activate` is not called, and the override returns immediately after `super.showWindow()` without any further window operation of its own. |
 | settings-window-012 | shows-quietly-under-quiet-presentation | `activatesOnShow == true`; `QuietWindowPresentation.isEnabled == true`; call `showWindow()` | `window.makeKeyAndOrderFrontQuietly()` is called; `NSApp.activate` is not. |
 | settings-window-013 | activates-and-keys-window-normally | `activatesOnShow == true`; quiet presentation disabled; call `showWindow()` | `NSApp.activate(ignoringOtherApps: true)` then `window.makeKeyAndOrderFront(nil)` are called. |
 | settings-window-014 | attaches-help-drawer-presenter | Trigger `configureWindow(_:)` (first `showWindow()`) | `viewController?.helpPresenter` is a `HelpDrawerController` built with that window as `parentWindow`. |
-| settings-window-015 | installs-unified-toolbar-chrome | Trigger `configureWindow(_:)` | `window.toolbar.toolbarStyle == .unified` (via the window), toolbar identifier `"ComposableSettings.Toolbar"`, `displayMode == .iconOnly`, `allowsUserCustomization == false`, `titlebarAppearsTransparent == true`, `titlebarSeparatorStyle == .none`. |
+| settings-window-015 | installs-unified-toolbar-chrome | Trigger `configureWindow(_:)` | `window.toolbarStyle == .unified`, toolbar identifier `"ComposableSettings.Toolbar"`, `displayMode == .iconOnly`, `allowsUserCustomization == false`, `titlebarAppearsTransparent == true`, `titlebarSeparatorStyle == .none`. |
 | settings-window-016 | fixes-toolbar-item-order | Read `toolbarDefaultItemIdentifiers` and `toolbarAllowedItemIdentifiers` | Both equal `[.sidebarTrackingSeparator, .settingsNavigation, .settingsPanelTitle, .flexibleSpace, .settingsHelp]`. |
 | settings-window-017 | hides-inline-help-button | Trigger `configureWindow(_:)` | `viewController?.showsInlineHelpButton == false`. |
 | settings-window-018 | builds-back-forward-as-one-control | Inspect the navigation toolbar item's view | One `NSSegmentedControl`, `trackingMode == .momentary`, `segmentStyle == .separated`, 2 segments, accessibility label "Back and forward". |
@@ -279,13 +293,13 @@ configuration surface this version actually exposes is `settingPanels`.
 | settings-window-020 | syncs-navigation-control-enablement | `canGoBack == false`, `canGoForward == true`; fire `onNavigationChange` | Back segment disabled, forward segment enabled. |
 | settings-window-021 | shows-current-panel-title | `currentPanelTitle == "General"`; fire `onNavigationChange` | Panel-title label text is `"General"`. |
 | settings-window-022 | renders-panel-title-as-single-line-heading | Inspect the panel-title label | Non-editable, `lineBreakMode == .byTruncatingTail`, horizontal content-hugging `.defaultHigh`, role `.primaryText`, text role `.heading`. |
-| settings-window-023 | shows-outline-glyph-when-drawer-closed | `isHelpVisible == false`; call `updateHelpButton()` | Help button image symbol is `questionmark.circle`. |
-| settings-window-024 | shows-filled-glyph-when-drawer-open | `isHelpVisible == true`; call `updateHelpButton()` | Help button image symbol is `questionmark.circle.fill`. |
+| settings-window-023 | shows-outline-glyph-when-drawer-closed | `isHelpVisible == false`; fire `onHelpVisibilityChange` | Help button image symbol is `questionmark.circle`. |
+| settings-window-024 | shows-filled-glyph-when-drawer-open | `isHelpVisible == true`; fire `onHelpVisibilityChange` | Help button image symbol is `questionmark.circle.fill`. |
 | settings-window-025 | tints-help-button-by-drawer-state | Toggle `isHelpVisible` false then true | `contentTintColor` is `secondaryTextColor` then `accentColor`. |
 | settings-window-026 | swaps-help-tooltip-by-drawer-state | Toggle `isHelpVisible` false then true | Tooltip reads "Show Help" then "Hide Help". |
 | settings-window-027 | keeps-help-accessibility-name-stable | Toggle `isHelpVisible` through several open/close cycles | `button.image?.accessibilityDescription == "Help"` after every cycle. |
 | settings-window-028 | updates-help-glyph-on-visibility-change | Fire `onHelpVisibilityChange` after the drawer opens | Help button glyph/tint/tooltip refresh to the open state. |
-| settings-window-029 | updates-help-glyph-on-navigation-change | Fire `onNavigationChange` while the drawer is open | Help button glyph/tint/tooltip reflect the open state (refreshed as a side effect of `updateToolbarState()`). |
+| settings-window-029 | updates-help-glyph-on-navigation-change | Fire `onNavigationChange` while the drawer is open | Help button glyph/tint/tooltip reflect the open state. |
 | settings-window-030 | wires-help-only-for-inserted-item | Toolbar factory called with `willBeInsertedIntoToolbar: false` for `.settingsHelp` | `helpButton`, the theme observer, and `helpAnchorView` are left unset. |
 | settings-window-031 | anchors-help-presenter-to-button | Toolbar factory called with `willBeInsertedIntoToolbar: true` for `.settingsHelp` | `viewController?.helpPresenter?.helpAnchorView` equals the returned item's button. |
 | settings-window-032 | tracks-theme-live-on-help-button | Change the resolved theme palette after the help item is inserted | Help button glyph/tint refresh without any other event firing. |
@@ -359,8 +373,6 @@ translating them; settling it needs either an i18n pass adding
 explicit decision that this window is English-only.
 
 ## Accessibility Options
-
-Document which accessibility display options (Rule 15) this component responds to:
 
 | Option | Behavior |
 |--------|----------|
@@ -441,7 +453,11 @@ anywhere in `SettingsWindow.swift`.
   disclosure-glyph helper), `SingleWindowController.swift` /
   `WindowController.swift` (window lifecycle and frame persistence),
   `ThemedViews.swift` (`ThemedLabel`), and `QuietWindowPresentation.swift`
-  (test/automation activation suppression).
+  (test/automation activation suppression). The private `updateToolbarState()`
+  method is what couples the help button's refresh to navigation changes: it
+  is the shared refresh path behind both `syncs-navigation-control-enablement`
+  and **updates-help-glyph-on-navigation-change**, called from the
+  `onNavigationChange` closure installed in `installToolbar(on:)`.
 - **WinUI 3**: the closest native shape is a single `Window` hosting a
   `NavigationView` in `Left` or `LeftCompact` `PaneDisplayMode` as the
   sidebar, with `NavigationView.MenuItems` sorted alphabetically to match
@@ -462,79 +478,105 @@ anywhere in `SettingsWindow.swift`.
   `SplitView` (`DisplayMode="Inline"` or `"CompactOverlay"`) pinned to the
   window's trailing edge as the WinUI substitute for the AppKit help
   drawer — WinUI has no drawer primitive of its own, so `SplitView` is the
-  standard stand-in, matching the pattern this cookbook already uses for
-  `ComposableTabsWindowController`'s drawer translation.
+  standard stand-in, matching the pattern
+  `agentictoolkit://recipes/composable-tabs-window-controller` already uses
+  for its own drawer translation.
 
 ## Design Decisions
 
-Decision: Give the sidebar's own top slot to the search field and remove the
-sidebar title entirely, rather than showing a titled sidebar with search
+**Decision**: Give the sidebar's own top slot to the search field and remove
+the sidebar title entirely, rather than showing a titled sidebar with search
 below it.
-Rationale: this matches System Settings' shape (source comment); the name of
-what is on screen is shown once, in the toolbar's panel-title item beside
-the back/forward control, exactly where a reader is already looking to
-change it — a separate sidebar title would be a second answer to the same
+**Rationale**: this matches System Settings' shape (source comment); the
+name of what is on screen is shown once, in the toolbar's panel-title item
+beside the back/forward control, exactly where a reader is already looking
+to change it — a separate sidebar title would be a second answer to the same
 question.
-Approved: pending
+**Approved**: pending
 
-Decision: Sort panels alphabetically, always, with no host-supplied ordering
-option.
-Rationale: the panels in a settings window are unrelated destinations, and
-the only thing a reader hunting for one of them knows is its name; whatever
-order a host happened to register panels in is an order only the host can
-see (source comment on `sortsPanelsByTitle`).
-Approved: pending
+**Decision**: Sort panels alphabetically, always, with no host-supplied
+ordering option.
+**Rationale**: the panels in a settings window are unrelated destinations,
+and the only thing a reader hunting for one of them knows is its name;
+whatever order a host happened to register panels in is an order only the
+host can see (source comment on `sortsPanelsByTitle`).
+**Approved**: pending
 
-Decision: Represent back/forward as one two-segment `NSSegmentedControl`
+**Decision**: Represent back/forward as one two-segment `NSSegmentedControl`
 rather than two independent `NSButton`s.
-Rationale: it is one control with one meaning — where in the navigation
+**Rationale**: it is one control with one meaning — where in the navigation
 trail the reader is — and a single shared bezel is how System Settings
 expresses that (source comment on `navigationControl`).
-Approved: pending
+**Approved**: pending
 
-Decision: `activatesOnShow` defaults to `true`, with an open override point
-for hosts that don't want it.
-Rationale: a settings window is normally opened to be used immediately, and
-shown from an `LSUIElement`/menubar host the base `showWindow()` still
+**Decision**: `activatesOnShow` defaults to `true`, with an open override
+point for hosts that don't want it.
+**Rationale**: a settings window is normally opened to be used immediately,
+and shown from an `LSUIElement`/menubar host the base `showWindow()` still
 leaves the window visible but non-key, so its sidebar selection and text
 fields don't respond until the user clicks it first; defaulting to
 activation avoids that dead first click for the common case, while the
 override keeps the behavior optional rather than forcing it on every
 consumer (source comment on `activatesOnShow`).
-Approved: pending
+**Approved**: pending
 
-Decision: Under `QuietWindowPresentation`, make the window key without
+**Decision**: Under `QuietWindowPresentation`, make the window key without
 activating the app or ordering it above other applications' windows.
-Rationale: an automated session driving the app still needs the sidebar
+**Rationale**: an automated session driving the app still needs the sidebar
 selection and text fields to respond, which requires the window to be key,
 but must not steal focus or draw over whatever the person at the keyboard is
 doing — that is the entire distinction this file draws between a settings
 window "opened to be used" and one "opened to be driven" (source comment on
 `showWindow()`).
-Approved: pending
+**Approved**: pending
 
-Decision: Wire the help button reference, its theme observer, and the
+**Decision**: Wire the help button reference, its theme observer, and the
 help-anchor view only when `willBeInsertedIntoToolbar` is `true`.
-Rationale: AppKit calls the toolbar item factory again to build a
+**Rationale**: AppKit calls the toolbar item factory again to build a
 customization-palette sample and on every toolbar rebuild; adopting one of
 those non-live copies would point all three at a button that is never on
 screen, leaving the real, visible help button unthemed and unreported
 (source comment on the `.settingsHelp` case).
-Approved: pending
+**Approved**: pending
+
+**Decision**: Whether to update the class doc comment (which still shows
+`override func makeSettingsPanels() -> [ComposableSettings.SettingsPanelViewController]`)
+to describe `settingPanels`, or to restore a `makeSettingsPanels()` override
+point, is not yet settled.
+**Rationale**: `SettingsWindow.swift` lines 13–21 illustrate subclassing
+through a `makeSettingsPanels()` override that does not exist anywhere in
+the class — the only subclass-facing configuration surface this version
+actually exposes is the `settingPanels` property (see Overview and
+Configuration). This is a documentation/implementation mismatch in the
+source, not a behavior this recipe can decide on its own; it belongs to
+whoever maintains `SettingsWindow.swift`.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [template-conformance](agenticdevelopercookbook://compliance/recipe-quality#template-conformance) | passed | recipe-quality |
-| [behavioral-requirements](agenticdevelopercookbook://compliance/recipe-quality#behavioral-requirements) | passed | recipe-quality |
-| [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | passed | recipe-quality |
-| [cookbook-compliance](agenticdevelopercookbook://compliance/recipe-quality#cookbook-compliance) | passed | recipe-quality |
-| [cross-recipe-consistency](agenticdevelopercookbook://compliance/recipe-quality#cross-recipe-consistency) | passed | recipe-quality |
-| [source-fidelity](agenticdevelopercookbook://compliance/recipe-quality#source-fidelity) | passed | recipe-quality |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | Accessibility |
+| [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | Accessibility |
+| [dynamic-type-support](agenticdevelopercookbook://compliance/accessibility#dynamic-type-support) | partial | Accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | Accessibility |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | Internationalization |
+| [string-externalization](agenticdevelopercookbook://compliance/internationalization#string-externalization) | failed | Internationalization |
+
+`screen-reader-support` and `keyboard-navigable` rest on the Accessibility
+section's Label requirements and Keyboard/focus bullets (explicit
+accessibility labels/descriptions on the navigation control and help button;
+ordinary keyboard-focusable AppKit controls). `dynamic-type-support` and
+`contrast-ratio` are `partial` because the source reads fonts and colors
+from the shared theme palette but this file neither asserts nor decides
+scaling or contrast itself (see the Minimum contrast ratio marker above).
+`no-hardcoded-strings` and `string-externalization` are `failed` because
+every user-facing string this file passes to AppKit is a literal, not a
+localization key (see Localization).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: replaced the fabricated recipe-quality Compliance rows with real accessibility/internationalization checks and their grounded statuses, cleaned up by `compliance_fix.py`; flagged the theme-token colors this file reads with a Minimum contrast ratio open question; downgraded `updates-help-glyph-on-navigation-change` from MUST to MAY and moved its private-method coupling into Platform Notes; recorded the stale `makeSettingsPanels()` doc comment as a pending Design Decision instead of prose; reformatted Design Decisions to the bold three-line form; trimmed `tags` to five entries and populated `depends-on`/`related`; removed leftover template instruction text from Accessibility Options; resolved the WinUI cross-reference to a full domain URL; and corrected three inaccurate conformance test vectors (settings-window-011, -015, -023, -024) and the "Activation disabled" States row. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial extraction from `SettingsWindow.swift`. |

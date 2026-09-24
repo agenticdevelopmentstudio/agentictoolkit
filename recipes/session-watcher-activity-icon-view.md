@@ -3,11 +3,11 @@ id: 1cecd319-1cc2-40a5-8ef0-56267eb78b89
 title: SessionWatcherActivityIconView
 domain: agentictoolkit://recipes/session-watcher-activity-icon-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
-created: '2026-09-23'
-modified: '2026-09-23'
+created: 2026-09-23
+modified: 2026-09-23
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -23,9 +23,9 @@ tags:
 - macos
 - appkit
 depends-on: []
-related: []
-references:
+related:
 - agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
+references: []
 approved-by: ''
 approved-date: ''
 ---
@@ -53,101 +53,115 @@ stuttering.
 - **fixed-glyph-size**: The component MUST constrain both its width and
   height to a fixed 13pt (`Self.side`), regardless of `activity` or
   `isSummarizing`.
-- **resists-horizontal-compression**: The component MUST set a required
+- **horizontal-compression-resistance**: The component MUST set a required
   horizontal content-compression-resistance priority on itself
   (`setContentCompressionResistancePriority(.required, for: .horizontal)`).
-- **selects-symbol-by-state**: The component MUST use the `sparkles` SF
+- **state-based-symbol-selection**: The component MUST use the `sparkles` SF
   Symbol whenever `isSummarizing` is `true`, regardless of `activity`; and
   otherwise MUST use `arrow.triangle.2.circlepath` for `activity == .working`,
   `circle.fill` for `activity == .idle`, and `exclamationmark.circle.fill`
   for `activity == .waiting`.
-- **hides-when-idle-and-not-summarizing**: The component MUST set
+- **idle-visibility-suppression**: The component MUST set
   `isHidden = true` only when `activity == .idle` and `isSummarizing ==
   false`, and MUST be visible (`isHidden = false`) for every other
-  combination of `activity` and `isSummarizing`.
-- **tints-by-state**: The component MUST tint the glyph with the active
+  combination of `activity` and `isSummarizing`. This is the same
+  condition under which **state-based-symbol-selection** selects
+  `circle.fill`, **state-based-tint** selects the tertiary text color, and
+  **state-based-label-and-tooltip** selects `"Idle"`; because the view is
+  hidden whenever that combination holds, none of those three idle values
+  is ever seen or announced by a user — they exist only so the glyph
+  layer and accessibility state are well-defined (and inspectable in
+  tests) while hidden, not because anyone perceives them.
+- **state-based-tint**: The component MUST tint the glyph with the active
   theme's accent color when `isSummarizing` is `true` or `activity ==
   .working`, with the theme's tertiary text color when `activity == .idle`
   and `isSummarizing` is `false`, and with the theme's warning color when
   `activity == .waiting` and `isSummarizing` is `false`.
-- **defaults-tint-before-first-theme-apply**: The component MUST use
+- **pre-theme-tint-default**: The component MUST use
   `NSColor.tertiaryLabelColor` as the glyph's tint until `applyTheme(_:)` is
   called for the first time.
-- **rasterizes-tint-via-fill**: The component MUST recolor the SF Symbol by
-  drawing the raw symbol image and then filling the tint color over it with
-  `.sourceAtop` compositing, rather than by an `NSImage.SymbolConfiguration`
-  color configuration.
-- **renders-nothing-for-unresolvable-symbol**: The component MUST set the
+- **symbol-layer-distinction**: When recoloring a multi-layer SF Symbol (for
+  example `exclamationmark.circle.fill`), the component MUST keep the
+  symbol's layers visually distinct from one another after tinting — the
+  exclamation mark MUST stay visually distinct from its enclosing circle,
+  rather than the tint collapsing every layer into a single flat-colored
+  silhouette. See the AppKit / UIKit Platform Notes bullet and Design
+  Decisions for the mechanism this source uses to satisfy it.
+- **unresolvable-symbol-fallback**: The component MUST set the
   glyph layer's `contents` to `nil` when `NSImage(systemSymbolName:accessibilityDescription:)`
   returns `nil` for the currently selected symbol name.
-- **updates-in-place**: The component MUST update an existing instance's
+- **in-place-state-update**: The component MUST update an existing instance's
   displayed state through `update(activity:isSummarizing:)` rather than
   requiring callers to construct a new instance for a state change.
-- **skips-redundant-updates**: The component MUST return from
+- **redundant-update-guard**: The component MUST return from
   `update(activity:isSummarizing:)` without redrawing, re-describing
   accessibility, or touching any animation when neither `activity` nor
   `isSummarizing` differs from the view's current values.
-- **restarts-animation-on-real-change**: The component MUST stop any running
+- **animation-restart-on-change**: The component MUST stop any running
   glyph animation and, only if it is currently in a window, start the
   animation appropriate to the new state, whenever
   `update(activity:isSummarizing:)` is called with a value that actually
   changes `activity` or `isSummarizing`.
-- **pulses-for-waiting-or-summarizing**: The component MUST animate the
+- **waiting-or-summarizing-pulse**: The component MUST animate the
   glyph layer's opacity from `1.0` to `0.25` and back (autoreversing) over
   0.7 seconds, repeating indefinitely, whenever `isSummarizing` is `true` or
   `activity == .waiting`.
-- **spins-for-working**: The component MUST rotate the glyph layer one full
+- **working-state-spin**: The component MUST rotate the glyph layer one full
   turn clockwise on screen (`transform.rotation.z` from `0` to `-2π`) over
   1.1 seconds with a linear timing function, repeating indefinitely, when
-  `activity == .working` and neither `isSummarizing` is `true` nor `activity
-  == .waiting`.
-- **installs-animations-idempotently**: The component MUST NOT add a new
+  `activity == .working` and `isSummarizing == false`.
+- **animation-install-idempotence**: The component MUST NOT add a new
   pulse or rotation animation for a key that already has an animation
   installed on the glyph layer.
-- **drops-animations-off-window**: The component MUST remove both the
+- **off-window-animation-removal**: The component MUST remove both the
   rotation and the pulse animation from the glyph layer when the view moves
   to a `nil` window.
-- **reinstalls-animations-on-window-attach**: The component MUST re-render
+- **window-attach-animation-reinstall**: The component MUST re-render
   the glyph and start its state-appropriate animation whenever the view
   moves into a non-`nil` window.
-- **tracks-appearance-changes**: The component MUST re-render the glyph
+- **appearance-change-rerender**: The component MUST re-render the glyph
   whenever the view's effective appearance changes, so that a dynamic tint
   color resolves against the new appearance.
-- **tracks-backing-scale-changes**: The component MUST re-render the glyph
-  whenever the view's backing properties change, rasterizing at the window's
-  current `backingScaleFactor`, falling back to the main screen's
-  `backingScaleFactor`, falling back to `2` if neither is available.
-- **lays-out-glyph-layer-to-bounds**: The component MUST keep the glyph
+- **display-scale-rerender**: The component MUST keep the rasterized glyph
+  matching the display's current pixel density, re-rendering whenever that
+  density changes, defaulting to a 2x density when it cannot otherwise be
+  determined. See the AppKit / UIKit Platform Notes bullet for the API this
+  source uses to read and react to that density.
+- **glyph-bounds-layout**: The component MUST keep the glyph
   sublayer's `bounds` equal to the view's own `bounds` and its `position`
-  centered in the view on every layout pass, with implicit layer actions
-  disabled for that update.
-- **exposes-image-accessibility-role**: The component MUST expose itself to
+  centered in the view on every layout pass, with no animated transition
+  for that resize/reposition. See the AppKit / UIKit Platform Notes bullet
+  for the mechanism (disabling implicit layer actions) this source uses to
+  suppress that animation.
+- **image-accessibility-role**: The component MUST expose itself to
   assistive technology as an accessibility element with the `.image` role.
-- **labels-and-tooltips-by-state**: The component MUST set both its
+- **state-based-label-and-tooltip**: The component MUST set both its
   accessibility label and its `toolTip` to `"Working"`, `"Idle"`, `"Waiting
   for you"`, or `"Summarizing"`, selected by the exact same `isSummarizing`/
-  `activity` logic as **selects-symbol-by-state**.
-- **identifies-itself-per-state**: The component MUST set its accessibility
+  `activity` logic as **state-based-symbol-selection**.
+- **state-based-accessibility-identifier**: The component MUST set its accessibility
   identifier to `session-panel.activity.summarizing` when `isSummarizing` is
   `true`, or to `session-panel.activity.working` / `session-panel.activity.idle`
   / `session-panel.activity.waiting` otherwise, matching `activity`.
-- **rejects-storyboard-instantiation**: The component MUST fail with a fatal
-  error if constructed via `init?(coder:)`, since it provides no Interface
-  Builder/`NSCoding` support.
+- **programmatic-construction-only**: The component MUST only be
+  constructible through its programmatic initializer; it MUST NOT support
+  instantiation from a serialized archive (for example, an Interface
+  Builder storyboard or nib). See the AppKit / UIKit Platform Notes bullet
+  for the API this source uses to enforce that.
 
 ## Appearance
 
 - **Corner radius**: None — neither the view's own layer nor the glyph
   sublayer sets a `cornerRadius`.
 - **Padding**: None — the glyph layer fills the view's bounds exactly (see
-  **lays-out-glyph-layer-to-bounds**); there is no internal inset.
+  **glyph-bounds-layout**); there is no internal inset.
 - **Font**: Not applicable in the text sense — the component renders an SF
   Symbol image, not text. The symbol is rasterized at `NSImage.SymbolConfiguration(pointSize:
   11, weight: .semibold)`.
 - **Background**: None/transparent — the view has `wantsLayer = true` but no
   `backgroundColor` is set on either its own layer or the glyph sublayer.
 - **Foreground/Text**: The glyph's tint — the active theme's accent,
-  tertiary-text, or warning color (see **tints-by-state**), or
+  tertiary-text, or warning color (see **state-based-tint**), or
   `NSColor.tertiaryLabelColor` before the first `applyTheme(_:)` call.
 - **Border**: None — no `borderWidth`/`borderColor` is set on either layer.
 - **Shadow**: None — no shadow-related layer property is set.
@@ -162,8 +176,8 @@ stuttering.
 |-------|------------------|
 | Idle, not summarizing (`activity: .idle, isSummarizing: false`) | View is hidden (`isHidden = true`); no glyph is drawn and no animation runs. |
 | Working, not summarizing (`activity: .working, isSummarizing: false`) | Visible; `arrow.triangle.2.circlepath` tinted with the theme's accent color; spins one full clockwise turn every 1.1s, indefinitely. |
-| Waiting, not summarizing (`activity: .waiting, isSummarizing: false`) | Visible; `exclamationmark.circle.fill` tinted with the theme's warning color; opacity pulses 1.0→0.25 and back every 0.7s, indefinitely. |
-| Summarizing (`isSummarizing: true`, any `activity`) | Visible; `sparkles` tinted with the theme's accent color; opacity pulses 1.0→0.25 and back every 0.7s, indefinitely — the same pulse as Waiting, regardless of the underlying `activity`. |
+| Waiting, not summarizing (`activity: .waiting, isSummarizing: false`) | Visible; `exclamationmark.circle.fill` tinted with the theme's warning color; opacity pulses 1.0→0.25 and back, 0.7s each way (1.4s full cycle), indefinitely. |
+| Summarizing (`isSummarizing: true`, any `activity`) | Visible; `sparkles` tinted with the theme's accent color; opacity pulses 1.0→0.25 and back, 0.7s each way (1.4s full cycle), indefinitely — the same pulse as Waiting, regardless of the underlying `activity`. |
 | Pressed | Not applicable: the source defines no target/action, gesture recognizer, or tracking area — this is a purely visual, non-interactive display element with no pressed state to represent. |
 | Disabled | Not applicable: the source defines no `isEnabled` property or dimmed-appearance branch. |
 | Focused | Not applicable: the view never becomes key/first responder; the source does not override `acceptsFirstResponder`, so `NSView`'s default (`false`) applies unmodified. |
@@ -176,7 +190,7 @@ stuttering.
   `init`.
 - **Label requirements**: Satisfied unconditionally — `describeState()` sets
   the accessibility label to `"Working"`, `"Idle"`, `"Waiting for you"`, or
-  `"Summarizing"` (see **labels-and-tooltips-by-state**) every time the
+  `"Summarizing"` (see **state-based-label-and-tooltip**) every time the
   state is established (`init`) or actually changed (`update`), so the
   label never describes a stale state. The same text is mirrored into
   `toolTip`.
@@ -211,33 +225,38 @@ stuttering.
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
 | activity-icon-001 | fixed-glyph-size | Any constructed instance | Both `widthAnchor` and `heightAnchor` resolve to exactly 13pt |
-| activity-icon-002 | resists-horizontal-compression | Any constructed instance, placed in a horizontally-constrained stack view | The view's horizontal content-compression-resistance priority reads `.required`; it does not shrink below 13pt |
-| activity-icon-003 | selects-symbol-by-state | `init(activity: .working, isSummarizing: true)` | The glyph is drawn from the `sparkles` symbol, not `arrow.triangle.2.circlepath` |
-| activity-icon-003b | selects-symbol-by-state | `init(activity: .waiting, isSummarizing: false)` | The glyph is drawn from `exclamationmark.circle.fill` |
-| activity-icon-004 | hides-when-idle-and-not-summarizing | `init(activity: .idle, isSummarizing: false)` | `isHidden == true` |
-| activity-icon-004b | hides-when-idle-and-not-summarizing | `init(activity: .idle, isSummarizing: true)` | `isHidden == false` |
-| activity-icon-005 | tints-by-state | `applyTheme(palette)` with `activity == .waiting, isSummarizing == false` | The glyph is filled with `palette.warningColor` |
-| activity-icon-005b | tints-by-state | `applyTheme(palette)` with `activity == .idle, isSummarizing == false` | The glyph is filled with `palette.tertiaryTextColor` |
-| activity-icon-006 | defaults-tint-before-first-theme-apply | Newly constructed instance, `applyTheme` never called | The glyph is filled with `NSColor.tertiaryLabelColor` |
-| activity-icon-007 | rasterizes-tint-via-fill | `applyTheme(palette)` with `activity == .waiting` | The rendered raster shows the exclamation mark distinct from its surrounding circle (not a single flat-colored silhouette) |
-| activity-icon-008 | renders-nothing-for-unresolvable-symbol | `NSImage(systemSymbolName:accessibilityDescription:)` stubbed/mocked to return `nil` for the selected symbol name | `glyph.contents == nil` |
-| activity-icon-009 | updates-in-place | Existing instance, `update(activity: .waiting, isSummarizing: false)` called | The same instance now renders the waiting glyph; no new instance was created |
-| activity-icon-010 | skips-redundant-updates | Existing instance at `activity: .working, isSummarizing: false`, then `update(activity: .working, isSummarizing: false)` | No re-render, no `describeState()` call, and the running spin animation is left untouched (does not restart) |
-| activity-icon-011 | restarts-animation-on-real-change | Existing instance in a window at `activity: .idle, isSummarizing: false` (hidden), then `update(activity: .working, isSummarizing: false)` | `isHidden` becomes `false`; a new `rotationKey` animation is installed |
-| activity-icon-012 | pulses-for-waiting-or-summarizing | Instance in a window, `update(activity: .waiting, isSummarizing: false)` | `glyph.animation(forKey: "session-activity-pulse")` is non-nil, opacity animates 1.0→0.25→1.0 over 0.7s, repeating |
-| activity-icon-013 | spins-for-working | Instance in a window, `update(activity: .working, isSummarizing: false)` | `glyph.animation(forKey: "session-activity-rotation")` is non-nil, `transform.rotation.z` animates 0→−2π over 1.1s linear, repeating |
-| activity-icon-014 | installs-animations-idempotently | Instance already spinning (`working`), `startAnimation()` invoked again without an intervening `stopAnimation()` | `glyph.animation(forKey: "session-activity-rotation")` is unchanged (no duplicate animation added) |
-| activity-icon-015 | drops-animations-off-window | Instance in a window and spinning (`working`), then removed from its superview (`window == nil`) | `glyph.animation(forKey: "session-activity-rotation")` becomes `nil` |
-| activity-icon-016 | reinstalls-animations-on-window-attach | Freshly constructed `activity: .working` instance, not yet in any window, then added to a window | The glyph re-renders and `glyph.animation(forKey: "session-activity-rotation")` becomes non-nil |
-| activity-icon-017 | tracks-appearance-changes | Instance on screen, `viewDidChangeEffectiveAppearance()` invoked (e.g. system switches light/dark) | The glyph re-renders (raster contents regenerate) reflecting the new appearance's resolved tint |
-| activity-icon-018 | tracks-backing-scale-changes | Instance moved to a window with a different `backingScaleFactor`, `viewDidChangeBackingProperties()` invoked | `glyph.contentsScale` matches the new window's `backingScaleFactor` |
-| activity-icon-019 | lays-out-glyph-layer-to-bounds | View resized, `layout()` invoked | `glyph.bounds == view.bounds`; `glyph.position == (bounds.midX, bounds.midY)`; no implicit layer animation plays for the change |
-| activity-icon-020 | exposes-image-accessibility-role | Any constructed instance | `accessibilityRole() == .image`; `isAccessibilityElement() == true` |
-| activity-icon-021 | labels-and-tooltips-by-state | `init(activity: .waiting, isSummarizing: false)` | Accessibility label and `toolTip` both read `"Waiting for you"` |
-| activity-icon-021b | labels-and-tooltips-by-state | `init(activity: .working, isSummarizing: true)` | Accessibility label and `toolTip` both read `"Summarizing"` (summarizing overrides activity) |
-| activity-icon-022 | identifies-itself-per-state | `init(activity: .idle, isSummarizing: false)` | `accessibilityIdentifier() == "session-panel.activity.idle"` |
-| activity-icon-022b | identifies-itself-per-state | `init(activity: .idle, isSummarizing: true)` | `accessibilityIdentifier() == "session-panel.activity.summarizing"` |
-| activity-icon-023 | rejects-storyboard-instantiation | `SessionWatcherActivityIconView(coder:)` invoked (e.g. nib/storyboard unarchiving) | Process traps with a fatal error |
+| activity-icon-002 | horizontal-compression-resistance | Any constructed instance, placed in a horizontally-constrained stack view | The view's horizontal content-compression-resistance priority reads `.required`; it does not shrink below 13pt |
+| activity-icon-003 | state-based-symbol-selection | `init(activity: .working, isSummarizing: true)` | The glyph is drawn from the `sparkles` symbol, not `arrow.triangle.2.circlepath` |
+| activity-icon-003b | state-based-symbol-selection | `init(activity: .waiting, isSummarizing: false)` | The glyph is drawn from `exclamationmark.circle.fill` |
+| activity-icon-003c | state-based-symbol-selection | `init(activity: .idle, isSummarizing: false)` | The glyph is drawn from `circle.fill` |
+| activity-icon-003d | state-based-symbol-selection | `init(activity: .working, isSummarizing: false)` | The glyph is drawn from `arrow.triangle.2.circlepath` |
+| activity-icon-004 | idle-visibility-suppression | `init(activity: .idle, isSummarizing: false)` | `isHidden == true` |
+| activity-icon-004b | idle-visibility-suppression | `init(activity: .idle, isSummarizing: true)` | `isHidden == false` |
+| activity-icon-005 | state-based-tint | `applyTheme(palette)` with `activity == .waiting, isSummarizing == false` | The glyph is filled with `palette.warningColor` |
+| activity-icon-005b | state-based-tint | `applyTheme(palette)` with `activity == .idle, isSummarizing == false` | The glyph is filled with `palette.tertiaryTextColor` |
+| activity-icon-005c | state-based-tint | `applyTheme(palette)` with `activity == .working, isSummarizing == false` | The glyph is filled with `palette.accentColor` |
+| activity-icon-005d | state-based-tint | `applyTheme(palette)` with `isSummarizing == true` (any `activity`) | The glyph is filled with `palette.accentColor` |
+| activity-icon-006 | pre-theme-tint-default | Newly constructed instance, `applyTheme` never called | The glyph is filled with `NSColor.tertiaryLabelColor` |
+| activity-icon-007 | symbol-layer-distinction | `applyTheme(palette)` with `activity == .waiting` | Sampling the rendered raster at the glyph's center (the exclamation mark) yields a pixel outside the fill's solid color (e.g. transparent or antialiased against the surrounding fill), distinct from a sample taken on the surrounding ring — the tint did not collapse both layers into one flat silhouette |
+| activity-icon-008 | unresolvable-symbol-fallback | The global/class-level `NSImage(systemSymbolName:accessibilityDescription:)` lookup intercepted (e.g. via method swizzling or an equivalent test double substituted for the system symbol lookup, since the source exposes no injectable seam for it) to return `nil` for the selected symbol name | `glyph.contents == nil` |
+| activity-icon-009 | in-place-state-update | Existing instance, `update(activity: .waiting, isSummarizing: false)` called | The same instance now renders the waiting glyph; no new instance was created |
+| activity-icon-010 | redundant-update-guard | Existing instance at `activity: .working, isSummarizing: false`, then `update(activity: .working, isSummarizing: false)` | No re-render, no `describeState()` call, and the running spin animation is left untouched (does not restart) |
+| activity-icon-011 | animation-restart-on-change | Existing instance in a window at `activity: .idle, isSummarizing: false` (hidden), then `update(activity: .working, isSummarizing: false)` | `isHidden` becomes `false`; a new `rotationKey` animation is installed |
+| activity-icon-012 | waiting-or-summarizing-pulse | Instance in a window, `update(activity: .waiting, isSummarizing: false)` | `glyph.animation(forKey: "session-activity-pulse")` is non-nil, opacity animates 1.0→0.25→1.0, 0.7s each way (1.4s full cycle), repeating |
+| activity-icon-012b | waiting-or-summarizing-pulse | Instance in a window, `update(activity: .idle, isSummarizing: true)` | `glyph.animation(forKey: "session-activity-pulse")` is non-nil (the pulse fires for the summarizing-and-idle combination the same as any other summarizing case) |
+| activity-icon-013 | working-state-spin | Instance in a window, `update(activity: .working, isSummarizing: false)` | `glyph.animation(forKey: "session-activity-rotation")` is non-nil, `transform.rotation.z` animates 0→−2π over 1.1s linear, repeating |
+| activity-icon-014 | animation-install-idempotence | Instance already spinning (`working`), `startAnimation()` invoked again without an intervening `stopAnimation()` | `glyph.animation(forKey: "session-activity-rotation")` is unchanged (no duplicate animation added) |
+| activity-icon-015 | off-window-animation-removal | Instance in a window and spinning (`working`), then removed from its superview (`window == nil`) | `glyph.animation(forKey: "session-activity-rotation")` becomes `nil` |
+| activity-icon-016 | window-attach-animation-reinstall | Freshly constructed `activity: .working` instance, not yet in any window, then added to a window | The glyph re-renders and `glyph.animation(forKey: "session-activity-rotation")` becomes non-nil |
+| activity-icon-017 | appearance-change-rerender | Instance on screen, `viewDidChangeEffectiveAppearance()` invoked (e.g. system switches light/dark) | `glyph.contents` is regenerated with a fill color equal to `tint.resolvedColor(in: newAppearance)`, not the color that had been resolved against the previous appearance |
+| activity-icon-018 | display-scale-rerender | Instance moved to a window with a different `backingScaleFactor`, `viewDidChangeBackingProperties()` invoked | `glyph.contentsScale` matches the new window's `backingScaleFactor` |
+| activity-icon-019 | glyph-bounds-layout | View resized, `layout()` invoked | `glyph.bounds == view.bounds`; `glyph.position == (bounds.midX, bounds.midY)`; no implicit layer animation plays for the change |
+| activity-icon-020 | image-accessibility-role | Any constructed instance | `accessibilityRole() == .image`; `isAccessibilityElement() == true` |
+| activity-icon-021 | state-based-label-and-tooltip | `init(activity: .waiting, isSummarizing: false)` | Accessibility label and `toolTip` both read `"Waiting for you"` |
+| activity-icon-021b | state-based-label-and-tooltip | `init(activity: .working, isSummarizing: true)` | Accessibility label and `toolTip` both read `"Summarizing"` (summarizing overrides activity) |
+| activity-icon-022 | state-based-accessibility-identifier | `init(activity: .idle, isSummarizing: false)` | `accessibilityIdentifier() == "session-panel.activity.idle"` |
+| activity-icon-022b | state-based-accessibility-identifier | `init(activity: .idle, isSummarizing: true)` | `accessibilityIdentifier() == "session-panel.activity.summarizing"` |
+| activity-icon-023 | programmatic-construction-only | `SessionWatcherActivityIconView(coder:)` invoked (e.g. nib/storyboard unarchiving) | Process traps with a fatal error |
 
 ## Edge Cases
 
@@ -271,7 +290,7 @@ stuttering.
 - **Missing/unresolvable SF Symbol**: If `NSImage(systemSymbolName:accessibilityDescription:)`
   returns `nil` for the selected symbol name, `renderGlyph()` sets
   `glyph.contents = nil` and returns — no fallback image, placeholder, or
-  crash (MUST, per **renders-nothing-for-unresolvable-symbol**). All four
+  crash (MUST, per **unresolvable-symbol-fallback**). All four
   symbol names the source actually selects (`sparkles`,
   `arrow.triangle.2.circlepath`, `circle.fill`,
   `exclamationmark.circle.fill`) are real system symbols, so this path is
@@ -281,13 +300,13 @@ stuttering.
   still runs, but `startAnimation()` is gated on `window != nil`, so the new
   animation does not begin until the view is later added to a window
   (`viewDidMoveToWindow` re-renders and starts it then) (MUST, per
-  **restarts-animation-on-real-change** and
-  **reinstalls-animations-on-window-attach**).
+  **animation-restart-on-change** and
+  **window-attach-animation-reinstall**).
 - **Rapid repeated `update` calls with unchanged values**: Each call is a
   no-op past the initial equality guard — no redraw, no
   `describeState()`, no animation churn — which is what keeps a
   continuously-polled "working" spin visually smooth rather than restarting
-  from zero on every poll (MUST, per **skips-redundant-updates**).
+  from zero on every poll (MUST, per **redundant-update-guard**).
 
 ## Configuration
 
@@ -335,7 +354,7 @@ so all four reach VoiceOver and the tooltip in English only.
 |--------|----------|
 | Reduce Motion | NEEDS REVIEW: Not implemented in source. The rotation (`working`'s spin) and the opacity pulse (`waiting`/summarizing) both repeat indefinitely (`repeatCount = .greatestFiniteMagnitude`), and no code in this file checks `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` (or any other Reduce Motion signal) before starting either, nor is a static substitute offered for either animated state. Settling this needs either a Reduce-Motion-gated static-icon substitution inside `startAnimation()`, or confirmation from the design/accessibility team that always-on animation here is an accepted exception. |
 | Increase Contrast | Not applicable to this component directly: the source reads no system contrast setting (e.g. `NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast`); the tint always comes from the active `SemanticPalette` (or the `NSColor.tertiaryLabelColor` system fallback before the first theme apply), so whether the resulting contrast is adequate is tracked once under Accessibility → Minimum contrast ratio above, not duplicated here. |
-| Differentiate Without Color | Supported: each state's SF Symbol shape (`arrow.triangle.2.circlepath`, `circle.fill`, `exclamationmark.circle.fill`, `sparkles`) differs from every other state's shape independently of the tint color `applyTheme` assigns (see **selects-symbol-by-state** and **tints-by-state**), so state is never conveyed by color alone. |
+| Differentiate Without Color | Supported: each state's SF Symbol shape (`arrow.triangle.2.circlepath`, `circle.fill`, `exclamationmark.circle.fill`, `sparkles`) differs from every other state's shape independently of the tint color `applyTheme` assigns (see **state-based-symbol-selection** and **state-based-tint**), so state is never conveyed by color alone. |
 
 ## Feature Flags
 
@@ -397,7 +416,8 @@ Not applicable: the source contains no logging calls (no `os_log`,
   AppKit stack does when the view is hidden. Drive the spin with a CSS
   `@keyframes` rule animating `transform: rotate(...)` linearly over 1.1s,
   infinite, and the pulse with a `@keyframes` rule animating `opacity`
-  between 1 and 0.25 over 0.7s, alternating, infinite — both wrapped in
+  between 1 and 0.25 over 0.7s per direction (`animation-duration: 0.7s` with
+  `alternate`, so a full up-and-back cycle is 1.4s), infinite — both wrapped in
   `@media (prefers-reduced-motion: reduce)` guards, the concrete fix for the
   Reduce Motion gap noted above. Use `role="img"` and `aria-label` for the
   four state strings, and re-render the fill color from CSS custom
@@ -407,9 +427,20 @@ Not applicable: the source contains no logging calls (no `os_log`,
   (this recipe's source): a macOS-only `NSView` subclass drawing into a
   private `CALayer` sublayer rather than the view's own backing layer,
   specifically to avoid AppKit re-centering the view's own layer's anchor
-  point on every frame change (see Design Decisions). A UIKit port replaces
-  `NSView`/`NSColor`/`NSImage` with `UIView`/`UIColor`/`UIImage`, uses
-  `CALayer` sublayer animation the same way, and must re-derive
+  point on every frame change (see Design Decisions). It satisfies
+  **symbol-layer-distinction** by drawing the raw SF Symbol image and then
+  filling the tint color over it with `.sourceAtop` compositing (see Design
+  Decisions), rather than an `NSImage.SymbolConfiguration` color option; it
+  satisfies **glyph-bounds-layout** by wrapping each layout pass's
+  `bounds`/`position` assignment in a `CATransaction` with
+  `setDisableActions(true)`, so no implicit layer animation plays for the
+  resize/reposition; it satisfies **display-scale-rerender** by reading
+  `backingScaleFactor` from the view's window, falling back to
+  `NSScreen.main`, falling back to `2`; and it satisfies
+  **programmatic-construction-only** by marking `init?(coder:)`
+  `@available(*, unavailable)` and having it `fatalError()`. A UIKit port
+  replaces `NSView`/`NSColor`/`NSImage` with `UIView`/`UIColor`/`UIImage`,
+  uses `CALayer` sublayer animation the same way, and must re-derive
   `viewDidMoveToWindow`'s "animations are dropped when leaving a window"
   handling and `viewDidChangeBackingProperties`'s scale handling from
   `traitCollectionDidChange`/`UIScreen.scale`, since this source's window-
@@ -422,7 +453,7 @@ Not applicable: the source contains no logging calls (no `os_log`,
   on demand the way this source's `CALayer` does — `ProgressRing`/`ProgressBar`
   are indeterminate-progress controls, not arbitrary-glyph animators.
   Bind `Visibility` to a converter reproducing
-  **hides-when-idle-and-not-summarizing**, and bind the icon's
+  **idle-visibility-suppression**, and bind the icon's
   `Foreground` `SolidColorBrush` to theme resources matching the three
   tints (e.g. `AccentTextFillColorPrimaryBrush` for accent,
   `TextFillColorTertiaryBrush` for tertiary text, `SystemFillColorCautionBrush`
@@ -462,11 +493,15 @@ Not applicable: the source contains no logging calls (no `os_log`,
 - **Decision**: Recoloring draws the raw symbol image and then fills the
   tint color over it with `.sourceAtop` compositing, instead of using
   `NSImage.SymbolConfiguration`'s own color options.
-  **Rationale**: A palette-based symbol color configuration paints every
-  layer of a multi-layer symbol the same single color; for
-  `exclamationmark.circle.fill` that would erase the exclamation mark into
-  its own circle. Filling over the rendered raster preserves the visual
-  distinction between the symbol's layers.
+  **Rationale**: Per the source's own doc comment on `renderGlyph()`
+  (`SessionWatcherActivityIconView.swift`), a palette-based symbol color
+  configuration paints every layer of a multi-layer symbol the same single
+  color; for `exclamationmark.circle.fill` that would erase the exclamation
+  mark into its own circle. Filling over the rendered raster preserves the
+  visual distinction between the symbol's layers. This file does not record
+  which specific `NSImage.SymbolConfiguration` color option was tried before
+  landing on the fill approach — only the source's own stated reason for
+  rejecting that family of API.
   **Approved: pending**
 - **Decision**: CoreAnimation (`CABasicAnimation`) drives the spin and pulse
   rather than a newer SF Symbol content-transition/variable-rotation
@@ -490,14 +525,24 @@ Not applicable: the source contains no logging calls (no `os_log`,
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [no-raw-hex](agenticdevelopercookbook://compliance/ui-tokens#no-raw-hex) | passed | ui-tokens |
-| [differentiate-without-color](agenticdevelopercookbook://compliance/accessibility#differentiate-without-color) | passed | accessibility |
-| [meaningful-labels](agenticdevelopercookbook://compliance/accessibility#meaningful-labels) | passed | accessibility |
-| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | needs-review | accessibility |
-| [reduce-motion-support](agenticdevelopercookbook://compliance/accessibility#reduce-motion-support) | needs-review | accessibility |
-| [live-region-announcements](agenticdevelopercookbook://compliance/accessibility#live-region-announcements) | needs-review | accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | passed | accessibility |
+| [contrast-ratio](agenticdevelopercookbook://compliance/accessibility#contrast-ratio) | partial | accessibility |
+| [reduced-motion](agenticdevelopercookbook://compliance/accessibility#reduced-motion) | failed | accessibility |
+| [no-hardcoded-strings](agenticdevelopercookbook://compliance/internationalization#no-hardcoded-strings) | failed | internationalization |
+
+`screen-reader-support` is `passed` because `describeState()` unconditionally
+sets a meaningful accessibility label for every state (see
+**state-based-label-and-tooltip**). `contrast-ratio` is `partial` because
+the tint's contrast against a session row's background cannot be computed
+from this file alone (see Accessibility → Minimum contrast ratio).
+`reduced-motion` is `failed` because no code path here checks a Reduce
+Motion signal before starting the spin or pulse animation (see
+Accessibility Options → Reduce Motion). `no-hardcoded-strings` is `failed`
+because the four accessibility label/tooltip strings are plain `String`
+literals with no localization key (see Localization).
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: restated four AppKit-mechanism MUSTs as observable outcomes and moved their mechanisms into the AppKit/UIKit Platform Notes bullet and Design Decisions; simplified the working-state-spin guard condition; noted that the idle symbol/tint/label are never seen or announced while the view is hidden; documented the missing symbol-provider seam for the unresolvable-symbol test vector instead of inventing one; renamed every requirement to a subject-noun name and updated all cross-references; moved the internal cookbook reference from `references` to `related`; corrected the pulse's per-direction/full-cycle timing; added test vectors for the working/summarizing tint, idle symbol, and summarizing-while-idle pulse; made the two flagged vectors mechanically checkable; grounded the `.sourceAtop` rationale in the source's own doc comment; unquoted the frontmatter dates; and rebuilt the Compliance table to cite only checks that exist in the catalog with rulings-consistent statuses. |

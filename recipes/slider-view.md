@@ -3,7 +3,7 @@ id: 0cbe1932-5c7e-4546-829d-0294708d499c
 title: SliderView
 domain: agentictoolkit://recipes/slider-view
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -23,7 +23,8 @@ tags:
 - macos
 - appkit
 depends-on: []
-related: []
+related:
+- agentictoolkit://recipes/captioned-slider-view
 references: []
 approved-by: ''
 approved-date: ''
@@ -72,7 +73,7 @@ construction.
   and `viewModel.value` — whenever `viewModel.onChange` fires.
 - **exposes-constituent-views**: Component MUST expose `label` and
   `slider` as public, directly-accessible properties.
-- **requires-designated-initializer**: Component MUST NOT support
+- **rejects-coder-initialization**: Component MUST NOT support
   construction via `init(coder:)`; that initializer MUST trigger a fatal
   error.
 - **rejects-frame-only-initialization**: Component MUST NOT support
@@ -158,35 +159,46 @@ construction.
   trackpad-driven `NSView`/`NSControl` composition (no touch input path in
   source); the 44×44pt minimum is an iOS/touch guidance, not a macOS
   pointer-interface requirement.
+- **Minimum contrast ratio**: NEEDS REVIEW: Not implemented in source. The
+  the leading label's text text color resolves from the active theme's primaryText role against
+  the hosting background at runtime; the component performs no contrast
+  check, so whether a given theme's resolved pair meets 4.5:1 cannot be
+  determined from this file. This would be settled by a theme-level
+  contrast audit of primaryText against the backgrounds it sits on.
 
 ## Conformance Test Vectors
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| slider-view-001 | arranges-row-layout | Construct `SliderView` with any `viewModel` | `label` and `slider` are both subviews of a single row view that is pinned to the component's edges; no other layout container appears |
+| slider-view-001 | arranges-row-layout | Construct `SliderView` with any `viewModel` | The row `NSStackView`'s arranged subviews are exactly `[label, <row-spacer inserted by makeRow>, slider]` in that order; that stack view is `SliderView`'s only subview and is pinned to its edges; no other layout container appears |
 | slider-view-002 | sets-slider-range | `viewModel.minValue = 0`, `viewModel.maxValue = 1` | After init, `slider.minValue == 0` and `slider.maxValue == 1` |
 | slider-view-003 | slider-hugs-loosely | Construct the component | After init, `slider.contentHuggingPriority(for: .horizontal).rawValue == 1` |
 | slider-view-004 | initializes-from-view-model | `viewModel.title = "Volume"`, `viewModel.value = 42` | After init, `label.stringValue == "Volume"` and `slider.doubleValue == 42` |
 | slider-view-005 | commits-slider-value | `viewModel.settingObserver.value = 10`; set `slider.doubleValue = 30` and invoke `sliderChanged(slider)` (the slider's target-action) | `viewModel.settingObserver.value == 30` after the call |
-| slider-view-006 | skips-redundant-commits | `viewModel.settingObserver.value = 50`; set `slider.doubleValue = 50` (same value) and invoke `sliderChanged(slider)` | `viewModel.settingObserver.value`'s setter is not invoked a second time (e.g. no additional write/observer notification is recorded) |
+| slider-view-006 | skips-redundant-commits | Substitute a counting `settingObserver` test double whose `value` setter increments a write counter; set its `value = 50`, reset the counter to 0, then set `slider.doubleValue = 50` (same value) and invoke `sliderChanged(slider)` | The counting `settingObserver`'s write counter stays at 0 after the call |
 | slider-view-007 | syncs-on-external-change | After construction, externally change `viewModel.title`, `viewModel.minValue`, `viewModel.maxValue`, and `viewModel.value`, then invoke `viewModel.onChange(newValue)` | `label.stringValue`, `slider.minValue`, `slider.maxValue`, and `slider.doubleValue` all update to reflect the new `viewModel` state |
 | slider-view-008 | exposes-constituent-views | Construct the component, then access `.label` and `.slider` from outside the type | Both properties are accessible and return the same `NSTextField`/`NSSlider` instances built during init |
-| slider-view-009 | requires-designated-initializer | Attempt `SliderView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
+| slider-view-009 | rejects-coder-initialization | Attempt `SliderView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
 | slider-view-010 | rejects-frame-only-initialization | Attempt `SliderView(frame: .zero)` | The call traps with a fatal error; no instance is returned |
+| slider-view-011 | syncs-on-external-change | Change the value on the backing `UserSetting` that `viewModel.settingObserver` observes (not by calling `viewModel.onChange` directly), then await one main-queue turn (the `.dropFirst().receive(on: DispatchQueue.main)` Combine hop in `UserSettingObserver`) | `label.stringValue`, `slider.minValue`, `slider.maxValue`, and `slider.doubleValue` are unchanged immediately after the setting write, and only update to reflect the new state after that main-queue turn elapses |
+| slider-view-012 | sets-slider-range | Construct `SliderView` with `viewModel.minValue = 10`, `viewModel.maxValue = 0` (an inverted range; a zero-width case such as `minValue = maxValue = 5` is equivalent) | `slider.minValue == 10` and `slider.maxValue == 0` — assigned unchanged from `viewModel`, with no clamping, swapping, or correction |
 
 ## Edge Cases
 
 - Null/empty input: `viewModel` (`RangeViewModel<Double>`) is a
-  non-optional, non-escaping-typed constructor parameter; Swift's type
-  system rules out `nil`. This is a MUST: the component provides, and
-  needs, no nil-handling path for its one initializer parameter.
+  non-optional, non-escaping-typed constructor parameter, so Swift's type
+  system rules out `nil` at the call site — this is a property of the
+  parameter's type, not a behavior the component implements, so the
+  component provides, and needs, no nil-handling path of its own for its
+  one initializer parameter.
 - Boundary values — inverted/zero-width range: source performs no
   `minValue < maxValue` validation before assigning `slider.minValue`/
   `slider.maxValue` from `viewModel`, either at init or in the `onChange`
-  re-sync. If `viewModel.minValue >= viewModel.maxValue`, `SliderView`
-  adds no guard of its own; the resulting slider behavior is whatever
-  `NSSlider` does for an equal-or-inverted range. This is a MUST: the
-  component MUST NOT validate or correct `viewModel`'s bounds itself.
+  re-sync (see slider-view-012). If `viewModel.minValue >= viewModel.maxValue`,
+  `SliderView` adds no guard of its own; the resulting slider behavior is
+  whatever `NSSlider` does for an equal-or-inverted range. This is an
+  absence rather than an enforced rule: nothing in source validates or
+  corrects `viewModel`'s bounds.
 - Concurrent access: Not applicable — the class and its `onChange` closure
   are both `@MainActor`-isolated, so Swift's concurrency checker
   serializes all access to the main actor; there is no code path by which
@@ -199,14 +211,10 @@ construction.
   networking of its own; it only reads from and writes to an in-process
   `RangeViewModel`.
 - Overwritten external observer: `viewModel.onChange` is a single closure
-  property. `SliderView`'s initializer unconditionally assigns
-  `viewModel.onChange = { [weak self] _ in ... }`, replacing whatever
-  handler (if any) was previously registered on that `viewModel`. This is
-  a MUST-level, source-traceable consequence of plain closure-property
-  assignment: the component MUST NOT be assumed to coexist with another
-  `onChange` observer already registered on the same `RangeViewModel`
-  instance — constructing a second `SliderView` (or any other observer)
-  against the same view model silently drops the earlier handler.
+  property, and `SliderView`'s initializer unconditionally assigns
+  `viewModel.onChange = { [weak self] _ in ... }`. See the one-observer-
+  per-view-model Design Decision for the resulting contract and its
+  rationale.
 - Asynchronous re-sync timing: `viewModel.onChange` is driven through
   `ComposableSettings.UserSettingObserver`
   (`packages/apple/AgenticToolkit/Core/SettingStorage/UserSetting.swift`),
@@ -321,10 +329,10 @@ Not applicable: `SliderView.swift` contains no logging call (no `print`,
   horizontal content-hugging priority set to `1`. There is no UIKit code
   path in source; a UIKit port would replace `NSSlider`/`NSTextField` with
   `UISlider`/`UILabel` and the `target`/`action` pattern with
-  `.addTarget(_:action:for: .valueChanged)` — UIKit has no
-  `NSCoder`-vs-frame initializer split to fatal-error on both the way
-  requires-designated-initializer and rejects-frame-only-initialization
-  do.
+  `.addTarget(_:action:for: .valueChanged)` — `UIView` has the same
+  `init(coder:)`/`init(frame:)` split as `NSView`, so a UIKit port would
+  fatal-error on both initializers the way rejects-coder-initialization
+  and rejects-frame-only-initialization do.
 - **WinUI 3** (the reason this recipe exists): Build the row as a `Grid`
   with column definitions `Auto,*`: a `TextBlock` for the title in column
   0, and a `Slider Minimum="{x:Bind Min, Mode=OneWay}"
@@ -372,6 +380,17 @@ Not applicable: `SliderView.swift` contains no logging call (no `print`,
   initializers that could construct it without one are intentionally
   disabled rather than left to produce a half-configured row.
   Approved: pending
+- Decision: Assign `viewModel.onChange` unconditionally in `init`, without
+  preserving or chaining any handler already registered on the same
+  `RangeViewModel` instance — constructing a second `SliderView` (or any
+  other observer) against the same view model silently drops the earlier
+  handler.
+  Rationale: `SliderView` owns its view model's re-sync handler for the
+  view's lifetime; supporting more than one simultaneous observer on a
+  single `RangeViewModel` would need a multicast mechanism the source
+  does not implement, so one view per view model is the stated limit
+  rather than an unstated side effect.
+  Approved: pending
 
 ## Compliance
 
@@ -380,12 +399,21 @@ Not applicable: `SliderView.swift` contains no logging call (no `print`,
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
 | [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [semantic-markup](agenticdevelopercookbook://compliance/accessibility#semantic-markup) | partial | accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
 | [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | reliability |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
+
+`keyboard-navigable` and `screen-reader-support` rest on `NSSlider`/`NSTextField`'s
+default AppKit accessibility and focus behavior; `screen-reader-support` is
+`partial` because source sets no `accessibilityLabel`/`accessibilityTitleUIElement`
+linking the slider to the label (see Accessibility, the open question on label
+requirements). The other rows rest on source composing only stock
+`NSView`/`NSControl` instances with no custom drawing, network, or persistence
+code of its own.
 
 ## Change History
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial ingredient recipe for SliderView, covering row layout/priority behavior, value-and-range sync on external change, and one open accessibility question (slider/title label association) for review. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: add `related` link to CaptionedSliderView; rename requirement to rejects-coder-initialization and its citations; fix the AppKit/UIKit platform note's wrong claim about UIKit's initializer split; name the row's exact arranged subviews and require a counting settingObserver test double in the affected test vectors; add test vectors for the async re-sync path and the inverted/zero-width range; drop RFC 2119 wording from two purely observational edge cases; move the overwritten-observer edge case into a Design Decision; remap the Compliance table's semantic-markup row to screen-reader-support and add the statuses' source rationale; records the unverified theme-token contrast as an open question. |

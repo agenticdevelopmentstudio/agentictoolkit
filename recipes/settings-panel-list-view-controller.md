@@ -3,7 +3,7 @@ id: a41760b2-4ffd-413b-970f-c0373c9bd3b6
 title: PanelListViewController
 domain: agentictoolkit://recipes/settings-panel-list-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -22,9 +22,10 @@ tags:
 - sidebar
 - search
 - split-view
-- macos
 - appkit
-depends-on: []
+depends-on:
+- agentictoolkit://recipes/topic-list-view-controller
+- agentictoolkit://recipes/settings-panel-view-controller
 related:
 - agentictoolkit://recipes/composable-tabs-settings-view-controller
 references:
@@ -52,7 +53,8 @@ Beyond what `TopicListViewController` already renders and themes, this file
 owns three concerns: (1) turning each panel's `descriptor` into a row, (2)
 narrowing the visible rows by a live `searchQuery`, delegated to
 `ComposableSettings.SettingsSearchIndex`
-(`.../SplitViewController/SettingsSearchIndex.swift`), and (3) keeping a
+(`packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/SplitViewController/SettingsSearchIndex.swift`),
+and (3) keeping a
 row's identity — the panel's index in the full, unfiltered array — stable
 across filtering, so a caller (`ComposableSettings.SplitViewController`) can
 select, query the visibility of, and arrow-key through panels by index no
@@ -60,67 +62,64 @@ matter what the search field currently hides.
 
 ## Behavioral Requirements
 
-- **stores-panel-array**: `setPanels(_:)` MUST store the given array as the
+- **panel-storage**: `setPanels(_:)` MUST store the given array as the
   component's full, ordered panel list, replacing whatever was stored before.
-- **rebuilds-sections-on-set-panels**: `setPanels(_:)` MUST rebuild the
+- **panel-set-rebuild**: `setPanels(_:)` MUST rebuild the
   sidebar's sections from the newly stored array before returning.
-- **ignores-unchanged-search-query**: Assigning `searchQuery` a value equal
+- **unchanged-query-guard**: Assigning `searchQuery` a value equal
   to its current value MUST NOT trigger a section rebuild (guarded by
   `oldValue != searchQuery`).
-- **rebuilds-sections-on-search-query-change**: Assigning `searchQuery` a
+- **query-change-rebuild**: Assigning `searchQuery` a
   value different from its current value MUST trigger a section rebuild.
-- **empty-query-matches-all-panels**: A `searchQuery` that is empty, or
+- **empty-query-inclusion**: A `searchQuery` that is empty, or
   contains only whitespace/newline characters, MUST include every stored
   panel among the visible rows.
-- **query-requires-every-term**: A non-empty, non-whitespace `searchQuery`
+- **all-terms-match**: A non-empty, non-whitespace `searchQuery`
   MUST include a panel only if every one of its space-separated terms is
   found, case-insensitively, as a substring of that panel's searchable text
   (per `SettingsSearchIndex.matches`, harvested from `descriptor.title`,
   `descriptor.section`, `searchKeywords`, `helpContent`'s topic titles and
   bodies, and — once the panel's own view has loaded — the titles of its
   non-editable `NSTextField`s, `NSButton`s, and `NSPopUpButton` items).
-- **preserves-original-panel-order**: Visible rows MUST appear in the same
+- **panel-order-preservation**: Visible rows MUST appear in the same
   relative order as their panels in the array most recently passed to
   `setPanels(_:)`.
-- **groups-by-contiguous-section-run**: Panels MUST be grouped into sidebar
+- **contiguous-section-grouping**: Panels MUST be grouped into sidebar
   sections by contiguous run of equal `descriptor.section` value among the
   panels the current query admits; a panel whose section differs from the
   immediately preceding admitted panel's section MUST start a new section,
   even when an earlier, non-adjacent panel already used that same section
   title.
-- **builds-row-from-descriptor**: Each row's title, icon, and
+- **descriptor-row-mapping**: Each row's title, icon, and
   disabled-appearance flag MUST be read from that panel's `descriptor.title`,
   `descriptor.icon`, and `descriptor.isDisabled`, respectively, at the moment
   sections are rebuilt.
-- **ids-row-by-original-index**: Each row's identifier MUST be the string
+- **original-index-row-id**: Each row's identifier MUST be the string
   form of its panel's zero-based index in the full array passed to
   `setPanels(_:)`, independent of that row's position under the current
   filter.
-- **bridges-selection-to-callback**: When constructed via
+- **selection-callback-bridge**: When constructed via
   `init(nibName:bundle:)` (the designated initializer), the component MUST
   invoke `onSelectPanel` with the panel resolved from the newly selected
   row's identifier whenever the underlying selection changes, and MUST
   invoke `onSelectPanel` with `nil` when the selection is cleared.
-- **omits-selection-bridge-for-coder-init**: When constructed via
+- **coder-init-bridge-omission**: When constructed via
   `init?(coder:)`, the component MUST NOT establish the `onSelectPanel`
   bridge described above; that initializer calls only `super.init(coder:)`
   and performs no further setup.
-- **selects-panel-without-callback**: `selectPanel(at:)` MUST select the row
+- **callback-free-selection**: `selectPanel(at:)` MUST select the row
   identified by the given index without invoking `onSelectPanel`.
-- **ignores-out-of-range-select**: `selectPanel(at:)` MUST have no effect
+- **out-of-range-select-guard**: `selectPanel(at:)` MUST have no effect
   when `index` falls outside `panels.indices`.
-- **reports-panel-visibility**: `isPanelVisible(at:)` MUST return `true` if,
+- **panel-visibility-report**: `isPanelVisible(at:)` MUST return `true` if,
   and only if, the panel at the given index is among the panels the current
   `searchQuery` admits.
-- **reports-visible-indices-in-order**: `visiblePanelIndices()` MUST return
+- **visible-index-report**: `visiblePanelIndices()` MUST return
   the original-array indices of the panels the current `searchQuery` admits,
   in ascending order.
-- **resolves-panel-from-row-id**: Resolving a panel from a row's identifier
+- **row-id-panel-resolution**: Resolving a panel from a row's identifier
   MUST parse that identifier as an integer and MUST yield no panel when the
   identifier is not a valid integer or falls outside `panels.indices`.
-- **supports-subclassing**: The component MAY be subclassed by a host app to
-  customize row presentation or add secondary actions; it is declared `open`
-  for exactly that purpose, per the source's own doc comment.
 
 ## Appearance
 
@@ -128,24 +127,20 @@ matter what the search field currently hides.
   with no corner radius anywhere in `TopicListViewController`'s cell
   factories, and this file overrides none of that layout.
 - **Padding**: Not set by this file; inherited unmodified from
-  `TopicListViewController.CellMetrics`
-  (`packages/apple/AgenticToolkit/macOS/UI/ViewControllers/TopicListViewController.swift`):
-  `titleLeadingInset` 14pt, `headerTrailingInset` 14pt, `headerLeadingInset`
-  2pt, `iconLeadingInset` 4pt, `iconSize` 16pt, `iconToTextGap` 6pt,
-  `textTrailingInset` 4pt.
+  `TopicListViewController.CellMetrics` — see
+  `agentictoolkit://recipes/topic-list-view-controller#appearance/padding`
+  for the insets this component renders with.
 - **Font**: Not set by this file; inherited unmodified from the same
-  `CellMetrics`: item rows use `palette.font(.body)`, section headers use
-  `palette.font(.caption)`, the optional sidebar title uses
-  `palette.font(.button)`.
+  `CellMetrics` — see
+  `agentictoolkit://recipes/topic-list-view-controller#appearance/font`.
 - **Background**: Not set by this file; inherited unmodified —
   `TopicListViewController.applyTheme` paints the view, content stack,
-  header, and footer with `palette.windowBackgroundColor`, and the outline
-  view/scroll view background with the same color.
+  header, footer, and outline/scroll view background. See
+  `agentictoolkit://recipes/topic-list-view-controller#appearance/background`.
 - **Foreground/Text**: Not set by this file; inherited unmodified from
-  `TopicListViewController.outlineView(viewFor:)`. An item row's text and
-  icon tint are `palette.primaryTextColor`/`palette.accentColor` when
-  `descriptor.isDisabled` is `false`, and `palette.tertiaryTextColor` for
-  both when it is `true`. Section headers use `palette.secondaryTextColor`.
+  `TopicListViewController.outlineView(viewFor:)`. See
+  `agentictoolkit://recipes/topic-list-view-controller#appearance/foreground-text`
+  for the exact color/state mapping this component's rows use.
 - **Border**: Not set by this file. `TopicListViewController` draws a 1pt
   hairline divider above every row in a card except the first, but a plain
   sidebar row (as this component uses) draws no such divider; no border is
@@ -195,31 +190,30 @@ matter what the search field currently hides.
 
 | ID | Requirements | Input | Expected |
 |----|-------------|-------|----------|
-| cts-panel-list-001 | stores-panel-array | `setPanels([panelA, panelB])` | The sidebar shows exactly two rows, for `panelA` and `panelB`, in that order |
-| cts-panel-list-002 | rebuilds-sections-on-set-panels | `setPanels([panelA])`, then `setPanels([panelA, panelB])` | The sidebar shows two rows after the second call, without a separate rebuild call being needed |
-| cts-panel-list-003 | ignores-unchanged-search-query | Set `searchQuery = "x"` twice in a row with the identical string | No second rebuild occurs (row identity/instances in the outline are unchanged after the second assignment) |
-| cts-panel-list-004 | rebuilds-sections-on-search-query-change | Set `searchQuery = "a"`, then `searchQuery = "b"` | The visible rows differ (or are recomputed) between the two assignments |
-| cts-panel-list-005 | empty-query-matches-all-panels | `setPanels([panelA, panelB])`, then `searchQuery = "   "` | Both rows remain visible |
-| cts-panel-list-006 | query-requires-every-term | `setPanels([panelA])` where `panelA.descriptor.title == "General"` and `panelA.descriptor.section == "App"`, then `searchQuery = "app general"` | `panelA`'s row is visible; `searchQuery = "app missing"` then hides it |
-| cts-panel-list-007 | preserves-original-panel-order | `setPanels([panelB, panelA])`, `searchQuery = ""` | Rows appear in the order `panelB`, `panelA` |
-| cts-panel-list-008 | groups-by-contiguous-section-run | `setPanels([p1(section: "A"), p2(section: "B"), p3(section: "A")])` | Three sections render, in order A, B, A — not two sections of A merged |
-| cts-panel-list-009 | builds-row-from-descriptor | `setPanels([panelA])` where `panelA.descriptor` has a specific title, icon, and `isDisabled == true` | The row shows that title and icon and renders in the disabled appearance |
-| cts-panel-list-010 | ids-row-by-original-index | `setPanels([panelA, panelB])`, `searchQuery = "panelB-only-term"` (hides `panelA`) | `panelB`'s surviving row still resolves to index `1` (not re-indexed to `0`) via `selectPanel(at: 1)` |
-| cts-panel-list-011 | bridges-selection-to-callback | Construct via `init(nibName:bundle:)`, `setPanels([panelA])`, click `panelA`'s row | `onSelectPanel` is invoked once with `panelA` |
-| cts-panel-list-012 | omits-selection-bridge-for-coder-init | Construct via `init?(coder:)`, `setPanels([panelA])`, select `panelA`'s row through the outline view directly | `onSelectPanel` is never invoked (it was never wired) |
-| cts-panel-list-013 | selects-panel-without-callback | Set `onSelectPanel` to a spy closure, call `selectPanel(at: 0)` | The row at index 0 becomes selected; the spy closure is not called |
-| cts-panel-list-014 | ignores-out-of-range-select | `setPanels([panelA])`, call `selectPanel(at: 5)` | No row's selection changes; no crash |
-| cts-panel-list-015 | reports-panel-visibility | `setPanels([panelA, panelB])`, `searchQuery` set to a term matching only `panelB` | `isPanelVisible(at: 0) == false`, `isPanelVisible(at: 1) == true` |
-| cts-panel-list-016 | reports-visible-indices-in-order | `setPanels([p0, p1, p2])`, `searchQuery` set to a term matching only `p0` and `p2` | `visiblePanelIndices() == [0, 2]` |
-| cts-panel-list-017 | resolves-panel-from-row-id | Select a row whose underlying id is `"1"` for `setPanels([panelA, panelB])` | `onSelectPanel` receives `panelB`; simulating a stale/malformed id (e.g. `"not-a-number"` or `"9"`) resolves to no panel |
-| cts-panel-list-018 | supports-subclassing | Declare a subclass of `PanelListViewController` overriding one of its non-final members | Compilation succeeds |
+| cts-panel-list-001 | panel-storage | `setPanels([panelA, panelB])` | The sidebar shows exactly two rows, for `panelA` and `panelB`, in that order |
+| cts-panel-list-002 | panel-set-rebuild | `setPanels([panelA])`, then `setPanels([panelA, panelB])` | The sidebar shows two rows after the second call, without a separate rebuild call being needed |
+| cts-panel-list-003 | unchanged-query-guard | Construct a test subclass overriding `setSections(_:)` to increment a counter; `setPanels([panelA, panelB])`; set `searchQuery = "x"`; record the counter; set `searchQuery = "x"` again (identical) | The counter after the second assignment equals the counter recorded after the first — `setSections(_:)` was not called again |
+| cts-panel-list-004 | query-change-rebuild | Same counter subclass as cts-panel-list-003; `setPanels([panelA, panelB])`; set `searchQuery = "a"`; record the counter; set `searchQuery = "b"` | The counter after the second assignment is one greater than after the first — `setSections(_:)` was called again |
+| cts-panel-list-005 | empty-query-inclusion | `setPanels([panelA, panelB])`, then `searchQuery = "   "` | Both rows remain visible |
+| cts-panel-list-006 | all-terms-match | `setPanels([panelA])` where `panelA.descriptor.title == "General"` and `panelA.descriptor.section == "App"`, then `searchQuery = "app general"` | `panelA`'s row is visible; `searchQuery = "app missing"` then hides it |
+| cts-panel-list-007 | panel-order-preservation | `setPanels([panelB, panelA])`, `searchQuery = ""` | Rows appear in the order `panelB`, `panelA` |
+| cts-panel-list-008 | contiguous-section-grouping | `setPanels([p1(section: "A"), p2(section: "B"), p3(section: "A")])` | Three sections render, in order A, B, A — not two sections of A merged |
+| cts-panel-list-009 | descriptor-row-mapping | `setPanels([panelA])` where `panelA.descriptor` has a specific title, icon, and `isDisabled == true` | The row shows that title and icon and renders in the disabled appearance |
+| cts-panel-list-010 | original-index-row-id | Construct via `init(nibName:bundle:)`; `setPanels([panelA, panelB])`, `searchQuery = "panelB-only-term"` (hides `panelA`); select the surviving row through the outline view directly (not via `selectPanel(at:)`) | `visiblePanelIndices() == [1]`, and `onSelectPanel` is invoked with `panelB` — proving the surviving row's id still resolves to index `1`, not re-indexed to `0` |
+| cts-panel-list-011 | selection-callback-bridge | Construct via `init(nibName:bundle:)`, `setPanels([panelA])`, click `panelA`'s row | `onSelectPanel` is invoked once with `panelA` |
+| cts-panel-list-012 | coder-init-bridge-omission | Construct via `init?(coder:)`, `setPanels([panelA])`, select `panelA`'s row through the outline view directly | `onSelectPanel` is never invoked (it was never wired) |
+| cts-panel-list-013 | callback-free-selection | Set `onSelectPanel` to a spy closure, call `selectPanel(at: 0)` | The row at index 0 becomes selected; the spy closure is not called |
+| cts-panel-list-014 | out-of-range-select-guard | `setPanels([panelA])`, call `selectPanel(at: 5)` | No row's selection changes; no crash |
+| cts-panel-list-015 | panel-visibility-report | `setPanels([panelA, panelB])`, `searchQuery` set to a term matching only `panelB` | `isPanelVisible(at: 0) == false`, `isPanelVisible(at: 1) == true` |
+| cts-panel-list-016 | visible-index-report | `setPanels([p0, p1, p2])`, `searchQuery` set to a term matching only `p0` and `p2` | `visiblePanelIndices() == [0, 2]` |
+| cts-panel-list-017 | row-id-panel-resolution | Select a row whose underlying id is `"1"` for `setPanels([panelA, panelB])` | `onSelectPanel` receives `panelB`; simulating a stale/malformed id (e.g. `"not-a-number"` or `"9"`) resolves to no panel |
 
 ## Edge Cases
 
 - **Null/empty input**: `setPanels([])` MUST leave the sidebar with no
   sections and no rows, with no crash — `buildSections(from:)` over an empty
   sequence returns an empty array. `searchQuery = ""` MUST match every panel
-  (see **empty-query-matches-all-panels**).
+  (see **empty-query-inclusion**).
 - **Boundary values**: `selectPanel(at:)`, `isPanelVisible(at:)`, and the
   internal row-id resolver MUST behave correctly at the first (`0`) and last
   (`panels.count - 1`) valid indices, and MUST silently no-op (rather than
@@ -327,7 +321,7 @@ logger reference anywhere in source).
   of `SettingsSearchIndex`'s case-insensitive, all-terms-must-match rule.
   Bind selection with `List(selection: $selectedPanelID)` against a stable
   id equal to the panel's original index (mirroring
-  **ids-row-by-original-index**), and surface it to the caller via
+  **original-index-row-id**), and surface it to the caller via
   `.onChange(of: selectedPanelID)` rather than a stored closure. A disabled
   row should combine `.foregroundStyle(.tertiary)` with a second, non-color
   cue (see the Differentiate Without Color gap above), such as a trailing
@@ -340,17 +334,19 @@ logger reference anywhere in source).
   `onPanelSelected: (Panel?) -> Unit` lambda fired from each row's
   `onClick`, and a `selectPanel(index: Int)` function that updates a
   `selectedIndex` state directly without invoking that lambda, mirroring
-  **selects-panel-without-callback**.
-- **React/Web**: Render one `<ul>`/`<section>` per contiguous run of
-  matching `section` (computed with a single pass over the ordered array,
-  not `Array.reduce` into a keyed map, for the same reordering reason), each
-  row a `<button role="option">` showing the descriptor's icon and label. A
+  **callback-free-selection**.
+- **React/Web**: Render one `<ul role="listbox">`/`<section>` per contiguous
+  run of matching `section` (computed with a single pass over the ordered
+  array, not `Array.reduce` into a keyed map, for the same reordering
+  reason), each row a `<li role="option" aria-selected="…">` (or, if plain
+  buttons are preferred over a listbox/option structure, a
+  `<button aria-current="…">`) showing the descriptor's icon and label. A
   controlled `<input type="search">` drives a `searchQuery` state variable
   that re-filters on every keystroke with the same case-insensitive,
   all-terms rule. Selection fires an `onSelectPanel(panel | null)` prop on
   click/`Enter`/`Space`; a separate `selectPanel(index)` helper updates only
-  the highlighted-row state (e.g. `aria-selected`) without invoking that
-  prop, mirroring **selects-panel-without-callback**.
+  the highlighted-row state (`aria-selected`/`aria-current`) without invoking
+  that prop, mirroring **callback-free-selection**.
 - **AppKit** (source platform): Source file
   `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/SplitViewController/SettingsPanelListViewController.swift`,
   declaring `ComposableSettings.PanelListViewController`. A macOS-only
@@ -358,10 +354,12 @@ logger reference anywhere in source).
   `ComposableSettings.TopicListViewController`
   (`packages/apple/AgenticToolkit/macOS/UI/ViewControllers/TopicListViewController.swift`).
   It composes `ComposableSettings.SettingsSearchIndex`
-  (`.../SplitViewController/SettingsSearchIndex.swift`) for filtering and
+  (`packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/SplitViewController/SettingsSearchIndex.swift`)
+  for filtering and
   reads `any ComposableSettingsPanel`'s `descriptor`
   (`ComposableSettings.SettingsPanelDescriptor`,
-  `.../SettingsPanel/SettingsPanelDescriptor.swift`) to build each row,
+  `packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/SettingsPanel/SettingsPanelDescriptor.swift`)
+  to build each row,
   rather than reimplementing outline-view layout, theming, or row
   accessibility — all of that stays in the ancestor. There is no UIKit code
   path; a UIKit port would need to replace `NSOutlineView`'s row/section
@@ -379,10 +377,13 @@ logger reference anywhere in source).
   in code, exactly as `buildSections(from:)` does, before handing the
   grouped `ObservableCollection` to the control. Bind each
   `NavigationViewItem`/`ListViewItem`'s `Content` to the panel's title and
-  `Icon` to a `SymbolIcon`/`BitmapIcon`; mirror `descriptor.isDisabled` with
-  `IsEnabled` inverted, but — per the Differentiate Without Color gap —
-  also add a non-color cue (a secondary "Coming soon" `TextBlock`, not
-  `Opacity` alone, which repeats the same color-only gap this recipe flags).
+  `Icon` to a `SymbolIcon`/`BitmapIcon`. Keep `IsEnabled=true` for a
+  `descriptor.isDisabled` row — mirroring `IsEnabled` to `isDisabled` would
+  make the row unselectable, contradicting the Disabled state (the row stays
+  selectable, styled only) — and instead style it with a muted
+  `Foreground`/`SymbolIcon` brush plus, per the Differentiate Without Color
+  gap, a non-color cue (a secondary "Coming soon" `TextBlock`, not `Opacity`
+  alone, which repeats the same color-only gap this recipe flags).
   Bind an `AutoSuggestBox`/`TextBox` to a `searchQuery` property on the view
   model, re-filtering and re-grouping the `ObservableCollection` on every
   `TextChanged` with the same case-insensitive, all-terms-must-match rule as
@@ -391,51 +392,59 @@ logger reference anywhere in source).
   index)` method that assigns `SelectedItem` under a reentrancy guard
   (mirroring the ancestor's `suppressingSelectionCallbacks`), since
   assigning `SelectedItem` directly would otherwise re-fire
-  `SelectionChanged` and violate **selects-panel-without-callback**.
+  `SelectionChanged` and violate **callback-free-selection**.
 
 ## Design Decisions
 
-- Decision: Identify each row by the panel's original index in the full,
+- **Decision**: Identify each row by the panel's original index in the full,
   unfiltered array, rather than by its position in the currently filtered
   list.
-  Rationale: Per the source's own doc comment on `visiblePanelIndices()`,
+  **Rationale**: Per the source's own doc comment on `visiblePanelIndices()`,
   "the position is the row's identity, so a filtered row still selects the
   panel it names" — a stable id under filtering is what lets
   `selectPanel(at:)`, `isPanelVisible(at:)`, and `SplitViewController`'s
   arrow-key stepping keep working correctly while a search query is active.
-  Approved: pending
-- Decision: Group panels into sections by contiguous run of matching
+  **Approved**: pending
+- **Decision**: Group panels into sections by contiguous run of matching
   `descriptor.section`, rather than by collecting every panel that shares a
   section title regardless of position.
-  Rationale: Per the source's own comment on `buildSections(from:)`,
+  **Rationale**: Per the source's own comment on `buildSections(from:)`,
   "Sections come out in the order the panels arrive, and a run of panels
   sharing one section title is one section. Grouping by title across the
   whole list instead hoisted every unsectioned panel to the top of the
   sidebar, silently reordering a list whose author had already put it in
   the order they meant."
-  Approved: pending
-- Decision: Filter the sidebar in place (hiding non-matching rows) instead
+  **Approved**: pending
+- **Decision**: Filter the sidebar in place (hiding non-matching rows) instead
   of replacing it with a separate search-results list.
-  Rationale: Per the source's own doc comment on `searchQuery`, "Filtering
+  **Rationale**: Per the source's own doc comment on `searchQuery`, "Filtering
   the sidebar (rather than replacing it with a results list) is what keeps
   a search reversible: the row the user is reading stays where it was in
   the list, and deleting the query puts its neighbours back around it."
-  Approved: pending
-- Decision: Expose `isPanelVisible(at:)` as a separate query rather than
+  **Approved**: pending
+- **Decision**: Expose `isPanelVisible(at:)` as a separate query rather than
   having `selectPanel(at:)` silently clear the search query whenever the
   target row is currently filtered out.
-  Rationale: Per the source's own doc comment on `isPanelVisible(at:)`,
+  **Rationale**: Per the source's own doc comment on `isPanelVisible(at:)`,
   "clearing the search on the caller's behalf when it was not needed throws
   away a filter the user is still reading by" — the caller
   (`SplitViewController`) is expected to check visibility first and decide
   for itself whether to clear the query.
-  Approved: pending
-- Decision: `selectPanel(at:)` never invokes `onSelectPanel`.
-  Rationale: Per the source's own doc comment, "programmatic selection
-  flows through `SettingsViewController.selectPanel`," so the callback
-  exists only to report a user-driven row pick, not to echo back a
+  **Approved**: pending
+- **Decision**: `selectPanel(at:)` never invokes `onSelectPanel`.
+  **Rationale**: Per the source's own doc comment, "programmatic selection
+  flows through `SplitViewController.selectPanel`" (the comment predates a
+  rename and still says `SettingsViewController`, but `SplitViewController`
+  is the only caller in source that drives `selectPanel(at:)`), so the
+  callback exists only to report a user-driven row pick, not to echo back a
   selection the caller itself just made.
-  Approved: pending
+  **Approved**: pending
+- **Decision**: Declare `PanelListViewController` as `open`, letting a host
+  app subclass it to customize row presentation or add secondary actions,
+  rather than sealing it or exposing customization through composition only.
+  **Rationale**: Per the source's own doc comment, "Open so client apps can
+  customize row presentation or add secondary actions."
+  **Approved**: pending
 
 ## Compliance
 
@@ -444,7 +453,7 @@ logger reference anywhere in source).
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
 | [platform-design-language](agenticdevelopercookbook://compliance/platform-compliance#platform-design-language) | passed | platform-compliance |
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
-| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | needs-review | accessibility |
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
 | [idempotent-operations](agenticdevelopercookbook://compliance/reliability#idempotent-operations) | passed | reliability |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
 
@@ -453,3 +462,4 @@ logger reference anywhere in source).
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: renamed requirements to subject-only kebab-case and updated every citation; deduped Appearance against the `TopicListViewController` recipe and added it to `depends-on` along with `settings-panel-view-controller`; dropped the `macos` tag; fixed the WinUI 3 and React/Web platform notes; replaced two unobservable test vectors with an observable rebuild-counter seam and strengthened cts-panel-list-010; reformatted Design Decisions to the bold three-line form, corrected a stale `SettingsViewController` citation, and added a decision for `open` subclassing (moved out of Behavioral Requirements/test vectors); fixed the `needs-review` compliance status to `partial` |

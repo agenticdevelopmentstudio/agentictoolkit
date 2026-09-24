@@ -3,7 +3,7 @@ id: a11f34ff-116c-47d6-bffa-edd0799cbcb2
 title: SplitViewController
 domain: agentictoolkit://recipes/split-view-controller
 type: ingredient
-version: 1.0.0
+version: 1.1.0
 status: review
 language: en
 created: '2026-09-23'
@@ -11,9 +11,8 @@ modified: '2026-09-23'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
-summary: AppKit base class for a settings window's topic/detail split — a non-collapsible
-  sidebar of panels, a themed detail pane, in-place back/forward history, and optional
-  alphabetical/searchable sidebar filtering.
+summary: AppKit base class for a settings window's sidebar/detail split with back/forward
+  history and optional search.
 platforms:
 - swift
 - macos
@@ -23,18 +22,16 @@ tags:
 - view-controller
 - navigation
 - search
-- macos
-- appkit
-depends-on: []
-related:
+depends-on:
 - agentictoolkit://recipes/settings-panel-list-view-controller
 - agentictoolkit://recipes/panel-host-view
 - agentictoolkit://recipes/panel-scroll-view
+related:
 - agentictoolkit://recipes/settings-panel-split-view-controller
 - agentictoolkit://recipes/settings-window
+- agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
 references:
 - https://developer.apple.com/design/human-interface-guidelines/split-views
-- agenticdevelopercookbook://guidelines/cookbook/ui/platform-design-languages
 approved-by: ''
 approved-date: ''
 ---
@@ -53,29 +50,39 @@ subclasses `ThemedSplitViewController` (an `AgenticDeveloperToolkit` base
 that supplies theme-aware split-view chrome and a divider-hiding safety fix)
 and conforms to `NSSearchFieldDelegate` solely to redirect the sidebar
 search field's arrow keys to sidebar-row navigation. Per the source's own
-doc comments, a client subclasses `SplitViewController`, populates it in
-`viewDidLoad` by calling `addPanel(_:)`, and the class itself owns: panel
-storage and ordering, an in-place back/forward navigation trail
-(`SettingsNavigationHistory`), sidebar sizing (draggable-and-autosaved, or
-content-sized and pinned), an optional sidebar search field, theming, and
-forwarding help state to a `PanelHostView`. A hosted panel MAY itself be a
-`SplitViewController` (see `SettingsPanelSplitViewController`'s own recipe),
-in which case this class treats it as a nested split: it unifies every
-nested sibling's sidebar to one content width and raises its own detail
-floor so the nested content is never squeezed. This recipe documents only
-what this file itself declares; the sidebar row rendering and its search
-matching belong to `PanelListViewController`'s own recipe, the detail
-pane's help-button chrome belongs to `PanelHostView`'s own recipe, the
-scroll wrapper belongs to `PanelScrollView`'s own recipe, and the
-window-level toolbar that drives this class's `goBack()`/`goForward()`/
-`helpPresenter` belongs to `SettingsWindow`'s own recipe.
+doc comments, a client subclasses `SplitViewController` and populates it in
+`viewDidLoad` by calling `addPanel(_:)`.
+
+A hosted panel MAY itself be a `SplitViewController` (see
+`SettingsPanelSplitViewController`'s own recipe), in which case this class
+treats it as a nested split: it unifies every nested sibling's sidebar to
+one content width and raises its own detail floor so the nested content is
+never squeezed.
+
+**Owns:**
+- Panel storage and ordering, including optional alphabetical sorting
+- An in-place back/forward navigation trail (`SettingsNavigationHistory`)
+- Sidebar sizing — draggable-and-autosaved, or content-sized and pinned
+- An optional sidebar search field and its arrow-key-to-selection redirect
+- Repainting the window/detail backgrounds from the active theme
+- Forwarding help state to a `PanelHostView`
+
+**Delegates to:**
+- `PanelListViewController` — sidebar row rendering and search matching
+  (its own recipe)
+- `PanelHostView` — the detail pane's help-button chrome (its own recipe)
+- `PanelScrollView` — the scroll wrapper around non-self-scrolling panel
+  content (its own recipe)
+- `SettingsWindow` — the window-level toolbar that drives this class's
+  `goBack()`/`goForward()`/`helpPresenter` (its own recipe)
+
+This recipe documents only what this file itself declares.
 
 ## Behavioral Requirements
 
-- **exposes-hosted-panels-read-only**: The component MUST expose its hosted
-  panels through a `private(set) panels: [any ComposableSettingsPanel]`
-  property, settable only via `setPanels(_:)`, `addPanel(_:)`,
-  `removePanel(_:)`, or `clear()`.
+- **exposes-hosted-panels-read-only**: The component MUST expose `panels`
+  as read-only to callers outside the type — mutable only through
+  `setPanels(_:)`, `addPanel(_:)`, `removePanel(_:)`, or `clear()`.
 - **default-detail-minimum-thickness**: The component MUST default
   `detailMinimumThickness` to `400` points when not overridden.
 - **overridable-detail-minimum-thickness**: A subclass MAY override
@@ -102,9 +109,9 @@ window-level toolbar that drives this class's `goBack()`/`goForward()`/
   that is itself a `SplitViewController` and using its `currentPanelTitle`
   — whenever that inner title is non-`nil`, rather than this instance's own
   selected panel's `descriptor.title`.
-- **rejects-coder-initialization**: The component MUST NOT support
-  construction via `init(coder:)`; that initializer MUST call
-  `fatalError()`.
+- **rejects-coder-initialization**: Attempting to construct the component
+  via `init(coder:)` MUST fail with a fatal error rather than returning an
+  instance.
 - **runs-on-main-actor**: The component MUST be `@MainActor`-isolated;
   construction and every property access MUST occur on the main actor.
 - **forwards-help-presenter-to-detail-chrome**: Whenever `helpPresenter` is
@@ -137,10 +144,10 @@ window-level toolbar that drives this class's `goBack()`/`goForward()`/
 - **builds-non-collapsible-sidebar-item**: During `viewDidLoad`, the
   component MUST add a sidebar `NSSplitViewItem` (built with
   `listViewController`) whose `canCollapse` is `false`.
-- **prioritizes-detail-pane-on-resize**: The sidebar item's
-  `holdingPriority` MUST be set higher (`.defaultLow + 1`) than the detail
-  item's (`.defaultLow`), so a window resize resizes the detail pane rather
-  than the sidebar.
+- **prioritizes-detail-pane-on-resize**: The sidebar item's resize-holding
+  priority MUST be higher than the detail item's, so a window resize
+  resizes the detail pane rather than the sidebar (see the source values in
+  Platform Notes).
 - **fixes-content-sized-sidebar-thickness**: Whenever `contentSizedSidebar`
   is `true`, the component MUST set the sidebar item's `minimumThickness`
   and `maximumThickness` to the same value (see
@@ -230,9 +237,11 @@ window-level toolbar that drives this class's `goBack()`/`goForward()`/
   selection, history availability, or panel title changes, it MUST invoke
   its own `onNavigationChange` and MUST also invoke the enclosing
   `SplitViewController`'s navigation-change notification, if one exists.
-- **reports-current-panel-from-detail-container**: `currentPanel` MUST be
-  derived by reading the detail container's first child view controller,
-  never from a separately stored selection index.
+- **reports-current-panel-from-detail-container**: `currentPanel` MUST
+  always reflect whichever panel is currently hosted in the detail pane,
+  recomputed from the detail pane's actual content rather than from any
+  separately tracked selection state (see the source mechanism in Platform
+  Notes).
 - **reports-effective-help-from-current-panel**: `effectiveHelp` MUST
   return the current panel's own `effectiveHelpContent`.
 - **refreshes-help-through-detail-chrome-and-outward**: `refreshHelp()`
@@ -247,9 +256,10 @@ window-level toolbar that drives this class's `goBack()`/`goForward()`/
   including `show(nil)`, MUST refresh the detail chrome's help content and
   MUST re-apply the detail-pane minimum-thickness floor.
 - **locates-enclosing-split-by-parent-chain**: `enclosingSettingsSplit`
-  MUST be found by walking `parent` upward until the nearest
-  `ComposableSettings.SplitViewController` is found, or `nil` at the root —
-  never from a stored reference.
+  MUST always reflect the current view-controller hierarchy — recomputed
+  from the live containment relationship each time it is read, not cached
+  — returning `nil` when no enclosing split exists (see the source
+  mechanism in Platform Notes).
 
 ## Appearance
 
@@ -343,10 +353,11 @@ window-level toolbar that drives this class's `goBack()`/`goForward()`/
 | split-view-controller-018 | filters-list-as-user-types | Type `"a"` into the search field without pressing Return | `listViewController.searchQuery == "a"` immediately |
 | split-view-controller-019 | redirects-arrow-keys-to-selection | With the search field focused and `"Advanced"` typed, press Down | Sidebar selection moves to the next visible row; search text remains `"Advanced"` |
 | split-view-controller-020 | builds-non-collapsible-sidebar-item | Load the view, then attempt to collapse the sidebar item | Collapse is refused; `canCollapse == false` |
-| split-view-controller-021 | prioritizes-detail-pane-on-resize | Shrink the window after load | The detail pane's width changes; the sidebar's width is unchanged |
+| split-view-controller-021 | prioritizes-detail-pane-on-resize | Read the sidebar item's and detail item's `holdingPriority` after `viewDidLoad` | Sidebar item's `holdingPriority == .defaultLow + 1`; detail item's `holdingPriority == .defaultLow` |
 | split-view-controller-022 | fixes-content-sized-sidebar-thickness | Set `contentSizedSidebar` to return `true`, then load | Sidebar item's `minimumThickness == maximumThickness` |
 | split-view-controller-023 | constrains-draggable-sidebar-range | Load with `contentSizedSidebar == false` (default) | Sidebar item's `minimumThickness == 160`, `maximumThickness == 360` |
 | split-view-controller-024 | persists-draggable-sidebar-width | Load with `contentSizedSidebar == false` | `splitView.autosaveName == sidebarAutosaveName` |
+| split-view-controller-024b | persists-draggable-sidebar-width | Subclass overrides `sidebarAutosaveName` to return `nil`; load with `contentSizedSidebar == false` | `splitView.autosaveName == nil`; width persistence is silently disabled, no fallback name is used |
 | split-view-controller-025 | omits-autosave-for-content-sized-sidebar | Load with `contentSizedSidebar == true` | `splitView.autosaveName` is left unset |
 | split-view-controller-026 | caps-content-sized-sidebar-width | `listViewController.preferredWidth()` returns `900`, `minimumSidebarWidthOverride == nil` | Sidebar item's fixed width is `480`, not `900` |
 | split-view-controller-027 | unifies-nested-sidebar-widths | Host two nested `SplitViewController` panels whose own `preferredWidth()`s are `180` and `220` | Both nested panels' `minimumSidebarWidthOverride == 220` |
@@ -378,6 +389,8 @@ window-level toolbar that drives this class's `goBack()`/`goForward()`/
 | split-view-controller-050 | wraps-other-panels-in-scroll-view | Show a plain panel with `hostsOwnScroll == false` | `panelHost`'s content is a `PanelScrollView` wrapping that panel's view |
 | split-view-controller-051 | updates-help-and-floor-on-every-show | Call `show(nil)` | `panelHost.setContent(nil)`, `panelHost.setHelp(nil)`, and the detail-floor recompute all run |
 | split-view-controller-052 | locates-enclosing-split-by-parent-chain | This instance is added as a child of an outer `SplitViewController` via `addPanel` | `enclosingSettingsSplit` returns that outer instance |
+| split-view-controller-053 | (edge case: `removePanel(_:)` on a non-member) | Panels `[a, b]`, call `removePanel(z)` where `z` is not in `panels` | `panels` is unchanged (`[a, b]`); navigation history is still reset, the sidebar's panel list is still re-set, and `onNavigationChange` still fires |
+| split-view-controller-054 | (edge case: stale nested-detail floor) | Two nested `SplitViewController` siblings raise `nestedDetailFloor` to `420`; `removePanel` drops the nested count to one | `nestedDetailFloor` remains `420` (not reset toward `0`), because `unifyNestedSidebars()`'s `guard nested.count > 1` returns early before recomputing it |
 
 ## Edge Cases
 
@@ -406,8 +419,13 @@ window-level toolbar that drives this class's `goBack()`/`goForward()`/
   removes nothing, but the method still unconditionally resets navigation
   history, re-sets the sidebar's panel list, and invokes
   `notifyNavigationChange()` — the same side effects as a real removal.
-  This is the actual behavior (MUST be relied upon as such, not assumed to
-  be a no-op).
+  This is a documented observation of the file's actual behavior, not a
+  deliberate contract (see split-view-controller-053).
+- **`sidebarAutosaveName == nil` while `contentSizedSidebar == false`**: A
+  subclass MAY override `sidebarAutosaveName` to return `nil`. In that case
+  `splitView.autosaveName` is set to `nil`, which silently disables
+  `NSSplitView`'s width-persistence for that instance — no fallback name is
+  substituted and nothing fails (see split-view-controller-024b).
 - **Stale nested-detail floor after a nested split is removed**:
   `unifyNestedSidebars()` only recomputes `nestedDetailFloor` when at least
   two nested `SplitViewController` panels remain (`guard nested.count > 1
@@ -417,7 +435,7 @@ window-level toolbar that drives this class's `goBack()`/`goForward()`/
   resetting it toward `0`. The detail pane's floor can therefore stay wider
   than the current panel set requires until a later state again has two or
   more nested siblings. This is the file's actual, undocumented behavior —
-  see Design Decisions.
+  see Design Decisions and split-view-controller-054.
 - **Toggling `showsSidebarSearch` or `sortsPanelsByTitle` after their
   first effect has already run**: Neither property has a property observer.
   `showsSidebarSearch` is read only once, in `viewDidLoad`, to decide
@@ -453,7 +471,7 @@ anywhere in `SplitViewController.swift`.
 |-----------|-------------|---------|
 | `"Search"` | Search | Placeholder text for the sidebar's search field, passed as `ThemedSearchField(placeholder: "Search")` and stored as AppKit's `placeholderString` — a literal `String`, not routed through any localization lookup in this file. |
 
-NEEDS REVIEW: the `"Search"` placeholder is a hardcoded literal, not passed
+NEEDS REVIEW: Not implemented in source. The `"Search"` placeholder is a hardcoded literal, not passed
 through `NSLocalizedString`/`String(localized:)`, both of which are used
 elsewhere in this Swift package (outside this file). It cannot be determined
 from `SplitViewController.swift` alone whether this is an intentional
@@ -538,7 +556,18 @@ appears anywhere in `SplitViewController.swift`.
   composing a `PanelListViewController` sidebar item and a `PanelHostView`-hosted
   detail item, wrapping non-self-scrolling panel content in a
   `PanelScrollView`, and tracking navigation with a
-  `SettingsNavigationHistory` value type. No UIKit counterpart exists in
+  `SettingsNavigationHistory` value type. `panels` is declared
+  `private(set)`, enforcing **exposes-hosted-panels-read-only** at compile
+  time. `init(coder:)` is `@available(*, unavailable)` and its body is
+  `fatalError()`, giving **rejects-coder-initialization** its fatal error.
+  The sidebar item's `holdingPriority` is `.defaultLow + 1` against the
+  detail item's `.defaultLow`, which is how
+  **prioritizes-detail-pane-on-resize** is implemented. `currentPanel` is
+  computed by reading `detailContainer.children.first`, and
+  `enclosingSettingsSplit` walks `parent` upward looking for the nearest
+  `ComposableSettings.SplitViewController` — the mechanisms behind
+  **reports-current-panel-from-detail-container** and
+  **locates-enclosing-split-by-parent-chain**. No UIKit counterpart exists in
   this codebase (`ComposableSettingsWindow/` is entirely AppKit); a UIKit
   port would reach for `UISplitViewController` with `.doubleColumn` style,
   though it has no analog of `contentSizedSidebar`'s pinned min==max
@@ -575,89 +604,83 @@ appears anywhere in `SplitViewController.swift`.
 
 ## Design Decisions
 
-Decision: `detailMinimumThickness` floors the detail pane's
+**Decision**: `detailMinimumThickness` floors the detail pane's
 `NSSplitViewItem.minimumThickness` rather than a required-width constraint
 on the detail content.
-Rationale: Per the source's own comment, this "lets the detail grow freely,
-unlike a required width constraint on the content, which pins the window";
-it is "the proper lever for the window's minimum width (window min =
-sidebar thickness + this)."
-Approved: pending
+**Rationale**: Per the source's own comment, this "lets the detail grow
+freely, unlike a required width constraint on the content, which pins the
+window"; it is "the proper lever for the window's minimum width (window
+min = sidebar thickness + this)."
+**Approved**: pending
 
-Decision: `contentSizedSidebar` defaults to `false` for this base class
+**Decision**: `contentSizedSidebar` defaults to `false` for this base class
 (the draggable, autosaved band), even though nested splits generally want
 `true`.
-Rationale: Per the source's own comment, "the full-height *root* window
+**Rationale**: Per the source's own comment, "the full-height *root* window
 sidebar keeps the draggable behaviour (its outline's column-fill misbehaves
 under a fixed width). Nested topic/detail splits opt in — they're the ones
 that visibly 'move around' as you switch between them."
-Approved: pending
+**Approved**: pending
 
-Decision: `showsSidebarSearch` and `sortsPanelsByTitle` both default to
+**Decision**: `showsSidebarSearch` and `sortsPanelsByTitle` both default to
 `false` and are switched on only for the window's root split.
-Rationale: Per the source's own comments, a nested split's sidebar is "a
-table of contents for one panel" written in an intentional order, while
+**Rationale**: Per the source's own comments, a nested split's sidebar is
+"a table of contents for one panel" written in an intentional order, while
 the root window's list is "a set of unrelated destinations" a reader can
 only find by name or by search; a second search field inside an outer
 split's already-filtered results "is a maze."
-Approved: pending
+**Approved**: pending
 
-Decision: `moveSelection(by:)` (arrow-key stepping) leaves the search
+**Decision**: `moveSelection(by:)` (arrow-key stepping) leaves the search
 field's text and query untouched, unlike `selectPanel`/`goBack`/`goForward`,
 which all clear it.
-Rationale: Per the source's own comment, "the query is the very thing the
-reader is steering by when they press Down, so clearing it would throw away
-the list they are moving through and jump the highlight somewhere else."
-Approved: pending
+**Rationale**: Per the source's own comment, "the query is the very thing
+the reader is steering by when they press Down, so clearing it would throw
+away the list they are moving through and jump the highlight somewhere
+else."
+**Approved**: pending
 
-Decision: `SplitViewController` conforms to `NSSearchFieldDelegate` solely
-to intercept `moveDown(_:)`/`moveUp(_:)`, returning `false` for every other
-command selector.
-Rationale: Per the source's own comment, this is answered in the delegate
-callback "rather than in a `keyDown` override because AppKit has already
-turned the key into the reader's intent by this point — and returning
-false for every other command leaves the rest of text editing exactly as
-it was."
-Approved: pending
+**Decision**: `SplitViewController` conforms to `NSSearchFieldDelegate`
+solely to intercept `moveDown(_:)`/`moveUp(_:)`, returning `false` for
+every other command selector.
+**Rationale**: Per the source's own comment, this is answered in the
+delegate callback "rather than in a `keyDown` override because AppKit has
+already turned the key into the reader's intent by this point — and
+returning false for every other command leaves the rest of text editing
+exactly as it was."
+**Approved**: pending
 
-Decision: `currentPanelTitle` and `effectiveHelp` both recurse into a
+**Decision**: `currentPanelTitle` and `effectiveHelp` both recurse into a
 selected panel that is itself a `SplitViewController`, reporting that
 inner split's own title/help rather than this instance's.
-Rationale: Per the source's own comment, "a split whose selected panel is
-itself a split answers with the topic selected *inside* it: that is the
+**Rationale**: Per the source's own comment, "a split whose selected panel
+is itself a split answers with the topic selected *inside* it: that is the
 panel the reader is looking at," and naming the outer container instead
 "left the toolbar stuck on the container's name while the reader moved
 down its list."
-Approved: pending
+**Approved**: pending
 
-Decision: `unifyNestedSidebars()` leaves `nestedDetailFloor` unchanged
+**Decision**: `unifyNestedSidebars()` leaves `nestedDetailFloor` unchanged
 (rather than resetting it toward `0`) whenever the current panel set has
 fewer than two nested `SplitViewController` panels.
-Rationale: Not stated in source. The method's guard clause returns before
-recomputing the floor, so a detail-pane floor raised while two or more
-nested splits were present can outlive their removal until a later state
-again has two or more. Documented here as observed behavior (see Edge
-Cases), not as a deliberate design tradeoff.
-Approved: pending
+**Rationale**: Not stated in source. The method's guard clause returns
+before recomputing the floor, so a detail-pane floor raised while two or
+more nested splits were present can outlive their removal until a later
+state again has two or more. Documented here as observed behavior (see
+Edge Cases and split-view-controller-054), not as a deliberate design
+tradeoff.
+**Approved**: pending
 
 ## Compliance
 
 | Check | Status | Category |
 |-------|--------|----------|
-| [template-conformance](agenticdevelopercookbook://compliance/recipe-quality#template-conformance) | passed | recipe-quality |
-| [behavioral-requirements](agenticdevelopercookbook://compliance/recipe-quality#behavioral-requirements) | passed | recipe-quality |
-| [completeness](agenticdevelopercookbook://compliance/recipe-quality#completeness) | passed | recipe-quality |
-| [cookbook-compliance](agenticdevelopercookbook://compliance/recipe-quality#cookbook-compliance) | passed | recipe-quality |
-| [cross-recipe-consistency](agenticdevelopercookbook://compliance/recipe-quality#cross-recipe-consistency) | passed | recipe-quality |
-| [source-fidelity](agenticdevelopercookbook://compliance/recipe-quality#source-fidelity) | passed | recipe-quality |
-| [main-actor-confined](agenticdevelopercookbook://compliance/architecture#main-actor-confined) | passed | architecture |
 | [separation-of-concerns](agenticdevelopercookbook://compliance/best-practices#separation-of-concerns) | passed | best-practices |
 | [keyboard-navigable](agenticdevelopercookbook://compliance/accessibility#keyboard-navigable) | passed | accessibility |
 | [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | accessibility |
 | [native-controls-preference](agenticdevelopercookbook://compliance/platform-compliance#native-controls-preference) | passed | platform-compliance |
 
-Statuses rest on: the class being `@MainActor`-isolated throughout with no
-off-actor mutation surface (main-actor-confined); this file delegating row
+Statuses rest on: this file delegating row
 rendering to `PanelListViewController`, help chrome to `PanelHostView`, and
 scroll wrapping to `PanelScrollView` rather than reimplementing any of them
 (separation-of-concerns); the search field's arrow-key redirect and the
@@ -674,4 +697,5 @@ would hear an English word regardless of the app's language.
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: restate five implementation-mechanics requirements (private(set), fatalError(), holdingPriority, detail-container read, parent-chain walk) as observable outcomes and move their mechanics into the AppKit Platform Notes bullet; downgrade the removePanel-on-non-member edge case from a MUST-relied-upon contract to a documented observation; add an edge case, a test vector, and Design-Decisions wording for a nil sidebarAutosaveName; add test vectors pinning the removePanel-on-non-member and stale-nested-detail-floor behaviors; tighten test vector 021 to assert holdingPriority directly instead of an unstated width change; reformat Design Decisions to the bold three-line form; split the Overview into a short description plus Owns/Delegates-to lists; move the platform-design-languages reference into related and the three composed-ingredient recipes into depends-on; trim tags to 5 and summary to ~120 characters; and reconcile the Compliance table against the catalog, dropping seven cited checks that have no corresponding category or check in the compliance catalog. |
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial creation |
