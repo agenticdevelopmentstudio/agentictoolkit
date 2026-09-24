@@ -580,6 +580,11 @@ targets:
       - target: AgenticToolkitMacOS
         embed: true
         codeSign: true
+      # The scripting tests import it directly (`@testable`), not through the
+      # AgenticToolkitMacOS re-export, so its internal `reset()` is reachable.
+      - target: AgenticToolkitScripting
+        embed: true
+        codeSign: true
       - target: AgenticToolkitCoreMacOS
         embed: true
         codeSign: true

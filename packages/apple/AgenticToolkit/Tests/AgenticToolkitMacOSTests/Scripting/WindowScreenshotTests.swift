@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-@testable import AgenticToolkitMacOS
+@testable import AgenticToolkitScripting
 
 @MainActor
 final class WindowScreenshotTests: XCTestCase {
