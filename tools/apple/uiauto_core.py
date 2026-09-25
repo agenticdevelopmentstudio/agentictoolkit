@@ -61,7 +61,7 @@ import signal
 import subprocess
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -499,7 +499,10 @@ def build_parser(profile: AppProfile) -> argparse.ArgumentParser:
         child.add_argument("argument")
 
     shot = sub.add_parser("shot", help="screenshot a window by name, sunk or not")
-    shot.add_argument("name", help="a window name, or a title substring")
+    shot.add_argument(
+        "name",
+        help=f"a window name ({', '.join(profile.window_titles)}), or a title substring",
+    )
     shot.add_argument("--out", type=Path, default=None, help="PNG path to write")
 
     waiter = sub.add_parser(
@@ -533,18 +536,20 @@ def main(profile: AppProfile, argv: list[str] | None = None) -> int:
     app: Path = args.app
     command: str = args.command
 
-    result = profile.handle(args, app)
-    if result is not None:
-        return result
-
     if command == "build":
         build_app(profile, app)
         print(f"built {app} ({bundle_version(app)})")
         return 0
 
     if not app.exists():
-        print(f"no app bundle at {app} — run `uiauto.py build`", file=sys.stderr)
+        print(f"no app bundle at {app} — run `{profile.prog} build`", file=sys.stderr)
         return 2
+
+    # The profile's own commands run after the bundle guard, since every one
+    # of them drives the app.
+    result = profile.handle(args, app)
+    if result is not None:
+        return result
 
     if command == "launch":
         before = frontmost_app()
