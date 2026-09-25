@@ -167,6 +167,19 @@
       "holds": "AgenticToolkitHub. Shared hub feature layer: HubModules registry hook, HubError, and per-feature models/data sources/modules consumed by the native hub apps."
     },
     {
+      "name": "apple-hubservice",
+      "paths": [
+        "packages/apple/AgenticToolkit/HubService/"
+      ],
+      "depends_on": [
+        "apple-hub",
+        "apple-htdv",
+        "apple-permissions"
+      ],
+      "shared": true,
+      "holds": "AgenticToolkitHubService. The hub's session, workspaces, API adapters and transport — no UI. Sees an embedded daemon only as AgenticDeveloperHubClient's EmbeddedDaemon."
+    },
+    {
       "name": "apple-tests",
       "paths": [
         "packages/apple/AgenticToolkit/Tests/"
@@ -185,7 +198,8 @@
         "apple-language",
         "apple-markdown",
         "apple-htdv",
-        "apple-hub"
+        "apple-hub",
+        "apple-hubservice"
       ],
       "shared": false,
       "holds": "Test bundles. Nothing depends on these."

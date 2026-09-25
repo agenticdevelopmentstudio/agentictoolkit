@@ -72,6 +72,13 @@ projectReferences:
   AgenticDeveloperToolkit:
     path: ../../../../../external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperToolkit/AgenticDeveloperToolkit.xcodeproj
 
+  # The generated hub API client. Climbs to the superproject's checkout for the
+  # same reason as AgenticDeveloperToolkit above: the superproject's workspace
+  # already contains this xcodeproj at that path, and a second copy would
+  # build a second AgenticDeveloperHubClient into the same products directory.
+  AgenticDeveloperHubClient:
+    path: ../../../../../external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperHubClient/AgenticDeveloperHubClient.xcodeproj
+
 packages:
   CodeEditLanguages:
     url: https://github.com/CodeEditApp/CodeEditLanguages.git
@@ -103,6 +110,18 @@ packages:
   LanguageClient:
     url: https://github.com/ChimeHQ/LanguageClient
     from: "0.8.2"
+  swift-openapi-runtime:
+    url: https://github.com/apple/swift-openapi-runtime
+    minVersion: "1.12.0"
+    maxVersion: "2.0.0"
+  swift-http-types:
+    url: https://github.com/apple/swift-http-types
+    minVersion: "1.0.0"
+    maxVersion: "2.0.0"
+  swift-openapi-urlsession:
+    url: https://github.com/apple/swift-openapi-urlsession
+    minVersion: "1.3.0"
+    maxVersion: "2.0.0"
 
 targets:
   AIPluginKit:
@@ -738,6 +757,106 @@ targets:
         embed: true
         codeSign: true
 
+  # The hub's service layer — session, workspaces, adapters, transport — with
+  # no UI. Split per platform because it depends on AgenticToolkitHub, which is.
+  AgenticToolkitHubService-macOS:
+    type: framework
+    platform: macOS
+    templates: [SwiftLint]
+    sources:
+      - path: HubService
+        excludes: ["iOS"]
+    dependencies:
+      - target: AgenticToolkitHub-macOS
+      - target: AgenticToolkitPermissions
+      - target: AgenticDeveloperHubClient/AgenticDeveloperHubClient
+      - package: swift-openapi-runtime
+        product: OpenAPIRuntime
+      - package: swift-http-types
+        product: HTTPTypes
+      # HubEnvironment.swift calls APITransport.direct() with no transport
+      # argument, which resolves to a default-parameter expression that
+      # constructs URLSessionTransport() — that expression compiles into
+      # THIS target's object code, so this target needs OpenAPIURLSession
+      # directly, not just transitively through AgenticDeveloperHubClient.
+      - package: swift-openapi-urlsession
+        product: OpenAPIURLSession
+    settings:
+      base:
+        PRODUCT_NAME: AgenticToolkitHubService
+        # Not 14.0 (the usual HTDV/Hub split-target floor): this target links
+        # AgenticToolkitPermissions for HubPermissions.swift, and that
+        # framework's own minimum is macOS 26.0 (no per-target override in its
+        # target definition, so it inherits the project's base setting).
+        # Matches the deployment target the app's own HubKit-macOS already
+        # built this same code at before the move.
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
+
+  AgenticToolkitHubService-iOS:
+    type: framework
+    platform: iOS
+    templates: [SwiftLint]
+    sources:
+      - path: HubService
+        excludes: ["macOS"]
+    dependencies:
+      - target: AgenticToolkitHub-iOS
+      - target: AgenticDeveloperHubClient/AgenticDeveloperHubClient
+      - package: swift-openapi-runtime
+        product: OpenAPIRuntime
+      - package: swift-http-types
+        product: HTTPTypes
+      # See the same dependency on AgenticToolkitHubService-macOS above:
+      # HubEnvironment.swift's APITransport.direct() default parameter
+      # constructs URLSessionTransport() directly in this target's code.
+      - package: swift-openapi-urlsession
+        product: OpenAPIURLSession
+    settings:
+      base:
+        SDKROOT: iphoneos
+        PRODUCT_NAME: AgenticToolkitHubService
+        IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+
+  AgenticToolkitHubServiceTests:
+    type: bundle.unit-test
+    platform: macOS
+    templates: [SwiftLint]
+    sources:
+      - Tests/AgenticToolkitHubServiceTests
+    # Every framework the bundle loads, embedded: a test bundle loads them out
+    # of its own Frameworks directory.
+    dependencies:
+      - target: AgenticToolkitHubService-macOS
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitHub-macOS
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitHTDV-macOS
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitPermissions
+        embed: true
+        codeSign: true
+      - target: AgenticDeveloperHubClient/AgenticDeveloperHubClient
+        embed: true
+        codeSign: true
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkit-macOS
+        embed: true
+        codeSign: true
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-macOS
+        embed: true
+        codeSign: true
+      - package: swift-openapi-runtime
+        product: OpenAPIRuntime
+      - package: swift-http-types
+        product: HTTPTypes
+      # EmbeddedDaemonTransportSourceTests builds an APITransport with a real
+      # URLSessionTransport, the way Task 1's FakeDaemon test does.
+      - package: swift-openapi-urlsession
+        product: OpenAPIURLSession
+
 aggregateTargets:
   AgenticToolkitMacOSAll:
     targets:
@@ -756,6 +875,7 @@ aggregateTargets:
       - AgenticToolkitMarkdown-macOS
       - AgenticToolkitHTDV-macOS
       - AgenticToolkitHub-macOS
+      - AgenticToolkitHubService-macOS
 
   # The spec files this store under "macOS, iOS", and `AgenticToolkitMarkdown-iOS`
   # existed but was reachable from no aggregate and no scheme — so nothing ever
@@ -772,6 +892,7 @@ aggregateTargets:
       - AgenticToolkitMarkdown-iOS
       - AgenticToolkitHTDV-iOS
       - AgenticToolkitHub-iOS
+      - AgenticToolkitHubService-iOS
 
   AgenticToolkitMacOSTestsAll:
     targets:
@@ -804,6 +925,8 @@ aggregateTargets:
       - AgenticToolkitHTDVTests
       - AgenticToolkitHub-macOS
       - AgenticToolkitHubTests
+      - AgenticToolkitHubService-macOS
+      - AgenticToolkitHubServiceTests
 
 schemes:
   AgenticToolkitDatabase:
@@ -1006,6 +1129,23 @@ schemes:
       config: Debug
       targets:
         - AgenticToolkitHubTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  AgenticToolkitHubService:
+    build:
+      targets:
+        AgenticToolkitHubService-macOS: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AgenticToolkitHubServiceTests
     profile:
       config: Release
     analyze:
