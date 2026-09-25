@@ -98,6 +98,16 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate {
     /// creation.
     open var minSize: NSSize?
 
+    /// Accessibility identifier applied to the window once it is actually
+    /// built. Settable at any time — before or after the window exists —
+    /// because the window is lazy: `loadWindow()` only runs on the first
+    /// `showWindow(_:)`, so a caller that reads `.window` beforehand (or
+    /// calls `window?.setAccessibilityIdentifier(_:)` on it) sets nothing.
+    /// Set this property instead and `loadWindow()` applies it when the
+    /// window comes into being, after `configureWindow(_:)` so it wins over
+    /// any identifier a subclass's override sets there.
+    public var accessibilityIdentifier: String?
+
     /// Called once the window exists and its content view controller is set,
     /// and *before* its saved frame is restored or it is ordered in. Override
     /// for post-creation mutation — installing a toolbar, wiring extra
@@ -153,6 +163,9 @@ open class SingleWindowController: NSWindowController, NSWindowDelegate {
             applyHUDChrome(hudConfiguration, to: newWindow)
         }
         configureWindow(newWindow)
+        if let accessibilityIdentifier {
+            newWindow.setAccessibilityIdentifier(accessibilityIdentifier)
+        }
         // WindowManager.restoreFrame handles positioning in every path:
         // saved geometry → restored; no saved state but spec registered →
         // applyDefaultPosition (geometric center via FrameCalculator); no

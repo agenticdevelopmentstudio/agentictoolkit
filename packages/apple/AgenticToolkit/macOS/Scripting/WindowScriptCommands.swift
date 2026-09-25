@@ -143,7 +143,7 @@ public final class ScriptScreenshotWindowCommand: ScriptWindowCommand, @unchecke
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
         let url = Self.destination(
             windowName: entry.name,
-            processName: ProcessInfo.processInfo.processName,
+            processName: ScriptWindows.screenshotPrefix,
             stamp: stamp
         )
         // The empty string rather than a path, on failure: a caller handed a

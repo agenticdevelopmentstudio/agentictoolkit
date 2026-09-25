@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 
 /// One window a script may name: what it is called, how to find it, and how
 /// to put it on screen.
@@ -39,6 +40,17 @@ public enum ScriptWindows {
     /// `quiet_presentation`. The reply's own keys (`pid`, `bundle_path`,
     /// `windows`) always win over a fact of the same name.
     public static var processFacts: @MainActor () -> [String: Any] = { [:] }
+
+    /// Prefix `screenshot window` writes its PNGs under:
+    /// `/tmp/<screenshotPrefix>-<window>-<stamp>.png`. Defaults to the
+    /// process name, lowercased with spaces as hyphens — settable so a host
+    /// can keep an existing filename convention distinct from
+    /// `ProcessInfo`'s process name.
+    public static var screenshotPrefix: String = defaultScreenshotPrefix()
+
+    private static func defaultScreenshotPrefix() -> String {
+        ProcessInfo.processInfo.processName.lowercased().replacingOccurrences(of: " ", with: "-")
+    }
 
     /// Adds a window, or replaces the one already registered under that name
     /// in its existing position, so the default-first window never shifts.
@@ -81,5 +93,6 @@ public enum ScriptWindows {
     static func reset() {
         registered = []
         processFacts = { [:] }
+        screenshotPrefix = defaultScreenshotPrefix()
     }
 }
