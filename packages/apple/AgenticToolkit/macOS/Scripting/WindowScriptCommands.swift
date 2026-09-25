@@ -152,8 +152,9 @@ public final class ScriptScreenshotWindowCommand: ScriptWindowCommand, @unchecke
         return url.path
     }
 
-    /// `/tmp/<process>-<window>-<stamp>.png`, the process name lowercased
-    /// with spaces as hyphens so the path needs no quoting.
+    /// `/tmp/<prefix>-<window>-<stamp>.png`. `processName` is the prefix
+    /// (`ScriptWindows.screenshotPrefix` at the call site), lowercased with
+    /// spaces as hyphens so the path needs no quoting.
     static func destination(windowName: String, processName: String, stamp: String) -> URL {
         let process = processName.lowercased().replacingOccurrences(of: " ", with: "-")
         return URL(fileURLWithPath: "/tmp/\(process)-\(windowName)-\(stamp).png")
