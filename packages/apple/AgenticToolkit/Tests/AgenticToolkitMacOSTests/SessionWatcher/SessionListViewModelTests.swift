@@ -43,8 +43,8 @@ final class SessionListViewModelTests: XCTestCase {
     private var viewModel: SessionWatcher.SessionListViewModel?
 
     override func tearDown() async throws {
-        // Explicit teardown: the view model's init starts two repeating timers and a
-        // notification observer. stopListening() tears them down deterministically
+        // Explicit teardown: startListening may start the frontmost timer and the
+        // source subscription. stopListening() tears them down deterministically
         // instead of relying on `deinit` firing promptly when the local goes out of
         // scope (which only holds while the test bodies never spin the run loop).
         viewModel?.stopListening()
@@ -195,5 +195,58 @@ final class SessionListViewModelTests: XCTestCase {
         // A single stop fully unsubscribes (no leaked second subscription).
         viewModel.stopListening()
         XCTAssertFalse(source.isObserving)
+    }
+
+    // MARK: - Accessibility probing
+
+    /// Counts Accessibility trust checks in place of `AXIsProcessTrusted()`.
+    private final class TrustProbe {
+        private(set) var calls = 0
+        func check() -> Bool {
+            calls += 1
+            return false
+        }
+    }
+
+    private func makeProbedViewModel(
+        tracksFrontmostWindow: Bool,
+        probe: TrustProbe
+    ) -> SessionWatcher.SessionListViewModel {
+        let viewModel = SessionWatcher.SessionListViewModel(
+            source: FakeSessionListSource([]),
+            settingsStore: UserSettings.shared,
+            tracksFrontmostWindow: tracksFrontmostWindow,
+            isAccessibilityTrusted: { probe.check() }
+        )
+        self.viewModel = viewModel
+        return viewModel
+    }
+
+    func testNeverAsksAboutAccessibilityUnlessTheHostOptsIn() {
+        // An untrusted app's AXIsProcessTrusted() right after an install froze
+        // the whole machine for ~10s (tccd lock held by universalAccessAuthWarn),
+        // so a host without the grant must never trigger one — not at init, not
+        // on show, not on a timer.
+        let probe = TrustProbe()
+        let viewModel = makeProbedViewModel(tracksFrontmostWindow: false, probe: probe)
+        viewModel.startListening()
+        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+
+        XCTAssertFalse(viewModel.isTrackingFrontmostWindow)
+        XCTAssertEqual(probe.calls, 0)
+    }
+
+    func testOptedInHostTracksTheFrontmostWindow() {
+        let probe = TrustProbe()
+        let viewModel = makeProbedViewModel(tracksFrontmostWindow: true, probe: probe)
+        XCTAssertEqual(probe.calls, 0, "constructing the view model must not probe")
+
+        viewModel.startListening()
+        XCTAssertTrue(viewModel.isTrackingFrontmostWindow)
+        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+        XCTAssertGreaterThan(probe.calls, 0)
+
+        viewModel.stopListening()
+        XCTAssertFalse(viewModel.isTrackingFrontmostWindow)
     }
 }

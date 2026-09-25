@@ -32,14 +32,25 @@ extension SessionWatcher {
         /// The number of active sessions.
         @Published private(set) var activeSessionCount: Int = 0
 
-        /// Whether the app has accessibility permission.
-        @Published private(set) var isAccessibilityTrusted: Bool = AXIsProcessTrusted()
-
         // MARK: - Properties
 
         private let source: SessionListSource
         private var refreshTimer: Timer?
-        private var accessibilityTimer: Timer?
+
+        /// Whether the list highlights the session whose terminal window is
+        /// frontmost. That needs Accessibility, so it is the host's to opt into:
+        /// only a host that holds the grant should turn it on.
+        ///
+        /// Off, the view model never asks TCC about Accessibility. That matters
+        /// because an *untrusted* app's `AXIsProcessTrusted()` — right after a
+        /// fresh install re-signs it — wakes `universalAccessAuthWarn`, whose
+        /// `TCCAccessCopyInformation` sweep holds tccd's lock for ~10s. Every
+        /// other TCC check queues behind it, WindowServer's included, and the
+        /// whole machine stops responding for that long.
+        private let tracksFrontmostWindow: Bool
+
+        /// The Accessibility trust check, injected so tests can count probes.
+        private let isAccessibilityTrusted: () -> Bool
 
         /// The action handler for session click actions.
         public let actionHandler: SessionWatcherActionHandler
@@ -69,16 +80,23 @@ extension SessionWatcher {
 
         // MARK: - Initialization
 
-        /// Whether real-time observation (source subscription + accessibility/
-        /// frontmost timers) is currently running. The hosting view controller
+        /// Whether real-time observation (source subscription + frontmost timer)
+        /// is currently running. The hosting view controller
         /// starts it on appear and stops it on disappear so a constructed-but-
         /// hidden window (e.g. one pre-constructed for launch restore) does no
         /// background polling.
         private var isListening = false
 
         @MainActor
-        public init(source: SessionListSource, settingsStore: SettingsStore) {
+        public init(
+            source: SessionListSource,
+            settingsStore: SettingsStore,
+            tracksFrontmostWindow: Bool = false,
+            isAccessibilityTrusted: @escaping () -> Bool = { AXIsProcessTrusted() }
+        ) {
             self.source = source
+            self.tracksFrontmostWindow = tracksFrontmostWindow
+            self.isAccessibilityTrusted = isAccessibilityTrusted
             self.actionHandler = SessionWatcherActionHandler(settingsStore: settingsStore)
             // Observation is started by the hosting view controller on viewWillAppear,
             // not here — constructing the view model must not start timers/polling
@@ -150,7 +168,7 @@ extension SessionWatcher {
         // MARK: - Real-time Updates
 
         /// Starts real-time observation: an initial load, the source subscription,
-        /// and the accessibility/frontmost timers. Idempotent — a second call while
+        /// and — when the host opted in — the frontmost-window timer. Idempotent — a second call while
         /// already listening is a no-op, so balanced appear/disappear pairing can't
         /// stack duplicate observers or timers. Called by the view controller on
         /// `viewWillAppear`.
@@ -166,21 +184,8 @@ extension SessionWatcher {
                 self?.loadSessions()
             }
 
-            // Re-check accessibility when the app comes to the foreground
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(checkAccessibility),
-                name: NSApplication.didBecomeActiveNotification,
-                object: nil
-            )
-
-            // Poll accessibility status every 2 seconds so the indicator updates
-            // promptly after the user grants permission in System Settings.
-            accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-                self?.checkAccessibility()
-            }
-
             // Poll the frontmost window to highlight the active session
+            guard tracksFrontmostWindow else { return }
             let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
                 self?.updateFrontmostSession()
             }
@@ -191,29 +196,14 @@ extension SessionWatcher {
         public func stopListening() {
             isListening = false
             source.stopObserving()
-            let center = NotificationCenter.default
-            center.removeObserver(self, name: NSApplication.didBecomeActiveNotification, object: nil)
             refreshTimer?.invalidate()
             refreshTimer = nil
-            accessibilityTimer?.invalidate()
-            accessibilityTimer = nil
             frontmostTimer?.invalidate()
             frontmostTimer = nil
         }
 
-        @objc private func checkAccessibility() {
-            let trusted = AXIsProcessTrusted()
-            if trusted != isAccessibilityTrusted {
-                logger.info("Accessibility status changed: \(trusted)")
-                if Thread.isMainThread {
-                    isAccessibilityTrusted = trusted
-                } else {
-                    DispatchQueue.main.async { [weak self] in
-                        self?.isAccessibilityTrusted = trusted
-                    }
-                }
-            }
-        }
+        /// Whether the frontmost-window timer is running. `internal` for tests.
+        var isTrackingFrontmostWindow: Bool { frontmostTimer != nil }
 
         // MARK: - Click Actions
 
@@ -413,7 +403,7 @@ extension SessionWatcher {
 
         /// Checks the system's frontmost window title and matches it to a session.
         private func updateFrontmostSession() {
-            guard AXIsProcessTrusted() else { return }
+            guard isAccessibilityTrusted() else { return }
 
             let title = Self.frontmostWindowTitle()
             guard !title.isEmpty else {
