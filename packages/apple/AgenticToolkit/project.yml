@@ -857,6 +857,109 @@ targets:
       - package: swift-openapi-urlsession
         product: OpenAPIURLSession
 
+  # The hub's UI: the signed-in shell, sign-in, the feature registry, and on
+  # macOS the main window, HubFeature and the hub's script commands.
+  AgenticToolkitHubUI-macOS:
+    type: framework
+    platform: macOS
+    templates: [SwiftLint]
+    sources:
+      - path: HubUI
+        excludes: ["iOS"]
+    dependencies:
+      - target: AgenticToolkitHubService-macOS
+      - target: AgenticToolkitHub-macOS
+      - target: AgenticToolkitHTDV-macOS
+      - target: AgenticToolkitCoreMacOS
+      - target: AgenticToolkitScripting
+      - target: AgenticToolkitPermissions
+      - target: AgenticToolkitPermissionsUI
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-macOS
+      - target: AgenticDeveloperHubClient/AgenticDeveloperHubClient
+      - package: swift-openapi-runtime
+        product: OpenAPIRuntime
+    settings:
+      base:
+        PRODUCT_NAME: AgenticToolkitHubUI
+        MACOSX_DEPLOYMENT_TARGET: "26.0"
+
+  AgenticToolkitHubUI-iOS:
+    type: framework
+    platform: iOS
+    templates: [SwiftLint]
+    sources:
+      - path: HubUI
+        excludes: ["macOS"]
+    dependencies:
+      - target: AgenticToolkitHubService-iOS
+      - target: AgenticToolkitHub-iOS
+      - target: AgenticToolkitHTDV-iOS
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-iOS
+      - target: AgenticDeveloperHubClient/AgenticDeveloperHubClient
+      - package: swift-openapi-runtime
+        product: OpenAPIRuntime
+    settings:
+      base:
+        SDKROOT: iphoneos
+        PRODUCT_NAME: AgenticToolkitHubUI
+        IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+
+  AgenticToolkitHubUITests:
+    type: bundle.unit-test
+    platform: macOS
+    templates: [SwiftLint]
+    sources:
+      - Tests/AgenticToolkitHubUITests
+      # The service tests' stubs (StubClientTransport, TestDefaults, Waiting),
+      # compiled here too rather than copied: the UI tests drive the same
+      # client through the same stubs.
+      - Tests/AgenticToolkitHubServiceTests/Support
+    dependencies:
+      - target: AgenticToolkitHubUI-macOS
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitHubService-macOS
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitHub-macOS
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitHTDV-macOS
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitCore
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitCoreUI
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitCoreMacOS
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitScripting
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitPermissions
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitPermissionsUI
+        embed: true
+        codeSign: true
+      - target: AgenticDeveloperHubClient/AgenticDeveloperHubClient
+        embed: true
+        codeSign: true
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkit-macOS
+        embed: true
+        codeSign: true
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-macOS
+        embed: true
+        codeSign: true
+      - package: swift-openapi-runtime
+        product: OpenAPIRuntime
+      - package: swift-http-types
+        product: HTTPTypes
+
 aggregateTargets:
   AgenticToolkitMacOSAll:
     targets:
@@ -876,6 +979,7 @@ aggregateTargets:
       - AgenticToolkitHTDV-macOS
       - AgenticToolkitHub-macOS
       - AgenticToolkitHubService-macOS
+      - AgenticToolkitHubUI-macOS
 
   # The spec files this store under "macOS, iOS", and `AgenticToolkitMarkdown-iOS`
   # existed but was reachable from no aggregate and no scheme — so nothing ever
@@ -893,6 +997,7 @@ aggregateTargets:
       - AgenticToolkitHTDV-iOS
       - AgenticToolkitHub-iOS
       - AgenticToolkitHubService-iOS
+      - AgenticToolkitHubUI-iOS
 
   AgenticToolkitMacOSTestsAll:
     targets:
@@ -927,6 +1032,8 @@ aggregateTargets:
       - AgenticToolkitHubTests
       - AgenticToolkitHubService-macOS
       - AgenticToolkitHubServiceTests
+      - AgenticToolkitHubUI-macOS
+      - AgenticToolkitHubUITests
 
 schemes:
   AgenticToolkitDatabase:
@@ -1146,6 +1253,23 @@ schemes:
       config: Debug
       targets:
         - AgenticToolkitHubServiceTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  AgenticToolkitHubUI:
+    build:
+      targets:
+        AgenticToolkitHubUI-macOS: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AgenticToolkitHubUITests
     profile:
       config: Release
     analyze:

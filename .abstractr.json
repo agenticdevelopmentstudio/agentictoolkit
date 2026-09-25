@@ -180,6 +180,25 @@
       "holds": "AgenticToolkitHubService. The hub's session, workspaces, API adapters and transport — no UI. Sees an embedded daemon only as AgenticDeveloperHubClient's EmbeddedDaemon."
     },
     {
+      "name": "apple-hubui",
+      "paths": [
+        "packages/apple/AgenticToolkit/HubUI/"
+      ],
+      "depends_on": [
+        "apple-hubservice",
+        "apple-hub",
+        "apple-htdv",
+        "apple-macos",
+        "apple-coremacos",
+        "apple-coreui",
+        "apple-core",
+        "apple-permissions",
+        "apple-permissionsui"
+      ],
+      "shared": true,
+      "holds": "AgenticToolkitHubUI. The hub's shells (AppKit and UIKit), sign-in, feature registry, and on macOS HubFeature and the hub script commands. Hosts assemble it; it builds no menu and no app delegate."
+    },
+    {
       "name": "apple-tests",
       "paths": [
         "packages/apple/AgenticToolkit/Tests/"
@@ -199,7 +218,8 @@
         "apple-markdown",
         "apple-htdv",
         "apple-hub",
-        "apple-hubservice"
+        "apple-hubservice",
+        "apple-hubui"
       ],
       "shared": false,
       "holds": "Test bundles. Nothing depends on these."
