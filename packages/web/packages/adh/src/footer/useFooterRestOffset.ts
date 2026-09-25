@@ -104,8 +104,12 @@ export function restOffset(doc: Document): number | null {
  * the right edge while the dock's centre moves half as far). Written on <html>, each new
  * value re-resolved inherited style for the whole document to move one face — in a
  * Chromium trace of a 12k-element page, 4,004 elements restyled per write against 3 with
- * the value on the dock. React never touches the root's inline style (BitbagDock gives it
- * no `style` prop), so the property stays put across his renders.
+ * the value on the dock. It stays put across his renders: the root's only `style` prop is
+ * BitbagDock's own `--bb-dock-slide-*` timing, and React writes only the properties it
+ * set. It does NOT survive a remount of the dock alone — the new root is a new element —
+ * which only development's Fast Refresh does (a hot-reloaded BitbagDock whose hooks
+ * changed): a face back at the centre after a hot reload is that, and a page reload
+ * puts him back.
  *
  * A LAYOUT effect: the dock mounts in the same commit (FooterChatInner portals it and
  * imports it statically), so it exists here, and the offset is set before his first
