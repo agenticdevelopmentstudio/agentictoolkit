@@ -27,6 +27,7 @@ extension ComposableSettings {
     @MainActor
     open class SettingsWindow: WindowController<SplitViewController>, NSToolbarDelegate {
 
+        /// A settings window identified by `windowID` — the key its saved window state and its registry lookup use.
         public init(windowID: String = "settings") {
             super.init(windowID: windowID, contentViewController: SplitViewController())
             self.windowTitle = "Settings"

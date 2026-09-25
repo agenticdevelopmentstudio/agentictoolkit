@@ -49,4 +49,19 @@ final class TopicListViewControllerTests: XCTestCase {
         XCTAssertGreaterThan(controller.preferredWidth(), 0,
             "even an empty list reserves its chrome padding")
     }
+
+    /// Review V13-c: a selection made before the view loads is not lost.
+    func testASelectionMadeBeforeTheViewLoadsIsApplied() {
+        let controller = TopicListViewController()
+        var reported = 0
+        controller.onSelect = { _ in reported += 1 }
+        controller.setItems([TopicListItem(id: "1", title: "A"), TopicListItem(id: "2", title: "B")])
+        controller.selectItem(withId: "2")
+        controller.setItems([TopicListItem(id: "1", title: "A"), TopicListItem(id: "2", title: "Bee")])
+
+        _ = controller.view
+
+        XCTAssertEqual(controller.selectedItem?.id, "2")
+        XCTAssertEqual(reported, 0, "a programmatic selection fires no callback")
+    }
 }

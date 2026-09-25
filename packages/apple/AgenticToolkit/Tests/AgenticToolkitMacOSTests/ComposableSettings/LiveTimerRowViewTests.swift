@@ -97,4 +97,16 @@ struct LiveTimerRowViewTests {
         ticker.fireForTests()
         #expect(ticks == 1)
     }
+
+    /// Review V19-d: the origin tooltip is the host's wording, not the toolkit's.
+    @Test func originTooltipsAreTheHostsToSet() {
+        let row = makeRow()
+        #expect(row.originLabel.toolTip == "Started by hand")
+        row.manualOriginTooltip = "Started from the menu"
+        #expect(row.originLabel.toolTip == "Started from the menu")
+
+        row.automaticOriginTooltip = "Started from session activity"
+        row.update(.init(id: "run-1", title: "Acme", startedAt: start, isManual: false))
+        #expect(row.originLabel.toolTip == "Started from session activity")
+    }
 }

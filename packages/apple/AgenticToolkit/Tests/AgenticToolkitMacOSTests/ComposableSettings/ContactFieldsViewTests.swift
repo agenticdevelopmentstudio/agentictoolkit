@@ -70,4 +70,28 @@ struct ContactFieldsViewTests {
         view.details = details
         #expect(view.details == details)
     }
+
+    /// Review V23-f: a reload while someone types in a field keeps what they
+    /// typed, still refreshes the other fields, and the edit is saved when it ends.
+    @Test func reloadingKeepsTheFieldBeingEdited() {
+        let view = makeView()
+        view.details = ComposableSettings.ContactDetails(contactName: "Dana Ito", email: "old@example.com")
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 320),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        #expect(window.makeFirstResponder(view.emailField.textField))
+        view.emailField.textField.currentEditor()?.string = "typed@exam"
+        var reported: [ComposableSettings.ContactDetails] = []
+        view.onChange = { reported.append($0) }
+
+        view.details = ComposableSettings.ContactDetails(contactName: "Dana Ito-Park", email: "old@example.com")
+
+        #expect(view.emailField.textField.currentEditor()?.string == "typed@exam")
+        #expect(view.contactNameField.textField.stringValue == "Dana Ito-Park")
+
+        window.makeFirstResponder(nil)
+        #expect(view.emailField.textField.stringValue == "typed@exam")
+        window.close()
+    }
 }

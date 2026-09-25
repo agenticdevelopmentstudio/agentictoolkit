@@ -1,6 +1,7 @@
 import AppKit
 
 import AgenticToolkitCoreMacOS
+import AgenticToolkitCoreUI
 
 extension ComposableSettings {
 
@@ -15,14 +16,18 @@ extension ComposableSettings {
     @MainActor
     public final class AddRemoveFooterView: NSView {
 
+        /// Called when `+` is clicked.
         public var onAdd: (() -> Void)?
+        /// Called when `−` is clicked. Never called while it is disabled.
         public var onRemove: (() -> Void)?
 
+        /// Reports through `onAdd`.
         public let addButton = NSButton(
-            title: "", image: NSImage(systemSymbolName: "plus", accessibilityDescription: "Add")!,
+            title: "", image: .symbol(named: "plus", accessibilityDescription: "Add"),
             target: nil, action: nil)
+        /// Reports through `onRemove`; enabled through `isRemoveEnabled`.
         public let removeButton = NSButton(
-            title: "", image: NSImage(systemSymbolName: "minus", accessibilityDescription: "Remove")!,
+            title: "", image: .symbol(named: "minus", accessibilityDescription: "Remove"),
             target: nil, action: nil)
 
         /// Anything the host wants beside the buttons — a count, an error, a
@@ -34,6 +39,8 @@ extension ComposableSettings {
             }
         }
 
+        /// Whether `−` is live. The host decides: only it knows whether the
+        /// selected item may be removed.
         public var isRemoveEnabled: Bool {
             get { removeButton.isEnabled }
             set { removeButton.isEnabled = newValue }

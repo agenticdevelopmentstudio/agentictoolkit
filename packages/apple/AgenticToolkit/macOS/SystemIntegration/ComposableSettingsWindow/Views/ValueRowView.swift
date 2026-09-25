@@ -13,14 +13,20 @@ extension ComposableSettings {
     @MainActor
     public final class ValueRowView: NSView, SettingsViewProtocol {
 
+        /// The setting's name, on the left.
         public let label: ThemedLabel
+        /// The figure, on the right. Selectable, so it can be copied.
         public let valueLabel: ThemedLabel
 
+        /// The figure's text.
         public var value: String {
             get { valueLabel.stringValue }
             set { valueLabel.stringValue = newValue }
         }
 
+        /// - Parameters:
+        ///   - title: the row's name, also the value's accessibility label.
+        ///   - value: the figure shown on the right.
         public init(title: String, value: String = "") {
             label = ComposableSettings.makeRowLabel(title)
             // Monospaced digits: totals that tick over must not reflow the row.
@@ -36,10 +42,6 @@ extension ComposableSettings {
             let row = Self.makeRow([label, valueLabel])
             addSubview(row)
             Self.pinToEdges(row, of: self)
-        }
-
-        public override init(frame frameRect: NSRect) {
-            fatalError("init(frame:) has not been implemented")
         }
 
         @available(*, unavailable)

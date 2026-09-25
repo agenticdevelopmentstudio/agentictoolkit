@@ -6,11 +6,12 @@ import AgenticToolkitCoreMacOS
 /// A record a ``ComposableSettings/RecordDetailWindowController`` can list.
 ///
 /// `id` is the record's own identity — a database id, not a row number — because
-/// the sidebar is rebuilt on every push from the daemon and a position means
+/// the sidebar is rebuilt on every push from the model and a position means
 /// something different each time.
 ///
-/// Not `@MainActor`: the records are `Sendable` DTOs that arrive from the
-/// daemon, and isolating the protocol would isolate them.
+/// Not `@MainActor`: the records are `Sendable` values that may arrive from
+/// another process or a background queue, and isolating the protocol would
+/// isolate them.
 public protocol RecordDetailItem: Identifiable where ID == String {
     /// What the sidebar row reads.
     var recordTitle: String { get }
@@ -30,24 +31,30 @@ extension ComposableSettings {
 
         // MARK: Callbacks
 
+        /// `+` was clicked. The owner creates the record and calls `setRecords`.
         public var onAddRecord: (() -> Void)?
+        /// `−` was clicked on a record `canRemoveRecord` allows.
         public var onRemoveRecord: ((Record) -> Void)?
+        /// The selected record changed; nil when the list is empty.
         public var onSelectRecord: ((Record?) -> Void)?
 
         /// Asked whether the selected record may be removed. `−` is disabled
         /// when it answers false, and a remove is refused even if the button
-        /// is bypassed. Nil allows every record. Billing's "Unassigned" row
-        /// answers false: it is a place, not a record anyone made.
+        /// is bypassed. Nil allows every record. A built-in row — a catch-all
+        /// bucket rather than a record anyone made — answers false.
         public var canRemoveRecord: ((Record) -> Bool)? {
             didSet { updateRemoveButton() }
         }
 
         // MARK: State
 
+        /// The records in the sidebar, in the owner's order.
         public private(set) var records: [Record] = []
 
+        /// The id of the record whose pane is on screen.
         public private(set) var selectedRecordID: String?
 
+        /// The record whose pane is on screen.
         public var selectedRecord: Record? {
             selectedRecordID.flatMap { id in records.first { $0.id == id } }
         }
@@ -58,6 +65,7 @@ extension ComposableSettings {
             didSet { emptyLabel.stringValue = emptyMessage ?? "" }
         }
 
+        /// The `+`/`−` bar under the sidebar.
         public let footer: AddRemoveFooterView
 
         private let makeDetailPanel: (Record) -> any ComposableSettingsPanel

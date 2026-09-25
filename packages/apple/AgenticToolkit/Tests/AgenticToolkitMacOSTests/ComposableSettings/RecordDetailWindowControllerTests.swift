@@ -107,6 +107,41 @@ final class RecordDetailWindowControllerTests: XCTestCase {
         XCTAssertEqual(controller.selectedRecord?.id, "c2")
     }
 
+    /// Review V13-b: a refresh that hands back the same records keeps the
+    /// Back/Forward trail — a window reloading every 30 s must not.
+    func testARefreshKeepsTheNavigationTrail() throws {
+        let controller = makeController()
+        let cable = Client(id: "c3", recordTitle: "Cable")
+        controller.setRecords([acme, bolt, cable])
+        controller.selectRecord(id: "c1")
+        controller.selectRecord(id: "c2")
+        controller.selectRecord(id: "c3")
+        let split = try XCTUnwrap(controller.viewController)
+        XCTAssertTrue(split.canGoBack)
+
+        controller.setRecords([acme, bolt, Client(id: "c3", recordTitle: "Cable Co")])
+
+        XCTAssertTrue(split.canGoBack, "an unchanged list must not wipe the trail")
+        split.goBack()
+        XCTAssertEqual(split.currentPanelTitle, "Bolt")
+    }
+
+    /// Review V13-b: a search that happens to hide the selected record is the
+    /// reader's, and a refresh must not clear it.
+    func testARefreshKeepsTheSidebarSearch() throws {
+        let controller = makeController()
+        controller.setRecords([acme, bolt])
+        controller.selectRecord(id: "c1")
+        let list = try XCTUnwrap(controller.viewController?.listViewController)
+        list.searchQuery = "Bolt"
+        XCTAssertFalse(list.isPanelVisible(at: 0))
+
+        controller.setRecords([acme, bolt])
+
+        XCTAssertEqual(list.searchQuery, "Bolt")
+        XCTAssertEqual(controller.selectedRecord?.id, "c1")
+    }
+
     func testDeletingTheSelectedRecordSelectsItsNeighbour() {
         let controller = makeController()
         controller.setRecords([acme, bolt])

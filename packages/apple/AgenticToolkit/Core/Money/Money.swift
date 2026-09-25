@@ -2,18 +2,26 @@ import Foundation
 
 /// An amount of money as integer minor units. There is no `Double` anywhere in
 /// this type: a rate of $0.10/hr applied to 3 minutes is exactly 0.5 cents, and
-/// a binary float cannot hold the tenths it takes to get there. Every total the
-/// billing feature shows is a sum of these.
+/// a binary float cannot hold the tenths it takes to get there.
+///
+/// A value type for code that wants its currency carried alongside the amount
+/// and mixed currencies refused. Callers that already hold a bare `Int` of
+/// hundredths (rates and totals read straight from a database column, say) can
+/// use `amountCents(seconds:rateCents:)` and `MoneyFormatter.string(cents:)`
+/// without ever constructing one.
 public struct Money: Codable, Sendable, Equatable, Comparable {
 
-    /// Minor units — cents for USD, whatever the currency's minor unit is
-    /// otherwise. Never a fraction.
+    /// Hundredths of the currency's major unit — cents for USD and EUR, and
+    /// hundredths of a yen or dinar too, whatever the currency's own minor unit
+    /// is, so every currency shares one scale with `MoneyFormatter`. Never a
+    /// fraction.
     public let cents: Int
 
     /// ISO-4217 code. Carried so a total can refuse to mix currencies; no
     /// conversion is performed anywhere.
     public let currency: String
 
+    /// An amount of `cents` hundredths in `currency` (ISO-4217).
     public init(cents: Int, currency: String = "USD") {
         self.cents = cents
         self.currency = currency
@@ -39,6 +47,8 @@ public struct Money: Codable, Sendable, Equatable, Comparable {
         return Money(cents: lhs.cents + rhs.cents, currency: lhs.currency)
     }
 
+    /// The difference, in the operands' shared currency. Subtracting across
+    /// currencies traps, for the same reason `+` does.
     public static func - (lhs: Money, rhs: Money) -> Money {
         precondition(lhs.isSameCurrency(as: rhs), "Money: subtracting \(rhs.currency) from \(lhs.currency)")
         return Money(cents: lhs.cents - rhs.cents, currency: lhs.currency)

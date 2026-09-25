@@ -18,8 +18,8 @@ extension ComposableSettings {
         private static let log = Logger(subsystem: "AgenticToolkit", category: "ComposableSettings.Alerts")
 
         /// A warning sheet with a destructive `actionTitle` button and Cancel.
-        /// Cancel is the default, so Return never deletes. With no window,
-        /// the answer is no.
+        /// Cancel is the default, so Return never deletes, and Esc cancels too.
+        /// With no window, the answer is no.
         public static func confirmDestructive(
             _ question: String,
             detail: String,
@@ -32,6 +32,20 @@ extension ComposableSettings {
                 answer(false)
                 return
             }
+            let alert = makeDestructiveAlert(question, detail: detail, actionTitle: actionTitle)
+            alert.beginSheetModal(for: window) { answer($0 == .alertFirstButtonReturn) }
+        }
+
+        /// The sheet `confirmDestructive` shows, built but not presented.
+        ///
+        /// A button carries one key equivalent. NSAlert gives a button titled
+        /// Cancel the Esc key only while its key equivalent is unset, so making
+        /// Cancel answer Return takes Esc away from it — and from the sheet,
+        /// which then has no keyboard way out but the destructive-free Return.
+        /// A second, invisible button owns Esc and clicks Cancel, so both keys
+        /// decline. It is zero-size rather than hidden because a hidden button
+        /// never sees its key equivalent.
+        static func makeDestructiveAlert(_ question: String, detail: String, actionTitle: String) -> NSAlert {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = question
@@ -41,7 +55,17 @@ extension ComposableSettings {
             action.keyEquivalent = ""
             let cancel = alert.addButton(withTitle: "Cancel")
             cancel.keyEquivalent = "\r"
-            alert.beginSheetModal(for: window) { answer($0 == .alertFirstButtonReturn) }
+            alert.layout()
+
+            let escape = NSButton(frame: .zero)
+            escape.isBordered = false
+            escape.title = ""
+            escape.keyEquivalent = "\u{1b}"
+            escape.target = cancel
+            escape.action = #selector(NSButton.performClick(_:))
+            escape.setAccessibilityElement(false)
+            alert.window.contentView?.addSubview(escape)
+            return alert
         }
 
         /// A warning sheet with the message and OK. With no window, it is logged.

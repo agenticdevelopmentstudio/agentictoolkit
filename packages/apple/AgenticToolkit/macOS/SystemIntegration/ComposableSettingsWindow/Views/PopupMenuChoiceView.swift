@@ -50,24 +50,32 @@ extension ComposableSettings {
             self.syncSelection()
         }
 
+        /// Selects the item that *carries* the current value, found through its
+        /// `representedObject` — never by position in `choices`, which is only
+        /// the same as the item's position while every item made it in.
         private func syncSelection() {
             self.label.stringValue = viewModel.title
             let current = viewModel.value
-            if let index = viewModel.choices.firstIndex(where: { $0.value == current }) {
-                self.popUpButton.selectItem(at: index)
+            if let item = popUpButton.itemArray.first(where: { ($0.representedObject as? Value) == current }) {
+                self.popUpButton.select(item)
             } else {
                 self.popUpButton.selectItem(at: -1)
             }
         }
 
+        /// One menu item per choice, built directly. `addItem(withTitle:)`
+        /// silently drops an earlier item with the same title, and two records
+        /// can share a name — two projects both called "Acme" are two choices.
         private static func populate(_ button: NSPopUpButton, with choices: [ChoiceViewModel<Value>.Choice]) {
             button.removeAllItems()
+            guard let menu = button.menu else { return }
             for choice in choices {
-                button.addItem(withTitle: choice.label)
-                button.lastItem?.representedObject = choice.value
+                let item = NSMenuItem(title: choice.label, action: nil, keyEquivalent: "")
+                item.representedObject = choice.value
                 if let symbol = choice.imageSystemName {
-                    button.lastItem?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+                    item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
                 }
+                menu.addItem(item)
             }
         }
 
@@ -76,10 +84,6 @@ extension ComposableSettings {
             if viewModel.settingObserver.value != value {
                 viewModel.settingObserver.value = value
             }
-        }
-
-        public override init(frame frameRect: NSRect) {
-            fatalError("init(frame frameRect: NSRect")
         }
 
         required init?(coder: NSCoder) {

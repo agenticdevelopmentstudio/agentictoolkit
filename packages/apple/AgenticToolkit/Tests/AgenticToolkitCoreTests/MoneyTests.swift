@@ -115,4 +115,75 @@ final class MoneyTests: XCTestCase {
         let formatter = MoneyFormatter(currency: "EUR", locale: Locale(identifier: "de_DE"))
         XCTAssertEqual(formatter.cents(parsing: "150,50"), 15_050)
     }
+
+    // MARK: - Review V9-a / V9-b / V9-c
+
+    private let enUS = MoneyFormatter(currency: "USD", locale: Locale(identifier: "en_US"))
+    private let deDE = MoneyFormatter(currency: "EUR", locale: Locale(identifier: "de_DE"))
+
+    /// V9-a: a European-typed rate in an en_US field is 150.50, not 15050.00.
+    func testACommaDecimalIsHonouredInAnEnglishLocale() {
+        XCTAssertEqual(enUS.cents(parsing: "150,50"), 15_050)
+        XCTAssertEqual(enUS.cents(parsing: "1,250"), 125_000,
+                       "three digits after the locale's grouping separator group")
+        XCTAssertEqual(enUS.cents(parsing: "1,250.00"), 125_000)
+    }
+
+    /// V9-a: a US-typed amount in a de_DE field is not scaled by 100 or 1/1000.
+    func testADotDecimalIsHonouredInAGermanLocale() {
+        XCTAssertEqual(deDE.cents(parsing: "$1,250.00"), 125_000)
+        XCTAssertEqual(deDE.cents(parsing: "150.50"), 15_050)
+        XCTAssertEqual(deDE.cents(parsing: "1.250,00"), 125_000)
+        XCTAssertEqual(deDE.cents(parsing: "1.250"), 125_000)
+    }
+
+    /// V9-a: a separator the locale uses for neither job, once, followed by
+    /// three digits, could be either — refuse rather than guess.
+    func testAnAmbiguousSeparatorIsRefused() {
+        let frFR = MoneyFormatter(currency: "EUR", locale: Locale(identifier: "fr_FR"))
+        XCTAssertNil(frFR.cents(parsing: "1.250"))
+        XCTAssertEqual(frFR.cents(parsing: "1.25"), 125)
+    }
+
+    /// V9-b: malformed text is nil, never a prefix of it.
+    func testMalformedAmountsAreRefused() {
+        XCTAssertNil(enUS.cents(parsing: "1.2.5"))
+        XCTAssertNil(enUS.cents(parsing: "15..50"))
+        XCTAssertNil(enUS.cents(parsing: "12,34,567"))
+        XCTAssertNil(enUS.cents(parsing: "1,250.00.5"))
+        XCTAssertNil(enUS.cents(parsing: "1.250,00.5"))
+        XCTAssertNil(enUS.cents(parsing: "15-0"))
+        XCTAssertNil(enUS.cents(parsing: "15/0"))
+    }
+
+    /// V9-b: the typographic minus is a minus, not dropped.
+    func testUnicodeMinusIsNegative() {
+        XCTAssertEqual(enUS.cents(parsing: "\u{2212}5"), -500)
+        XCTAssertEqual(enUS.cents(parsing: "-5"), -500)
+    }
+
+    /// V9-b: past Int's range is nil, not a wrapped number.
+    func testAnOverflowingAmountIsRefused() {
+        XCTAssertNil(enUS.cents(parsing: "99999999999999999999"))
+        XCTAssertNil(enUS.cents(parsing: "-99999999999999999999"))
+    }
+
+    /// V9-c: displayed rows add up to the displayed total in a currency with
+    /// no minor unit — 1050 + 500 hundredths of a yen is ¥15.50, and each row
+    /// shows its own two decimals rather than rounding to whole yen.
+    func testYenRowsShowTheSameScaleAsTheirTotal() {
+        let jpy = MoneyFormatter(currency: "JPY", locale: Locale(identifier: "en_US"))
+        XCTAssertTrue(jpy.string(cents: 1_050).contains("10.50"), jpy.string(cents: 1_050))
+        XCTAssertTrue(jpy.string(cents: 500).contains("5.00"), jpy.string(cents: 500))
+        XCTAssertTrue(jpy.string(cents: 1_550).contains("15.50"), jpy.string(cents: 1_550))
+    }
+
+    /// V9-c: KWD has a three-digit minor unit; the stored hundredths never had
+    /// a third digit, so display does not invent one.
+    func testDinarShowsTwoDecimals() {
+        let kwd = MoneyFormatter(currency: "KWD", locale: Locale(identifier: "en_US"))
+        let text = kwd.string(cents: 3_125)
+        XCTAssertTrue(text.contains("31.25"), text)
+        XCTAssertFalse(text.contains("31.250"), text)
+    }
 }

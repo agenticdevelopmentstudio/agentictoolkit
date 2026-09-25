@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 import AgenticToolkitCore
 @testable import AgenticToolkitMacOS
@@ -30,6 +31,39 @@ final class PopupMenuChoiceViewTests: XCTestCase {
         XCTAssertEqual(view.popUpButton.itemTitles, ["Zed", "B", "A"])
         XCTAssertEqual(view.popUpButton.titleOfSelectedItem, "B",
                        "the value is kept, not the index it used to sit at")
+    }
+
+    /// Review V8-c: two records may share a name. Each is its own item, and the
+    /// popup shows the one the setting holds — not whatever sits at its index.
+    func testChoicesWithTheSameLabelAreEachOfferedAndSelectedByValue() {
+        // `sendAction` is routed through `NSApp`, which is nil until something
+        // asks for the shared application — run first, the click went nowhere.
+        _ = NSApplication.shared
+        var backing = "id2"
+        let model = ComposableSettings.ChoiceViewModel<String>(
+            title: "Project",
+            choices: [
+                .init(label: "Acme", value: "id1"),
+                .init(label: "Acme", value: "id3"),
+                .init(label: "Beta", value: "id2")
+            ],
+            get: { backing },
+            set: { backing = $0 }
+        )
+        let view = ComposableSettings.PopupMenuChoiceView(viewModel: model)
+
+        XCTAssertEqual(view.popUpButton.numberOfItems, 3, "an equal title must not merge two choices")
+        XCTAssertEqual(view.popUpButton.selectedItem?.representedObject as? String, "id2")
+
+        // The user picks the second Acme.
+        view.popUpButton.selectItem(at: 1)
+        view.popUpButton.sendAction(view.popUpButton.action, to: view.popUpButton.target)
+        XCTAssertEqual(backing, "id3")
+
+        model.onChange?("id3")
+        XCTAssertEqual(view.popUpButton.indexOfSelectedItem, 1)
+        XCTAssertEqual(view.popUpButton.selectedItem?.representedObject as? String, "id3",
+                       "the popup must show the project Assign Run will use")
     }
 
     func testAValueNoLongerOfferedSelectsNothing() {

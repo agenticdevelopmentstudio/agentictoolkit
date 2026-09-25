@@ -8,11 +8,16 @@ extension ComposableSettings {
     /// field someone is still typing into, and a client with no email at all is
     /// a normal client.
     public struct ContactDetails: Codable, Equatable, Sendable {
+        /// The person to write to.
         public var contactName: String
+        /// An email address, as typed.
         public var email: String
+        /// A phone number, as typed.
         public var phone: String
+        /// A website, as typed.
         public var url: String
 
+        /// A contact block; every field defaults to empty.
         public init(
             contactName: String = "",
             email: String = "",
@@ -37,9 +42,11 @@ extension ComposableSettings {
 
         /// Fired only for edits made in the UI. Assigning `details` is how a
         /// caller loads a record, and a load is not a change — reporting it
-        /// would write the record straight back to the daemon on every select.
+        /// would write the record straight back to its store on every select.
         public var onChange: ((ContactDetails) -> Void)?
 
+        /// The record shown. Assigning it refreshes every field except one
+        /// being edited, which keeps what has been typed.
         public var details: ContactDetails {
             get { storedDetails }
             set {
@@ -50,6 +57,7 @@ extension ComposableSettings {
             }
         }
 
+        /// The four rows, exposed for layout and UI tests.
         public private(set) var contactNameField: TextEditView!
         public private(set) var emailField: TextEditView!
         public private(set) var phoneField: TextEditView!
@@ -58,6 +66,10 @@ extension ComposableSettings {
         private var storedDetails = ContactDetails()
         private var isLoading = false
 
+        /// - Parameters:
+        ///   - title: the group's header.
+        ///   - accessibilityPrefix: prepended to `.name`, `.email`, `.phone`
+        ///     and `.url` to form each field's accessibility identifier.
         public init(title: String = "Contact", accessibilityPrefix: String) {
             // `GroupView.init(withTitle:)` is a convenience initializer, and a
             // subclass cannot chain to one — the designated init takes the
@@ -118,10 +130,22 @@ extension ComposableSettings {
             // change one main-queue hop later, and a record loaded into a field
             // that still shows the previous client for a frame is the kind of
             // flicker nobody can reproduce on demand.
-            contactNameField.textField.stringValue = storedDetails.contactName
-            emailField.textField.stringValue = storedDetails.email
-            phoneField.textField.stringValue = storedDetails.phone
-            urlField.textField.stringValue = storedDetails.url
+            //
+            // A field someone is typing in is left alone: a caller reloads the
+            // record on a timer or after any save, and replacing the text under
+            // the cursor throws the half-typed value away. The typed value is
+            // written back into the record when the edit ends. A caller that
+            // loads a *different* record must end editing first
+            // (`window.makeFirstResponder(nil)`), or that edit lands in it.
+            show(storedDetails.contactName, in: contactNameField)
+            show(storedDetails.email, in: emailField)
+            show(storedDetails.phone, in: phoneField)
+            show(storedDetails.url, in: urlField)
+        }
+
+        private func show(_ text: String, in field: TextEditView) {
+            guard field.textField.currentEditor() == nil else { return }
+            field.textField.stringValue = text
         }
     }
 }

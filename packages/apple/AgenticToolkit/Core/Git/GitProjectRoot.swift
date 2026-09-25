@@ -2,9 +2,9 @@ import Foundation
 
 /// Resolves the top-level project root for a working directory: the **main**
 /// working tree of the topmost git repository that is *not* itself a
-/// submodule of a parent. Moved out of Stenographer's `SessionEnricher` so
-/// the app can resolve a folder the user picks to the same root the daemon
-/// groups sessions under.
+/// submodule of a parent. Shared so every consumer that groups work by
+/// project — a folder the user picks, a session's working directory —
+/// resolves it to the same root.
 public enum GitProjectRoot {
 
     /// What a resolution actually learned, which is not the same as what

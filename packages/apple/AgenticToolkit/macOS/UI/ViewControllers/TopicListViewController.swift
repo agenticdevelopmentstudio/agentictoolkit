@@ -95,6 +95,9 @@ open class TopicListViewController: NSViewController {
     // Keeps the sidebar painted in the active theme's window-background color.
     private var themeObserver: ThemePaletteObserver?
 
+    /// The id `selectItem(withId:)` was given before the view loaded.
+    private var pendingSelectionID: String?
+
     open override func loadView() {
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TopicListColumn"))
         column.title = ""
@@ -126,6 +129,12 @@ open class TopicListViewController: NSViewController {
         // something reloads it a second time after the window has shown.
         outlineView.reloadData()
         outlineView.expandItem(nil, expandChildren: true)
+        // A selection asked for before this point had no rows to land on; it
+        // was held until now for the same reason the items were.
+        if let pending = pendingSelectionID {
+            pendingSelectionID = nil
+            selectRow(forId: pending)
+        }
 
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true
@@ -327,7 +336,7 @@ open class TopicListViewController: NSViewController {
         // different item. Suppress across the whole reload+restore — otherwise
         // `reloadData()`'s own selection drop fires `onSelect(nil)` and the
         // detail pane goes blank behind a list that still looks selected.
-        let selectedId = selectedItem?.id
+        let selectedId = isViewLoaded ? selectedItem?.id : pendingSelectionID
         self.sections = sections
         self.rootNodesCache = Self.buildRootNodes(from: sections)
         suppressingSelectionCallbacks {
@@ -422,7 +431,21 @@ open class TopicListViewController: NSViewController {
 
     /// Selects the row matching `id` without firing `onSelect`.
     /// No-op if the id isn't present.
+    ///
+    /// Before the view has loaded the outline has no rows, so the id is held
+    /// and applied when it loads — a window that selects a record from its
+    /// `init()` would otherwise open with nothing selected.
     open func selectItem(withId id: String) {
+        guard isViewLoaded else {
+            pendingSelectionID = id
+            return
+        }
+        selectRow(forId: id)
+    }
+
+    /// `selectItem(withId:)` without the loaded-view check — `loadView` needs
+    /// it before `isViewLoaded` turns true.
+    private func selectRow(forId id: String) {
         guard let node = rootNodesCache.first(where: { node in
             if case .item(let item) = node.kind, item.id == id { return true }
             return false

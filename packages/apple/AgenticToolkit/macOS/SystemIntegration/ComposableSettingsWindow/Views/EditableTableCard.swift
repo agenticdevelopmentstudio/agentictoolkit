@@ -18,12 +18,18 @@ extension ComposableSettings {
             case indicator
         }
 
+        /// The caller's key for the column; what every callback reports.
         public let id: String
+        /// The header text.
         public let title: String
+        /// The column's initial width in points.
         public let width: CGFloat
+        /// What the column's cells are made of.
         public let kind: Kind
+        /// Whether clicking the header reports a sort through `onSort`.
         public let isSortable: Bool
 
+        /// A column; text columns are read-only unless `kind` says otherwise.
         public init(
             id: String, title: String, width: CGFloat,
             kind: Kind = .text(editable: false), isSortable: Bool = false
@@ -40,8 +46,11 @@ extension ComposableSettings {
     /// a toggle simply draws nothing: the card reports the mismatch to no one,
     /// because a table that refuses to draw is worse than one with a gap.
     public enum EditableTableCellValue: Sendable {
+        /// Plain text.
         case text(String)
+        /// A switch, on or off.
         case toggle(Bool)
+        /// A dot, filled when true.
         case indicator(Bool)
         /// Greyed prompt text — a value not set yet, not a value that is empty.
         case placeholder(String)
@@ -51,13 +60,16 @@ extension ComposableSettings {
     /// not a row index — because a row index stops meaning anything the moment
     /// the owner re-sorts.
     public struct EditableTableRow: Sendable, Identifiable {
+        /// The caller's own id for the record this row shows.
         public let id: String
+        /// The row's values, keyed by column id. A missing key draws an empty cell.
         public let cells: [String: EditableTableCellValue]
         /// Drawn with the warning tint: a runaway timer, an entry that needs
         /// attention. Marking is all the card does; what it means is the
         /// owner's business.
         public let isFlagged: Bool
 
+        /// A row for the record `id`.
         public init(id: String, cells: [String: EditableTableCellValue], isFlagged: Bool = false) {
             self.id = id
             self.cells = cells
@@ -73,6 +85,7 @@ extension ComposableSettings {
     /// at it. `palette` is the base class's, so the wash follows a live theme
     /// change with the rest of the row.
     public final class EditableTableRowView: ThemedTableRowView {
+        /// Whether the row draws the warning wash.
         public var isFlagged = false {
             didSet { needsDisplay = true }
         }
@@ -91,10 +104,15 @@ extension ComposableSettings {
     /// `GitGlobalConfigTableView` is this view welded to git config, and every
     /// non-git line of it is here instead — including the one that is not
     /// obvious: a reload arriving while a cell is being edited is **held
-    /// back**. `setRows` assigns before `reloadData`, so a
-    /// `controlTextDidEndEditing` landing mid-reload reads the new rows at the
-    /// old row index and commits the user's half-typed text against a record
-    /// they never touched.
+    /// back** (`EditDeferredValue`, shared with that table).
+    ///
+    /// Holding back is not enough on its own, because it only starts at the
+    /// first keystroke: a field that has focus but no typing yet is ended by
+    /// the reload itself, after `rows` has already been replaced. So every
+    /// text cell also carries the row id, column id and text it was filled
+    /// with, and an edit is committed against *those* — never against a row
+    /// index or a column position, both of which a reload or a header drag
+    /// can change under the field — and not at all when the text is unchanged.
     ///
     /// The card owns no model. Rows arrive as values, and every interaction
     /// leaves through a closure — so the same card serves a list backed by a
@@ -104,15 +122,21 @@ extension ComposableSettings {
 
         // MARK: Callbacks
 
+        /// `+` was clicked.
         public var onAdd: (() -> Void)?
+        /// `−` was clicked with this row selected.
         public var onRemove: ((_ rowID: String) -> Void)?
+        /// The user selected a row, or cleared the selection (nil).
         public var onSelectionChange: ((_ rowID: String?) -> Void)?
+        /// A text cell's edit ended with text different from what it was filled with.
         public var onEdit: ((_ rowID: String, _ columnID: String, _ newValue: String) -> Void)?
+        /// A toggle cell was flipped.
         public var onToggle: ((_ rowID: String, _ columnID: String, _ isOn: Bool) -> Void)?
+        /// A sortable header was clicked. The card does not sort; the owner re-sorts and calls `setRows`.
         public var onSort: ((_ columnID: String, _ ascending: Bool) -> Void)?
 
         /// Asked whether the selected row may be removed; `−` is disabled when
-        /// it answers false. Nil allows every row. A billed entry answers
+        /// it answers false. Nil allows every row. A locked record answers
         /// false: a button that looks live and then refuses teaches nothing.
         public var canRemoveRow: ((_ rowID: String) -> Bool)? {
             didSet { updateButtons() }
@@ -129,29 +153,38 @@ extension ComposableSettings {
 
         // MARK: State
 
+        /// The rows on screen — the last `setRows` that was not held back by an edit.
         public private(set) var rows: [EditableTableRow] = []
 
+        /// The id of the selected row, or nil.
         public var selectedRowID: String? {
             let row = tableView.selectedRow
             guard row >= 0, row < rows.count else { return nil }
             return rows[row].id
         }
 
+        /// The table itself, for layout, tests and accessibility.
         public let tableView = ThemedTableView()
+        /// Shown over the table while it has no rows.
         public let emptyLabel = ThemedLabel(role: .secondaryText, textRole: .body)
 
+        /// The footer's `+` button.
         public var addButton: NSButton { footer.addButton }
+        /// The footer's `−` button.
         public var removeButton: NSButton { footer.removeButton }
 
         private let columns: [EditableTableColumn]
         private let footer: AddRemoveFooterView
         private let scrollView = ThemedScrollView()
-        private var isEditingField = false
-        private var pendingRows: [EditableTableRow]?
+        private var heldRows = EditDeferredValue<[EditableTableRow]>()
         private var lastReportedSelection: String??
         private var footerActions: [ObjectIdentifier: () -> Void] = [:]
+        private weak var observedWindow: NSWindow?
 
         private static let cellIdentifier = NSUserInterfaceItemIdentifier("editable-table-cell")
+        private static let toggleIdentifier = NSUserInterfaceItemIdentifier("editable-table-toggle")
+        private static let indicatorIdentifier = NSUserInterfaceItemIdentifier("editable-table-indicator")
+        private static let rowViewIdentifier = NSUserInterfaceItemIdentifier("editable-table-row")
 
         /// - Parameters:
         ///   - visibleRows: how many rows the table shows before scrolling. A
@@ -187,10 +220,7 @@ extension ComposableSettings {
         /// Replaces the rows — unless a cell is being edited, in which case the
         /// replacement waits for that edit to commit.
         public func setRows(_ rows: [EditableTableRow]) {
-            guard !isEditingField else {
-                pendingRows = rows
-                return
-            }
+            guard let rows = heldRows.offer(rows) else { return }
             applyRows(rows)
         }
 
@@ -218,6 +248,14 @@ extension ComposableSettings {
             onEdit?(rows[rowIndex].id, columnID, newValue)
         }
 
+        /// Applies one edited cell to the row with `rowID`. A row that is no
+        /// longer in the table is ignored: the text was typed into a record
+        /// that has since gone, and no other row may receive it.
+        public func commitEdit(rowID: String, columnID: String, newValue: String) {
+            guard rows.contains(where: { $0.id == rowID }) else { return }
+            onEdit?(rowID, columnID, newValue)
+        }
+
         /// A push button in the footer, after `+`/`−`. The owner decides when
         /// it is enabled. The card only places it and reports the click.
         @discardableResult
@@ -242,16 +280,49 @@ extension ComposableSettings {
         /// The two halves of "a field is being edited", without a field editor.
         /// Hosting a real one in a test means a window, a first responder and a
         /// run loop — three things that make a test flaky for no extra coverage.
-        func beginEditingForTests() { isEditingField = true }
+        func beginEditingForTests() { heldRows.beginEditing() }
 
         func endEditingForTests() { finishEditing() }
 
         private func finishEditing() {
-            isEditingField = false
-            if let pending = pendingRows {
-                pendingRows = nil
+            if let pending = heldRows.endEditing() {
                 applyRows(pending)
             }
+        }
+
+        // MARK: - Window lifetime
+
+        /// AppKit sends no end-of-editing notification when a window is closed
+        /// with a field editor still live, and a reused window keeps that
+        /// editor as first responder. Without this, every later `setRows`
+        /// would be held for an edit that already ended, and the reopened
+        /// table would show stale rows.
+        public override func viewWillMove(toWindow newWindow: NSWindow?) {
+            super.viewWillMove(toWindow: newWindow)
+            if let observedWindow {
+                NotificationCenter.default.removeObserver(
+                    self, name: NSWindow.willCloseNotification, object: observedWindow)
+            }
+            observedWindow = newWindow
+            if let newWindow {
+                NotificationCenter.default.addObserver(
+                    self, selector: #selector(windowWillClose(_:)),
+                    name: NSWindow.willCloseNotification, object: newWindow)
+            }
+        }
+
+        @objc private func windowWillClose(_ notification: Notification) {
+            // End the edit the way a click elsewhere would: the text commits to
+            // the row it was typed into (see `CellField`) and the held reload
+            // lands. `finishEditing` covers a window whose responder was not
+            // one of this table's fields.
+            if let window = notification.object as? NSWindow,
+               let editor = window.firstResponder as? NSText,
+               let field = editor.delegate as? NSView,
+               field.isDescendant(of: tableView) {
+                window.makeFirstResponder(nil)
+            }
+            finishEditing()
         }
 
         // MARK: - Setup
@@ -312,7 +383,7 @@ extension ComposableSettings {
         @objc fileprivate func togglePressed(_ sender: NSButton) {
             let row = sender.tag
             guard row >= 0, row < rows.count else { return }
-            guard let columnID = sender.identifier?.rawValue else { return }
+            guard let columnID = (sender as? EditableTableToggle)?.toggleColumnID else { return }
             onToggle?(rows[row].id, columnID, sender.state == .on)
         }
     }
@@ -322,6 +393,7 @@ extension ComposableSettings {
 
 extension ComposableSettings.EditableTableCard: NSTableViewDataSource {
 
+    /// `NSTableViewDataSource`: one table row per `rows` element.
     public func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
     /// The card reports the click and sorts nothing: the owner holds the model,
@@ -340,6 +412,7 @@ extension ComposableSettings.EditableTableCard: NSTableViewDataSource {
 
 extension ComposableSettings.EditableTableCard: NSTableViewDelegate {
 
+    /// `NSTableViewDelegate`: a recycled cell for the column's kind, filled from the row.
     public func tableView(
         _ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int
     ) -> NSView? {
@@ -348,20 +421,31 @@ extension ComposableSettings.EditableTableCard: NSTableViewDelegate {
         guard let column = columns.first(where: { $0.id == columnID }) else { return nil }
         let value = rows[row].cells[columnID]
 
+        // Every kind is dequeued by identifier, so scrolling a long table
+        // recycles cells instead of building (and theming) one per row.
         switch column.kind {
         case .toggle:
-            let button = NSButton(checkboxWithTitle: "", target: self, action: #selector(togglePressed(_:)))
-            button.identifier = tableColumn.identifier
+            let button = reusableToggle()
+            // The button's own `identifier` is the reuse identifier, so the
+            // column id is carried in `toggleColumnID`.
+            button.toggleColumnID = columnID
             button.tag = row
-            if case .toggle(let isOn) = value { button.state = isOn ? .on : .off }
+            if case .toggle(let isOn) = value {
+                button.state = isOn ? .on : .off
+            } else {
+                button.state = .off
+            }
             button.setAccessibilityLabel(column.title)
             return button
 
         case .indicator:
-            let label = ThemedLabel(role: .primaryText, textRole: .body)
+            let label = reusableIndicator()
             if case .indicator(let isOn) = value {
                 label.stringValue = isOn ? "●" : "○"
                 label.setAccessibilityLabel(isOn ? "\(column.title), on" : "\(column.title), off")
+            } else {
+                label.stringValue = ""
+                label.setAccessibilityLabel(nil)
             }
             return label
 
@@ -380,17 +464,18 @@ extension ComposableSettings.EditableTableCard: NSTableViewDelegate {
                 field.stringValue = ""
                 field.placeholderString = nil
             }
+            field.bind(rowID: rows[row].id, columnID: columnID, shownText: field.stringValue)
             return field
         }
     }
 
-    private func reusableField() -> NSTextField {
+    private func reusableField() -> ComposableSettings.EditableTableCellField {
         if let reused = tableView.makeView(
             withIdentifier: Self.cellIdentifier, owner: self
-        ) as? NSTextField {
+        ) as? ComposableSettings.EditableTableCellField {
             return reused
         }
-        let field = NSTextField(string: "")
+        let field = ComposableSettings.EditableTableCellField(string: "")
         field.identifier = Self.cellIdentifier
         field.isBordered = false
         field.drawsBackground = false
@@ -399,12 +484,43 @@ extension ComposableSettings.EditableTableCard: NSTableViewDelegate {
         return field
     }
 
+    private func reusableToggle() -> ComposableSettings.EditableTableToggle {
+        if let reused = tableView.makeView(
+            withIdentifier: Self.toggleIdentifier, owner: self
+        ) as? ComposableSettings.EditableTableToggle {
+            return reused
+        }
+        let button = ComposableSettings.EditableTableToggle(
+            checkboxWithTitle: "", target: self, action: #selector(togglePressed(_:)))
+        button.identifier = Self.toggleIdentifier
+        return button
+    }
+
+    private func reusableIndicator() -> ThemedLabel {
+        if let reused = tableView.makeView(
+            withIdentifier: Self.indicatorIdentifier, owner: self
+        ) as? ThemedLabel {
+            return reused
+        }
+        let label = ThemedLabel(role: .primaryText, textRole: .body)
+        label.identifier = Self.indicatorIdentifier
+        return label
+    }
+
+    /// `NSTableViewDelegate`: a recycled `EditableTableRowView`, flagged per row.
     public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        let view = ComposableSettings.EditableTableRowView(frame: .zero)
+        let view = tableView.makeView(
+            withIdentifier: Self.rowViewIdentifier, owner: self
+        ) as? ComposableSettings.EditableTableRowView ?? {
+            let fresh = ComposableSettings.EditableTableRowView(frame: .zero)
+            fresh.identifier = Self.rowViewIdentifier
+            return fresh
+        }()
         view.isFlagged = row < rows.count && rows[row].isFlagged
         return view
     }
 
+    /// `NSTableViewDelegate`: reports the selection and re-asks `canRemoveRow`.
     public func tableViewSelectionDidChange(_ notification: Notification) {
         updateButtons()
         let current = selectedRowID
@@ -420,19 +536,57 @@ extension ComposableSettings.EditableTableCard: NSTableViewDelegate {
 
 extension ComposableSettings.EditableTableCard: NSTextFieldDelegate {
 
+    /// `NSTextFieldDelegate`: from the first keystroke, reloads are held back.
     public func controlTextDidBeginEditing(_ notification: Notification) {
-        isEditingField = true
+        heldRows.beginEditing()
     }
 
+    /// Commits against the row and column the field was *filled for*, not
+    /// against `field.tag` or `tableView.column(for:)`: by the time this runs
+    /// a reload may have replaced `rows` (so the tag names another record),
+    /// and a header drag may have moved the column (so its display position
+    /// names another column). Text the user did not change is not committed
+    /// at all — focus alone is not an edit.
     public func controlTextDidEndEditing(_ notification: Notification) {
         defer { finishEditing() }
-        guard let field = notification.object as? NSTextField else { return }
-        let row = field.tag
-        guard row >= 0, row < rows.count else { return }
-        // A reload landing mid-edit can detach the field's row view before this
-        // notification arrives; `column(for:)` then answers -1.
-        let columnIndex = tableView.column(for: field)
-        guard columnIndex >= 0, columnIndex < columns.count else { return }
-        commitEdit(rowIndex: row, columnID: columns[columnIndex].id, newValue: field.stringValue)
+        guard let field = notification.object as? ComposableSettings.EditableTableCellField,
+              let binding = field.binding,
+              field.stringValue != binding.shownText
+        else { return }
+        commitEdit(rowID: binding.rowID, columnID: binding.columnID, newValue: field.stringValue)
+    }
+}
+
+// MARK: - Cells
+
+extension ComposableSettings {
+
+    /// A text cell that remembers which record and column it was filled for,
+    /// and with what text. See `EditableTableCard.controlTextDidEndEditing`.
+    public final class EditableTableCellField: NSTextField {
+
+        /// What the cell was last filled with by the table.
+        public struct Binding: Equatable, Sendable {
+            /// The id of the row the cell was filled for.
+            public let rowID: String
+            /// The id of the column the cell sits in.
+            public let columnID: String
+            /// The text the table put in the cell; an edit ending on the same text is not reported.
+            public let shownText: String
+        }
+
+        /// What the cell was last filled with; nil until the table fills it.
+        public private(set) var binding: Binding?
+
+        func bind(rowID: String, columnID: String, shownText: String) {
+            binding = Binding(rowID: rowID, columnID: columnID, shownText: shownText)
+        }
+    }
+
+    /// A toggle cell. Its `identifier` is the reuse identifier, so the column
+    /// it reports for is carried separately.
+    public final class EditableTableToggle: NSButton {
+        /// The id of the column this toggle was last filled for.
+        public var toggleColumnID: String?
     }
 }

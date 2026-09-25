@@ -387,8 +387,21 @@ extension ComposableSettings {
 
         // MARK: - Panel management
 
+        /// Replaces the sidebar's panels, keeping the one on screen if it is
+        /// still among them.
+        ///
+        /// Handing back the *same* panels in the same order — a record window
+        /// refreshing its rows on a timer — only redraws the sidebar (titles may
+        /// have changed): the Back/Forward trail survives, and a search that
+        /// hides the selected row is left as the reader typed it.
         public func setPanels(_ panels: [any ComposableSettingsPanel]) {
-            self.panels = ordered(panels)
+            let newPanels = ordered(panels)
+            if newPanels.count == self.panels.count,
+               zip(newPanels, self.panels).allSatisfy({ $0 === $1 }) {
+                refreshUnchangedPanels()
+                return
+            }
+            self.panels = newPanels
             // The trail is a list of positions in `panels`; a different list makes
             // every one of them point somewhere else.
             history.reset()
@@ -434,6 +447,20 @@ extension ComposableSettings {
             // emptied the trail the arrows would have used to get back. The
             // shared restore below covers both cases.
             restoreSelectionAfterRebuild()
+            notifyNavigationChange()
+        }
+
+        /// `setPanels` with the list it already has. Every position still names
+        /// the same panel, so the trail stays valid; the sidebar is rebuilt for
+        /// changed titles and its highlight put back where the reader can see it.
+        private func refreshUnchangedPanels() {
+            listViewController.setPanels(panels)
+            updateSidebarLayout()
+            if let current = currentPanel,
+               let index = panels.firstIndex(where: { $0 === current }),
+               listViewController.isPanelVisible(at: index) {
+                listViewController.selectPanel(at: index)
+            }
             notifyNavigationChange()
         }
 

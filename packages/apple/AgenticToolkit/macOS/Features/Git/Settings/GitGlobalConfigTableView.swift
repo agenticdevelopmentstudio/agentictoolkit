@@ -22,17 +22,14 @@ public final class GitGlobalConfigTableView: NSView {
     /// would wrongly block a legitimate clear.
     private var placeholderRow: Int?
 
-    /// True between `controlTextDidBeginEditing` and `controlTextDidEndEditing`
-    /// for any cell in this table. `setEntries` checks it before touching
-    /// `entries`: that call assigns `entries` before `tableView.reloadData()`,
-    /// so a `controlTextDidEndEditing` landing mid-reload would read the
-    /// *new* entries at the field's *old* row index and commit the user's
-    /// half-typed text against a setting they never touched.
-    private var isEditingField = false
-
-    /// A reload that arrived while `isEditingField` was true, applied once
-    /// the in-flight edit finishes.
-    private var pendingEntries: [GitConfigEntry]?
+    /// Editing between `controlTextDidBeginEditing` and
+    /// `controlTextDidEndEditing` for any cell in this table. `setEntries`
+    /// offers to it before touching `entries`: that call assigns `entries`
+    /// before `tableView.reloadData()`, so a `controlTextDidEndEditing`
+    /// landing mid-reload would read the *new* entries at the field's *old*
+    /// row index and commit the user's half-typed text against a setting they
+    /// never touched. Shared with `EditableTableCard`.
+    private var heldEntries = EditDeferredValue<[GitConfigEntry]>()
 
     let tableView = ThemedTableView()
     let errorLabel = ThemedLabel(role: .secondaryText, textRole: .caption)
@@ -65,12 +62,9 @@ public final class GitGlobalConfigTableView: NSView {
 
     /// Replaces the displayed entries and reloads the table -- unless a cell
     /// is currently being edited, in which case the replacement is held back
-    /// until that edit commits (see `isEditingField`'s doc comment for why).
+    /// until that edit commits (see `heldEntries`'s doc comment for why).
     public func setEntries(_ entries: [GitConfigEntry]) {
-        guard !isEditingField else {
-            pendingEntries = entries
-            return
-        }
+        guard let entries = heldEntries.offer(entries) else { return }
         applyEntries(entries)
     }
 
@@ -294,16 +288,13 @@ extension GitGlobalConfigTableView: NSTableViewDelegate {
 
 extension GitGlobalConfigTableView: NSTextFieldDelegate {
     public func controlTextDidBeginEditing(_ notification: Notification) {
-        isEditingField = true
+        heldEntries.beginEditing()
     }
 
     public func controlTextDidEndEditing(_ notification: Notification) {
-        isEditingField = false
+        let pending = heldEntries.endEditing()
         defer {
-            if let pending = pendingEntries {
-                pendingEntries = nil
-                applyEntries(pending)
-            }
+            if let pending { applyEntries(pending) }
         }
         guard let field = notification.object as? NSTextField else { return }
         let row = field.tag

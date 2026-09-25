@@ -4,8 +4,9 @@ import AgenticToolkitCore
 /// The contract a `ComposableSettings.ViewModel` needs from its storage: read a
 /// value, write a value, hear about changes. `UserSettingObserver` was that
 /// contract's only implementation for as long as every settings row was backed
-/// by `UserDefaults`; billing rows are backed by SQLite on the daemon, so the
-/// dependency is inverted here rather than duplicating thirty row views.
+/// by `UserDefaults`; a row can equally be backed by a database or a remote
+/// service, so the dependency is inverted here rather than duplicating thirty
+/// row views.
 ///
 /// `@MainActor`, because `UserSettingObserver` already is
 /// (`Core/SettingStorage/UserSetting.swift:46`) and under Swift 6 strict
@@ -38,8 +39,10 @@ public final class ClosureSettingObserver<Value>: SettingObserving {
     private let getter: () -> Value
     private let setter: (Value) -> Void
 
+    /// Called on the main queue after each write through `value`.
     public var onChange: ((_ newValue: Value) -> Void)?
 
+    /// An observer reading through `get`, writing through `set`.
     public init(
         get: @escaping () -> Value,
         set: @escaping (Value) -> Void,
@@ -50,6 +53,7 @@ public final class ClosureSettingObserver<Value>: SettingObserving {
         self.onChange = onChange
     }
 
+    /// Reads through `get`; a write goes through `set` and then reports `onChange`.
     public var value: Value {
         get { getter() }
         set {
