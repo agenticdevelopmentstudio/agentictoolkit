@@ -190,6 +190,9 @@ extension ComposableSettings {
             let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.onTick?() }
             }
+            // A clock read in whole seconds can land a tenth late; the slack
+            // lets the system coalesce the wakeup with others.
+            timer.tolerance = interval / 10
             RunLoop.main.add(timer, forMode: .common)
             self.timer = timer
         }

@@ -74,4 +74,32 @@ final class PopupMenuChoiceViewTests: XCTestCase {
         XCTAssertNil(view.popUpButton.selectedItem,
                      "showing A would claim a value the setting does not hold")
     }
+
+    func testUpdateChoicesLeavesTheMenuAloneWhenNothingChanged() {
+        let (model, view) = makeView(value: "a")
+        let itemBefore = view.popUpButton.item(at: 0)
+        var rebuilt = 0
+        let viewHandler = model.onChoicesChange
+        model.onChoicesChange = { rebuilt += 1; viewHandler?() }
+
+        XCTAssertFalse(model.updateChoices([.init(label: "A", value: "a"), .init(label: "B", value: "b")]))
+        XCTAssertEqual(rebuilt, 0, "an identical list must not rebuild an open menu")
+        XCTAssertTrue(view.popUpButton.item(at: 0) === itemBefore)
+
+        XCTAssertTrue(model.updateChoices([.init(label: "A2", value: "a"), .init(label: "B", value: "b")]))
+        XCTAssertEqual(rebuilt, 1)
+        XCTAssertEqual(view.popUpButton.itemTitles, ["A2", "B"])
+    }
+
+    func testDisablingTheViewDimsItsTitleWithThePopup() {
+        let (_, view) = makeView(value: "a")
+
+        view.isEnabled = false
+        XCTAssertFalse(view.popUpButton.isEnabled)
+        XCTAssertLessThan(view.label.alphaValue, 1, "a dead popup beside a full-strength title reads as live")
+
+        view.isEnabled = true
+        XCTAssertTrue(view.popUpButton.isEnabled)
+        XCTAssertEqual(view.label.alphaValue, 1)
+    }
 }

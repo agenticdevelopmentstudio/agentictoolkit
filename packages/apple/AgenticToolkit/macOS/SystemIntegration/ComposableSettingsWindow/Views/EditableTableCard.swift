@@ -241,6 +241,55 @@ extension ComposableSettings {
             updateButtons()
         }
 
+        /// Replaces the rows whose ids appear in `changed`, redrawing only
+        /// those rows — for a caller that refreshes a few cells often (a
+        /// running clock ticking once a second) and must not pay for, or
+        /// flicker through, a whole `reloadData` each time. Order, selection
+        /// and every other row are left alone.
+        ///
+        /// While a cell is being edited the change is folded into the rows
+        /// held back for that edit, so it lands with them and never under the
+        /// field editor. Answers false when some id in `changed` is not a row
+        /// here; those are ignored, and the owner should `setRows` instead.
+        @discardableResult
+        public func updateRows(_ changed: [EditableTableRow]) -> Bool {
+            let byID = Dictionary(changed.map { ($0.id, $0) }, uniquingKeysWith: { _, newer in newer })
+            if heldRows.isEditing {
+                let base = heldRows.pending ?? rows
+                _ = heldRows.offer(base.map { byID[$0.id] ?? $0 })
+                return Set(base.map(\.id)).isSuperset(of: byID.keys)
+            }
+            var indexes = IndexSet()
+            for (index, row) in rows.enumerated() {
+                guard let replacement = byID[row.id] else { continue }
+                rows[index] = replacement
+                indexes.insert(index)
+            }
+            if !indexes.isEmpty {
+                tableView.reloadData(
+                    forRowIndexes: indexes,
+                    columnIndexes: IndexSet(integersIn: 0..<tableView.numberOfColumns))
+                // `reloadData(forRowIndexes:)` refills the cells but keeps the
+                // row views, so the flag is carried over by hand.
+                for index in indexes {
+                    let rowView = tableView.rowView(atRow: index, makeIfNecessary: false)
+                    (rowView as? EditableTableRowView)?.isFlagged = rows[index].isFlagged
+                }
+            }
+            return indexes.count == byID.count
+        }
+
+        /// Selects the row with `id` and scrolls it into view. Answers false,
+        /// and leaves the selection alone, when no row has that id — a record
+        /// that has not arrived yet, or has gone.
+        @discardableResult
+        public func selectRow(id: String) -> Bool {
+            guard let index = rows.firstIndex(where: { $0.id == id }) else { return false }
+            tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+            tableView.scrollRowToVisible(index)
+            return true
+        }
+
         /// Applies one edited cell. Public so the owner can drive it in a test
         /// without an NSTextField and a live field editor.
         public func commitEdit(rowIndex: Int, columnID: String, newValue: String) {
@@ -274,6 +323,28 @@ extension ComposableSettings {
         @objc private func footerButtonPressed(_ sender: NSButton) {
             footerActions[ObjectIdentifier(sender)]?()
         }
+
+        /// A pull-down button in the footer: clicking it opens a menu whose
+        /// items `items` builds fresh each time it opens, so they are never
+        /// stale. A real pull-down rather than a push button that pops a menu
+        /// by hand, so VoiceOver announces a menu button, the keyboard opens
+        /// it, and the menu sits where the platform puts it. The owner decides
+        /// when it is enabled, and gives each item its own target and action.
+        @discardableResult
+        public func addFooterMenuButton(
+            title: String, identifier: String, items: @escaping () -> [NSMenuItem]
+        ) -> NSPopUpButton {
+            let button = NSPopUpButton(frame: .zero, pullsDown: true)
+            button.controlSize = .small
+            _ = button.accessibilityID(identifier)
+            let source = FooterMenuSource(title: title, items: items)
+            button.menu = source.menu
+            footerMenuSources.append(source)
+            footer.addAccessoryView(button)
+            return button
+        }
+
+        private var footerMenuSources: [FooterMenuSource] = []
 
         // MARK: - Test seams
 
@@ -580,6 +651,29 @@ extension ComposableSettings {
 
         func bind(rowID: String, columnID: String, shownText: String) {
             binding = Binding(rowID: rowID, columnID: columnID, shownText: shownText)
+        }
+    }
+
+    /// Feeds a footer pull-down its items as it opens. A pull-down's first
+    /// item is the button's face, not a choice, so it is re-added every time.
+    @MainActor
+    final class FooterMenuSource: NSObject, NSMenuDelegate {
+        let menu = NSMenu()
+        private let title: String
+        private let items: () -> [NSMenuItem]
+
+        init(title: String, items: @escaping () -> [NSMenuItem]) {
+            self.title = title
+            self.items = items
+            super.init()
+            menu.delegate = self
+            menu.addItem(withTitle: title, action: nil, keyEquivalent: "")
+        }
+
+        func menuNeedsUpdate(_ menu: NSMenu) {
+            menu.removeAllItems()
+            menu.addItem(withTitle: title, action: nil, keyEquivalent: "")
+            items().forEach(menu.addItem)
         }
     }
 

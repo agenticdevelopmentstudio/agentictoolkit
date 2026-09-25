@@ -15,6 +15,22 @@ extension ComposableSettings {
         /// Fired after `choices` is replaced.
         public var onChoicesChange: (() -> Void)?
 
+        /// Replaces `choices` only when the list really differs — a label, a
+        /// value, an icon or the order changed. A caller that re-reads its
+        /// records on every poll otherwise rebuilds the popup's menu each time,
+        /// which closes it under a person mid-pick. Answers whether it replaced.
+        @discardableResult
+        public func updateChoices(_ newChoices: [Choice]) -> Bool {
+            let same = newChoices.count == choices.count
+                && zip(newChoices, choices).allSatisfy { lhs, rhs in
+                    lhs.label == rhs.label && lhs.value == rhs.value
+                        && lhs.imageSystemName == rhs.imageSystemName
+                }
+            if same { return false }
+            choices = newChoices
+            return true
+        }
+
         public init(
             title: String,
             setting: UserSetting<Value>,

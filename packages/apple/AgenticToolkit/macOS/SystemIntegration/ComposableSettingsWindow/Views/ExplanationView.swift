@@ -4,9 +4,30 @@ import AgenticToolkitCore
 extension ComposableSettings {
 
     /// Small descriptive blurb rendered beneath a setting.
+    ///
+    /// Also a status line whose text changes and which may be hidden: set
+    /// ``text`` and `isHidden` after it is placed. It is a
+    /// ``SelfHidingSettingsView``, so a card's row closes up and reopens with
+    /// it — a plain label hidden before it was added would take its row down
+    /// with it for good.
     @MainActor
-    public class ExplanationView: NSView, SettingsViewProtocol {
+    public class ExplanationView: NSView, SettingsViewProtocol, SelfHidingSettingsView {
         public let label: NSTextField
+
+        /// Told to whoever placed this view when `isHidden` changes.
+        public var onVisibilityChange: (() -> Void)?
+
+        /// The blurb. Setting it re-wraps the label to the new text.
+        public var text: String {
+            get { label.stringValue }
+            set { label.stringValue = newValue }
+        }
+
+        public override var isHidden: Bool {
+            didSet {
+                if isHidden != oldValue { onVisibilityChange?() }
+            }
+        }
 
         public init(withText text: String) {
             self.label = Self.createLabel(title: text)

@@ -401,6 +401,7 @@
 		329908FD1189C57066AC75CE /* AgenticToolkitHTDV-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0BC52FC75BA23DC2B808E306 /* AgenticToolkitHTDV-macOS.framework */; };
 		331EE8F2A046A8848422BAF1 /* DividerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB783DDA1E4AB17256866125 /* DividerView.swift */; };
 		33AFBBFDC6CE74C0947F7454 /* ExtensionInputBoxModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D282DC10505261D2337F7993 /* ExtensionInputBoxModelTests.swift */; };
+		33C7DD0DBDFB49FAF5FDFAC7 /* EditableTableCardUpdateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1555B628BE316CC051F3AD65 /* EditableTableCardUpdateTests.swift */; };
 		3418DB4D2DDCD509CA0345CC /* FormDetails.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3908B299DFC11D5CFFD3688C /* FormDetails.swift */; };
 		34192A22D14F285CFE37D847 /* AIChatViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 368B098E9316C0BC6A1C425B /* AIChatViewModelTests.swift */; };
 		3466AA1BEAAEE068B1A7E0CB /* EcosystemConfigModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94A21990F17A44C7EC18B9DD /* EcosystemConfigModels.swift */; };
@@ -3366,6 +3367,7 @@
 		14DA19F006DBD1DEE5EB9F0C /* ScreenSetStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenSetStorage.swift; sourceTree = "<group>"; };
 		14E9941C074D5D20D2E7A3CC /* ConversationsSessionFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationsSessionFilter.swift; sourceTree = "<group>"; };
 		14F0D7A30AF00561219B8FCF /* ContextVisualizationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextVisualizationView.swift; sourceTree = "<group>"; };
+		1555B628BE316CC051F3AD65 /* EditableTableCardUpdateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditableTableCardUpdateTests.swift; sourceTree = "<group>"; };
 		155F63F8DD201589BA250664 /* LiveTimerRowViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTimerRowViewTests.swift; sourceTree = "<group>"; };
 		156797041CCFC6775B8D556D /* ExtensionRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionRegistry.swift; sourceTree = "<group>"; };
 		1582FFA3C37E29B8B3A8FCD0 /* ExtensionRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionRegistryTests.swift; sourceTree = "<group>"; };
@@ -7564,6 +7566,7 @@
 				BB32A367A5F1FBB330432FA5 /* ContactFieldsViewTests.swift */,
 				205FE0167ACD04CD88F99B96 /* EditableTableCardFooterTests.swift */,
 				985193AF903CF5BD0E25B3E5 /* EditableTableCardTests.swift */,
+				1555B628BE316CC051F3AD65 /* EditableTableCardUpdateTests.swift */,
 				4A618AF5B63FFF127DDA18A3 /* FontChooserButtonTests.swift */,
 				155F63F8DD201589BA250664 /* LiveTimerRowViewTests.swift */,
 				B95836248F50BCF8124D984C /* PathViewTests.swift */,
@@ -11107,6 +11110,7 @@
 				6D36928249D1C59F363EFC29 /* DocumentTabsViewControllerTests.swift in Sources */,
 				FEB19A11D1B009615E0C7CFA /* EditableTableCardFooterTests.swift in Sources */,
 				260B11537F9FAEE8E9A3F2CB /* EditableTableCardTests.swift in Sources */,
+				33C7DD0DBDFB49FAF5FDFAC7 /* EditableTableCardUpdateTests.swift in Sources */,
 				5CDF93805916ADCC1C33E7A4 /* EditorConfigurationTests.swift in Sources */,
 				C4D2C644128E02D5F1AA315D /* EditorOptionsOverrideTests.swift in Sources */,
 				2A932EAF5D82AF4C1184378F /* EditorSettingsPanelViewControllerTests.swift in Sources */,

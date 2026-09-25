@@ -10,6 +10,16 @@ extension ComposableSettings {
 
         private let viewModel: ChoiceViewModel<Value>
 
+        /// Greys out the whole row — the popup and its title — the way
+        /// `FontPickerView.isEnabled` does. Disabling only `popUpButton`
+        /// leaves the title at full strength beside a dead control.
+        public var isEnabled: Bool = true {
+            didSet {
+                popUpButton.isEnabled = isEnabled
+                label.alphaValue = isEnabled ? 1 : 0.4
+            }
+        }
+
         public init(viewModel: ChoiceViewModel<Value>) {
             self.viewModel = viewModel
             self.label = Self.createLabel(title: viewModel.title)
