@@ -71,14 +71,33 @@ describe('BitbagDock', () => {
       expect(container.firstElementChild).toHaveClass('bb-dock--resting')
     })
 
-    it('opens his chat under him on a tap, full size, with the caret in the composer', () => {
+    it('opens his chat on a tap, him on its corner as its send control, with the caret in the composer', () => {
       const { container } = render(<BitbagDock rest="avatar" />)
       fireEvent.click(screen.getByRole('button', { name: 'Chat with bitbag' }))
       expect(panelOf(container).hidden).toBe(false)
       const face = container.querySelector('.bb-dock__avatar') as HTMLElement
-      expect(face.style.width).toBe('132px')
+      // Three-quarters of 132: he stands where the send button was, so it is not drawn.
+      expect(face.style.width).toBe('99px')
+      expect(panelOf(container).style.getPropertyValue('--bb-dock-corner-w')).toBe('99px')
+      expect(chat.props.sendButton).toBe(false)
       expect(face).toHaveAttribute('aria-expanded', 'true')
+      expect(face).toHaveAttribute('aria-label', 'Send to bitbag')
       expect(document.activeElement).toBe(screen.getByLabelText('Message'))
+    })
+
+    it('keeps the caret in the composer when he is pressed while open', () => {
+      render(<BitbagDock rest="avatar" />)
+      const face = screen.getByRole('button', { name: 'Chat with bitbag' })
+      // Resting, his press is an ordinary one.
+      expect(fireEvent.mouseDown(face)).toBe(true)
+      fireEvent.click(face)
+      // Open, it is cancelled, so the press does not take focus off the composer.
+      expect(fireEvent.mouseDown(face)).toBe(false)
+    })
+
+    it('keeps the send button for the resting modes that are not him', () => {
+      render(<BitbagDock />)
+      expect(chat.props.sendButton).toBe(true)
     })
 
     it('goes back to rest when the chat folds after being engaged — not the instant it opens folded', async () => {
@@ -106,7 +125,7 @@ describe('BitbagDock', () => {
       expect(pageLock.active).toBe(false)
     })
 
-    it('closes on a tap on him while open, rather than reopening', () => {
+    it('closes on a tap on him while open but not yet engaged, rather than reopening', () => {
       const { container } = render(<BitbagDock rest="avatar" />)
       const face = screen.getByRole('button', { name: 'Chat with bitbag' })
       fireEvent.click(face)
@@ -115,7 +134,7 @@ describe('BitbagDock', () => {
       expect(panelOf(container).hidden).toBe(true)
     })
 
-    it('closes on a click that no pointerdown preceded — assistive tech, `el.click()`', () => {
+    it('closes, before his chat is engaged, on a click that no pointerdown preceded — assistive tech, `el.click()`', () => {
       const { container } = render(<BitbagDock rest="avatar" />)
       const face = screen.getByRole('button', { name: 'Chat with bitbag' })
       act(() => face.click())
@@ -132,14 +151,21 @@ describe('BitbagDock', () => {
       // (bitbag-dock.css, adh-site.css) stayed over the page with nothing to talk to.
       fireEvent.keyDown(face, { key: 'Enter' })
       chatReports(true)
-      fireEvent.keyDown(face, { key: 'Enter' })
+      chatReports(false)
       expect(chat.props.engaged).toBe(false)
+      expect(screen.getByRole('button', { name: 'Chat with bitbag' })).toHaveAttribute('aria-expanded', 'false')
+    })
 
+    it('sends, rather than closing, on a tap on him once his chat is engaged', () => {
+      const { container } = render(<BitbagDock rest="avatar" />)
+      const face = screen.getByRole('button', { name: 'Chat with bitbag' })
       fireEvent.click(face)
       chatReports(true)
       fireEvent.pointerDown(face)
       fireEvent.click(face)
-      expect(chat.props.engaged).toBe(false)
+      fireEvent.keyDown(face, { key: 'Enter' })
+      expect(panelOf(container).hidden).toBe(false)
+      expect(chat.props.engaged).toBe(true)
     })
 
     it('hands focus back to him when he closes with it inside the panel', () => {

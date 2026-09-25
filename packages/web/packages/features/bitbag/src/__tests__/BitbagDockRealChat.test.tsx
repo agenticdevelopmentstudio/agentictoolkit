@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 
 // The resting dock against his REAL chat and his REAL `i`. BitbagDock.test.tsx stands a
 // mock in for the chat, which suits the dock's own state and is blind to the contract
-// between the two: the dock closes on the chat's `onEngagedChange`, folds it through
+// between the two: the dock closes on the chat's `onEngagedChange`, sends through the chat's own form, folds it through
 // `engaged`, puts the caret in it by CHAT_INPUT_SELECTOR, and marks its own face and the
 // `i` with CHAT_INSIDE_ATTR — each a name the chat package can change without a mocked
 // test noticing, which is how the `.pc-collapsed` observer this replaced would have gone
@@ -68,6 +68,20 @@ function expectResting(): void {
   expect(chatBox()).toHaveClass('pc-collapsed')
 }
 
+/** Type into his composer the way a reader does, so the chat sees the input event. */
+function typeInto(text: string): void {
+  fireEvent.change(composer(), { target: { value: text } })
+}
+
+/** It went out through the composer's own send: box cleared, message in his transcript, still open. */
+function expectSent(text: string): void {
+  expect(composer().value).toBe('')
+  expect(chatBox().textContent).toContain(text)
+  expect(panel().hidden).toBe(false)
+  expect(face()).toHaveAttribute('aria-expanded', 'true')
+  expect(chatBox()).not.toHaveClass('pc-collapsed')
+}
+
 describe('BitbagDock with his real chat', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -125,27 +139,43 @@ describe('BitbagDock with his real chat', () => {
     expect(document.activeElement).toBe(face())
   })
 
-  it('folds his chat when he is closed with Enter', async () => {
+  it('sends what is in his composer, and stays open, when he is pressed with Enter', async () => {
     await openDock()
+    typeInto('hello by enter')
     face().focus()
     fireEvent.keyDown(face(), { key: 'Enter' })
     await settle()
-    expectResting()
+    expectSent('hello by enter')
   })
 
-  it('closes, rather than reopening, on a tap on him while his chat is engaged', async () => {
+  it('sends, rather than closing, on a tap on him while his chat is engaged', async () => {
     await openDock()
+    typeInto('hello by tap')
     fireEvent.pointerDown(face())
+    fireEvent.mouseDown(face())
     fireEvent.pointerUp(face())
     fireEvent.click(face())
     await settle()
-    expectResting()
+    expectSent('hello by tap')
+    // His press is part of the conversation: the caret never left the composer.
+    expect(document.activeElement).toBe(composer())
   })
 
-  it('closes on a click that no pointerdown preceded — assistive tech, `el.click()`', async () => {
+  it('sends on a click that no pointerdown preceded — assistive tech, `el.click()`', async () => {
     await openDock()
+    typeInto('hello by click')
     act(() => face().click())
     await settle()
-    expectResting()
+    expectSent('hello by click')
+  })
+
+  it('sends nothing, and stays open, on a tap with an empty composer', async () => {
+    await openDock()
+    const before = chatBox().textContent
+    fireEvent.click(face())
+    await settle()
+    expect(panel().hidden).toBe(false)
+    expect(chatBox()).not.toHaveClass('pc-collapsed')
+    expect(chatBox().textContent).toBe(before)
   })
 })

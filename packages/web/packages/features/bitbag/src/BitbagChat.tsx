@@ -111,6 +111,12 @@ export interface BitbagChatProps {
    * for the same reason.
    */
   onEngagedChange?: (engaged: boolean) => void
+  /**
+   * Whether his composer draws its own send button (default true). The avatar-rest
+   * dock turns it off: there he sits over the composer's corner, and tapping him is
+   * the send.
+   */
+  sendButton?: boolean
 }
 
 export function BitbagChat({
@@ -125,6 +131,7 @@ export function BitbagChat({
   className,
   engaged,
   onEngagedChange,
+  sendButton,
 }: BitbagChatProps) {
   const isDock = variant === 'dock'
   // Default to the built-in scripted mock so existing consumers are byte-for-byte
@@ -284,6 +291,7 @@ export function BitbagChat({
         statusUtterance={isDock ? echo : inputDisabled ? statusLine : echo}
         inputDisabled={inputDisabled}
         fadeOlder
+        sendButton={sendButton}
         sizing={sizing}
         engaged={engaged}
         onEngagedChange={onEngagedChange}

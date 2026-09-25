@@ -80,6 +80,13 @@
    * adh footer does: its header is at 50). */
   z-index: 45;
 
+  /* How wide his chat is. A host sets `--bb-dock-panel-width` to change it (the adh
+   * footer widens it on big screens); this rule's own value is the default. It is
+   * a var rather than a width on the panel because the avatar-rest dock places him
+   * on the chat's corner from outside the panel, and needs the same number.
+   * Percentages here resolve against the dock, which is viewport-wide. */
+  --bb-dock-panel-w: var(--bb-dock-panel-width, min(560px, calc(100% - 2rem)));
+
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -94,6 +101,25 @@
   .bb-dock__avatar,
   .bb-dock--rest-avatar .bb-dock__avatar {
     transition: none;
+  }
+  .bb-dock.bb-dock--rest-avatar:not(.bb-dock--resting) .bb-dock__avatar {
+    animation: none;
+  }
+}
+
+/* A phone gets the whole width. The chat meets the screen's edges there, so the
+ * sides and bottom of its frame would be a border against nothing — they go, and
+ * only the top corners stay round. Above the theme's own `.persona-chat` rule on
+ * purpose: this is where the box sits, which the dock owns. */
+@media (max-width: 640px) {
+  .bb-dock {
+    --bb-dock-panel-w: 100%;
+  }
+  .bb-dock .persona-chat {
+    border-left-width: 0;
+    border-right-width: 0;
+    border-bottom-width: 0;
+    border-radius: 18px 18px 0 0;
   }
 }
 
@@ -212,6 +238,39 @@
   transform: translateX(var(--bb-dock-rest-x, 0px));
   margin-bottom: calc(0.1rem + var(--bb-dock-rest-lift, 0px));
 }
+/* Open, he moves onto his chat's lower-right corner, in place of the send button —
+ * tapping him there is the send (BitbagDock), and he giggles for it. Out of the
+ * column, so the chat alone sets the dock's height and he sits over it; placed
+ * against the dock, whose bottom is the chat's bottom and whose width is the
+ * viewport's, so the chat's right edge is half the leftover width in from its
+ * own. He comes in with a plain settle — a fade and a small rise — rather than
+ * any of his moods: opening is not a reaction, and the laugh it used to play
+ * read as a wince. The selector outranks the doze scale's `:has()` above, which
+ * would otherwise halve him in the moment before the caret unfolds the chat. */
+.bb-dock.bb-dock--rest-avatar:not(.bb-dock--resting) .bb-dock__avatar {
+  position: absolute;
+  z-index: 1;
+  right: calc((100% - var(--bb-dock-panel-w)) / 2 + 0.3rem);
+  bottom: 0.3rem;
+  margin: 0;
+  transform: none;
+  transform-origin: bottom right;
+  animation: bb-dock-corner-in 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes bb-dock-corner-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.9);
+  }
+}
+/* The composer stops short of him, so what you type never runs under his face.
+ * BitbagDock sets `--bb-dock-corner-w` to his width on the corner. */
+.bb-dock--rest-avatar .persona-chat .pc-input-area {
+  padding-right: calc(var(--bb-dock-corner-w, 0px) + 0.6rem);
+}
+.bb-dock--rest-avatar .bb-dock__avatar {
+  cursor: pointer;
+}
 /* He is the button here, so he gets a button's focus ring. */
 .bb-dock--rest-avatar .bb-dock__avatar:focus-visible {
   outline: 2px solid var(--color-accent, #e8a33d);
@@ -226,7 +285,7 @@
  * it; the chat and the button each take their own. */
 .bb-dock__panel {
   position: relative;
-  width: min(560px, calc(100vw - 2rem));
+  width: var(--bb-dock-panel-w);
   pointer-events: none;
 }
 .bb-dock__chat {
@@ -235,7 +294,8 @@
 
 /* --- the `i`: where else bitbag lives ------------------------------------- */
 
-/* Sat astride the chat's top-right corner rather than inside it. Inside, it
+/* Sat astride the chat's top-right corner (top-left in the avatar-rest dock, below)
+ * rather than inside it. Inside, it
  * would land on top of the send button whenever the box is folded down to a
  * single entry line — which is most of the time. Half-on/half-off keeps it in
  * the same place in both states, clear of the composer and clear of bitbag
@@ -269,6 +329,16 @@
   transform: translateY(-50%);
   pointer-events: auto;
 }
+/* In the avatar-rest dock his face takes the right-hand side of the chat, so the
+ * `i` moves to the mirrored spot on the left, and its panel hangs from its left. */
+.bb-dock--rest-avatar .bb-info {
+  left: 0.7rem;
+  right: auto;
+}
+.bb-dock--rest-avatar .bb-info__pop {
+  left: 0;
+  right: auto;
+}
 .bb-info__btn {
   display: grid;
   place-items: center;
@@ -294,8 +364,9 @@
 }
 
 /* The panel opens UP from the button — the dock is on the bottom edge, so there
- * is nowhere below to open into — and hangs from its right edge, which is the
- * one that can't run off the screen. */
+ * is nowhere below to open into — and hangs from the edge on the button's side
+ * of the chat (right here, left in the avatar-rest dock), which is the one that
+ * can't run off the screen. */
 .bb-info__pop {
   position: absolute;
   bottom: calc(100% + 0.5rem);

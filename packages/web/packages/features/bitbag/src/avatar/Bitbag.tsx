@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactElement } from "react";
+import { useEffect, useImperativeHandle, useRef, type ReactElement, type Ref } from "react";
 import gsap from "gsap";
 import {
   useAvatarEngine,
@@ -34,11 +34,22 @@ const MOODS: MoodMap<BitbagExpression> = { idle: "idle", bored: "bored", asleep:
  */
 const TUNING: Partial<Tuning> = { boredAfterMs: Infinity, asleepAfterMs: Infinity };
 
+/** The ways he giggles when poked, drawn at random so a run of pokes never plays
+ *  the same bit twice in a row: the squeezed-eye laugh, the upside-down whirl, the
+ *  wide-eyed bounce. */
+const GIGGLES: readonly BitbagExpression[] = ["laughing", "silly", "excited"];
+let lastGiggle: BitbagExpression | null = null;
+const giggle = (): BitbagExpression => {
+  const pool = GIGGLES.filter((g) => g !== lastGiggle);
+  lastGiggle = pool[Math.floor(Math.random() * pool.length)] ?? GIGGLES[0]!;
+  return lastGiggle;
+};
+
 /** A click STARTLES a sleeping bitbag (he jolts wide-eyed); otherwise he giggles. */
 const pokeReaction = (resting: BitbagExpression): { expression: BitbagExpression; ms: number } =>
   resting === "asleep"
     ? { expression: "startled", ms: 1700 } // the startle lingers a touch longer
-    : { expression: "laughing", ms: 1400 };
+    : { expression: giggle(), ms: 1400 };
 
 /** Blinks pause while the eyes are deliberately controlled (the laugh squeeze). */
 const BLINK_SUPPRESSED: BitbagExpression[] = ["laughing"];
@@ -125,9 +136,30 @@ export interface BitbagProps {
    * thinking spinner rather than his chatter.
    */
   mute?: boolean;
+  /**
+   * Whether a click on him pokes him (default true). A host that gives his click
+   * a job of its own — the dock, where tapping him opens his chat or sends — turns
+   * it off and pokes him itself through `handleRef`, only when the job calls for it.
+   */
+  pokeOnClick?: boolean;
+  /** Imperative access for a host that drives his reactions itself. */
+  handleRef?: Ref<BitbagHandle>;
 }
 
-export function Bitbag({ expression, gaze = null, onSpeak, mute = false }: BitbagProps): ReactElement {
+/** What a host can make bitbag do directly. */
+export interface BitbagHandle {
+  /** Poke him: he giggles (at random), or startles if he was asleep. */
+  poke: () => void;
+}
+
+export function Bitbag({
+  expression,
+  gaze = null,
+  onSpeak,
+  mute = false,
+  pokeOnClick = true,
+  handleRef,
+}: BitbagProps): ReactElement {
   const svgRef = useRef<SVGSVGElement>(null);
   // Transform layers, outermost first, each with a single owner so they never
   // fight: idleRef = idle fidget (sway + breath), tiltRef = head-tilt toward a
@@ -186,6 +218,8 @@ export function Bitbag({ expression, gaze = null, onSpeak, mute = false }: Bitba
     blinkSuppressed: BLINK_SUPPRESSED,
   });
 
+  useImperativeHandle(handleRef, () => ({ poke }), [poke]);
+
   // Pinprick pupils: fade the tiny lit dots in when his eyes shut (asleep), so
   // there's always a spark in the dark; hidden when awake (the real irises show).
   const eyesShut = effective === "asleep";
@@ -203,9 +237,9 @@ export function Bitbag({ expression, gaze = null, onSpeak, mute = false }: Bitba
       viewBox="-15 -72 350 195"
       aria-label="bitbag"
       className="block h-auto w-full"
-      onClick={poke}
+      onClick={pokeOnClick ? poke : undefined}
       style={{
-        cursor: "pointer",
+        cursor: pokeOnClick ? "pointer" : undefined,
         pointerEvents: "auto",
         // Don't clip the glyph to the viewBox: the emotional `scale`/`rotation`
         // (and the silly spin) push his extremities past the box, and the default

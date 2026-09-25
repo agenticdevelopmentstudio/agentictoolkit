@@ -1,9 +1,18 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type MouseEvent,
+} from 'react'
 import {
   CHAT_INPUT_SELECTOR,
   CHAT_INSIDE_ATTR,
+  submitChatInput,
   type ChatBackend,
   type GazeVector,
 } from '@agenticdevelopertoolkit/chat'
@@ -11,8 +20,13 @@ import type { ThemeKey } from '@agenticdevelopertoolkit/themes'
 import { useKeyboardInset, usePageScrollLock } from '@agenticdevelopertoolkit/viewport'
 import { BitbagChat } from './BitbagChat'
 import { BitbagInfo } from './BitbagInfo'
-import { Bitbag, type BitbagExpression } from './avatar'
+import { Bitbag, type BitbagExpression, type BitbagHandle } from './avatar'
 import { DEFAULT_THEME } from './voice'
+
+/** How big he is on his chat's corner, as a share of his full `size`: the corner is
+ *  where the send button was, and at full size he would stand over half the
+ *  composer. */
+const CORNER_SCALE = 0.75
 
 export interface BitbagDockProps {
   /** The toolkit theme that skins his chat. Defaults to the adh house style. */
@@ -35,10 +49,10 @@ export interface BitbagDockProps {
    * - `'avatar'` — his face alone, at half size, with no entry line under him.
    *   For a host whose bottom edge is already a bar of its own (the adh footer):
    *   a 560px composer across the middle of it covered the bar's links and made
-   *   every page reserve room for it. Tapping him opens his chat under him, with
-   *   the caret in it; when the chat folds (a tap away, Escape) he goes back to
-   *   being just a face, and tapping him again puts him back as well — folding
-   *   the chat with him.
+   *   every page reserve room for it. Tapping him opens his chat, with the caret
+   *   in it, and he moves onto its lower-right corner in place of the send button:
+   *   tapping him there sends what you typed, and he giggles. When the chat folds
+   *   (a tap away, Escape) he goes back to being just a face in the bar.
    */
   rest?: 'entry' | 'avatar'
 }
@@ -157,21 +171,37 @@ export function BitbagDock({
     panelRef.current?.querySelector<HTMLInputElement>(CHAT_INPUT_SELECTOR)?.focus()
   }, [avatarRest, open])
 
-  // A tap, Enter/Space, or a bare `el.click()` from assistive tech all toggle on
-  // the LIVE `open`. That is only sound because his own press is marked part of the
-  // conversation (`CHAT_INSIDE_ATTR`, below): unmarked, a press on him folded the
-  // chat at pointerdown — closing the dock — before the click that followed could
-  // read the state it was meant to toggle, and the click reopened him. The
-  // pointerdown snapshot that papered over it read stale for any click that no
-  // pointerdown preceded, so those could open him but never close him.
-  const toggle = (): void => {
-    if (open) close()
-    else setOpen(true)
+  // Resting, a tap (or Enter/Space, or a bare `el.click()` from assistive tech)
+  // opens him — quietly: no poke, so he arrives without a reaction. Open, he IS the
+  // send button, and a tap sends what is in his composer and pokes him, so every
+  // send gets a giggle. His press is marked part of the conversation
+  // (`CHAT_INSIDE_ATTR`, below), so it never reads as a tap away that folds the
+  // chat before the click lands.
+  const face = useRef<BitbagHandle>(null)
+  const activate = (): void => {
+    if (!open) {
+      setOpen(true)
+      return
+    }
+    // A chat opened while its composer was still disabled never engages, so no
+    // fold will ever close it; a tap on him is the way out of that one.
+    if (!chatEngaged) {
+      close()
+      return
+    }
+    face.current?.poke()
+    submitChatInput(panelRef.current)
   }
   const onAvatarKey = (e: KeyboardEvent<HTMLDivElement>): void => {
     if (e.key !== 'Enter' && e.key !== ' ') return
     e.preventDefault()
-    toggle()
+    activate()
+  }
+  // Open, a press on him must not take focus from the composer: the caret would
+  // leave the box you are typing in, and on a phone the keyboard would drop on
+  // every send. A send button keeps focus where it is; so does he.
+  const keepComposerFocus = (e: MouseEvent<HTMLDivElement>): void => {
+    if (open) e.preventDefault()
   }
 
   // Resting, he is laid out at half width rather than scaled to it: a transform leaves
@@ -187,30 +217,46 @@ export function BitbagDock({
     .filter(Boolean)
     .join(' ')
 
+  // Open from the rest he sits on the chat's corner, smaller, and the composer keeps
+  // clear of him: `--bb-dock-corner-w` is how much room it leaves at its right end.
+  const cornerWidth = Math.round(size * CORNER_SCALE)
+  const width = !avatarRest ? size : resting ? size / 2 : cornerWidth
+  const panelStyle = avatarRest
+    ? ({ '--bb-dock-corner-w': `${cornerWidth}px` } as CSSProperties)
+    : undefined
+
   return (
     <div className={rootClass}>
       <div
         ref={bitbagRef}
         className="bb-dock__avatar"
-        style={{ width: resting ? size / 2 : size }}
+        style={{ width }}
         {...(avatarRest
           ? {
               role: 'button',
               tabIndex: 0,
-              'aria-label': open ? 'bitbag' : 'Chat with bitbag',
+              'aria-label': open ? 'Send to bitbag' : 'Chat with bitbag',
               'aria-expanded': open,
               [CHAT_INSIDE_ATTR]: '',
-              onClick: toggle,
+              onClick: activate,
               onKeyDown: onAvatarKey,
+              onMouseDown: keepComposerFocus,
             }
           : {})}
       >
-        <Bitbag expression={chatHint ?? undefined} gaze={gaze} onSpeak={onSpeak} mute={mute} />
+        <Bitbag
+          expression={chatHint ?? undefined}
+          gaze={gaze}
+          onSpeak={onSpeak}
+          mute={mute}
+          pokeOnClick={!avatarRest}
+          handleRef={face}
+        />
       </div>
       {/* The panel is the frame his chat and his `i` share: it fixes the box's
           width (the column itself is viewport-wide, so the chat can't set it)
           and gives the `i` a corner to hang off. */}
-      <div ref={panelRef} className="bb-dock__panel" hidden={resting}>
+      <div ref={panelRef} className="bb-dock__panel" hidden={resting} style={panelStyle}>
         <BitbagChat
           className="bb-dock__chat"
           variant="dock"
@@ -223,6 +269,7 @@ export function BitbagDock({
           onMute={onMute}
           engaged={chatEngaged}
           onEngagedChange={onEngagedChange}
+          sendButton={!avatarRest}
         />
         <BitbagInfo />
       </div>
