@@ -28,6 +28,10 @@ import { DEFAULT_THEME } from './voice'
  *  composer. */
 const CORNER_SCALE = 0.75
 
+/** How long closing waits for the panel's exit animation before hiding it anyway —
+ *  comfortably past the animation's own length in bitbag-dock.css. */
+const CLOSE_FALLBACK_MS = 600
+
 export interface BitbagDockProps {
   /** The toolkit theme that skins his chat. Defaults to the adh house style. */
   theme?: ThemeKey
@@ -127,6 +131,14 @@ export function BitbagDock({
   // z-index — over the host page until the next tap or Escape happened to land.
   const avatarRest = rest === 'avatar'
   const [open, setOpen] = useState(false)
+  // Going back to rest is animated: `closing` is the stretch between the decision
+  // and `hidden`, while the panel plays its way out (`bb-dock--closing` in
+  // bitbag-dock.css). `open` stays true through it — the panel has to be rendered
+  // to be seen leaving.
+  const [closing, setClosing] = useState(false)
+  const showing = open && !closing
+  // Whether he has been back to rest at least once — see `bb-dock--returned`.
+  const [returned, setReturned] = useState(false)
   const [chatEngaged, setChatEngaged] = useState(false)
   // The frame his chat and his `i` share, which `hidden` takes away when he rests.
   const panelRef = useRef<HTMLDivElement>(null)
@@ -136,40 +148,101 @@ export function BitbagDock({
   // over the keyboard (the dock rides `--kb-inset` for that). Open, for the
   // avatar-only rest; engaged, for the always-shown dock, whose folded state is
   // part of the page.
-  usePageScrollLock(avatarRest ? open : chatEngaged, panelRef)
+  usePageScrollLock(avatarRest ? showing : chatEngaged, panelRef)
 
   // Every way back to rest comes through here. Focus first: `hidden` stops the
   // panel rendering, and a focused composer or `i` inside it dropped focus to
   // <body> — a keyboard user lost their place on every Escape. It goes back to
-  // him, the control that opened the panel.
+  // him, the control that opened the panel. It goes now, not when the animation
+  // ends, so a phone's keyboard drops with the panel rather than after it.
   const close = useCallback((): void => {
     if (panelRef.current?.contains(document.activeElement)) bitbagRef.current?.focus()
+    setClosing(true)
+    setReturned(true)
+  }, [])
+
+  // The end of the way out. The chat stays engaged until here — folding it the
+  // moment the close began would snap it to its one-line size mid-fade — and folds
+  // with the panel hidden, so its engaged-only CSS (the scrim, the raised z-index)
+  // never outlives the dock that was showing it.
+  const finishClosing = useCallback((): void => {
     setOpen(false)
+    setClosing(false)
     setChatEngaged(false)
   }, [])
+
+  // Waits out the panel's exit animation, or doesn't wait at all when there is none
+  // to wait for — reduced motion switches it off, and a host sheet could too, and a
+  // wait for an `animationend` that never comes would leave him open for good. The
+  // timeout is the same guard for an animation that is interrupted.
+  useEffect(() => {
+    const panel = panelRef.current
+    if (!closing || !panel) return
+    const name = getComputedStyle(panel).animationName
+    if (!name || name === 'none') {
+      finishClosing()
+      return
+    }
+    const onEnd = (e: AnimationEvent): void => {
+      if (e.target === panel) finishClosing()
+    }
+    const fallback = window.setTimeout(finishClosing, CLOSE_FALLBACK_MS)
+    panel.addEventListener('animationend', onEnd)
+    return () => {
+      window.clearTimeout(fallback)
+      panel.removeEventListener('animationend', onEnd)
+    }
+  }, [closing, finishClosing])
 
   // The fold that ends a conversation (a tap away, Escape) is what puts him back to
   // rest — one "done talking" signal, the chat's own, rather than a second one to
   // drift. It cannot fire on opening, which would shut him the instant he opened:
   // the chat opens folded, only the caret going in engages it, and the chat reports
-  // real flips only — so a fold heard here always follows an engagement. (A chat
-  // opened while its composer was still disabled never engages, so it never folds
-  // back either; tapping him again is the way out of that one.)
+  // real flips only — so a fold heard here always follows an engagement. In the
+  // avatar-only rest the fold is left to `finishClosing`, for the reason there.
   const onEngagedChange = useCallback(
     (engaged: boolean): void => {
-      setChatEngaged(engaged)
+      if (engaged || !avatarRest) setChatEngaged(engaged)
       if (!engaged && avatarRest) close()
     },
     [avatarRest, close],
   )
 
+  // A tap away closes him whether or not the chat has engaged yet. The chat's own
+  // fold covers an engaged chat; before that — his greeting still typing, the
+  // composer still disabled — nothing did, and a tap outside the open chat went
+  // nowhere. Anything the chat counts as part of the conversation (the panel, him,
+  // anything marked CHAT_INSIDE_ATTR) is not away, by the same rule the chat uses.
+  // Escape is the keyboard's way out, and like the chat's it leaves a press a layer
+  // above already spent (the `i` panel) alone.
+  useEffect(() => {
+    if (!avatarRest || !showing) return
+    const onPointerDown = (e: PointerEvent): void => {
+      const target = e.target
+      if (!(target instanceof Element)) return
+      if (panelRef.current?.contains(target) || target.closest(`[${CHAT_INSIDE_ATTR}]`)) return
+      close()
+    }
+    const onKeyDown = (e: globalThis.KeyboardEvent): void => {
+      if (e.key === 'Escape' && !e.defaultPrevented) close()
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [avatarRest, showing, close])
+
   // Opening puts the caret in his composer, which is what engages the chat. An
   // effect, not the click handler: at click time the panel is still `hidden`, and
   // a browser will not focus an element that is not being rendered.
+  // (The composer can still be disabled for his greeting at this point, and then
+  // the focus bounces; `summoned` has the chat put it there once it enables.)
   useEffect(() => {
-    if (!avatarRest || !open) return
+    if (!avatarRest || !showing) return
     panelRef.current?.querySelector<HTMLInputElement>(CHAT_INPUT_SELECTOR)?.focus()
-  }, [avatarRest, open])
+  }, [avatarRest, showing])
 
   // Resting, a tap (or Enter/Space, or a bare `el.click()` from assistive tech)
   // opens him — quietly: no poke, so he arrives without a reaction. Open, he IS the
@@ -183,8 +256,13 @@ export function BitbagDock({
       setOpen(true)
       return
     }
-    // A chat opened while its composer was still disabled never engages, so no
-    // fold will ever close it; a tap on him is the way out of that one.
+    // Caught on his way out: he stays.
+    if (closing) {
+      setClosing(false)
+      return
+    }
+    // Not engaged yet — the composer is still disabled while he greets, so there is
+    // nothing to send — a tap on him closes him again, as it would have reopened.
     if (!chatEngaged) {
       close()
       return
@@ -201,17 +279,20 @@ export function BitbagDock({
   // leave the box you are typing in, and on a phone the keyboard would drop on
   // every send. A send button keeps focus where it is; so does he.
   const keepComposerFocus = (e: MouseEvent<HTMLDivElement>): void => {
-    if (open) e.preventDefault()
+    if (showing) e.preventDefault()
   }
 
   // Resting, he is laid out at half width rather than scaled to it: a transform leaves
   // the full-size box in place, and that invisible box would sit over the host bar's
-  // own controls taking their clicks.
+  // own controls taking their clicks. `bb-dock--returned` marks a rest he came back
+  // to, which he settles into; the rest a page loads with has nothing to settle from.
   const resting = avatarRest && !open
   const rootClass = [
     'bb-dock',
     avatarRest && 'bb-dock--rest-avatar',
     resting && 'bb-dock--resting',
+    closing && 'bb-dock--closing',
+    returned && 'bb-dock--returned',
     className,
   ]
     .filter(Boolean)
@@ -235,8 +316,8 @@ export function BitbagDock({
           ? {
               role: 'button',
               tabIndex: 0,
-              'aria-label': open ? 'Send to bitbag' : 'Chat with bitbag',
-              'aria-expanded': open,
+              'aria-label': showing ? 'Send to bitbag' : 'Chat with bitbag',
+              'aria-expanded': showing,
               [CHAT_INSIDE_ATTR]: '',
               onClick: activate,
               onKeyDown: onAvatarKey,
@@ -270,6 +351,7 @@ export function BitbagDock({
           engaged={chatEngaged}
           onEngagedChange={onEngagedChange}
           sendButton={!avatarRest}
+          summoned={avatarRest && showing}
         />
         <BitbagInfo />
       </div>

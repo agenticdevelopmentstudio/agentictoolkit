@@ -117,6 +117,13 @@ export interface BitbagChatProps {
    * the send.
    */
   sendButton?: boolean
+  /**
+   * Whether the host opened his chat because the reader asked for it — the
+   * avatar-rest dock, after a tap on his face. That tap IS the reach, so the caret
+   * goes into his composer the moment it opens, even if it was still disabled
+   * for his greeting when the chat appeared. Dock variant only.
+   */
+  summoned?: boolean
 }
 
 export function BitbagChat({
@@ -132,6 +139,7 @@ export function BitbagChat({
   engaged,
   onEngagedChange,
   sendButton,
+  summoned = false,
 }: BitbagChatProps) {
   const isDock = variant === 'dock'
   // Default to the built-in scripted mock so existing consumers are byte-for-byte
@@ -161,7 +169,9 @@ export function BitbagChat({
   // `engaged`, which the 30s give-up timeout also sets without the reader having
   // touched anything). In the dock it is a DIFFERENT fact from arriving: he
   // connects at mount there, so the ritual sees no reach at all. The dock watches
-  // for it itself.
+  // for it itself — or the host tells it (`summoned`): a dock that opens his chat
+  // on a tap has already seen the reach, and the caret it put in the composer at
+  // opening bounced off if the greeting still had the composer disabled.
   const [dockEngaged, setDockEngaged] = useState(false)
   useEffect(() => {
     const el = wrapperRef.current
@@ -174,7 +184,7 @@ export function BitbagChat({
       el.removeEventListener('focusin', onEngage)
     }
   }, [isDock, dockEngaged])
-  const reached = isDock ? dockEngaged : engagedByUser
+  const reached = isDock ? dockEngaged || summoned : engagedByUser
 
   // He's "responding" both while awaiting the reply AND while it streams out.
   const streaming = session.messages.some((m) => m.isStreaming)

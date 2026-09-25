@@ -93,6 +93,41 @@ describe('BitbagDock with his real chat', () => {
     vi.useRealTimers()
   })
 
+  // Opened straight away, his composer is still disabled for the greeting, and the
+  // caret the dock puts in it at opening bounces off. It used to stay out for good:
+  // the chat only counted itself reached for once the caret got in, and only turned
+  // on the focus reclaim that would have put it there once it was reached for.
+  it('puts the caret in his composer once his greeting enables it, when opened during the greeting', async () => {
+    render(<BitbagDock rest="avatar" />)
+    // A real tap focuses him on its way in (he is focusable, and nothing cancels his
+    // press while he rests) — which also gives jsdom's `document.hasFocus()`, which the
+    // reclaim checks, the answer a browser gives.
+    face().focus()
+    fireEvent.click(face())
+    await settle()
+    expect(composer().disabled).toBe(true)
+    expect(document.activeElement).not.toBe(composer())
+
+    for (let ms = 0; composer().disabled && ms < 20000; ms += 250) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250)
+      })
+    }
+    expect(composer().disabled).toBe(false)
+    expect(document.activeElement).toBe(composer())
+    expect(chatBox()).not.toHaveClass('pc-collapsed')
+  })
+
+  it('goes back to rest on a tap away before his chat has engaged', async () => {
+    render(<BitbagDock rest="avatar" />)
+    fireEvent.click(face())
+    await settle()
+    expect(panel().hidden).toBe(false)
+    fireEvent.pointerDown(document.body)
+    await settle()
+    expectResting()
+  })
+
   it('goes back to rest when his engaged chat folds on a tap away', async () => {
     await openDock()
     fireEvent.pointerDown(document.body)

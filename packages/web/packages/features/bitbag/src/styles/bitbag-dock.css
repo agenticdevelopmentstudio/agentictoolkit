@@ -263,6 +263,58 @@
     transform: translateY(6px) scale(0.9);
   }
 }
+/* And back to rest. A tap away, Escape, or a tap on him before he has engaged
+ * starts it (BitbagDock's `close`); the dock keeps the panel rendered under
+ * `.bb-dock--closing` until the panel's `animationend`, then hides it. So the panel
+ * animation is the clock — its name must not be `none` here, or the dock reads
+ * that as "nothing to wait for" and hides it at once (which is what reduced motion
+ * wants, below). The panel sinks toward his corner as it fades, the way it would
+ * fold into him; he fades on the corner with it, and the wash fades from under
+ * both on the same curve. */
+.bb-dock--closing .bb-dock__panel {
+  transform-origin: bottom right;
+  animation: bb-dock-panel-out 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+@keyframes bb-dock-panel-out {
+  to {
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+  }
+}
+.bb-dock.bb-dock--rest-avatar.bb-dock--closing:not(.bb-dock--resting) .bb-dock__avatar {
+  animation: bb-dock-corner-out 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+@keyframes bb-dock-corner-out {
+  to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.85);
+  }
+}
+/* Outranks the lit rule above — same `:not()` and `:has()`, one class more. */
+.bb-dock.bb-dock--closing:not(.bb-dock--resting):has(.persona-chat)::before {
+  opacity: 0;
+  pointer-events: none;
+}
+/* Back on the bar he settles in — the rest he came back to, never the one the page
+ * loads with. `--bb-dock-rest-x` is in the keyframe because a keyframe transform
+ * replaces the resting one rather than adding to it. */
+.bb-dock--returned.bb-dock--resting .bb-dock__avatar {
+  animation: bb-dock-rest-in 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes bb-dock-rest-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--bb-dock-rest-x, 0px)) translateY(8px) scale(0.85);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bb-dock--closing .bb-dock__panel,
+  .bb-dock.bb-dock--rest-avatar.bb-dock--closing:not(.bb-dock--resting) .bb-dock__avatar,
+  .bb-dock--returned.bb-dock--resting .bb-dock__avatar {
+    animation: none;
+  }
+}
+
 /* The composer stops short of him, so what you type never runs under his face.
  * BitbagDock sets `--bb-dock-corner-w` to his width on the corner. */
 .bb-dock--rest-avatar .persona-chat .pc-input-area {

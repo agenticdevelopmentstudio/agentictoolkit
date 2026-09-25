@@ -197,6 +197,93 @@ describe('BitbagDock', () => {
       expect(document.activeElement).toBe(elsewhere)
     })
 
+    it('tells his chat it was summoned while it is open, and only then', () => {
+      render(<BitbagDock rest="avatar" />)
+      expect(chat.props.summoned).toBe(false)
+      fireEvent.click(screen.getByRole('button', { name: 'Chat with bitbag' }))
+      expect(chat.props.summoned).toBe(true)
+    })
+
+    it('closes on a press away or Escape before his chat engages, but not on a press on him or in the panel', () => {
+      const { container } = render(<BitbagDock rest="avatar" />)
+      const face = screen.getByRole('button', { name: 'Chat with bitbag' })
+      fireEvent.click(face)
+      fireEvent.pointerDown(screen.getByLabelText('Message'))
+      fireEvent.pointerDown(face)
+      expect(panelOf(container).hidden).toBe(false)
+      fireEvent.pointerDown(document.body)
+      expect(panelOf(container).hidden).toBe(true)
+
+      fireEvent.click(face)
+      fireEvent.keyDown(document.body, { key: 'Escape' })
+      expect(panelOf(container).hidden).toBe(true)
+    })
+
+    describe('the way back to rest', () => {
+      /** Give the panel an exit animation to wait for — jsdom loads no stylesheet. */
+      function animated(container: HTMLElement): HTMLElement {
+        const panel = panelOf(container)
+        panel.style.animationName = 'bb-dock-panel-out'
+        return panel
+      }
+
+      it('plays out before the panel hides, folding his chat only at the end', () => {
+        const { container } = render(<BitbagDock rest="avatar" />)
+        const face = screen.getByRole('button', { name: 'Chat with bitbag' })
+        fireEvent.click(face)
+        chatReports(true)
+        const panel = animated(container)
+        fireEvent.pointerDown(document.body)
+
+        expect(container.firstElementChild).toHaveClass('bb-dock--closing')
+        expect(panel.hidden).toBe(false)
+        expect(face).toHaveAttribute('aria-expanded', 'false')
+        // Still engaged: folding now would snap it to one line mid-fade.
+        expect(chat.props.engaged).toBe(true)
+
+        fireEvent.animationEnd(panel)
+        expect(panel.hidden).toBe(true)
+        expect(chat.props.engaged).toBe(false)
+        expect(container.firstElementChild).not.toHaveClass('bb-dock--closing')
+        expect(container.firstElementChild).toHaveClass('bb-dock--returned')
+      })
+
+      it('hides the panel anyway if the animation never ends', () => {
+        vi.useFakeTimers()
+        try {
+          const { container } = render(<BitbagDock rest="avatar" />)
+          fireEvent.click(screen.getByRole('button', { name: 'Chat with bitbag' }))
+          const panel = animated(container)
+          fireEvent.pointerDown(document.body)
+          expect(panel.hidden).toBe(false)
+          act(() => {
+            vi.advanceTimersByTime(600)
+          })
+          expect(panel.hidden).toBe(true)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      it('stays open when he is tapped on his way out', () => {
+        const { container } = render(<BitbagDock rest="avatar" />)
+        const face = screen.getByRole('button', { name: 'Chat with bitbag' })
+        fireEvent.click(face)
+        const panel = animated(container)
+        fireEvent.pointerDown(document.body)
+        fireEvent.click(face)
+        expect(container.firstElementChild).not.toHaveClass('bb-dock--closing')
+        expect(face).toHaveAttribute('aria-expanded', 'true')
+        fireEvent.animationEnd(panel)
+        expect(panel.hidden).toBe(false)
+      })
+
+      it('does not settle him in on the rest the page loads with', () => {
+        const { container } = render(<BitbagDock rest="avatar" />)
+        expect(container.firstElementChild).not.toHaveClass('bb-dock--returned')
+      })
+    })
+
     it('toggles from the keyboard with Enter and Space', () => {
       const { container } = render(<BitbagDock rest="avatar" />)
       const face = screen.getByRole('button', { name: 'Chat with bitbag' })
