@@ -141,7 +141,7 @@ public final class HubSceneController {
     /// On the lifecycle chain too, and for a stronger reason than ordering:
     /// a `shutdown()` running concurrently with an in-flight `start()` is the
     /// one interleaving that can leave a freshly armed periodic loop kicking
-    /// an engine `shutdown()` has already finished. `LocalDaemon.shutdown()`
+    /// an engine `shutdown()` has already finished. the daemon's `shutdown()`
     /// defends against that itself, but keeping the two ordered means the
     /// situation never arises. The cost — `shutdown()` waiting on whatever
     /// is ahead of it in a termination window of a few seconds — is
