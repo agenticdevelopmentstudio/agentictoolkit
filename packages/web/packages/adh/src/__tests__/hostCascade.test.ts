@@ -157,6 +157,9 @@ const SHORTHANDS: Record<string, readonly string[]> = {
     'font-variant-emoji',
   ],
   gap: ['row-gap', 'column-gap'],
+  // Added for the header's 3-column grid (G47, Mike, 2026-09-25) — the header sheet is now
+  // the first of the four to place an item with `grid-column` rather than flex order/gap.
+  'grid-column': ['grid-column-start', 'grid-column-end'],
   inset: ['top', 'right', 'bottom', 'left'],
   'list-style': ['list-style-position', 'list-style-image', 'list-style-type'],
   margin: ['margin-top', 'margin-right', 'margin-bottom', 'margin-left'],

@@ -11,7 +11,7 @@
 // (`/content/notes` DOES exist on the backend. It is the device-SYNC marker surface —
 // content only, no title/category/tags, no workspace — and it has no web consumer. It is
 // deliberately not what this client talks to.)
-import { markdownApi } from "../markdown/markdown";
+import { markdownApi, type MarkdownScope } from "../markdown/markdown";
 import type {
   ResearchDocument,
   ResearchSummary,
@@ -49,25 +49,25 @@ export const notesApi = {
   // semantics are still undesigned, so an org note is simply an org-owned document, and
   // the marker carries only its creator stamp.
   /** The workspace's notes (metadata only), most-recently-updated first. */
-  list(filters: NoteFilters = {}, opts?: { workspace?: string }): Promise<NoteSummary[]> {
+  list(filters: NoteFilters = {}, opts?: MarkdownScope): Promise<NoteSummary[]> {
     return markdownApi.list(filters, { ...opts, noted: true });
   },
 
   /** One note WITH its body. */
-  get(id: string, opts?: { workspace?: string }): Promise<Note> {
+  get(id: string, opts?: MarkdownScope): Promise<Note> {
     return markdownApi.get(id, opts);
   },
 
-  create(body: CreateNoteBody, opts?: { workspace?: string }): Promise<Note> {
+  create(body: CreateNoteBody, opts?: MarkdownScope): Promise<Note> {
     return markdownApi.create({ ...body, note: true }, opts);
   },
 
-  update(id: string, body: UpdateNoteBody, opts?: { workspace?: string }): Promise<Note> {
+  update(id: string, body: UpdateNoteBody, opts?: MarkdownScope): Promise<Note> {
     return markdownApi.update(id, body, opts);
   },
 
   /** Soft-delete; the backend tombstones the note marker with the document. */
-  remove(id: string, opts?: { workspace?: string }): Promise<void> {
+  remove(id: string, opts?: MarkdownScope): Promise<void> {
     return markdownApi.remove(id, opts);
   },
 
@@ -75,25 +75,25 @@ export const notesApi = {
    *  `parentIds`. Shared with research's flat category vocabulary by construction: one
    *  owner has one set of categories, seen two ways. A category may sit under several
    *  parents, so the fold draws some of them in more than one place. */
-  categories(opts?: { workspace?: string }): Promise<NoteCategory[]> {
+  categories(opts?: MarkdownScope): Promise<NoteCategory[]> {
     return markdownApi.categoryTree(opts);
   },
 
   /** Create a category, optionally under one or more others. */
   createCategory(
     body: MarkdownCategoryCreateBody,
-    opts?: { workspace?: string },
+    opts?: MarkdownScope,
   ): Promise<NoteCategory> {
     return markdownApi.createCategory(body, opts);
   },
 
   /** The workspace's tag labels (the tag field's autocomplete source). */
-  tags(opts?: { workspace?: string }): Promise<string[]> {
+  tags(opts?: MarkdownScope): Promise<string[]> {
     return markdownApi.tags(opts);
   },
 
   /** The same tags WITH their ids — what the tag manager renames and deletes by. */
-  tagSet(opts?: { workspace?: string }): Promise<NoteTag[]> {
+  tagSet(opts?: MarkdownScope): Promise<NoteTag[]> {
     return markdownApi.tagSet(opts);
   },
 };

@@ -176,7 +176,8 @@ export function ApplicationsPane({
     urlSelection,
     blank: appBlank,
     toInput: appToInput,
-    validate: (draft, others) => appValidate(draft, others.map((o) => o.identifier)),
+    validate: (draft, others, base) =>
+      appValidate(draft, others.map((o) => o.identifier), base?.identifier),
     differs: appDiffers,
     normalize: appNormalize,
     create: (input) => applicationsPrototypeApi.create(input, ecosystemId ?? ""),

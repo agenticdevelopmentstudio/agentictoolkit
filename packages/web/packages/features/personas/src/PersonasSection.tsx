@@ -162,7 +162,11 @@ export function PersonasSection({
       selectedId: openPersona?.id ?? null,
       onSelect: (id) => selectPersona(id),
       onClear: () => selectPersona(null),
-      emptyLabel: "No personas yet.",
+      // "Loading…" while pending mirrors ResearchPane.tsx's `emptyLabel` (Mike, 2026-09-25): the
+      // rail host re-registers on a plain field's change, and a load that resolves to zero rows
+      // never flips the level's `items` reference, so an unconditional "No personas yet." never
+      // reaches the rail until something ELSE re-renders it.
+      emptyLabel: personasQuery.isPending ? "Loading…" : "No personas yet.",
       // Create and search live on the list they act on — its toolbar — since the page-wide home bar
       // they used to sit in was removed as clunky (Mike, 2026-09-24). UNCONDITIONAL, as the bar's
       // button was: an empty list is exactly when the first create matters most.

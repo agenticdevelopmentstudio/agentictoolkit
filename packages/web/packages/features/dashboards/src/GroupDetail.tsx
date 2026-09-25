@@ -5,7 +5,7 @@ import { validateSlug } from "@agenticdevelopertoolkit/ui/lib/slug";
 import { Card, CardContent } from "@agenticdevelopertoolkit/ui/components/card";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Label } from "@agenticdevelopertoolkit/ui/components/label";
-import { DetailSection } from "@agentic-toolkit/resource";
+import { DetailSection, unchangedFromStored } from "@agentic-toolkit/resource";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 
 export interface GroupDraft {
@@ -24,16 +24,26 @@ export function groupToInput(g: SiteGroupView): GroupDraft {
 
 /** Returns an error message, or null when the draft is valid. `reserved` is the HOST's
  *  reserved-word set (the hub passes its route-namespace list) — the pre-extraction hub
- *  version bound it implicitly via the host's validateSlug wrapper. */
+ *  version bound it implicitly via the host's validateSlug wrapper.
+ *
+ *  `storedSlug` is the slug already on the group being edited (absent on a create). It exempts
+ *  the slug's FORMAT rule only — same reasoning as `teamValidate`'s stored-identifier exemption
+ *  (`@agentic-toolkit/teams`): a group the backend already accepted need not satisfy a
+ *  client-side format rule added later, and refusing it holds the Name/Retention fields' Save
+ *  hostage to a slug nobody is touching. Uniqueness and the required-ness rules stay unconditional
+ *  (Mike, 2026-09-25). */
 export function groupValidate(
   draft: GroupDraft,
   takenSlugs: string[],
   reserved?: ReadonlySet<string>,
+  storedSlug?: string,
 ): string | null {
   if (!draft.name.trim()) return "Group name is required.";
   const slug = draft.slug.trim();
-  const slugError = validateSlug(slug, reserved);
-  if (slugError) return slugError;
+  if (!unchangedFromStored(slug, storedSlug)) {
+    const slugError = validateSlug(slug, reserved);
+    if (slugError) return slugError;
+  }
   if (takenSlugs.includes(slug)) return `Slug "${slug}" is already in use.`;
   const days = parseInt(draft.retentionDays, 10);
   if (!Number.isFinite(days) || days <= 0) return "Retention must be a positive number of days.";

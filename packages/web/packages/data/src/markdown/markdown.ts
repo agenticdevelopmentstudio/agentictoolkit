@@ -7,7 +7,7 @@
 // a generic data client must not import that adh-specific package, so a backend contract
 // change is only caught by keeping wire.ts in sync, not by the build.
 import { authedJson, authedRequest, isConflict } from "../http";
-import { enc, workspaceQuery } from "../client-helpers";
+import { enc } from "../client-helpers";
 import type {
   MarkdownDocumentRow,
   MarkdownDocumentSummaryRow,
@@ -64,10 +64,29 @@ const PAGE_SIZE = 200;
  *  owner's notes, `doc` for their docs (the documents in the matching storage bucket).
  *  A `false` is NOT "everything except that corpus" — the backend offers no such set —
  *  it is simply the unfiltered list. */
-export interface MarkdownListOptions {
-  workspace?: string;
+export interface MarkdownListOptions extends MarkdownScope {
   noted?: boolean;
   doc?: boolean;
+  /** Only documents at this visibility — a bucket's Papers table asks for `"public"`, filtered
+   *  SERVER side so no page cut can hide a published paper (Mike, 2026-09-25). */
+  visibility?: "private" | "public";
+}
+
+/** Where an op acts. `workspace` pins it to the workspace's owning principal; `ecosystemId`
+ *  names the ONE ecosystem it acts in (backend `?ecosystemId=`, verified against what the caller
+ *  manages) — a bucket's markdown rows are that bucket's ecosystem's, never the workspace-wide
+ *  list (Mike, 2026-09-25: "an ecosystem shows only its own data"). */
+export interface MarkdownScope {
+  workspace?: string;
+  ecosystemId?: string;
+}
+
+function scopeQuery(opts?: MarkdownScope): string {
+  const params = new URLSearchParams();
+  if (opts?.workspace) params.set("workspace", opts.workspace);
+  if (opts?.ecosystemId) params.set("ecosystemId", opts.ecosystemId);
+  const q = params.toString();
+  return q ? `?${q}` : "";
 }
 
 function listQuery(filters: ResearchFilters, opts?: MarkdownListOptions): string {
@@ -80,7 +99,9 @@ function listQuery(filters: ResearchFilters, opts?: MarkdownListOptions): string
   if (tag) params.set("tag", tag);
   if (opts?.noted) params.set("noted", "true");
   if (opts?.doc) params.set("doc", "true");
+  if (opts?.visibility) params.set("visibility", opts.visibility);
   if (opts?.workspace) params.set("workspace", opts.workspace);
+  if (opts?.ecosystemId) params.set("ecosystemId", opts.ecosystemId);
   return params.toString();
 }
 
@@ -152,18 +173,18 @@ export const markdownApi = {
   },
 
   /** Fetch one document WITH its body (the master list omits the body). */
-  async get(id: string, opts?: { workspace?: string }): Promise<ResearchDocument> {
+  async get(id: string, opts?: MarkdownScope): Promise<ResearchDocument> {
     return withTags(
-      await authedJson<ResearchDocument>(`${BASE}/${enc(id)}${workspaceQuery(opts)}`),
+      await authedJson<ResearchDocument>(`${BASE}/${enc(id)}${scopeQuery(opts)}`),
     );
   },
 
   async create(
     body: CreateMarkdownBody,
-    opts?: { workspace?: string },
+    opts?: MarkdownScope,
   ): Promise<ResearchDocument> {
     return withTags(
-      await authedJson<ResearchDocument>(`${BASE}${workspaceQuery(opts)}`, {
+      await authedJson<ResearchDocument>(`${BASE}${scopeQuery(opts)}`, {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -173,19 +194,19 @@ export const markdownApi = {
   async update(
     id: string,
     body: UpdateMarkdownBody,
-    opts?: { workspace?: string },
+    opts?: MarkdownScope,
   ): Promise<ResearchDocument> {
     return withTags(
-      await authedJson<ResearchDocument>(`${BASE}/${enc(id)}${workspaceQuery(opts)}`, {
+      await authedJson<ResearchDocument>(`${BASE}/${enc(id)}${scopeQuery(opts)}`, {
         method: "PUT",
         body: JSON.stringify(body),
       }),
     );
   },
 
-  async remove(id: string, opts?: { workspace?: string }): Promise<void> {
+  async remove(id: string, opts?: MarkdownScope): Promise<void> {
     // 204 No Content — authedRequest, not authedJson (nothing to parse).
-    await authedRequest(`${BASE}/${enc(id)}${workspaceQuery(opts)}`, { method: "DELETE" });
+    await authedRequest(`${BASE}/${enc(id)}${scopeQuery(opts)}`, { method: "DELETE" });
   },
 
   /** Is this public route free for this document's author? Answers the same question
@@ -195,10 +216,10 @@ export const markdownApi = {
   async routeAvailable(
     id: string,
     route: string,
-    opts?: { workspace?: string },
+    opts?: MarkdownScope,
   ): Promise<MarkdownRouteAvailability> {
     return authedJson<MarkdownRouteAvailability>(
-      `${BASE}/${enc(id)}/route-available/${enc(route)}${workspaceQuery(opts)}`,
+      `${BASE}/${enc(id)}/route-available/${enc(route)}${scopeQuery(opts)}`,
     );
   },
 
@@ -208,12 +229,12 @@ export const markdownApi = {
   async publish(
     id: string,
     route: string,
-    opts?: { workspace?: string },
+    opts?: MarkdownScope,
   ): Promise<ResearchDocument> {
     try {
       return withTags(
         await authedJson<ResearchDocument>(
-          `${BASE}/${enc(id)}/publish${workspaceQuery(opts)}`,
+          `${BASE}/${enc(id)}/publish${scopeQuery(opts)}`,
           {
             method: "POST",
             body: JSON.stringify({ route } satisfies MarkdownPublishBody),
@@ -229,9 +250,9 @@ export const markdownApi = {
   },
 
   /** Revert to a private draft and free the public route. */
-  async unpublish(id: string, opts?: { workspace?: string }): Promise<ResearchDocument> {
+  async unpublish(id: string, opts?: MarkdownScope): Promise<ResearchDocument> {
     return withTags(
-      await authedJson<ResearchDocument>(`${BASE}/${enc(id)}/unpublish${workspaceQuery(opts)}`, {
+      await authedJson<ResearchDocument>(`${BASE}/${enc(id)}/unpublish${scopeQuery(opts)}`, {
         method: "POST",
       }),
     );
@@ -242,8 +263,8 @@ export const markdownApi = {
    *  (GET /content/markdown/categories). `workspace` matters: the backend scopes the
    *  vocabulary to the same owner it scopes the documents to, so an org workspace's
    *  autocomplete must ask for the ORG's names, not the caller's own. */
-  async categories(opts?: { workspace?: string }): Promise<string[]> {
-    return (await authedJson<StringListBody>(`${BASE}/categories${workspaceQuery(opts)}`)).items;
+  async categories(opts?: MarkdownScope): Promise<string[]> {
+    return (await authedJson<StringListBody>(`${BASE}/categories${scopeQuery(opts)}`)).items;
   },
 
   /** The same categories WITH their structure — `parentIds` makes them a DAG. The flat
@@ -253,9 +274,9 @@ export const markdownApi = {
    *  Against a backend too old to send `nodes`, {@link categoryNodes} rebuilds the flat
    *  names it DID send as roots, so the rail degrades to one level instead of crashing
    *  or emptying. */
-  async categoryTree(opts?: { workspace?: string }): Promise<MarkdownCategoryNode[]> {
+  async categoryTree(opts?: MarkdownScope): Promise<MarkdownCategoryNode[]> {
     return categoryNodes(
-      await authedJson<MarkdownCategoryTreeBody>(`${BASE}/categories${workspaceQuery(opts)}`),
+      await authedJson<MarkdownCategoryTreeBody>(`${BASE}/categories${scopeQuery(opts)}`),
     );
   },
 
@@ -267,10 +288,10 @@ export const markdownApi = {
    *  {@link taxonomyApi.addCategoryParent}, where it is what it says it is. */
   async createCategory(
     body: MarkdownCategoryCreateBody,
-    opts?: { workspace?: string },
+    opts?: MarkdownScope,
   ): Promise<MarkdownCategoryNode> {
     try {
-      return await authedJson<MarkdownCategoryNode>(`${BASE}/categories${workspaceQuery(opts)}`, {
+      return await authedJson<MarkdownCategoryNode>(`${BASE}/categories${scopeQuery(opts)}`, {
         method: "POST",
         body: JSON.stringify(body),
       });
@@ -284,15 +305,15 @@ export const markdownApi = {
 
   /** The workspace's existing tag LABELS — the autocomplete/browse source for the tag
    *  field (GET /content/markdown/tags), same shape + scoping as `categories`. */
-  async tags(opts?: { workspace?: string }): Promise<string[]> {
-    return (await authedJson<StringListBody>(`${BASE}/tags${workspaceQuery(opts)}`)).items;
+  async tags(opts?: MarkdownScope): Promise<string[]> {
+    return (await authedJson<StringListBody>(`${BASE}/tags${scopeQuery(opts)}`)).items;
   },
 
   /** The same tags WITH their row ids — what a manager needs to rename or delete one, and
    *  what `tags()` above cannot carry. One endpoint serves both views, so they can never
    *  disagree about the workspace's vocabulary; see {@link tagNodes} for the older-backend
    *  degrade. */
-  async tagSet(opts?: { workspace?: string }): Promise<MarkdownKeywordNode[]> {
-    return tagNodes(await authedJson<MarkdownTagSetBody>(`${BASE}/tags${workspaceQuery(opts)}`));
+  async tagSet(opts?: MarkdownScope): Promise<MarkdownKeywordNode[]> {
+    return tagNodes(await authedJson<MarkdownTagSetBody>(`${BASE}/tags${scopeQuery(opts)}`));
   },
 };

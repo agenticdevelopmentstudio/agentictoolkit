@@ -7,7 +7,7 @@ import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Label } from "@agenticdevelopertoolkit/ui/components/label";
 import { Select } from "@agenticdevelopertoolkit/ui/components/select";
 import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
-import { DetailSection } from "@agentic-toolkit/resource";
+import { DetailSection, unchangedFromStored } from "@agentic-toolkit/resource";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { EndpointsEditor } from "./EndpointsEditor";
 
@@ -26,16 +26,23 @@ export function siteToInput(s: SiteView): SiteDraft {
   return { name: s.name, slug: s.slug, groupId: s.groupId };
 }
 
-/** Returns an error message, or null when the draft is valid. */
+/** Returns an error message, or null when the draft is valid. `storedSlug` is the slug already on
+ *  the site being edited (absent on a create) — exempts the slug's FORMAT rule only, the same
+ *  pattern (and the same reasoning) as `groupValidate` next door in `GroupDetail.tsx`: a site the
+ *  backend already accepted need not satisfy a client-side format rule added later. Uniqueness and
+ *  the required-ness rules stay unconditional (Mike, 2026-09-25). */
 export function siteValidate(
   draft: SiteDraft,
   takenSlugs: string[],
   reserved?: ReadonlySet<string>,
+  storedSlug?: string,
 ): string | null {
   if (!draft.name.trim()) return "Site name is required.";
   const slug = draft.slug.trim();
-  const slugError = validateSlug(slug, reserved);
-  if (slugError) return slugError;
+  if (!unchangedFromStored(slug, storedSlug)) {
+    const slugError = validateSlug(slug, reserved);
+    if (slugError) return slugError;
+  }
   if (takenSlugs.includes(slug)) return `Slug "${slug}" is already in use.`;
   if (!draft.groupId) return "Select a group for this site.";
   return null;

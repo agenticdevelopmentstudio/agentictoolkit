@@ -27,6 +27,10 @@ import {
   type RailHostRegistry,
   type RegisteredLevels,
 } from "@agentic-toolkit/resource";
+// The shared rail/toolbar stand-in (G68, Mike, 2026-09-25) — see its own doc comment for why a
+// single copy replaced five near-identical ones and what it draws. `showTitle` because this
+// harness always rendered each level's `<h3>{title}</h3>`.
+import { RailStandIn } from "@agentic-toolkit/resource/testing";
 import type { TopicLevel } from "@agenticdevelopertoolkit/ui/blocks";
 
 vi.mock("@agentic-toolkit/auth", () => ({
@@ -139,10 +143,11 @@ function levelById(id: string): TopicLevel {
   return hit;
 }
 
-/** The same minimal rail host `NotebookPane.test.tsx` uses: it renders the published levels and
- *  hands the test the level objects, so a level's SHAPE can be asserted on. Each level's `+`,
- *  search and gear render on ITS OWN toolbar, scoped via `data-testid={`toolbar-${l.id}`}` —
- *  they rode the page-wide home bar until that strip was removed as clunky (Mike, 2026-09-24). */
+/** The same minimal rail host `NotebookPane.test.tsx` uses: it renders the published levels (via
+ *  the shared `RailStandIn`, G68, Mike, 2026-09-25) and hands the test the level objects, so a
+ *  level's SHAPE can be asserted on. Each level's `+`, search and gear render on ITS OWN toolbar,
+ *  scoped via `data-testid={`toolbar-${l.id}`}` — they rode the page-wide home bar until that
+ *  strip was removed as clunky (Mike, 2026-09-24). */
 function Harness({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<Map<string, RegisteredLevels>>(
     new Map(),
@@ -174,38 +179,7 @@ function Harness({ children }: { children: ReactNode }) {
     .flatMap((e) => e.levels);
   return (
     <RailHostContext.Provider value={registry}>
-      <div>
-        {levels.map((l) => (
-          <div key={l.id}>
-            <h3>{l.title}</h3>
-            <div data-testid={`toolbar-${l.id}`}>
-              {l.onNew && (
-                <button type="button" onClick={() => l.onNew?.()}>
-                  {l.newLabel}
-                </button>
-              )}
-              {l.search && (
-                <input
-                  type="search"
-                  aria-label={l.search.placeholder}
-                  value={l.search.query}
-                  onChange={(e) => l.search?.onQueryChange?.(e.target.value)}
-                />
-              )}
-              {l.titleActions}
-            </div>
-            <ul>
-              {l.items.map((item) => (
-                <li key={item.id}>
-                  <button type="button" onClick={() => l.onSelect?.(item.id)}>
-                    {item.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
+      <RailStandIn levels={levels} showTitle />
       {children}
     </RailHostContext.Provider>
   );

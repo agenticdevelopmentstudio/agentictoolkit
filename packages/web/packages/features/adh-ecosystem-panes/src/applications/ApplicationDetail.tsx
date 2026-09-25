@@ -14,7 +14,7 @@ import {
   type ApplicationKind,
   type PrototypeApplication,
 } from "../api/applications-prototype";
-import { DetailSection } from "@agentic-toolkit/resource";
+import { DetailSection, unchangedFromStored } from "@agentic-toolkit/resource";
 import { SchemaPermissionsSection } from "./SchemaPermissionsSection";
 import { AccessTokensSection } from "./AccessTokensSection";
 import type { RenderTransferSection } from "../transfer-seam";
@@ -58,16 +58,27 @@ export function appToInput(a: PrototypeApplication): ApplicationInput {
   };
 }
 
-/** Returns an error message, or null when the draft is valid. */
+/** Returns an error message, or null when the draft is valid. `storedIdentifier` is the id already
+ *  on the record being edited (absent on a create). It exempts the id from the type-prefix/rdid
+ *  FORMAT rule only — same reasoning as `teamValidate`'s stored-identifier exemption
+ *  (`@agentic-toolkit/teams`): a row the backend wrote need not satisfy a client-side format rule
+ *  added later, and holding every other field's Save hostage to it is the bug this grandfathers.
+ *  Required-ness and uniqueness are never exempt: an empty or duplicate id is still refused even
+ *  when untouched (Mike, 2026-09-25). */
 export function appValidate(
   draft: ApplicationInput,
   takenIdentifiers: string[] = [],
+  storedIdentifier?: string,
 ): string | null {
   const id = draft.identifier.trim();
   if (!id) return "Id is required.";
   // isRdid validates EVERY segment (type prefix + each dotted segment), not just the leaf, so a
   // malformed interior scope (e.g. an all-ecosystems free-text entry) is caught client-side too.
-  if (!id.startsWith("app.") || !isRdid(id))
+  // Skipped for an id unchanged from what's stored — see the doc above.
+  if (
+    !unchangedFromStored(id, storedIdentifier) &&
+    (!id.startsWith("app.") || !isRdid(id))
+  )
     return "Id must be a type-prefixed application id, e.g. app.my-ecosystem.my-app";
   if (takenIdentifiers.includes(id)) return `Id "${id}" is already in use.`;
   if (!draft.name.trim()) return "Name is required.";

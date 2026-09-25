@@ -126,17 +126,21 @@ export function useMasterDetailForm<TItem, TInput>(
   const stored: TInput | null = creating ? null : base;
 
   const dirty = Boolean(draft) && Boolean(base) && config.differs(draft!, base!);
-  // What blocks `d` from saving — `config.validate`'s reason, UNLESS the stored record already
-  // fails with that very reason. Then the edit did not cause the problem, and refusing it holds
-  // every other field hostage to a value the BACKEND wrote: the team pane shipped with Save dark on
-  // every provisioned team, and a pane-by-pane exemption (`unchangedFromStored`) fixed only the
-  // panes someone remembered to fix, while ~25 feed a `validate` through here (Mike, 2026-09-24).
-  // The backend stays the authority on what it accepts. Never on create: nothing is stored there,
-  // so a new record is held to every rule.
+  // What blocks `d` from saving — exactly `config.validate`'s reason, and nothing more. This used
+  // to ALSO waive a reason that `config.validate(stored, ...)` reproduced (comparing the two
+  // MESSAGES), which is the bug G14 found: it compares only the FIRST rule `validate` returns, so
+  // (a) a later rule broken behind a stored failure was hidden — a stored record already invalid
+  // on rule 1 sailed straight past rule 2 even when the draft newly broke rule 2 — and (b) a
+  // DIFFERENT invalid value that happened to produce the same message text as the stored one was
+  // exempted, not just an untouched one. Grandfathering a legacy value the backend already accepted
+  // is still correct (the panes below still need it — the auto-provisioned `participants` /
+  // `admins` teams shipped with Save permanently dark), but it has to be a decision each RULE makes
+  // about its own field, not a decision this hook makes about the message as a whole. So it moved
+  // into each validator, rule by rule, using `unchangedFromStored(value, base?.field)` — see
+  // `appValidate`, `schemaValidate`, `groupValidate`, `teamValidate`, `userValidate` and the
+  // projects validators for the pattern (Mike, 2026-09-25).
   function reasonFor(d: TInput): string | null {
-    const reason = config.validate(d, others, stored);
-    if (reason === null || stored === null) return reason;
-    return config.validate(stored, others, stored) === reason ? null : reason;
+    return config.validate(d, others, stored);
   }
   // Why Save can't fire, as the REASON string `config.validate` already returns rather than the
   // boolean it used to be collapsed into. Every pane built on this hook renders its Save through

@@ -80,7 +80,8 @@ export function GroupsSection({
     urlSelection,
     blank: groupBlank,
     toInput: groupToInput,
-    validate: (draft, others) => groupValidate(draft, others.map((o) => o.slug), reservedSlugs),
+    validate: (draft, others, base) =>
+      groupValidate(draft, others.map((o) => o.slug), reservedSlugs, base?.slug),
     differs: groupDiffers,
     normalize: groupNormalize,
     create: (input) =>

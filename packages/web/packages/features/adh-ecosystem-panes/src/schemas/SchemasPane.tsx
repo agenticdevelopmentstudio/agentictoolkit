@@ -3,9 +3,16 @@
 import { useCallback, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import { Pencil, Settings, Table2, Trash2 } from "lucide-react";
+import { Pencil, Settings, Table2, Trash2, Wrench } from "lucide-react";
 import { useResourceList } from "@agentic-toolkit/data";
 import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
+import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@agenticdevelopertoolkit/ui/components/dropdown-menu";
 import { Field, ListToolButton } from "@agenticdevelopertoolkit/ui/blocks";
 import type { TopicLevel } from "@agenticdevelopertoolkit/ui/blocks";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
@@ -18,7 +25,7 @@ import {
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Select } from "@agenticdevelopertoolkit/ui/components/select";
 import { Textarea } from "@agenticdevelopertoolkit/ui/components/textarea";
-import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
+import { DialogErrorText, ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { CreateResourceDialog, StackLevels } from "@agentic-toolkit/resource";
 import { CRUD_TABLES, CrudDataView, useExitGuardChannel } from "@agentic-toolkit/crud";
 import { UnsavedChangesAlert } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-alert";
@@ -46,8 +53,9 @@ import { nameForType, TYPE_BY_ID, TypeOptions } from "./type-options";
 import { isMarkdownType, MarkdownRowsView } from "./MarkdownRowsView";
 import type { RenderTransferSection } from "../transfer-seam";
 
-// Settings edits the bucket's name, slug and description only; its tables are added and removed one
-// at a time from the bucket's rail, each a save of its own. So neither the dirty check nor the save
+// Settings edits the bucket's name, slug and description only; its tables are added and removed
+// from the bucket's rail — one at a time, or all at once from its table actions — each a save of
+// its own. So neither the dirty check nor the save
 // looks at `tables` — a save from Settings must never rewrite the table list it did not show.
 function schemaDiffers(a: SchemaDefinitionInput, b: SchemaDefinitionInput): boolean {
   return a.name !== b.name || a.slug !== b.slug || a.description !== b.description;
@@ -84,9 +92,10 @@ export function SchemasPane({
   renderTransfer,
 }: {
   ecosystemId?: string;
-  /** The workspace whose documents a markdown-backed table (docs, notes, papers) lists — those
-   *  rows are owned by the workspace's principal, not scoped by ecosystem. Undefined lists the
-   *  caller's own, the same degrade every `?workspace=` reader makes. */
+  /** The workspace whose principal owns a markdown-backed table's documents (docs, notes,
+   *  papers). The rows are ALSO scoped to the bucket's ecosystem (`?ecosystemId=`), so a product
+   *  bucket lists that product's documents, never the workspace-wide set (Mike, 2026-09-25).
+   *  Undefined acts as the caller, the same degrade every `?workspace=` reader makes. */
   workspaceSlug?: string;
   /** Unused: the breadcrumb names the pane now (kept for the ScopedPane prop shape). */
   title?: ReactNode;
@@ -125,7 +134,7 @@ export function SchemasPane({
     urlSelection,
     blank: schemaBlank,
     toInput: schemaToInput,
-    validate: (draft, others) => schemaValidate(draft, others),
+    validate: (draft, others, base) => schemaValidate(draft, others, base?.slug),
     differs: schemaDiffers,
     normalize: schemaNormalize,
     create: (input) => schemasApi.create(input, ecosystemId ?? ""),
@@ -210,6 +219,24 @@ export function SchemasPane({
       setSettingsFor(null);
     });
 
+  // Removing a table is a save of its own, so it gets what a save gets: one at a time, and its
+  // failure on screen. It used to be fired and forgotten (`void`) — a refused removal was an
+  // unhandled rejection with nothing shown, and a second click could send it again.
+  const [removing, setRemoving] = useState(false);
+  // The tables a Remove is waiting on the user to confirm. A removal drops the table's bucket_types
+  // row — and with it every persona interest pointing at that id — so one stray click on the trash
+  // must not be enough (Mike, 2026-09-25). `what` names them in the question.
+  const [pendingRemove, setPendingRemove] = useState<{ tables: SchemaTable[]; what: string } | null>(
+    null,
+  );
+  // Add all's own latch and failure, as a removal's: a save of its own, never sent twice.
+  const [adding, setAdding] = useState(false);
+  const [addAllError, setAddAllError] = useState<string | null>(null);
+  const tablesBusy = removing || adding;
+  // Why the confirmed removal was refused — shown in the confirm, which is the only place the
+  // question it answered is still on screen.
+  const [removeError, setRemoveError] = useState<string | null>(null);
+
   // The bucket's own rail is its tables and nothing else; the bucket's Settings sit behind the
   // gear in its header and open in a dialog (Mike, 2026-09-24: "add a gear icon … show the
   // settings in a dialog, remove settings from the tables list"). The `+` beside it adds a table.
@@ -239,26 +266,54 @@ export function SchemasPane({
         // off (Mike, 2026-09-24). One click, straight to a dialog — a gear opening a MENU would be
         // GearMenuTrigger's.
         titleActions: (
-          <ListToolButton
-            label="Bucket settings"
-            aria-haspopup="dialog"
-            onClick={() => setSettingsFor(bucket.id)}
-          >
-            <Settings size={15} aria-hidden />
-          </ListToolButton>
+          <>
+            <ListToolButton
+              label="Bucket settings"
+              aria-haspopup="dialog"
+              onClick={() => setSettingsFor(bucket.id)}
+            >
+              <Settings size={15} aria-hidden />
+            </ListToolButton>
+            {/* The bulk verbs the old in-Settings tables editor had — Add all, Remove all — back on
+                the list they act on, behind a tool menu, each still a save of its own (Mike,
+                2026-09-25). The gear stays one click to Settings; these are a second list of
+                verbs, so they get their own trigger rather than a menu in front of Settings. */}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label="Table actions"
+                title="Table actions"
+                className="flex shrink-0 items-center justify-center rounded p-0.5 text-apt-text-muted outline-none hover:text-apt-text focus-visible:ring-2 focus-visible:ring-apt-gold/40"
+              >
+                <Wrench size={15} aria-hidden />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  disabled={missingTypes(bucket.tables).length === 0 || tablesBusy}
+                  onClick={() => void addAllTables()}
+                >
+                  Add all tables
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={bucket.tables.length === 0 || tablesBusy}
+                  onClick={() => {
+                    // Every table goes, the open one with it, so staged rows ask first.
+                    rowsGateRef.current.attemptExit(() => {
+                      setRemoveError(null);
+                      setPendingRemove({ tables: bucket.tables, what: "every table" });
+                    });
+                  }}
+                >
+                  Remove all tables…
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
         ),
         itemNoun: "table",
         emptyLabel: "No tables yet.",
       }
     : null;
 
-  // Removing a table is a save of its own, so it gets what a save gets: one at a time, and its
-  // failure on screen. It used to be fired and forgotten (`void`) — a refused removal was an
-  // unhandled rejection with nothing shown, and a second click could send it again.
-  const [removing, setRemoving] = useState(false);
-  // Held WITH the table it is about, as `subState` is with its bucket, so another table's header
-  // never shows it.
-  const [tableError, setTableError] = useState<{ tableId: string; message: string } | null>(null);
 
   // Renaming or retyping a table (the pencil beside the trash) is a save of its own as well, in a
   // modal like Add table's, pre-filled. The deleted in-place tables editor used to do this;
@@ -269,24 +324,59 @@ export function SchemasPane({
   const [editTableId, setEditTableId] = useState<string | null>(null);
   const editTable = bucket?.tables.find((t) => t.id === editTableId);
 
-  async function removeTable(t: SchemaTable) {
-    if (!bucket || removing) return;
+  async function removeTables(gone: SchemaTable[]) {
+    if (!bucket || tablesBusy) return;
     setRemoving(true);
-    setTableError(null);
+    setRemoveError(null);
+    const ids = new Set(gone.map((t) => t.id));
     try {
-      await schemasApi.update(bucket.id, { tables: bucket.tables.filter((x) => x.id !== t.id) });
+      await schemasApi.update(bucket.id, { tables: bucket.tables.filter((x) => !ids.has(x.id)) });
     } catch (err) {
-      setTableError({
-        tableId: t.id,
-        message: err instanceof Error ? err.message : "Couldn't remove the table.",
-      });
+      // Shown in the confirm, which stays open on a refusal: the question it answered is still
+      // the one on screen, and a retry is one click.
+      setRemoveError(err instanceof Error ? err.message : "Couldn't remove the table.");
       return;
     } finally {
       setRemoving(false);
     }
+    setPendingRemove(null);
     selectSub(null);
     // The removal has landed. A failed re-read is the list's own error (`loadError`, above the
     // pane), never reported as a failed removal — that would tell the user to do it again.
+    await refresh().catch(() => {});
+  }
+
+  // Every catalogue type the bucket doesn't hold yet, named as Add table would name it — suffixed
+  // with its schema where that name is already taken, so a bulk add never trips the uniqueness
+  // rule a hand-picked name would be asked to fix.
+  function missingTypes(tables: SchemaTable[]): SchemaTable[] {
+    const held = new Set(tables.map((t) => t.type));
+    const names = new Set(tables.map((t) => t.name));
+    const out: SchemaTable[] = [];
+    for (const t of TYPE_BY_ID.values()) {
+      if (held.has(t.id)) continue;
+      const base = nameForType(t.id);
+      const name = names.has(base) ? `${base}_${t.schema}` : base;
+      names.add(name);
+      out.push(newSchemaTable(t.id, name));
+    }
+    return out;
+  }
+
+  async function addAllTables() {
+    if (!bucket || tablesBusy) return;
+    const additions = missingTypes(bucket.tables);
+    if (additions.length === 0) return;
+    setAdding(true);
+    setAddAllError(null);
+    try {
+      await schemasApi.update(bucket.id, { tables: [...bucket.tables, ...additions] });
+    } catch (err) {
+      setAddAllError(err instanceof Error ? err.message : "Couldn't add the tables.");
+      return;
+    } finally {
+      setAdding(false);
+    }
     await refresh().catch(() => {});
   }
 
@@ -330,30 +420,36 @@ export function SchemasPane({
                 variant="destructive-ghost"
                 size="icon"
                 // Removing the table unmounts its rows, so rows staged in them ask first — the
-                // same question leaving the table any other way asks.
-                onClick={() => rowsGateRef.current.attemptExit(() => void removeTable(openTable))}
-                disabled={removing}
+                // same question leaving the table any other way asks — and then the removal itself
+                // is confirmed.
+                onClick={() =>
+                  rowsGateRef.current.attemptExit(() => {
+                    setRemoveError(null);
+                    setPendingRemove({ tables: [openTable], what: `“${openTable.name}”` });
+                  })
+                }
+                disabled={tablesBusy}
                 title="Remove table from bucket"
                 aria-label={`Remove ${openTable.name} from bucket`}
               >
                 <Trash2 />
               </Button>
             </div>
-            <ErrorText
-              error={tableError?.tableId === openTable.id ? tableError.message : null}
-              className="px-6 pt-2"
-            />
             {isMarkdownType(openTable.type) ? (
               <MarkdownRowsView
                 key={rowsKey}
                 type={openTable.type}
                 workspace={workspaceSlug}
+                ecosystemId={bucket.ecosystemId}
               />
             ) : meta ? (
               <CrudDataView
                 key={rowsKey}
                 meta={meta}
-                filter={{ ecosystemId: bucket.ecosystemId }}
+                // A SCOPE, not a filter: the backend verifies the caller manages the bucket's
+                // ecosystem and acts there on every verb. As a plain filter it read a non-admin's
+                // product bucket as empty and refused every create (Mike, 2026-09-25).
+                scopeEcosystemId={bucket.ecosystemId}
                 createDefaults={{ ecosystemId: bucket.ecosystemId }}
                 onGuardChange={registerGuard}
               />
@@ -451,6 +547,35 @@ export function SchemasPane({
 
         <UnsavedChangesAlert {...rowsGate.exitAlertProps} />
         <UnsavedChangesAlert {...settingsGate.exitAlertProps} />
+
+        {/* A confirm, not an alert: `cancelLabel` makes the ✕ a Cancel rather than a second
+            Confirm. A refusal is said HERE, in the question it answered. */}
+        <AlertModal
+          open={pendingRemove !== null}
+          title={`Remove ${pendingRemove?.what ?? ""} from ${bucket?.name ?? "the bucket"}?`}
+          description={
+            <>
+              The table is taken out of this bucket, and anything that points at it by id — a
+              persona's interest in it — stops pointing anywhere. Its rows stay in the ecosystem.
+              <DialogErrorText error={removeError} />
+            </>
+          }
+          destructive
+          confirmLabel="Remove"
+          cancelLabel="Cancel"
+          busy={removing}
+          onConfirm={() => pendingRemove && void removeTables(pendingRemove.tables)}
+          onCancel={() => {
+            setPendingRemove(null);
+            setRemoveError(null);
+          }}
+        />
+        <AlertModal
+          open={addAllError !== null}
+          title="Couldn't add the tables"
+          description={addAllError ?? ""}
+          onConfirm={() => setAddAllError(null)}
+        />
 
         {/* Create is a scoped modal: name + description only (tables are added from the new
             bucket's own rail, which opens once the created bucket is selected). */}

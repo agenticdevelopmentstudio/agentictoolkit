@@ -9,7 +9,7 @@ import { rdidPrefix, validateLeaf } from "@agentic-toolkit/adh-ui/rdid";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { slugifyBucketName } from "./schema-model";
 import type { SchemaDefinition, SchemaDefinitionInput, SchemaTable } from "./schema-model";
-import { DetailSection } from "@agentic-toolkit/resource";
+import { DetailSection, unchangedFromStored } from "@agentic-toolkit/resource";
 import { DeleteEntitySection } from "@agentic-toolkit/adh-ui/blocks";
 import type { RenderTransferSection } from "../transfer-seam";
 
@@ -86,19 +86,29 @@ export function tableNameValidate(name: string, tables: SchemaTable[]): string |
  *  neither form validated with this edits them (the create modal starts them empty; Settings
  *  neither shows nor saves them), so a check here could only block a save over a stored list the
  *  user cannot see. A table's name is {@link tableNameValidate}'s, as the table is added or
- *  edited. */
+ *  edited.
+ *
+ *  `storedSlug` is the slug already on the bucket being edited (absent on a create). It exempts
+ *  the slug's FORMAT/length rules only — same reasoning as `teamValidate`'s stored-identifier
+ *  exemption: a bucket the backend already accepted need not satisfy a client-side rule added
+ *  later, and refusing it holds the Name/Description fields' Save hostage to a slug nobody is
+ *  touching. Uniqueness against `others` and the Name-required rule are never exempt (Mike,
+ *  2026-09-25). */
 export function schemaValidate(
   draft: SchemaDefinitionInput,
   others: Pick<SchemaDefinition, "name" | "slug">[] = [],
+  storedSlug?: string,
 ): string | null {
   const name = draft.name.trim();
   if (!name) return "Name is required.";
   if (others.some((o) => o.name.toLowerCase() === name.toLowerCase()))
     return `A bucket named "${name}" already exists.`;
   const slug = draft.slug.trim();
-  const slugProblem = validateLeaf(slug);
-  if (slugProblem) return `Slug: ${slugProblem}`;
-  if (slug.length > 64) return "Slug: 64 characters at most.";
+  if (!unchangedFromStored(slug, storedSlug)) {
+    const slugProblem = validateLeaf(slug);
+    if (slugProblem) return `Slug: ${slugProblem}`;
+    if (slug.length > 64) return "Slug: 64 characters at most.";
+  }
   if (others.some((o) => o.slug === slug)) return `A bucket with the slug "${slug}" already exists.`;
   return null;
 }

@@ -86,9 +86,10 @@ describe('CrudDataBrowser scoped to an ecosystem', () => {
 
     // Named on the URL (the scope the backend authorizes the write against) AND in the body (the
     // row's own column), so the re-list, filtered to this ecosystem, finds the row it just made.
+    // The workspace rides too: it is the owner the backend stamps a create with.
     await waitFor(() =>
       expect(authedJson).toHaveBeenCalledWith(
-        `/api/bucket/buckets?ecosystemId=${ECO}`,
+        `/api/bucket/buckets?ecosystemId=${ECO}&workspace=w`,
         expect.objectContaining({ method: 'POST' }),
       ),
     )

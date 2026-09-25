@@ -72,8 +72,12 @@ export interface CrudResource {
 
 /** List/create/update/delete one generic-CRUD table through the site's /api
  *  BFF proxy, authenticated by the shared Bearer client. `filter` narrows the LIST
- *  call only (column-equality query params the backend list route ANDs with the
- *  ecosystem scope); mutations are unaffected. `scopeEcosystemId` names the target
+ *  call (column-equality query params the backend list route ANDs with the
+ *  ecosystem scope) — except its `workspace`, which is a SCOPE, not a column: it
+ *  rides every write too, because the backend reads `?workspace=` on POST/PUT/DELETE
+ *  as the owner a create is stamped with and the scope an edit is allowed in. Sent on
+ *  the list alone, All Data's workspace view listed an org's rows and then created
+ *  under the caller and refused edits to rows another member made (Mike, 2026-09-25). `scopeEcosystemId` names the target
  *  ecosystem on EVERY verb (`?ecosystemId=` — the backend's ecosystem-param scope
  *  override for the integration synced-data tables, authorized server-side against
  *  the ecosystems the caller manages); without it the backend scopes to the caller's
@@ -91,8 +95,15 @@ export function useCrudResource(
   // them to drift.
   const [fetching, setFetching] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  // The scope override rides every verb's URL; empty string means "no override".
-  const scopeQuery = scopeQueryOf(scopeEcosystemId)
+  // The scopes ride every write's URL; empty string means "none". (The list sends them in
+  // `listUrl`, the ecosystem one there alongside the filter.)
+  const workspace = filter?.workspace
+  const scopeQuery = [
+    scopeQueryOf(scopeEcosystemId),
+    workspace ? `workspace=${encodeURIComponent(workspace)}` : '',
+  ]
+    .filter(Boolean)
+    .join('&')
   // Guards against out-of-order responses: switching tables (a new `meta` on a
   // live hook) starts a new list call while the old one may still be in
   // flight — only the LATEST call may write state, or a slow stale response

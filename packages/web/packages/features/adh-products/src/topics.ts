@@ -31,14 +31,21 @@ export const PRODUCT_TOPICS = [
   { id: "storage", label: "Storage", dividerAfter: false, features: ["storage"] },
   { id: "integrations", label: "Integrations", dividerAfter: false, features: ["integrations"] },
   // Messaging: send email/SMS to this product's customers via its OWN connected
-  // Postmark/Twilio integration (the promoted admin Messaging tool). Drawn only while the
-  // product holds the catalog's `messaging` feature — so not at all while the catalog lists
-  // it as coming soon — and each channel is disabled until its provider is connected on
-  // Integrations.
-  { id: "messaging", label: "Messaging", dividerAfter: false, features: ["messaging"] },
+  // Postmark/Twilio integration (the promoted admin Messaging tool) — MessagingPane, not the
+  // DM/chat catalog feature (which the catalog lists `comingSoon` and no ecosystem can ever
+  // hold). No `features`: always shown, like Applications and Dashboards, each channel
+  // disabled until its provider is connected on Integrations (Mike, 2026-09-25).
+  { id: "messaging", label: "Messaging", dividerAfter: false },
   { id: "applications", label: "Applications", dividerAfter: false, features: ["applications"] },
-  { id: "dashboards", label: "Dashboards", dividerAfter: true, features: ["dashboards"] },
-  { id: "invitations", label: "Users", dividerAfter: false, features: ["users"] },
+  // Dashboards: always shown, no catalog feature behind it — DashboardsPanel/DashboardsFeature
+  // render unconditionally, and gating on the `dashboards` catalog key (itself `comingSoon`)
+  // would have hidden the row from every product forever (Mike, 2026-09-25).
+  { id: "dashboards", label: "Dashboards", dividerAfter: true },
+  // Users: the product's own auth-provisioned roster, not the `users` catalog key — that key is
+  // `comingSoon` and no ecosystem can ever hold it, which made this row (and Customers below)
+  // impossible to draw. `user-authentication` is the feature a product actually provisions to
+  // get a customer realm, and Users is that realm's roster (Mike, 2026-09-25).
+  { id: "invitations", label: "Users", dividerAfter: false, features: ["user-authentication"] },
   // Everything about HOW someone gets in, as one GROUP rather than four rows spread down the
   // rail: the product's own auth policy (User Auth), the sign-in clients it vends
   // (oauth.clients — the apps a developer registers so their site can sign its own customers in

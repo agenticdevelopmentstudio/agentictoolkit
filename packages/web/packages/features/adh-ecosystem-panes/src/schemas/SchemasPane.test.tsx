@@ -29,7 +29,7 @@ vi.mock("../../../../data/src/markdown/markdown", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../../data/src/markdown/markdown")>()),
   markdownApi,
 }));
-// Reports what the table view was handed — the bucket decides the filter and the new-row defaults.
+// Reports what the table view was handed — the bucket decides the scope and the new-row defaults.
 // Its "stage a row" button stands in for an unsaved row: the view reports a dirty guard, and
 // withdraws it when it unmounts, as the real grid does. `CrudTable` is the grid a markdown-backed
 // table draws its rows in; it reports how many it was handed.
@@ -42,11 +42,13 @@ vi.mock("@agentic-toolkit/crud", async () => {
     CrudDataView: function CrudDataView({
       meta,
       filter,
+      scopeEcosystemId,
       createDefaults,
       onGuardChange,
     }: {
       meta: { key: string };
       filter?: Record<string, string>;
+      scopeEcosystemId?: string;
       createDefaults?: Record<string, string>;
       onGuardChange?: (g: { isDirty: () => boolean } | null) => void;
     }) {
@@ -58,7 +60,7 @@ vi.mock("@agentic-toolkit/crud", async () => {
       return (
         <div>
           <div data-testid="rows">
-            {`${meta.key} ${JSON.stringify(filter)} ${JSON.stringify(createDefaults)}`}
+            {`${meta.key} ${JSON.stringify(filter)} ${scopeEcosystemId} ${JSON.stringify(createDefaults)}`}
           </div>
           <button type="button" onClick={() => setStaged(true)}>
             stage a row
@@ -198,6 +200,14 @@ async function openSettings() {
   return screen.findByRole("dialog");
 }
 
+/** Answer the Remove confirm with Remove. */
+async function confirmRemove() {
+  const confirm = await screen.findByRole("dialog", { name: /^Remove / });
+  await act(async () => {
+    fireEvent.click(within(confirm).getByRole("button", { name: "Remove" }));
+  });
+}
+
 /** The pencil in the open `people` table's header, and the dialog it opens. */
 async function editPeople() {
   fireEvent.click(screen.getByRole("button", { name: "Edit people" }));
@@ -222,7 +232,7 @@ describe("SchemasPane — the bucket layout", () => {
   it("opens a bucket onto its tables alone, the first one showing", async () => {
     const contents = await openBucket();
     const rows = within(contents).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent);
-    expect(rows).toEqual(["Bucket settings", "Add table", "people"]);
+    expect(rows).toEqual(["Bucket settings", "Table actions", "Add table", "people"]);
     expect(within(contents).queryByRole("separator")).toBeNull();
     expect(within(contents).getByRole("button", { name: "people" })).toHaveAttribute(
       "aria-pressed",
@@ -258,8 +268,10 @@ describe("SchemasPane — the bucket layout", () => {
     const contents = await openBucket();
     fireEvent.click(within(contents).getByRole("button", { name: "people" }));
     expect(screen.getByRole("heading")).toHaveTextContent("people: content.contacts");
+    // A verified SCOPE, not a plain filter: as a filter, a non-admin's product bucket read empty
+    // and every create was refused (Mike, 2026-09-25).
     expect(screen.getByTestId("rows")).toHaveTextContent(
-      'content/contacts {"ecosystemId":"eco-uuid"} {"ecosystemId":"eco-uuid"}',
+      'content/contacts undefined eco-uuid {"ecosystemId":"eco-uuid"}',
     );
   });
 
@@ -462,18 +474,35 @@ describe("SchemasPane — the bucket layout", () => {
 
     trash();
     fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
+    await confirmRemove();
     await waitFor(() => expect(schemasApi.update).toHaveBeenCalledWith(BUCKET.id, { tables: [] }));
+  });
+
+  // One stray click on the trash drops the table's id and every persona interest pointing at it,
+  // so it asks first (Mike, 2026-09-25).
+  it("removing a table is confirmed; Cancel sends nothing", async () => {
+    await openBucket();
+    fireEvent.click(screen.getByRole("button", { name: "Remove people from bucket" }));
+    const confirm = await screen.findByRole("dialog", { name: /^Remove / });
+    expect(confirm).toHaveTextContent("Remove “people” from Customer CRM?");
+    fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /^Remove / })).toBeNull());
+    expect(schemasApi.update).not.toHaveBeenCalled();
   });
 
   // A removal used to be fired and forgotten: a refused one said nothing, and a second click sent
   // it again.
-  it("a refused removal says why; a retry starts clean and cannot be sent twice", async () => {
+  it("a refused removal says why in the confirm; a retry starts clean and cannot be sent twice", async () => {
     await openBucket();
-    const trash = () => screen.getByRole("button", { name: "Remove people from bucket" });
     schemasApi.update.mockRejectedValueOnce(new Error("The table is in use."));
-    fireEvent.click(trash());
-    expect(await screen.findByText("The table is in use.")).toBeInTheDocument();
-    expect(screen.getByRole("heading")).toHaveTextContent("people: content.contacts");
+    fireEvent.click(screen.getByRole("button", { name: "Remove people from bucket" }));
+    await confirmRemove();
+    const confirm = await screen.findByRole("dialog", { name: /^Remove / });
+    expect(await within(confirm).findByText("The table is in use.")).toBeInTheDocument();
+    // The table is still open behind the modal (which hides it from the a11y tree meanwhile).
+    expect(
+      screen.getByRole("heading", { hidden: true, name: "people: content.contacts" }),
+    ).toBeInTheDocument();
 
     let settle!: (saved: typeof BUCKET) => void;
     schemasApi.update.mockImplementationOnce(
@@ -482,12 +511,40 @@ describe("SchemasPane — the bucket layout", () => {
           settle = resolve;
         }),
     );
-    fireEvent.click(trash());
-    expect(screen.queryByText("The table is in use.")).toBeNull();
-    expect(trash()).toBeDisabled();
-    fireEvent.click(trash());
+    await confirmRemove();
+    expect(within(confirm).queryByText("The table is in use.")).toBeNull();
+    expect(
+      screen.getByRole("button", { hidden: true, name: "Remove people from bucket" }),
+    ).toBeDisabled();
     expect(schemasApi.update).toHaveBeenCalledTimes(2);
     await act(async () => settle({ ...BUCKET, tables: [] }));
+  });
+
+  // The old tables editor's bulk verbs, back on the bucket's rail behind its table actions.
+  it("Add all tables adds every type the bucket lacks, in one save, ids kept", async () => {
+    await openBucket();
+    fireEvent.click(screen.getByRole("button", { name: "Table actions" }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Add all tables" }));
+    });
+    const [, patch] = schemasApi.update.mock.calls[0]! as [string, { tables: typeof BUCKET.tables }];
+    expect(patch.tables[0]).toEqual(BUCKET.tables[0]);
+    const types = patch.tables.map((t) => t.type);
+    expect(types.filter((t) => t === "content.contacts")).toHaveLength(1);
+    expect(types.length).toBeGreaterThan(2);
+    expect(new Set(patch.tables.map((t) => t.name)).size).toBe(patch.tables.length);
+  });
+
+  it("Remove all tables is confirmed, then empties the bucket", async () => {
+    schemasApi.list.mockResolvedValue([{ ...BUCKET, tables: [...BUCKET.tables, LEADS] }]);
+    await openBucket();
+    fireEvent.click(screen.getByRole("button", { name: "Table actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove all tables…" }));
+    const confirm = await screen.findByRole("dialog", { name: /^Remove / });
+    expect(confirm).toHaveTextContent("Remove every table from Customer CRM?");
+    expect(schemasApi.update).not.toHaveBeenCalled();
+    await confirmRemove();
+    await waitFor(() => expect(schemasApi.update).toHaveBeenCalledWith(BUCKET.id, { tables: [] }));
   });
 
   // Without the pencil, the only fix for a wrong name or type was remove + re-add, which mints the
@@ -583,6 +640,10 @@ describe("SchemasPane — the bucket layout", () => {
     await waitFor(() =>
       expect(screen.getByTestId("markdown-rows")).toHaveTextContent("content/markdown 1"),
     );
-    expect(markdownApi.list).toHaveBeenCalledWith({}, { workspace: "acme", noted: true });
+    // The bucket's own ecosystem's notes, not the workspace-wide set.
+    expect(markdownApi.list).toHaveBeenCalledWith(
+      {},
+      { workspace: "acme", ecosystemId: "eco-uuid", noted: true },
+    );
   });
 });

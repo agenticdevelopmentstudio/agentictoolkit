@@ -181,23 +181,40 @@
   min-width: 0;
 }
 
+/* THREE columns, not a flex row with an absolutely-positioned title dropped on top
+ * (G47, Mike, 2026-09-25). The title used to be `position: absolute; left: 50%` —
+ * centred on the CONTAINER, with no regard for how wide `.adh-header__lead` (the site
+ * switcher / workspace trigger) actually was — so a long trigger (e.g. WorkspaceMenu's
+ * "${label} Workspace") that crossed the container's own midpoint sat UNDER the title's
+ * text instead of pushing it aside: an absolutely positioned box is out of flow, so
+ * nothing about it participates in the sibling layout that would otherwise make room.
+ * `minmax(0, 1fr) auto minmax(0, 1fr)` is the same symmetric-outer-tracks trick already
+ * used below for `.adh-home__toolbar`: the two `1fr` tracks are forced equal, which is
+ * what makes the middle (`auto`) column sit at the container's true centre regardless of
+ * how the lead/nav content is sized — and because the title is now IN FLOW, a wide lead
+ * or nav can only ever grow into its OWN track, never onto the title's.
+ * `justify-content: space-between` is dropped: with explicit `grid-column` on every
+ * child below, there is nothing left for it to distribute. */
 .adh-header__container {
   position: relative;
   width: 100%;
   padding: 0 1.5rem;
   height: var(--adh-header-bar-height, 3.5rem);
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 1.5rem;
 }
 
 .adh-header__page-title {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  max-width: 50%;
+  grid-column: 2;
+  justify-self: center;
+  /* A percentage here would resolve against the MIDDLE column's own size, which is
+   * `auto` (sized BY this element's content) — a circular basis no browser can resolve
+   * usefully, unlike the old absolute box's `max-width: 50%`, which resolved against
+   * the container. `vw` sidesteps the circularity while keeping the same JOB: stop one
+   * long title from squeezing the lead/nav tracks toward their `0` floor. */
+  max-width: 50vw;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -213,6 +230,27 @@
   .adh-header__page-title {
     display: none;
   }
+
+  /* With the title gone the middle track is empty, and the equal outer tracks that
+     existed only to centre it just halve the bar: the brand's 8rem floor (below)
+     overran its half into the nav at 390px (Mike, 2026-09-25 — e2e "the header fits a
+     phone"). So the nav takes its content width and the brand gets the rest, which is
+     what the flex row this grid replaced did. A `center` slot is never hidden, so a
+     bar that has one keeps the three tracks. The brand STRETCHES to its track rather
+     than hugging its start: `justify-self: start` sizes it to its content, which the
+     track cannot shrink, so the site name overran the nav instead of taking its
+     ellipsis. */
+  .adh-header__container:not(:has(> .adh-header__center)) {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .adh-header__container:not(:has(> .adh-header__center)) > .adh-header__lead {
+    justify-self: stretch;
+  }
+
+  .adh-header__container:not(:has(> .adh-header__center)) > .adh-header__nav {
+    grid-column: 2;
+  }
 }
 
 /* The help-enabled title is a BUTTON, so it has to take back the pointer events
@@ -221,13 +259,16 @@
 .adh-header__page-title--help {
   pointer-events: auto;
   cursor: pointer;
-  /* HelpEnabled's own `-mx-1 px-1` lets the hover highlight bleed 4px past the
-     text without moving it — true for text in normal flow, false here. This
-     element is centred by `left: 50%` + `translate(-50%, -50%)`, and a negative
-     inline margin shrinks the box the translate is measured against, so the
-     title sits 4px left of centre on every page in the fleet. The padding stays;
-     only the compensating margin is wrong in this positioning context. */
-  margin-inline: 0;
+  /* No `margin-inline: 0` compensation here any more (G47, Mike, 2026-09-25): that
+     override existed only because the title used to be centred by `left: 50%` +
+     `translate(-50%, -50%)`, and `translate()`'s offset is computed from the box's
+     OWN (border-box) width while `left`'s offset separately bakes in the margin — an
+     asymmetric interaction that shifted the title 4px left of centre despite
+     HelpEnabled's `-mx-1 px-1` being symmetric on both sides. Centring now happens
+     via `justify-self: center` on the grid item above, which centres the box's
+     MARGIN box within its grid area — symmetric margins stay symmetric, so the skew
+     this compensated for cannot recur, and removing it restores the intended
+     4px hover-highlight bleed. */
 }
 
 /* ...but not when there is nothing to open. HelpEnabled keeps the caller's class on
@@ -277,6 +318,13 @@
   font-family: var(--adh-header-nav-font, var(--font-mono));
   font-size: var(--adh-header-nav-size, 0.75rem);
   letter-spacing: var(--adh-header-nav-letter-spacing, 0.04em);
+  /* The right cluster: the container's third grid column (G47, Mike, 2026-09-25).
+   * `justify-self: end` hugs the right edge the way `justify-content: space-between`
+   * used to; `min-width: 0` lets this shrink below its content size, the same
+   * shrink-to-fit `.adh-header__container` used to grant every flex child by default. */
+  grid-column: 3;
+  justify-self: end;
+  min-width: 0;
 }
 
 .adh-header__nav-link {
@@ -359,34 +407,40 @@
    `.adh-header__icon-button > svg` above would otherwise out-specify it. */
 
 /* Interactive centre slot (e.g. the status site's live indicator + refresh).
-   Absolutely centred like the page title, but stays clickable and lets its
-   content size itself. */
+   Centred like the page title — same grid column, same reasoning (G47, Mike,
+   2026-09-25) — but stays clickable (the page title's `pointer-events: none` was
+   only ever there because THAT slot renders inert text) and lets its content size
+   itself rather than truncating with an ellipsis. */
 .adh-header__center {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  grid-column: 2;
+  justify-self: center;
   display: flex;
   align-items: center;
-  max-width: 60%;
+  /* `vw`, not `%`, for the same reason as `.adh-header__page-title`'s `max-width`
+     just above: a percentage here would resolve against this column's own `auto`
+     size, which this element's content DECIDES — a circular basis. */
+  max-width: 60vw;
 }
 
 /* Left cluster: the site-name switcher, with its status badge(s) stacked
-   underneath (nav stays pinned right via the container's space-between). Stacking
-   (rather than the old inline badge row) is what keeps this cluster narrow enough
-   for a phone-width header.
-   `flex-shrink: 0` is load-bearing: the nav is content-sized (min-width: auto), so
-   without it the brand is the only thing that CAN shrink and a crowded bar crushes
-   it to zero width — wrapping the title over three lines and pushing the badge out
-   of the bar. The brand holds its width; anything that doesn't fit is the nav's
-   problem (see .adh-header__links). */
+   underneath. Stacking (rather than the old inline badge row) is what keeps this
+   cluster narrow enough for a phone-width header.
+   The container's FIRST grid column (G47, Mike, 2026-09-25) — `minmax(0, 1fr)`, the
+   same as the nav's column 3, which is what makes the title in column 2 sit at the
+   bar's true centre regardless of how wide either cluster's content is. `min-width: 0`
+   lets this shrink below its content size rather than forcing the column wider than
+   its equal 1fr share (which would in turn push the title off-centre) — unlike the
+   old flex layout's `flex-shrink: 0`, which held the brand at its full natural width
+   unconditionally and deferred every squeeze onto the nav; here both flanking columns
+   share the squeeze, symmetrically, by construction. */
 .adh-header__lead {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
   gap: 0.15rem;
-  flex-shrink: 0;
+  grid-column: 1;
+  justify-self: start;
   min-width: 0;
 }
 
@@ -401,6 +455,10 @@
   align-items: center;
   gap: 0.4rem;
   min-width: 0;
+  /* The lead is a COLUMN that hugs its start, so this row is sized to its content
+     unless something caps it — and a row wider than the lead is a site name drawn
+     over the nav, not ellipsed (Mike, 2026-09-25 — phone header, 390px). */
+  max-width: 100%;
 }
 
 /* One line, always — a wrapped brand is what blows out the fixed-height bar. */
@@ -485,23 +543,25 @@
      Gutters and the cluster gap are desktop-sized above this query, and 72px of a
      390px screen is 18% of it spent on nothing. 1rem is what a phone gutter is
      elsewhere in this sheet; the gap is only ever a MINIMUM separation here, since
-     `justify-content: space-between` is what actually holds the clusters apart. */
+     the container's two equal `1fr` columns are what actually hold the clusters at
+     opposite edges (G47, Mike, 2026-09-25 — was `justify-content: space-between`,
+     before the header became a 3-column grid). */
   .adh-header__container {
     padding: 0 1rem;
     gap: 0.75rem;
   }
 
-  /* …and the brand is the give of last resort. Above this width `.adh-header__lead`
-     is `flex-shrink: 0`, which is what keeps a crowded desktop bar from crushing the
-     site name — it is the bar's only child with text in it, so it is the only one a
-     squeeze can take from. The floor is what makes giving that up safe here: 8rem
-     still reads as a name, and no site name can widen the bar past the viewport any
-     more. The site NAME is the one term here whose width the
-     header does not control, so it is the term that has to yield — measured, hub
-     signed in at 390px put the nav's right edge at 405.8px against a 390px document,
-     i.e. a phone with a horizontally scrolling page and the avatar caret off-screen. */
+  /* …and the brand is the give of last resort, but a FLOORED one, unlike the give
+     the base `.adh-header__lead` rule already grants every width (`min-width: 0` —
+     G47, Mike, 2026-09-25): unfloored, the one thing here with actual text in it is
+     also the one thing a crowded phone bar would crush to nothing, wrapping the site
+     name over three lines and pushing the badge out of the bar. 8rem still reads as a
+     name, and no site name can widen the bar past the viewport any more. The site
+     NAME is the one term here whose width the header does not control, so it is the
+     term that has to yield — measured, hub signed in at 390px put the nav's right
+     edge at 405.8px against a 390px document, i.e. a phone with a horizontally
+     scrolling page and the avatar caret off-screen. */
   .adh-header__lead {
-    flex-shrink: 1;
     min-width: 8rem;
   }
 

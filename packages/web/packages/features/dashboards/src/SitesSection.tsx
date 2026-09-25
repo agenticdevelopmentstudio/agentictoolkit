@@ -79,11 +79,12 @@ export function SitesSection({
     // Slug is unique per GROUP server-side (uq_sites_group_slug), so only the
     // slugs in the draft's own group can collide — checking globally would
     // wrongly reject a slug that's free within this group but used in another.
-    validate: (draft, others) =>
+    validate: (draft, others, base) =>
       siteValidate(
         draft,
         others.filter((o) => o.groupId === draft.groupId).map((o) => o.slug),
         reservedSlugs,
+        base?.slug,
       ),
     differs: siteDiffers,
     normalize: siteNormalize,

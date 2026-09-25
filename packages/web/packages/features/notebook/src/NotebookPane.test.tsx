@@ -11,9 +11,10 @@
 // Everything that acts on the notes LIST — Create Note, the pop-over search, and the gear's
 // filters and taxonomy editors — now rides that level's own toolbar (`onNew`/`search`/
 // `titleActions`), after the page-wide home bar they used to publish into was removed as clunky
-// (Mike, 2026-09-24). The harness's `<Rail>` below renders each level's toolbar controls itself,
-// scoped per level id via `data-testid={\`toolbar-${l.id}\`}`, so a test can tell "wired to this
-// level" from "wired to some other one" rather than trusting an unscoped `screen.*` query.
+// (Mike, 2026-09-24). The harness's shared `RailStandIn` below renders each level's toolbar
+// controls itself, scoped per level id via `data-testid={\`toolbar-${l.id}\`}`, so a test can tell
+// "wired to this level" from "wired to some other one" rather than trusting an unscoped
+// `screen.*` query.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useMemo, useState, type ReactNode } from "react";
@@ -22,6 +23,10 @@ import {
   type RailHostRegistry,
   type RegisteredLevels,
 } from "@agentic-toolkit/resource";
+// The shared rail/toolbar stand-in (G68, Mike, 2026-09-25) — see its own doc comment for why a
+// single copy replaced five near-identical ones and what it draws. `showTitle` because this
+// harness always rendered each level's `<h3>{title}</h3>`.
+import { RailStandIn } from "@agentic-toolkit/resource/testing";
 import type { TopicLevel } from "@agenticdevelopertoolkit/ui/blocks";
 
 vi.mock("@agentic-toolkit/auth", () => ({
@@ -128,58 +133,6 @@ function levelById(id: string): TopicLevel {
   return hit;
 }
 
-/** Renders the published rows the way the hub's workspace shell would.
- *
- *  It also stands in for the two signals the real `TopicRail` owns: the header spinner it shows
- *  while `busy`, and the hover dwell after which it calls `onPrefetch`. The dwell's TIMING is the
- *  rail's own business (and is tested there); what belongs here is whether this pane wires the
- *  two at all — which is exactly the thing a typechecked optional prop cannot tell you. */
-function Rail({ published }: { published: TopicLevel[] }) {
-  return (
-    <div>
-      {published.map((l) => (
-        <div key={l.id}>
-          <h3>{l.title}</h3>
-          {l.busy && <span data-testid={`busy-${l.id}`} />}
-          {/* Scoped per level id, the way the real `TopicRail`'s own `data-htd-toolbar` row is:
-           *  every `+`, search box and gear this pane publishes lives on ITS level's toolbar, so a
-           *  test can tell "wired to the notes level" from "wired to some other one". */}
-          <div data-testid={`toolbar-${l.id}`}>
-            {l.onNew && (
-              <button type="button" onClick={() => l.onNew?.()}>
-                {l.newLabel}
-              </button>
-            )}
-            {l.search && (
-              <input
-                type="search"
-                aria-label={l.search.placeholder}
-                value={l.search.query}
-                onChange={(e) => l.search?.onQueryChange?.(e.target.value)}
-              />
-            )}
-            {l.titleActions}
-          </div>
-          <ul>
-            {l.items.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  disabled={item.disabled}
-                  onClick={() => l.onSelect?.(item.id)}
-                  onPointerEnter={() => l.onPrefetch?.(item.id)}
-                >
-                  {item.label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 /** A minimal rail host. `toolbarSlot` is `null` since no test here opens an editor; the
  *  feature-bar fields that used to sit beside it are gone from `RailHostRegistry` entirely. */
 function Harness({ children }: { children: ReactNode }) {
@@ -209,7 +162,7 @@ function Harness({ children }: { children: ReactNode }) {
   levels = [...entries.values()].sort((a, b) => a.depth - b.depth).flatMap((e) => e.levels);
   return (
     <RailHostContext.Provider value={registry}>
-      <Rail published={levels} />
+      <RailStandIn levels={levels} showTitle />
       {children}
     </RailHostContext.Provider>
   );

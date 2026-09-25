@@ -25,10 +25,12 @@ describe("heldTopics", () => {
     expect(ids(heldTopics(TOPICS, [row("signin-apps")]))).toEqual(["authentication", "settings"]);
   });
 
-  // `provisioning` is in the ecosystem — the dialog ticks it too — so the list draws it.
-  it("counts provisioning as held, and removed as not", () => {
+  // `provisioning` is in the ecosystem and the dialog ticks it too, but this list draws only what
+  // can actually be navigated into — a still-provisioning feature can fail partway and open onto
+  // storage that was never created (Mike, 2026-09-25).
+  it("withholds a provisioning row, same as a removed one", () => {
     const got = heldTopics(TOPICS, [row("storage", "provisioning"), row("dashboards", "removed")]);
-    expect(ids(got)).toEqual(["storage", "settings"]);
+    expect(ids(got)).toEqual(["settings"]);
   });
 
   it("an ecosystem holding nothing shows only the unkeyed rows", () => {

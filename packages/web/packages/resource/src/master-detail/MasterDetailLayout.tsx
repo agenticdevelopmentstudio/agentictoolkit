@@ -32,7 +32,11 @@ export interface MasterDetailActions {
   canSave: boolean;
   /** Why Save is disabled, or null when nothing is blocking it — rendered beside the button so a
    *  grey Save always says why. Supplied by useMasterDetailForm from the same `validate` that
-   *  computes `canSave`; optional so hand-built bars that have no reason to give can omit it. */
+   *  computes `canSave`; optional so hand-built bars that have no reason to give can omit it.
+   *  PRESENCE, not just truthiness, is load-bearing: `ButtonBar` keys the caption row's whole
+   *  mounted lifetime on whether this key was set AT ALL (`undefined`) — a bar built by
+   *  `useMasterDetailForm` always sets it (to a string or to `null`) and so always gets a row that
+   *  holds its line even with nothing to say; a hand-built bar that never sets it gets no row. */
   blockedReason?: string | null;
   saving?: boolean;
   onDelete: () => void;
@@ -165,6 +169,10 @@ export function ButtonBar({
     canCancel,
     onSave,
     canSave,
+    // `undefined` (the key absent) and `null` (the key present, no reason right now) are two
+    // different facts, and the destructuring default below would collapse them into the same
+    // `null` — so the channel test reads `actions.blockedReason` BEFORE that default applies.
+    // See `hasBlockedReasonChannel` (Mike, 2026-09-25).
     blockedReason = null,
     saving = false,
     onDelete,
@@ -174,6 +182,11 @@ export function ButtonBar({
     onCancelDelete,
     deleting = false,
   } = actions;
+  // Whether this bar has a reason to report AT ALL — a hand-built bar that never sets
+  // `blockedReason` (the prop is optional) gets no caption row, ever. A bar that DOES set it
+  // (even to `null`, meaning "nothing's wrong right now") keeps the row mounted so the caption can
+  // change without the row itself mounting/unmounting under it — see the caption comment below.
+  const hasBlockedReasonChannel = actions.blockedReason !== undefined;
   // [New]  ⟷  [Delete] │ [Cancel] [Save] — all borderless "[icon] title".
   // A recessed (darker) strip with top + bottom borders reads as a distinct bar,
   // set off from the tab row above (via the FeatureTabs gap) and the topic|details
@@ -240,17 +253,28 @@ export function ButtonBar({
   // Its OWN line under the bar, not a span inside it: the bar's title is absolutely centred, so an
   // in-flow span left of Save painted straight over any title long enough to reach it — the team
   // pane's "Use reverse-domain form…" sat on top of "Settings (… Participants Team)" and neither
-  // could be read (Mike, 2026-09-24). Right-aligned so it reads as Save's caption; wraps rather
-  // than truncates, because a clipped reason is the one piece of text here the user needs whole.
+  // could be read (Mike, 2026-09-24).
+  //
+  // The ROW stays mounted for the bar's whole life once it has a channel at all (see
+  // `hasBlockedReasonChannel` above) — only the TEXT inside it swaps. It used to mount/unmount on
+  // `blockedReason`'s truthiness, which shifted the detail pane below by a full line on every
+  // reason-appears/reason-clears edit (G39, Mike, 2026-09-25): the live region has to stay put for
+  // a screen reader to keep tracking it, and a sighted user shouldn't feel the page jump every time
+  // they fix (or break) a field. A non-breaking space holds the line's height when there's nothing
+  // to say, rather than an empty string, which most browsers collapse a block's height around.
+  // Right-aligned so it reads as Save's caption; `truncate` (with the full text as `title`) rather
+  // than the old wrap, because an unbounded caption is exactly what grows the row it's meant to
+  // hold steady — a narrow viewport is where that showed up.
   const strip = (
     <div className="flex w-full min-w-0 flex-col">
       {bar}
-      {blockedReason && (
+      {hasBlockedReasonChannel && (
         <p
           role="status"
-          className="border-b border-apt-border bg-apt-bg px-6 py-1 text-right text-xs text-apt-text-muted"
+          title={blockedReason || undefined}
+          className="truncate border-b border-apt-border bg-apt-bg px-6 py-1 text-right text-xs text-apt-text-muted"
         >
-          {blockedReason}
+          {blockedReason || " "}
         </p>
       )}
     </div>

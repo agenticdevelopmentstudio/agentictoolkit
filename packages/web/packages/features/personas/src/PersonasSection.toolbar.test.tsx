@@ -150,6 +150,10 @@ describe("PersonasSection puts New Persona on the list's toolbar", () => {
       </Chrome>,
     );
 
+    // Wait for the loaded empty label — "No personas yet." only reads once `personasQuery`
+    // settles (Mike, 2026-09-25); asserting the `+` before that would pass even if a load that
+    // resolved empty left the rail stuck on its pending label forever.
+    expect(await screen.findByText("No personas yet.")).not.toBeNull();
     const bar = await toolbar();
     expect(bar.getByRole("button", { name: "New Persona" })).not.toBeNull();
   });
@@ -166,7 +170,10 @@ describe("PersonasSection puts New Persona on the list's toolbar", () => {
       </Chrome>,
     );
 
-    expect(screen.getByText("Loading…")).not.toBeNull();
+    // TWO "Loading…" texts while pending, not one: the leaf's own pending paragraph, and the
+    // rail's `emptyLabel` (Mike, 2026-09-25 — mirrors ResearchPane.tsx, so the rail re-registers
+    // on load rather than reading a stale "No personas yet." set at first render's empty items).
+    expect(screen.getAllByText("Loading…")).toHaveLength(2);
     await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
     const bar = await toolbar();
     expect(bar.getByRole("button", { name: "New Persona" })).not.toBeNull();

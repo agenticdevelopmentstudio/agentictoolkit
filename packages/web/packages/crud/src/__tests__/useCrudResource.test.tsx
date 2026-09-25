@@ -297,7 +297,7 @@ describe('useCrudResource filter', () => {
     )
   })
 
-  it('does not add the filter to mutation URLs (list-only)', async () => {
+  it('does not add a column filter to mutation URLs (list-only)', async () => {
     authedJson.mockResolvedValue([])
     const { result } = renderHook(() => useCrudResource(tiers, { sourceProvider: 'reddit' }))
     await waitFor(() => expect(result.current.loading).toBe(false))
@@ -307,6 +307,44 @@ describe('useCrudResource filter', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: 'pro', name: 'Pro' }),
     })
+  })
+
+  // `workspace` is a scope, not a column: the backend stamps a create's owner and allows an edit
+  // from it, so sent on the list alone All Data listed an org's rows, then created under the
+  // caller and refused edits to rows another member made (Mike, 2026-09-25).
+  it('sends the filter\'s workspace on every write, alone and beside the ecosystem scope', async () => {
+    authedJson.mockResolvedValue([])
+    authedRequest.mockResolvedValueOnce(undefined as never)
+    const { result } = renderHook(() =>
+      useCrudResource(tiers, { workspace: 'acme co', sourceProvider: 'reddit' }, 'eco-1'),
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(() => result.current.create({ key: 'pro' }))
+    expect(authedJson).toHaveBeenCalledWith(
+      '/api/billing/subscription-tiers?ecosystemId=eco-1&workspace=acme%20co',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    await act(() => result.current.update({ id: 't1' }, { name: 'N' }))
+    expect(authedJson).toHaveBeenCalledWith(
+      '/api/billing/subscription-tiers/t1?ecosystemId=eco-1&workspace=acme%20co',
+      expect.objectContaining({ method: 'PUT' }),
+    )
+    await act(() => result.current.remove({ id: 't1' }))
+    expect(authedRequest).toHaveBeenCalledWith(
+      '/api/billing/subscription-tiers/t1?ecosystemId=eco-1&workspace=acme%20co',
+      { method: 'DELETE' },
+    )
+  })
+
+  it('sends the workspace on a write with no ecosystem scope', async () => {
+    authedJson.mockResolvedValue([])
+    const { result } = renderHook(() => useCrudResource(tiers, { workspace: 'acme' }))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(() => result.current.create({ key: 'pro' }))
+    expect(authedJson).toHaveBeenCalledWith(
+      '/api/billing/subscription-tiers?workspace=acme',
+      expect.objectContaining({ method: 'POST' }),
+    )
   })
 
   it('does not re-list when an equivalent inline filter object is passed on re-render', async () => {

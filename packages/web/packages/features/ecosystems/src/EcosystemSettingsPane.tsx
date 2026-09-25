@@ -3,7 +3,12 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 
 import { ecosystemsApi, type Ecosystem, type EcosystemInput } from "@agentic-toolkit/data/ecosystems";
-import { useMasterDetailForm, RecordSettingsPane, useRecordAffordance } from "@agentic-toolkit/resource";
+import {
+  useMasterDetailForm,
+  RecordSettingsPane,
+  useRecordAffordance,
+  unchangedFromStored,
+} from "@agentic-toolkit/resource";
 import { DeleteEntitySection } from "@agentic-toolkit/adh-ui/blocks";
 import { isRdid, parseRdid, prefixFor } from "@agentic-toolkit/adh-ui/rdid";
 import { ecoBlank, ecoToInput, ecoDiffers, ecoNormalize } from "./EcosystemDetail";
@@ -116,19 +121,27 @@ export function EcosystemSettingsPane({
       if (!draft.name.trim()) return "Display name is required.";
       const slug = leafOf(draft.identifier.trim());
       if (!slug) return "Slug is required.";
-      if (!ecoCreateRdidValid(scope, slug))
+      // WHETHER THIS IS A RENAME IS A FACT ABOUT THE INPUT BEING VALIDATED, never about the
+      // render-scoped `status` (see the probe-gate comment below — that's the bug this fact was
+      // introduced to fix). The same fact now ALSO gates the rdid-format check just below: a
+      // stored identifier that predates today's format rule (or that used a legacy top-level
+      // scope) must not block Save the instant an unrelated field is edited. `useMasterDetailForm`
+      // used to grandfather that for us, by re-running `validate` on the stored record and waiving
+      // a reason it reproduced — but that compared MESSAGES, so a stored failure could mask an
+      // unrelated new one; grandfathering moved into each validator, rule by rule, hence this
+      // explicit check (Mike, 2026-09-25).
+      const renaming = !unchangedFromStored(draft.identifier, base?.identifier);
+      if (renaming && !ecoCreateRdidValid(scope, slug))
         return `"${draft.identifier}" is not a valid identifier — lowercase letters, digits, and interior hyphens only.`;
       if (others.some((o) => o.identifier === draft.identifier))
         return `Identifier "${draft.identifier}" is already in use.`;
       // A rename (or a create) needs the probe's go-ahead — same bar as the create
       // dialog. An unchanged identifier skips it.
       //
-      // WHETHER THIS IS A RENAME IS A FACT ABOUT THE INPUT BEING VALIDATED, never about the
-      // render-scoped `status`. The hook also validates the STORED record and waives any reason
-      // that record reproduces; gated on `status` alone, the stored row reproduced "Waiting for
-      // the identifier availability check." whenever the probe was checking or had errored, the
-      // waiver cleared it, and Save sent the rename without the probe's go-ahead.
-      const renaming = base === null || draft.identifier.trim() !== base.identifier.trim();
+      // Gated on `status` alone, the stored row reproduced "Waiting for the identifier
+      // availability check." whenever the probe was checking or had errored, the old hook-level
+      // waiver cleared it, and Save sent the rename without the probe's go-ahead — hence `renaming`
+      // rather than `status` deciding whether these two rules apply at all.
       if (renaming && status === "unavailable") return `Identifier "${draft.identifier}" is already in use.`;
       if (renaming && status !== "idle" && status !== "available")
         return "Waiting for the identifier availability check.";

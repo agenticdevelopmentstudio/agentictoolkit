@@ -65,9 +65,10 @@ export interface CatalogFeature {
  * nor safely re-addable-in-silence. So the one list is read two ways, each named below
  * rather than re-filtered by every reader (the filters were copied by hand, and a copy
  * drifts): {@link activeFeatureKeys} for what can be navigated into — the hub's workspace
- * rail — and {@link presentFeatureKeys} for what the ecosystem has — the picker, which
- * shows `provisioning` as already-taken so the owner cannot queue it twice, and a
- * product's Features list, which has to agree with the picker.
+ * rail, and a product's own Features list, which must not draw a row for a feature that
+ * could still fail partway through provisioning — and {@link presentFeatureKeys} for what
+ * the ecosystem HAS — the Manage-features picker only, which shows `provisioning` as
+ * already-taken so the owner cannot queue it twice (Mike, 2026-09-25).
  */
 export type FeatureState = "provisioning" | "active" | "removed";
 
@@ -82,7 +83,9 @@ export interface ProvisionedFeature {
 /**
  * The keys an ecosystem HAS: every row but `removed`, `provisioning` included — a feature still
  * being built is in the ecosystem, and offering it for adding would queue it twice. What the
- * picker ticks and what a product's Features list draws rows for: one rule, so the two agree.
+ * Manage-features picker ticks, and only the picker — a product's Features list reads
+ * {@link activeFeatureKeys} instead, since a still-provisioning feature is not yet safe to
+ * navigate into (Mike, 2026-09-25).
  */
 export function presentFeatureKeys(rows: readonly ProvisionedFeature[]): ReadonlySet<string> {
   return new Set(rows.filter((f) => f.state !== "removed").map((f) => f.featureKey));
@@ -90,7 +93,9 @@ export function presentFeatureKeys(rows: readonly ProvisionedFeature[]): Readonl
 
 /**
  * The keys an ecosystem can be NAVIGATED into: `active` rows only. A `provisioning` feature can
- * have stopped partway, so a row for it could open onto a pane whose storage is not there.
+ * have stopped partway, so a row for it could open onto a pane whose storage is not there. Read
+ * by the hub's workspace rail and by a product's own Features list ({@link heldTopics}) — a rail
+ * or topic list shows only what is actually there to open (Mike, 2026-09-25).
  */
 export function activeFeatureKeys(rows: readonly ProvisionedFeature[]): ReadonlySet<string> {
   return new Set(rows.filter((f) => f.state === "active").map((f) => f.featureKey));

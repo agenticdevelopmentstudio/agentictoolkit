@@ -1,4 +1,4 @@
-import { presentFeatureKeys, type ProvisionedFeature } from "@agentic-toolkit/data/ecosystems";
+import { activeFeatureKeys, type ProvisionedFeature } from "@agentic-toolkit/data/ecosystems";
 
 /** The fields of a topic row {@link heldTopics} reads: see `EcosystemsTopicConfig.features`. */
 interface FeatureKeyedTopic {
@@ -36,14 +36,20 @@ export function settingsLast<T extends DividedTopic>(topics: readonly T[]): T[] 
 /**
  * The topic rows an ecosystem actually holds: every row that names no catalog feature (Settings,
  * Child Ecosystems, a feature site's own rows), plus each row with at least one of its `features`
- * provisioned and not removed.
+ * ACTIVE.
  *
  * The Features list used to draw every product topic whether or not the product had it — the
  * child "Agentic Developer Hub" showed nineteen rows while its Manage features dialog showed
- * nothing ticked (Mike, 2026-09-24). The list and the dialog now read the same provisioned set
- * through the same rule, `presentFeatureKeys`, so once the read has landed a keyed row is drawn
- * exactly when the dialog opens with one of its features ticked. A coming-soon feature is never
- * provisionable, so its row stays off until the catalog ships it.
+ * nothing ticked (Mike, 2026-09-24). That first fix read the dialog's own rule
+ * (`presentFeatureKeys`), on the theory that a list and the dialog that turns its rows on could
+ * not disagree if they read one set. They can, and do: `provisioning` is a row the dialog must
+ * tick (queuing it twice would be a bug) but a row this list must NOT draw, because a
+ * still-provisioning feature can fail partway and a topic row that opens onto storage that isn't
+ * there is worse than a row that briefly lags behind the dialog. So a list and the picker are
+ * different questions after all — "can I navigate there" versus "is this in the ecosystem" — and
+ * each reads the rule for its own question: this list `activeFeatureKeys`, the same one the hub's
+ * workspace rail reads, and the dialog `presentFeatureKeys` (Mike, 2026-09-25). A coming-soon
+ * feature is never provisionable, so its row stays off until the catalog ships it.
  *
  * `provisioned` is `undefined` while the read is in flight: keyed rows are withheld until it
  * lands rather than drawn and then yanked — all but `routed`, the row the URL names. Withholding
@@ -60,7 +66,7 @@ export function heldTopics<T extends FeatureKeyedTopic>(
   routed?: string,
 ): T[] {
   if (provisioned === null) return [...topics];
-  const held = presentFeatureKeys(provisioned ?? []);
+  const held = activeFeatureKeys(provisioned ?? []);
   return topics.filter(
     (t) =>
       t.features == null ||

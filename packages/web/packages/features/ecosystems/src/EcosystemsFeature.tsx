@@ -64,9 +64,12 @@ export interface EcosystemsTopicConfig {
   description?: string;
   dividerAfter?: boolean;
   /** The catalog feature keys behind this row. When set, the row is drawn only while the scoped
-   *  ecosystem holds at least one of them (see `heldTopics`), so the Features list and the Manage
-   *  features dialog read the same set. Omit for a row that is not a catalog feature (Settings,
-   *  Child Ecosystems, a feature site's own rows) — it is always drawn. */
+   *  ecosystem holds one of them as `active` (see `heldTopics`) — a still-provisioning feature
+   *  can fail partway, so this list must not open a row onto a pane whose storage isn't there.
+   *  The Manage features dialog reads a wider set (`presentFeatureKeys`, provisioning included)
+   *  since it only needs to know a feature is already spoken for (Mike, 2026-09-25). Omit for a
+   *  row that is not a catalog feature (Settings, Child Ecosystems, a feature site's own rows) —
+   *  it is always drawn. */
   features?: readonly string[];
 }
 

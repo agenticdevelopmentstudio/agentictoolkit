@@ -3,6 +3,9 @@
 // site's /home). The panel is internal; the barrel exposes the feature entry (the host passes
 // `basePath` + the `tables` it resolved from its own catalogs) and the URL parse both hosts share.
 export { KnowledgeBasesFeature } from "./KnowledgeBasesFeature";
+// The workspace → ecosystem gate both hosts mount the feature through, so the scope is resolved
+// and refused the same way on the site and in the hub.
+export { WorkspaceKnowledgeBases } from "./WorkspaceKnowledgeBases";
 
 // The persona-memory table rule. ALSO exported at the server-safe ./tables subpath —
 // RSC pages must import it from there (this barrel's dist is a "use client" module).

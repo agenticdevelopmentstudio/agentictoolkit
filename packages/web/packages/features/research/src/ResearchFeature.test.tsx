@@ -32,7 +32,14 @@ import {
   type RailHostRegistry,
   type RegisteredLevels,
 } from "@agentic-toolkit/resource";
-import type { TopicLevel } from "@agenticdevelopertoolkit/ui/blocks";
+// The rail stand-in itself (G68, Mike, 2026-09-25) — this suite used to hand-roll its own
+// near-copy of the four other feature packages' harnesses, and the copies had drifted (one of
+// them called `l.search.onQueryChange` unguarded, though `TopicListSearch.onQueryChange` is
+// optional). The shared helper draws the same three toolbar controls in the real rail's own
+// order (`+`, then search, then `titleActions` — `topic-detail.tsx`'s list toolbar), shows
+// `emptyLabel` on a zero-item level, and stands in for the same two signals this suite exercises:
+// the `busy` spinner and the `onPrefetch` hover dwell.
+import { RailStandIn } from "@agentic-toolkit/resource/testing";
 
 // useBasePathRoute (ResearchFeature's URL wiring) reads next/navigation's useRouter; a stub is
 // enough for most tests, which assert on the API calls rather than the resulting route. The
@@ -167,79 +174,12 @@ afterEach(cleanup);
 // next test's `get` is never called and its assertion fails describing the feature working
 // correctly. The tests below therefore each start from an empty cache.
 
-/** Renders the published rail level (the document rows) the way the hub's workspace shell would,
- *  so the test can drive the rows — plus each level's own TOOLBAR (the `+` from `onNew`/
- *  `newLabel`, a controlled search box from `search`, and `titleActions`, the gear menu), scoped
- *  inside a `data-testid={`toolbar-${l.id}`}` wrapper so a test can scope `within()` it rather
- *  than trusting that nothing else on the page could satisfy an unscoped query. Mirrors the real
- *  rail's `data-htd-toolbar` (`topic-detail.tsx`), standing in for it since this harness draws its
- *  own minimal rail rather than the real one — the page-wide home bar these controls used to
- *  publish into was removed as clunky (Mike, 2026-09-24). The three are drawn in the real rail's
- *  order, `+` first, but ORDER is not this stand-in's to prove: the real rail decides it (and pops
- *  its search over from a magnifier where this draws the field outright), so it is pinned against
- *  the real rail, in `@agenticdevelopertoolkit/ui`'s `topic-rail-toolbar.test.tsx`. An earlier
- *  stand-in drew the `+` LAST, and a placement test here pinned that order — the opposite of the
- *  real toolbar's.
- *
- *  A level with no rows shows its `emptyLabel`, as the real rail does. The toolbar is published
- *  before the list resolves, so that text is how a test knows it is looking at the LOADED empty
- *  list rather than the loading one.
- *
- *  It also stands in for the two signals the real `TopicRail` owns: the header spinner it shows
- *  while `busy`, and the hover dwell after which it calls `onPrefetch`. The dwell's TIMING is the
- *  rail's own business (and is tested there); what belongs here is whether this pane wires the
- *  two at all — which is exactly the thing a typechecked optional prop cannot tell you. */
-function Rail({ levels }: { levels: TopicLevel[] }) {
-  return (
-    <div>
-      {levels.map((l) => (
-        <div key={l.id}>
-          {l.busy && <span data-testid={`busy-${l.id}`} />}
-          {/* Wiring-level stand-in for the real rail's icon column: not rendering one is the
-           *  observable effect of `hideItemIcons`, which nothing here otherwise reads. */}
-          <span data-testid={`hide-item-icons-${l.id}`}>{String(Boolean(l.hideItemIcons))}</span>
-          <div data-testid={`toolbar-${l.id}`}>
-            {l.onNew ? (
-              <button type="button" onClick={() => l.onNew?.()}>
-                {l.newLabel}
-              </button>
-            ) : null}
-            {l.search ? (
-              <input
-                type="search"
-                aria-label={l.search.placeholder}
-                value={l.search.query}
-                onChange={(e) => l.search?.onQueryChange?.(e.target.value)}
-              />
-            ) : null}
-            {l.titleActions}
-          </div>
-          {l.items.length === 0 && <p>{l.emptyLabel}</p>}
-          <ul>
-            {l.items.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => l.onSelect?.(item.id)}
-                  onPointerEnter={() => l.onPrefetch?.(item.id)}
-                >
-                  {item.label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 /** A minimal rail HOST: it registers ResearchPane's published documents level and exposes the
  *  merged stack the way the hub's workspace shell would (the shell owns `mergedLevels`; this
  *  package owns only the RailHostContext contract). Stands in for the host so the published
- *  document rows AND their toolbar's own controls (rendered by `Rail` above) are drivable. No
- *  `HomeBarHost` any more: the controls ride the documents level's own `search`/`onNew`/
- *  `titleActions` now, so `Rail` above is the whole story.
+ *  document rows AND their toolbar's own controls (rendered by the shared `RailStandIn`) are
+ *  drivable. No `HomeBarHost` any more: the controls ride the documents level's own
+ *  `search`/`onNew`/`titleActions` now, so `RailStandIn` below is the whole story.
  *
  *  `setDetailTitle`/`detailTitle` are wired through the package's own {@link useHostDetailTitle} —
  *  the REAL host-side hook every production host (StandaloneRailHost, the hub's
@@ -285,7 +225,7 @@ function Harness({ children }: { children: ReactNode }) {
           missing) when no pane is publishing, so "cleared" and "never rendered" both read as
           the same empty string rather than a testid that disappears from the DOM. */}
       <div data-testid="detail-title">{detailTitle ?? ""}</div>
-      <Rail levels={mergedLevels} />
+      <RailStandIn levels={mergedLevels} />
       {children}
     </RailHostContext.Provider>
   );
@@ -913,8 +853,8 @@ describe("ResearchFeature", () => {
   // `screen.getByRole("button", { name: "Create Document" })` finds the button whether it was
   // published onto this level's toolbar or floating disconnected somewhere else on the page.
 
-  // WIRING only: which of the level's fields each control arrives through. Their ORDER is the real
-  // rail's to decide, and this harness's `Rail` is a stand-in — see its doc for where it is pinned.
+  // WIRING only: which of the level's fields each control arrives through. Their ORDER is the
+  // shared `RailStandIn`'s to decide (below), and IT pins the real rail's order.
   it("publishes the search, the filters and Create Document onto the Documents list's toolbar", async () => {
     render(
       <Harness>
@@ -934,6 +874,30 @@ describe("ResearchFeature", () => {
     // catches it.
     expect(screen.getAllByRole("button", { name: "Create Document" })).toHaveLength(1);
     expect(screen.getAllByRole("searchbox")).toHaveLength(1);
+  });
+
+  // The shared `RailStandIn` draws these three controls in the REAL rail's own order (G68, Mike,
+  // 2026-09-25): `+`, then the search box, then `titleActions` (the gear) — `topic-detail.tsx`'s
+  // list toolbar (`newButton`, then the search `ListToolButton`, then a flex spacer, then
+  // `titleActions`). Pinning it here is pinning that shared helper's contract, not inventing a
+  // second opinion on it — the helper's own doc comment says where ITS order comes from.
+  it("draws the toolbar in the real rail's order: + before search before the filters gear", async () => {
+    render(
+      <Harness>
+        <ResearchFeature basePath="/w1/research" />
+      </Harness>,
+    );
+
+    const toolbar = within(await screen.findByTestId("toolbar-research-documents"));
+    const create = toolbar.getByRole("button", { name: "Create Document" });
+    const search = toolbar.getByRole("searchbox", { name: "Search research documents" });
+    const gear = toolbar.getByRole("button", { name: "Document filters" });
+    // DOCUMENT_POSITION_FOLLOWING (4): `other` comes AFTER `this` in the tree. Two checks chain
+    // the whole order: create < search < gear.
+    // eslint-disable-next-line no-bitwise -- Node's own DOM ordering API is bitwise by design.
+    expect(create.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // eslint-disable-next-line no-bitwise
+    expect(search.compareDocumentPosition(gear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("opens the category and tag axes from the toolbar's gear — the whole filter cluster arrives", async () => {

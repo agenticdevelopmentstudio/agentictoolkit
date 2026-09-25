@@ -299,10 +299,12 @@ export function AdhHeader({
           pageTitle &&
           (pageTitleHelp ? (
             // The TRIGGER carries the title class, rather than wrapping a span that
-            // has it: `.adh-header__page-title` is absolutely centred and sets
-            // `pointer-events: none`, so a button around it would be both mispositioned
-            // and unclickable over the text. The inner span exists to keep the
-            // ellipsis, which a flex item cannot do for itself.
+            // has it: `.adh-header__page-title` is the container's own centred grid
+            // item and sets `pointer-events: none` (G47, Mike, 2026-09-25 — was
+            // absolutely centred; a grid item now, same reasoning either way), so a
+            // button around it would be both a second, differently-laid-out box and
+            // unclickable over the text. The inner span exists to keep the ellipsis,
+            // which a flex item (HelpEnabled's own root) cannot do for itself.
             <HelpEnabled
               id={pageTitleHelp}
               fallback={pageTitleHelpFallback}

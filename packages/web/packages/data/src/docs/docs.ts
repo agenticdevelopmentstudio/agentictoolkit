@@ -13,7 +13,7 @@
 // and, from v2, an uploaded file of any kind. The upload is why docs got a corpus and a
 // bucket of their own rather than a second view of the notes rows: a file needs somewhere
 // to land, and the bucket is that somewhere.
-import { markdownApi } from "../markdown/markdown";
+import { markdownApi, type MarkdownScope } from "../markdown/markdown";
 import type {
   ResearchDocument,
   ResearchSummary,
@@ -48,25 +48,25 @@ export const docsApi = {
   // `workspace` pins every op to that workspace's owning principal, exactly as it does for
   // notes and research: list returns the docs that principal OWNS, create stamps it owner.
   /** The workspace's docs (metadata only), most-recently-updated first. */
-  list(filters: DocFilters = {}, opts?: { workspace?: string }): Promise<DocSummary[]> {
+  list(filters: DocFilters = {}, opts?: MarkdownScope): Promise<DocSummary[]> {
     return markdownApi.list(filters, { ...opts, doc: true });
   },
 
   /** One doc WITH its body. */
-  get(id: string, opts?: { workspace?: string }): Promise<Doc> {
+  get(id: string, opts?: MarkdownScope): Promise<Doc> {
     return markdownApi.get(id, opts);
   },
 
-  create(body: CreateDocBody, opts?: { workspace?: string }): Promise<Doc> {
+  create(body: CreateDocBody, opts?: MarkdownScope): Promise<Doc> {
     return markdownApi.create({ ...body, doc: true }, opts);
   },
 
-  update(id: string, body: UpdateDocBody, opts?: { workspace?: string }): Promise<Doc> {
+  update(id: string, body: UpdateDocBody, opts?: MarkdownScope): Promise<Doc> {
     return markdownApi.update(id, body, opts);
   },
 
   /** Soft-delete; the backend tombstones the doc marker with the document. */
-  remove(id: string, opts?: { workspace?: string }): Promise<void> {
+  remove(id: string, opts?: MarkdownScope): Promise<void> {
     return markdownApi.remove(id, opts);
   },
 
@@ -74,25 +74,25 @@ export const docsApi = {
    *  `parentIds`. Shared with notes and research by construction: one owner has one set of
    *  categories, seen three ways. A category may sit under several parents, so the fold
    *  draws some of them in more than one place. */
-  categories(opts?: { workspace?: string }): Promise<DocCategory[]> {
+  categories(opts?: MarkdownScope): Promise<DocCategory[]> {
     return markdownApi.categoryTree(opts);
   },
 
   /** Create a category, optionally under one or more others. */
   createCategory(
     body: MarkdownCategoryCreateBody,
-    opts?: { workspace?: string },
+    opts?: MarkdownScope,
   ): Promise<DocCategory> {
     return markdownApi.createCategory(body, opts);
   },
 
   /** The workspace's tag labels (the tag field's autocomplete source). */
-  tags(opts?: { workspace?: string }): Promise<string[]> {
+  tags(opts?: MarkdownScope): Promise<string[]> {
     return markdownApi.tags(opts);
   },
 
   /** The same tags WITH their ids — what the tag manager renames and deletes by. */
-  tagSet(opts?: { workspace?: string }): Promise<DocTag[]> {
+  tagSet(opts?: MarkdownScope): Promise<DocTag[]> {
     return markdownApi.tagSet(opts);
   },
 };

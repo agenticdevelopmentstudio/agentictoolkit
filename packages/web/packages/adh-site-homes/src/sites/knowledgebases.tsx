@@ -1,7 +1,7 @@
 "use client";
 
 import { defineSiteHome } from "@agentic-toolkit/adh/home";
-import { KnowledgeBasesFeature } from "@agentic-toolkit/knowledgebases";
+import { KnowledgeBasesFeature, WorkspaceKnowledgeBases } from "@agentic-toolkit/knowledgebases";
 // personaMemoryTables comes from the server-safe ./tables subpath (same reason as ./parse:
 // the barrel dist is a "use client" module).
 import { personaMemoryTables } from "@agentic-toolkit/knowledgebases/tables";
@@ -31,16 +31,25 @@ const TABLES = personaMemoryTables();
  * A client module because a model carries functions, which cannot cross from a Server Component
  * into the client shell — see SiteHomeRoute.
  *
- * `workspaceSlug` is deliberately NOT passed: the data is token-scoped, which is what it was
- * before the workspace segment existed. Scoping it to the chosen workspace is the open platform
- * decision (feature-platform-phase2 §2), and it stays one prop at this seam.
+ * Scoped to the chosen workspace's ecosystem ({@link WorkspaceKnowledgeBases}). It used to be
+ * token-scoped, which for a hub token is ecosystem zero: every workspace showed the same rows and
+ * every create landed there (Mike, 2026-09-25: an ecosystem shows only its own data).
  *
  * Auth: both mounts sit under a HomeGate layout.
  */
 export const knowledgeBasesHome = defineSiteHome({
   parse: parseKnowledgeBasesPath,
-  render: ({ scopedBase, view }) => (
-    <KnowledgeBasesFeature basePath={scopedBase} tables={TABLES} {...view} />
+  render: ({ scopedBase, workspaceSlug, view }) => (
+    <WorkspaceKnowledgeBases workspaceSlug={workspaceSlug}>
+      {(ecosystemId) => (
+        <KnowledgeBasesFeature
+          basePath={scopedBase}
+          tables={TABLES}
+          scopeEcosystemId={ecosystemId}
+          {...view}
+        />
+      )}
+    </WorkspaceKnowledgeBases>
   ),
 });
 

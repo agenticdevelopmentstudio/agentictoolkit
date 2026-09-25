@@ -6,8 +6,8 @@
 // publish path) runs for real inside the same minimal host harness the sibling features'
 // tests use. ResourceExplorer's "New Team…" button rides the published resource level's own
 // `onNew`/`search` — that list's own TOOLBAR — after the page-wide home bar it used to publish
-// into was removed as clunky (Mike, 2026-09-24); the harness's `<Rail>` below renders each
-// level's toolbar controls itself, scoped per level id.
+// into was removed as clunky (Mike, 2026-09-24); the harness's shared `RailStandIn` below renders
+// each level's toolbar controls itself, scoped per level id.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { useMemo, useState, type ReactNode } from "react";
@@ -16,7 +16,9 @@ import {
   type RailHostRegistry,
   type RegisteredLevels,
 } from "@agentic-toolkit/resource";
-import type { TopicLevel } from "@agenticdevelopertoolkit/ui/blocks";
+// The shared rail/toolbar stand-in (G68, Mike, 2026-09-25) — see its own doc comment for why a
+// single copy replaced five near-identical ones and what it draws.
+import { RailStandIn } from "@agentic-toolkit/resource/testing";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
@@ -64,43 +66,6 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-function Rail({ levels }: { levels: TopicLevel[] }) {
-  return (
-    <div>
-      {levels.map((l) => (
-        <div key={l.id}>
-          {/* The rail carries the empty label. It used to be read off the "All teams" card
-              landing too; that landing is gone (docs/ui/fleet-ui-audit.md §1.5), so the rail
-              is the only surface that states WHY a host has no teams. */}
-          {l.items.length === 0 ? <p>{l.emptyLabel}</p> : null}
-          {l.items.map((item) => (
-            <button key={item.id} type="button" onClick={() => l.onSelect(item.id)}>
-              {item.label}
-            </button>
-          ))}
-          {/* Toolbar stand-in, scoped per level id (mirrors the real rail's `data-htd-toolbar`)
-              so a test can tell "wired to THIS level" from "wired to some other one". */}
-          <div data-testid={`toolbar-${l.id}`}>
-            {l.onNew && (
-              <button type="button" onClick={() => l.onNew?.()}>
-                {l.newLabel}
-              </button>
-            )}
-            {l.search && (
-              <input
-                type="search"
-                aria-label={l.search.placeholder}
-                value={l.search.query}
-                onChange={(e) => l.search?.onQueryChange?.(e.target.value)}
-              />
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function Harness({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<Map<string, RegisteredLevels>>(new Map());
   const registry: RailHostRegistry = useMemo(
@@ -130,7 +95,7 @@ function Harness({ children }: { children: ReactNode }) {
     .flatMap((e) => e.levels);
   return (
     <RailHostContext.Provider value={registry}>
-      <Rail levels={mergedLevels} />
+      <RailStandIn levels={mergedLevels} />
       {children}
     </RailHostContext.Provider>
   );

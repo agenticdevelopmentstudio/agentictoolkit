@@ -5,6 +5,8 @@ import { useResourceList } from "@agentic-toolkit/data";
 import { docsApi } from "@agentic-toolkit/data/docs";
 import {
   markdownApi,
+  type MarkdownListOptions,
+  type MarkdownScope,
   type ResearchFilters,
   type ResearchSummary,
 } from "@agentic-toolkit/data/markdown";
@@ -39,26 +41,30 @@ import { useExitGate } from "@agenticdevelopertoolkit/ui/hooks/useExitGate";
 /** What this view needs of a markdown client. `markdownApi` fits it, and so do `docsApi` and
  *  `notesApi`, which are `markdownApi` with their shelf's marker baked in. */
 interface MarkdownClient {
-  list(filters: ResearchFilters, opts?: { workspace?: string }): Promise<ResearchSummary[]>;
-  get(id: string, opts?: { workspace?: string }): Promise<{ content: string }>;
-  create(body: { content: string }, opts?: { workspace?: string }): Promise<unknown>;
-  update(id: string, body: { content: string }, opts?: { workspace?: string }): Promise<unknown>;
-  remove(id: string, opts?: { workspace?: string }): Promise<void>;
+  list(filters: ResearchFilters, opts?: MarkdownListOptions): Promise<ResearchSummary[]>;
+  get(id: string, opts?: MarkdownScope): Promise<{ content: string }>;
+  create(body: { content: string }, opts?: MarkdownScope): Promise<unknown>;
+  update(id: string, body: { content: string }, opts?: MarkdownScope): Promise<unknown>;
+  remove(id: string, opts?: MarkdownScope): Promise<void>;
 }
 
 /**
- * One list REQUEST: the client that sends it, and the cache key its answer is kept under. The key
- * names the request, not a table type — `content.markdown` and `content.papers` send the same one,
- * and while the cache was keyed per type, opening one table and then the other fetched the same
- * page twice, under two entries. Declared once per request so a client and its key cannot part.
+ * One list REQUEST: the client that sends it, the list filter it adds, and the cache key its answer
+ * is kept under. The key names the request, not a table type, so two types that send the same
+ * request share one entry. Declared once per request so a client, its filter and its key cannot
+ * part.
  */
 interface ListSource {
   api: MarkdownClient;
   listKey: string;
+  list?: Pick<MarkdownListOptions, "visibility">;
 }
 const EVERY_DOCUMENT: ListSource = { api: markdownApi, listKey: "all" };
 const DOCS_SHELF: ListSource = { api: docsApi, listKey: "docs" };
 const NOTES_SHELF: ListSource = { api: notesApi, listKey: "notes" };
+// A paper is a PUBLISHED doc, and the backend filters by visibility itself: picking the public
+// ones out of the first page of every document hid any paper past that page (Mike, 2026-09-25).
+const PUBLISHED: ListSource = { api: markdownApi, listKey: "public", list: { visibility: "public" } };
 
 /**
  * A markdown-backed type → where its rows come from, whether a new row belongs here, and which of
@@ -66,18 +72,13 @@ const NOTES_SHELF: ListSource = { api: notesApi, listKey: "notes" };
  * marker on the way in and lists by it on the way out, so a row made here cannot be misfiled. The
  * marker flags used to be spelled here by hand, a second copy of what those clients already own.
  */
-const MARKDOWN_TYPES: Record<
-  string,
-  ListSource & { canCreate: boolean; keep?: (d: ResearchSummary) => boolean }
-> = {
+const MARKDOWN_TYPES: Record<string, ListSource & { canCreate: boolean }> = {
   "content.markdown": { ...EVERY_DOCUMENT, canCreate: true },
   "content.docs": { ...DOCS_SHELF, canCreate: true },
   "content.notes": { ...NOTES_SHELF, canCreate: true },
   // A paper is a PUBLISHED doc (publish mints the marker; visibility is the publish switch), so
-  // there is no New — a row created from this table is not a paper — and the rows are the public
-  // ones of the page `content.markdown` lists: the list route has no visibility filter, so the
-  // view picks them out (`rows` below) and the two tables share one request.
-  "content.papers": { ...EVERY_DOCUMENT, canCreate: false, keep: (d) => d.visibility === "public" },
+  // there is no New — a row created from this table is not a paper.
+  "content.papers": { ...PUBLISHED, canCreate: false },
 };
 
 export function isMarkdownType(type: string): boolean {
@@ -104,17 +105,28 @@ const META: CrudTableMeta = {
   columns: ["title", "category", "visibility", "excerpt"].map(col),
 };
 
-export function MarkdownRowsView({ type, workspace }: { type: string; workspace?: string }) {
+/**
+ * `ecosystemId` is the BUCKET's ecosystem: every op acts there (backend `?ecosystemId=`), so a
+ * product bucket's rows are that product's, not the workspace-wide list — "an ecosystem shows only
+ * its own data" (Mike, 2026-09-25).
+ */
+export function MarkdownRowsView({
+  type,
+  workspace,
+  ecosystemId,
+}: {
+  type: string;
+  workspace?: string;
+  ecosystemId?: string;
+}) {
   const spec = MARKDOWN_TYPES[type]!;
-  const { api } = spec;
-  const opts = { workspace };
-  // Unfiltered, and keyed on the request: `keep` runs over the cached list (`rows` below), so two
-  // types that send one request share one entry. Built from the client alone for the same
-  // reason — a `load` that changed with the type would re-read the shared entry on every switch
-  // between them.
-  const load = useCallback(() => api.list({}, { workspace }), [api, workspace]);
+  const { api, list } = spec;
+  const opts = useMemo(() => ({ workspace, ecosystemId }), [workspace, ecosystemId]);
+  // Keyed on the request — source, workspace and ecosystem — so two types that send one request
+  // share one entry, and two buckets never share one.
+  const load = useCallback(() => api.list({}, { ...opts, ...list }), [api, opts, list]);
   const { items, reload, error, isFetching } = useResourceList<ResearchSummary>(
-    `bucket-markdown-rows:${spec.listKey}:${workspace ?? ""}`,
+    `bucket-markdown-rows:${spec.listKey}:${workspace ?? ""}:${ecosystemId ?? ""}`,
     load,
   );
 
@@ -192,10 +204,7 @@ export function MarkdownRowsView({ type, workspace }: { type: string; workspace?
     }
   }
 
-  const rows = useMemo(
-    () => (items ?? []).filter(spec.keep ?? (() => true)),
-    [items, spec],
-  ) as unknown as CrudRow[];
+  const rows = (items ?? []) as unknown as CrudRow[];
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 py-4">
       <CrudTable

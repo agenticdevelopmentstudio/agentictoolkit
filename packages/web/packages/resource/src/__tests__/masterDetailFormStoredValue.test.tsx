@@ -138,9 +138,13 @@ describe("unchangedFromStored", () => {
   });
 });
 
-// The hook's own exemption, for validators that grandfather nothing themselves: a reason the STORED
-// record already fails with was not caused by the edit, so it never holds Save (Mike, 2026-09-24).
-describe("useMasterDetailForm — a problem already on record never blocks an edit", () => {
+// G14: the hook itself does NO grandfathering any more — `reasonFor` just returns
+// `config.validate(d, others, stored)` (see the comment on it in useMasterDetailForm.ts). A
+// validator that never calls `unchangedFromStored` on its own fields gets none, even when the
+// stored record already fails one of its rules (Mike, 2026-09-25). This replaces a block that used
+// to assert the OLD hook-level behaviour (waiving a reason whose MESSAGE matched the stored
+// record's) — that comparison is exactly what G14 found broken, for two reasons proven below.
+describe("useMasterDetailForm — a validator that never exempts itself gets no exemption", () => {
   const SLUG = "Use a dotted identifier.";
   /** A strict format rule with no stored-value exemption of its own. */
   function strictValidate(d: Draft): string | null {
@@ -149,14 +153,32 @@ describe("useMasterDetailForm — a problem already on record never blocks an ed
   }
   const LEGACY: Row = { id: "legacy", name: "Legacy", email: "participants" };
 
-  it("enables Save on an edit to another field of a record that fails the rule", () => {
+  it("blocks Save on an edit to another field, because the validator never exempted the legacy email", () => {
     const { result } = renderHook(() =>
       useMasterDetailForm(makeConfig({ items: [LEGACY], validate: strictValidate })),
     );
     act(() => result.current.select("legacy"));
     act(() => result.current.onChange({ name: "Renamed", email: "participants" }));
-    expect(result.current.actions.blockedReason).toBeNull();
-    expect(result.current.actions.canSave).toBe(true);
+    // The OLD hook-level grandfathering used to waive this: `config.validate(stored, ...)`
+    // reproduced the identical SLUG text, so the hook cleared it. `reasonFor` no longer runs that
+    // second call at all, so a validator that wants this leniency has to say so itself.
+    expect(result.current.actions.blockedReason).toBe(SLUG);
+    expect(result.current.actions.canSave).toBe(false);
+  });
+
+  it("reports a DIFFERENT invalid value even though it produces the identical message text — the G14 (b) bug", () => {
+    // The old bug compared MESSAGES, not values: two different bad emails that both fail the
+    // "needs a dot" rule produced the same SLUG text, and the hook waived the second one as though
+    // it were the untouched original, even though it is a brand-new (and still invalid) edit.
+    const { result } = renderHook(() =>
+      useMasterDetailForm(makeConfig({ items: [LEGACY], validate: strictValidate })),
+    );
+    act(() => result.current.select("legacy"));
+    act(() =>
+      result.current.onChange({ name: "Legacy", email: "totally-different-but-still-bad" }),
+    );
+    expect(result.current.actions.blockedReason).toBe(SLUG);
+    expect(result.current.actions.canSave).toBe(false);
   });
 
   it("still blocks a NEW problem the edit introduces", () => {
@@ -176,5 +198,83 @@ describe("useMasterDetailForm — a problem already on record never blocks an ed
     act(() => result.current.actions.onCreate());
     act(() => result.current.onChange({ name: "New", email: "participants" }));
     expect(result.current.actions.blockedReason).toBe(SLUG);
+  });
+});
+
+// The pattern the fix moved grandfathering INTO: a validator calls `unchangedFromStored` on the
+// ONE field its own rule is about, and SKIPS that rule's check entirely when the field is
+// untouched — rather than running the rule, getting a message, and comparing message text after
+// the fact (which is what let one shadowed rule hide another — the G14 (a) bug). Because the skip
+// happens before the rule runs, a LATER rule in the same validator is never shadowed by an earlier
+// one's grandfathered failure (Mike, 2026-09-25).
+describe("useMasterDetailForm — a validator that grandfathers itself, rule by rule", () => {
+  const RULE_A = "A must be lowercase letters only.";
+  const RULE_B = "B must be lowercase letters only.";
+  type ABDraft = { a: string; b: string };
+  interface ABRow extends ABDraft {
+    id: string;
+  }
+
+  function selfGrandfatheringValidate(
+    d: ABDraft,
+    _others: ABRow[],
+    base: ABDraft | null,
+  ): string | null {
+    if (!unchangedFromStored(d.a, base?.a) && !/^[a-z]*$/.test(d.a)) return RULE_A;
+    if (!/^[a-z]*$/.test(d.b)) return RULE_B;
+    return null;
+  }
+
+  // Stored with an invalid `a` (predates the format rule) and a valid `b`.
+  const LEGACY: ABRow = { id: "legacy", a: "BAD1", b: "ok" };
+
+  function abConfig(
+    overrides: Partial<MasterDetailFormConfig<ABRow, ABDraft>> = {},
+  ): MasterDetailFormConfig<ABRow, ABDraft> {
+    return {
+      items: [LEGACY],
+      getId: (r) => r.id,
+      blank: () => ({ a: "", b: "" }),
+      toInput: (r) => ({ a: r.a, b: r.b }),
+      validate: selfGrandfatheringValidate,
+      differs: (x, y) => x.a !== y.a || x.b !== y.b,
+      create: async (input) => ({ id: "new", ...input }),
+      update: async (id, input) => ({ id, ...input }),
+      refresh: () => {},
+      createLabel: "New row",
+      ...overrides,
+    };
+  }
+
+  it("(a) still reports a LATER rule the edit breaks, even though an EARLIER rule is grandfathered", () => {
+    const { result } = renderHook(() => useMasterDetailForm(abConfig()));
+    act(() => result.current.select("legacy"));
+    // `a` is untouched (still the legacy "BAD1") — exempt, rule A never runs. `b` is edited to
+    // something invalid. Under the OLD hook-level comparison, rule A's failure (unchanged from
+    // stored) would have masked rule B ever being reached at all — that's exactly the bug: rule B's
+    // NEW problem is reported here, not hidden behind rule A's old one.
+    act(() => result.current.onChange({ a: "BAD1", b: "BAD2" }));
+    expect(result.current.actions.blockedReason).toBe(RULE_B);
+    expect(result.current.actions.canSave).toBe(false);
+  });
+
+  it("(c) exempts the untouched legacy field when a DIFFERENT field is edited to something valid", () => {
+    const { result } = renderHook(() => useMasterDetailForm(abConfig()));
+    act(() => result.current.select("legacy"));
+    // `a` stays exactly as stored ("BAD1"); `b` changes but still satisfies its own rule. Save is
+    // enabled despite the legacy `a` never having satisfied rule A.
+    act(() => result.current.onChange({ a: "BAD1", b: "changed" }));
+    expect(result.current.actions.blockedReason).toBeNull();
+    expect(result.current.actions.canSave).toBe(true);
+  });
+
+  it("still blocks a change TO the grandfathered field that is itself invalid", () => {
+    const { result } = renderHook(() => useMasterDetailForm(abConfig()));
+    act(() => result.current.select("legacy"));
+    // `a` is now genuinely edited (not just re-sent unchanged) to a new, still-invalid value — the
+    // exemption is for the untouched legacy value, not a blanket pass on the field forever.
+    act(() => result.current.onChange({ a: "BAD3", b: "ok" }));
+    expect(result.current.actions.blockedReason).toBe(RULE_A);
+    expect(result.current.actions.canSave).toBe(false);
   });
 });

@@ -56,7 +56,9 @@ const doc = (id: string, title: string, visibility = "private") => ({
   tags: [],
   visibility,
 });
-const show = (type: string) => render(<MarkdownRowsView type={type} workspace="acme" />);
+const show = (type: string, ecosystemId = "eco-1") =>
+  render(<MarkdownRowsView type={type} workspace="acme" ecosystemId={ecosystemId} />);
+const SCOPE = { workspace: "acme", ecosystemId: "eco-1" };
 
 beforeEach(() => {
   markdownApi.list.mockResolvedValue([]);
@@ -74,14 +76,12 @@ afterEach(() => {
 describe("MarkdownRowsView — which rows, and whose", () => {
   it.each([
     ["content.markdown", {}],
-    ["content.papers", {}],
+    ["content.papers", { visibility: "public" }],
     ["content.docs", { doc: true }],
     ["content.notes", { noted: true }],
-  ])("%s lists through its shelf's own client", async (type, flags) => {
+  ])("%s lists through its shelf's own client, in the bucket's ecosystem", async (type, flags) => {
     show(type);
-    await waitFor(() =>
-      expect(markdownApi.list).toHaveBeenCalledWith({}, { workspace: "acme", ...flags }),
-    );
+    await waitFor(() => expect(markdownApi.list).toHaveBeenCalledWith({}, { ...SCOPE, ...flags }));
   });
 
   it.each([
@@ -100,22 +100,28 @@ describe("MarkdownRowsView — which rows, and whose", () => {
     });
     expect(markdownApi.create).toHaveBeenCalledWith(
       { content: "# Hello", ...marker },
-      { workspace: "acme" },
+      SCOPE,
     );
   });
 
-  // The two send the same request, so they share one cache entry: while it was keyed per type,
-  // opening one and then the other fetched the same page twice.
-  it("markdown and papers share one list request; papers keeps the public rows", async () => {
-    markdownApi.list.mockResolvedValue([doc("d-1", "Draft"), doc("d-2", "Paper", "public")]);
-    const view = show("content.markdown");
-    await waitFor(() => expect(screen.getByTestId("row-titles")).toHaveTextContent("Draft, Paper"));
-
-    view.rerender(<MarkdownRowsView type="content.papers" workspace="acme" />);
-    expect(screen.getByTestId("row-titles").textContent).toBe("Paper");
+  // Papers are filtered by the SERVER: picking the public ones out of the first page of every
+  // document hid any paper past that page (Mike, 2026-09-25). The view draws what it is sent.
+  it("papers asks for the public rows and offers no New", async () => {
+    markdownApi.list.mockResolvedValue([doc("d-2", "Paper", "public")]);
+    show("content.papers");
+    await waitFor(() => expect(screen.getByTestId("row-titles")).toHaveTextContent("Paper"));
     expect(screen.queryByRole("button", { name: "New" })).toBeNull();
-    await act(async () => {});
-    expect(markdownApi.list).toHaveBeenCalledTimes(1);
+  });
+
+  // Two buckets never share one cache entry: a product's rows are that product's.
+  it("a different bucket's ecosystem is a different request", async () => {
+    markdownApi.list.mockResolvedValue([doc("d-1", "Mine")]);
+    const view = show("content.markdown");
+    await waitFor(() => expect(screen.getByTestId("row-titles")).toHaveTextContent("Mine"));
+    markdownApi.list.mockResolvedValue([doc("d-9", "Theirs")]);
+    view.rerender(<MarkdownRowsView type="content.markdown" workspace="acme" ecosystemId="eco-2" />);
+    await waitFor(() => expect(screen.getByTestId("row-titles")).toHaveTextContent("Theirs"));
+    expect(markdownApi.list).toHaveBeenLastCalledWith({}, { workspace: "acme", ecosystemId: "eco-2" });
   });
 });
 
@@ -144,7 +150,7 @@ describe("MarkdownRowsView — editing a row", () => {
     expect(box).not.toHaveAttribute("readonly");
     expect(box).toHaveValue("# Draft");
     expect(saveButton).toBeEnabled();
-    expect(markdownApi.get).toHaveBeenCalledWith("d-1", { workspace: "acme" });
+    expect(markdownApi.get).toHaveBeenCalledWith("d-1", SCOPE);
   });
 
   it("a row that fails to load says why, and cannot be saved over", async () => {
@@ -173,7 +179,7 @@ describe("MarkdownRowsView — deleting a row", () => {
       fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
     });
     expect(await within(confirm).findByRole("alert")).toHaveTextContent("The document is locked.");
-    expect(markdownApi.remove).toHaveBeenCalledWith("d-1", { workspace: "acme" });
+    expect(markdownApi.remove).toHaveBeenCalledWith("d-1", SCOPE);
 
     fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

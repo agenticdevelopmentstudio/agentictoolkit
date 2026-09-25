@@ -19498,6 +19498,8 @@ export interface paths {
             query?: {
                 /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                 workspace?: string;
+                /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                ecosystemId?: string;
             };
             header?: never;
             path?: never;
@@ -19512,6 +19514,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                     page?: number;
                     pageSize?: number;
                     /** @description Free-text query matched across title, body, category, and tags. */
@@ -19522,6 +19526,8 @@ export interface paths {
                     tag?: string;
                     /** @description Restrict to documents whose frontmatter adh_source equals this value. Used by researchUpsert to look up an existing doc without scanning the full export. */
                     source?: string;
+                    /** @description Restrict to documents with this visibility — `public` lists the published ones (papers). An unknown value is a 400. */
+                    visibility?: "private" | "public";
                     /** @description Send true to restrict to NOTES — the documents filed in the owner's `notes` storage bucket (a live content.notes marker). A false value is the unfiltered list; there is no "not a note" filter. A value that is neither is a 400, not a silently unfiltered list. */
                     noted?: boolean;
                     /** @description Send true to restrict to DOCS — the documents filed in the owner's `docs` storage bucket (a live content.docs marker). The informal corpus: anything written down that is neither a note nor a composed paper. Same rules as `noted`: false is the unfiltered list, and an unparseable value is a 400. */
@@ -19565,6 +19571,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path?: never;
@@ -19636,6 +19644,8 @@ export interface paths {
             query?: {
                 /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                 workspace?: string;
+                /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                ecosystemId?: string;
             };
             header?: never;
             path?: never;
@@ -19650,6 +19660,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path?: never;
@@ -19687,6 +19699,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path?: never;
@@ -19818,6 +19832,8 @@ export interface paths {
             query?: {
                 /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                 workspace?: string;
+                /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                ecosystemId?: string;
             };
             header?: never;
             path?: never;
@@ -19829,6 +19845,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path?: never;
@@ -19873,6 +19891,8 @@ export interface paths {
             query?: {
                 /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                 workspace?: string;
+                /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                ecosystemId?: string;
             };
             header?: never;
             path: {
@@ -19886,6 +19906,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path: {
@@ -19930,6 +19952,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path: {
@@ -20004,6 +20028,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path: {
@@ -20050,6 +20076,8 @@ export interface paths {
             query?: {
                 /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                 workspace?: string;
+                /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                ecosystemId?: string;
             };
             header?: never;
             path: {
@@ -20066,6 +20094,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path: {
@@ -20124,6 +20154,8 @@ export interface paths {
             query?: {
                 /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                 workspace?: string;
+                /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                ecosystemId?: string;
             };
             header?: never;
             path: {
@@ -20141,6 +20173,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path: {
@@ -20200,6 +20234,8 @@ export interface paths {
             query?: {
                 /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                 workspace?: string;
+                /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                ecosystemId?: string;
             };
             header?: never;
             path: {
@@ -20218,6 +20254,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path: {
@@ -20292,6 +20330,8 @@ export interface paths {
             query?: {
                 /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                 workspace?: string;
+                /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                ecosystemId?: string;
             };
             header?: never;
             path: {
@@ -20307,6 +20347,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path: {
@@ -20356,6 +20398,8 @@ export interface paths {
             query?: {
                 /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                 workspace?: string;
+                /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                ecosystemId?: string;
             };
             header?: never;
             path: {
@@ -20374,6 +20418,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path: {
@@ -20423,6 +20469,8 @@ export interface paths {
             query?: {
                 /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                 workspace?: string;
+                /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                ecosystemId?: string;
             };
             header?: never;
             path: {
@@ -20441,6 +20489,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path: {
@@ -20490,6 +20540,8 @@ export interface paths {
             query?: {
                 /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                 workspace?: string;
+                /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                ecosystemId?: string;
             };
             header?: never;
             path: {
@@ -20503,6 +20555,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path: {
@@ -20556,6 +20610,8 @@ export interface paths {
             query?: {
                 /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                 workspace?: string;
+                /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                ecosystemId?: string;
             };
             header?: never;
             path: {
@@ -20570,6 +20626,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path: {
@@ -20631,6 +20689,8 @@ export interface paths {
             query?: {
                 /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                 workspace?: string;
+                /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                ecosystemId?: string;
             };
             header?: never;
             path: {
@@ -20647,6 +20707,8 @@ export interface paths {
                 query?: {
                     /** @description Scope to this WORKSPACE’s owning principal (the caller’s own customer slug, or an organization the caller belongs to). Omitted: the caller’s own documents. Unknown/foreign slug: 404. */
                     workspace?: string;
+                    /** @description Act in this ECOSYSTEM (uuid or rdid) instead of the token’s: list its documents, and file a new one in it. It must be the caller’s own or one they manage. Unknown: 404. Not manageable: 403. */
+                    ecosystemId?: string;
                 };
                 header?: never;
                 path: {
