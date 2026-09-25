@@ -8,7 +8,7 @@ import {
   type GazeVector,
 } from '@agenticdevelopertoolkit/chat'
 import type { ThemeKey } from '@agenticdevelopertoolkit/themes'
-import { useKeyboardInset } from '@agenticdevelopertoolkit/viewport'
+import { useKeyboardInset, usePageScrollLock } from '@agenticdevelopertoolkit/viewport'
 import { BitbagChat } from './BitbagChat'
 import { BitbagInfo } from './BitbagInfo'
 import { Bitbag, type BitbagExpression } from './avatar'
@@ -116,6 +116,13 @@ export function BitbagDock({
   const [chatEngaged, setChatEngaged] = useState(false)
   // The frame his chat and his `i` share, which `hidden` takes away when he rests.
   const panelRef = useRef<HTMLDivElement>(null)
+  // While his conversation is up, nothing scrolls but what is inside that frame —
+  // his transcript. A drag or wheel anywhere else, the site's own scrolling pane
+  // included, goes nowhere, and iOS no longer pans the page to lift his composer
+  // over the keyboard (the dock rides `--kb-inset` for that). Open, for the
+  // avatar-only rest; engaged, for the always-shown dock, whose folded state is
+  // part of the page.
+  usePageScrollLock(avatarRest ? open : chatEngaged, panelRef)
 
   // Every way back to rest comes through here. Focus first: `hidden` stops the
   // panel rendering, and a focused composer or `i` inside it dropped focus to

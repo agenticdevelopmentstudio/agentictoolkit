@@ -15,7 +15,10 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 // Only his face is stubbed (a gsap rig with nothing to say about the dock), and the
 // keyboard-inset hook, which has no on-screen keyboard to measure here.
 vi.mock('../avatar', () => ({ Bitbag: () => <span data-testid="bitbag" /> }))
-vi.mock('@agenticdevelopertoolkit/viewport', () => ({ useKeyboardInset: () => {} }))
+vi.mock('@agenticdevelopertoolkit/viewport', () => ({
+  useKeyboardInset: () => {},
+  usePageScrollLock: () => {},
+}))
 
 import { BitbagDock } from '../BitbagDock'
 

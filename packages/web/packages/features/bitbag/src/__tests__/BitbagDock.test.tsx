@@ -10,6 +10,8 @@ import type { BitbagChatProps } from '../BitbagChat'
 // `onEngagedChange` and read back the `engaged` the dock imposes, and renders the
 // composer the dock puts the caret in: `.pc-input` is what CHAT_INPUT_SELECTOR selects.
 const chat = vi.hoisted(() => ({ props: {} as Partial<BitbagChatProps> }))
+// The page lock's last word: whether the dock is holding the page still right now.
+const pageLock = vi.hoisted(() => ({ active: false }))
 vi.mock('../avatar', () => ({ Bitbag: () => <span data-testid="bitbag" /> }))
 vi.mock('../BitbagInfo', () => ({ BitbagInfo: () => null }))
 vi.mock('../BitbagChat', () => ({
@@ -22,7 +24,12 @@ vi.mock('../BitbagChat', () => ({
     )
   },
 }))
-vi.mock('@agenticdevelopertoolkit/viewport', () => ({ useKeyboardInset: () => {} }))
+vi.mock('@agenticdevelopertoolkit/viewport', () => ({
+  useKeyboardInset: () => {},
+  usePageScrollLock: (active: boolean) => {
+    pageLock.active = active
+  },
+}))
 
 import { BitbagDock } from '../BitbagDock'
 
@@ -41,6 +48,15 @@ describe('BitbagDock', () => {
     expect(panelOf(container).hidden).toBe(false)
     expect(screen.queryByRole('button', { name: /bitbag/i })).toBeNull()
     expect((container.querySelector('.bb-dock__avatar') as HTMLElement).style.width).toBe('132px')
+  })
+
+  it('holds the page still only while his always-shown chat is engaged', () => {
+    render(<BitbagDock />)
+    expect(pageLock.active).toBe(false)
+    chatReports(true)
+    expect(pageLock.active).toBe(true)
+    chatReports(false)
+    expect(pageLock.active).toBe(false)
   })
 
   describe("rest='avatar'", () => {
@@ -78,6 +94,16 @@ describe('BitbagDock', () => {
       expect(chat.props.engaged).toBe(true)
       chatReports(false)
       expect(panelOf(container).hidden).toBe(true)
+    })
+
+    it('holds the page still while his chat is open, and lets it go when he rests', () => {
+      render(<BitbagDock rest="avatar" />)
+      expect(pageLock.active).toBe(false)
+      const face = screen.getByRole('button', { name: 'Chat with bitbag' })
+      fireEvent.click(face)
+      expect(pageLock.active).toBe(true)
+      fireEvent.click(face)
+      expect(pageLock.active).toBe(false)
     })
 
     it('closes on a tap on him while open, rather than reopening', () => {
