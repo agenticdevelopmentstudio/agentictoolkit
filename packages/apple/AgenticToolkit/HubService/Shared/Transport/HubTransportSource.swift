@@ -2,8 +2,8 @@ import AgenticDeveloperHubClient
 import Foundation
 
 /// Where the app's `APITransport` comes from. macOS resolves against a
-/// running daemon (`ResolvedTransportSource`, Task 3); iOS hands out the
-/// in-process daemon's transport (`LocalDaemonTransportSource`, Task 4).
+/// running daemon (`ResolvedTransportSource`); iOS hands out the in-process
+/// daemon's transport (`EmbeddedDaemonTransportSource`).
 /// `HubEnvironment` calls `makeTransport()` at bootstrap and again whenever
 /// the app is foregrounded, rebuilding its client if the kind changed.
 public protocol HubTransportSource: Sendable {
