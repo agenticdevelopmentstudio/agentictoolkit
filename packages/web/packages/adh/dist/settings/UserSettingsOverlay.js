@@ -276,6 +276,8 @@ import {
 import { Checkbox } from "@agenticdevelopertoolkit/ui/components/checkbox";
 import { Label } from "@agenticdevelopertoolkit/ui/components/label";
 import { SettingRow } from "@agentic-toolkit/account";
+import { DetailSection, SettingsBody } from "@agentic-toolkit/resource";
+import { Card, CardContent } from "@agenticdevelopertoolkit/ui/components/card";
 import { jsx, jsxs } from "react/jsx-runtime";
 var REDUCE_MOTION_OPTIONS = [
   { value: "auto", label: "Default" },
@@ -339,59 +341,71 @@ function CheckboxRow({
   onCheckedChange
 }) {
   return /* @__PURE__ */ jsxs("div", { className: "flex items-start gap-3", children: [
-    /* @__PURE__ */ jsx(Checkbox, { id, checked, onCheckedChange, className: "mt-0.5" }),
+    /* @__PURE__ */ jsx(
+      Checkbox,
+      {
+        id,
+        checked,
+        onCheckedChange,
+        className: "mt-0.5"
+      }
+    ),
     /* @__PURE__ */ jsxs("div", { className: "min-w-0", children: [
       /* @__PURE__ */ jsx(Label, { htmlFor: id, className: "cursor-pointer", children: label }),
       description && /* @__PURE__ */ jsx("p", { className: "mt-0.5 text-xs text-apt-text-muted", children: description })
     ] })
   ] });
 }
-var ThemePickerRow = process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === "local" || process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === "testing" || process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === "staging" ? dynamic(() => import("@agentic-toolkit/adh/settings/ThemePickerRow"), { ssr: false }) : () => null;
+var ThemePickerRow = process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === "local" || process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === "testing" || process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === "staging" ? dynamic(() => import("@agentic-toolkit/adh/settings/ThemePickerRow"), {
+  ssr: false
+}) : () => null;
 function AppearancePanel() {
   const { prefs, set } = useAppearanceSettings();
-  return /* @__PURE__ */ jsx("div", { className: "min-h-0 flex-1 overflow-y-auto px-6 py-6", children: /* @__PURE__ */ jsxs("div", { className: "max-w-3xl space-y-7", children: [
+  return /* @__PURE__ */ jsxs(SettingsBody, { children: [
     /* @__PURE__ */ jsx("p", { className: "text-sm text-apt-text-muted", children: "\u201CDefault\u201D follows your device\u2019s own setting where possible. These preferences are saved to your account, so they follow you to every site in the family." }),
-    /* @__PURE__ */ jsx(ThemePickerRow, {}),
-    /* @__PURE__ */ jsx(
-      SegmentedRow,
-      {
-        label: "Reduce motion",
-        description: "Minimise animations and transitions.",
-        value: prefs.reduceMotion,
-        options: REDUCE_MOTION_OPTIONS,
-        onChange: (reduceMotion) => set({ reduceMotion })
-      }
-    ),
-    /* @__PURE__ */ jsx(
-      SegmentedRow,
-      {
-        label: "Contrast",
-        description: "Strengthen text and border contrast.",
-        value: prefs.contrast,
-        options: CONTRAST_OPTIONS,
-        onChange: (contrast) => set({ contrast })
-      }
-    ),
-    /* @__PURE__ */ jsx(
-      SegmentedRow,
-      {
-        label: "Text size",
-        value: prefs.textSize,
-        options: TEXT_SIZE_OPTIONS,
-        onChange: (textSize) => set({ textSize })
-      }
-    ),
-    /* @__PURE__ */ jsx(
-      SegmentedRow,
-      {
-        label: "Spacing",
-        description: "Density of layout spacing.",
-        value: prefs.spacing,
-        options: SPACING_OPTIONS,
-        onChange: (spacing) => set({ spacing })
-      }
-    ),
-    /* @__PURE__ */ jsxs("div", { className: "space-y-4 border-t border-apt-border pt-6", children: [
+    /* @__PURE__ */ jsx(DetailSection, { title: "Display", children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(CardContent, { className: "flex flex-col gap-6", children: [
+      /* @__PURE__ */ jsx(ThemePickerRow, {}),
+      /* @__PURE__ */ jsx(
+        SegmentedRow,
+        {
+          label: "Reduce motion",
+          description: "Minimise animations and transitions.",
+          value: prefs.reduceMotion,
+          options: REDUCE_MOTION_OPTIONS,
+          onChange: (reduceMotion) => set({ reduceMotion })
+        }
+      ),
+      /* @__PURE__ */ jsx(
+        SegmentedRow,
+        {
+          label: "Contrast",
+          description: "Strengthen text and border contrast.",
+          value: prefs.contrast,
+          options: CONTRAST_OPTIONS,
+          onChange: (contrast) => set({ contrast })
+        }
+      ),
+      /* @__PURE__ */ jsx(
+        SegmentedRow,
+        {
+          label: "Text size",
+          value: prefs.textSize,
+          options: TEXT_SIZE_OPTIONS,
+          onChange: (textSize) => set({ textSize })
+        }
+      ),
+      /* @__PURE__ */ jsx(
+        SegmentedRow,
+        {
+          label: "Spacing",
+          description: "Density of layout spacing.",
+          value: prefs.spacing,
+          options: SPACING_OPTIONS,
+          onChange: (spacing) => set({ spacing })
+        }
+      )
+    ] }) }) }),
+    /* @__PURE__ */ jsx(DetailSection, { title: "Accessibility", children: /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs(CardContent, { className: "flex flex-col gap-4", children: [
       /* @__PURE__ */ jsx(
         CheckboxRow,
         {
@@ -411,12 +425,17 @@ function AppearancePanel() {
           onCheckedChange: (underlineLinks) => set({ underlineLinks })
         }
       )
-    ] })
-  ] }) });
+    ] }) }) })
+  ] });
 }
 
 // src/settings/HubPreferencesPanel.tsx
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import {
   chordFromEvent,
@@ -430,6 +449,8 @@ import {
   setSiteMenuShortcut,
   useHubPreferences
 } from "@agentic-toolkit/adh/header/hub-preferences";
+import { DetailSection as DetailSection2, SettingsBody as SettingsBody2 } from "@agentic-toolkit/resource";
+import { Card as Card2, CardContent as CardContent2 } from "@agenticdevelopertoolkit/ui/components/card";
 import { jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
 var SITE_MENU_LABEL = "Site menu";
 function HubPreferencesPanel() {
@@ -470,62 +491,73 @@ function HubPreferencesPanel() {
   }, [recording.state]);
   const isDefault = siteMenuShortcut === DEFAULT_SITE_MENU_SHORTCUT;
   const isOff = siteMenuShortcut === "";
-  return /* @__PURE__ */ jsx2("div", { className: "min-h-0 flex-1 overflow-y-auto px-6 py-6", children: /* @__PURE__ */ jsxs2("div", { className: "max-w-3xl space-y-7", children: [
+  return /* @__PURE__ */ jsxs2(SettingsBody2, { children: [
     /* @__PURE__ */ jsx2("p", { className: "text-sm text-apt-text-muted", children: "Preferences for the hub\u2019s own chrome. Unlike the rest of your settings, these are saved to this browser rather than to your account \u2014 a keyboard shortcut belongs to the keyboard in front of you." }),
-    /* @__PURE__ */ jsx2(
-      SettingRow2,
-      {
-        label: "Site menu shortcut",
-        description: "Opens and closes the site menu from anywhere, including while you are typing.",
-        children: /* @__PURE__ */ jsxs2("div", { className: "flex items-center gap-2", children: [
-          /* @__PURE__ */ jsx2(
-            "span",
-            {
-              className: "min-w-24 rounded-md border border-apt-border px-3 py-1.5 text-center font-mono text-sm text-apt-text",
-              "aria-live": "polite",
-              children: recording.state === "listening" ? "Press keys\u2026" : !mounted ? "\xA0" : isOff ? "Off" : formatChord(siteMenuShortcut)
-            }
-          ),
-          recording.state === "listening" ? /* @__PURE__ */ jsx2(
-            Button,
-            {
-              variant: "outline",
-              size: "sm",
-              onClick: () => setRecording({ state: "idle" }),
-              children: "Cancel"
-            }
-          ) : /* @__PURE__ */ jsx2(
-            Button,
-            {
-              variant: "outline",
-              size: "sm",
-              onClick: () => setRecording({ state: "listening" }),
-              children: isOff ? "Set" : "Change"
-            }
-          ),
-          /* @__PURE__ */ jsx2(
-            Button,
-            {
-              variant: "ghost",
-              size: "sm",
-              disabled: isDefault,
-              onClick: () => save(DEFAULT_SITE_MENU_SHORTCUT),
-              children: "Reset"
-            }
-          ),
-          /* @__PURE__ */ jsx2(Button, { variant: "ghost", size: "sm", disabled: isOff, onClick: () => save(""), children: "Turn off" })
-        ] })
-      }
-    ),
-    recording.state === "listening" && /* @__PURE__ */ jsx2("p", { className: "text-xs text-apt-text-muted", children: "Press the combination you want. Escape cancels; Escape and Tab cannot be bound." }),
-    recording.state === "conflict" && /* @__PURE__ */ jsxs2("p", { className: "text-xs text-apt-red", role: "alert", children: [
-      formatChord(recording.keys),
-      " is already",
-      " ",
-      /* @__PURE__ */ jsx2("span", { className: "font-medium", children: recording.with }),
-      ". Pick another combination."
-    ] })
-  ] }) });
+    /* @__PURE__ */ jsx2(DetailSection2, { title: "Keyboard shortcuts", children: /* @__PURE__ */ jsx2(Card2, { children: /* @__PURE__ */ jsxs2(CardContent2, { className: "flex flex-col gap-3", children: [
+      /* @__PURE__ */ jsx2(
+        SettingRow2,
+        {
+          label: "Site menu shortcut",
+          description: "Opens and closes the site menu from anywhere, including while you are typing.",
+          children: /* @__PURE__ */ jsxs2("div", { className: "flex items-center gap-2", children: [
+            /* @__PURE__ */ jsx2(
+              "span",
+              {
+                className: "min-w-24 rounded-md border border-apt-border px-3 py-1.5 text-center font-mono text-sm text-apt-text",
+                "aria-live": "polite",
+                children: recording.state === "listening" ? "Press keys\u2026" : !mounted ? "\xA0" : isOff ? "Off" : formatChord(siteMenuShortcut)
+              }
+            ),
+            recording.state === "listening" ? /* @__PURE__ */ jsx2(
+              Button,
+              {
+                variant: "outline",
+                size: "sm",
+                onClick: () => setRecording({ state: "idle" }),
+                children: "Cancel"
+              }
+            ) : /* @__PURE__ */ jsx2(
+              Button,
+              {
+                variant: "outline",
+                size: "sm",
+                onClick: () => setRecording({ state: "listening" }),
+                children: isOff ? "Set" : "Change"
+              }
+            ),
+            /* @__PURE__ */ jsx2(
+              Button,
+              {
+                variant: "ghost",
+                size: "sm",
+                disabled: isDefault,
+                onClick: () => save(DEFAULT_SITE_MENU_SHORTCUT),
+                children: "Reset"
+              }
+            ),
+            /* @__PURE__ */ jsx2(
+              Button,
+              {
+                variant: "ghost",
+                size: "sm",
+                disabled: isOff,
+                onClick: () => save(""),
+                children: "Turn off"
+              }
+            )
+          ] })
+        }
+      ),
+      recording.state === "listening" && /* @__PURE__ */ jsx2("p", { className: "text-xs text-apt-text-muted", children: "Press the combination you want. Escape cancels; Escape and Tab cannot be bound." }),
+      recording.state === "conflict" && /* @__PURE__ */ jsxs2("p", { className: "text-xs text-apt-red", role: "alert", children: [
+        formatChord(recording.keys),
+        " is already",
+        " ",
+        /* @__PURE__ */ jsx2("span", { className: "font-medium", children: recording.with }),
+        ". Pick another combination."
+      ] })
+    ] }) }) })
+  ] });
 }
 
 // src/settings/registry.tsx
@@ -552,6 +584,8 @@ var ICONS = {
 };
 var HELP = {
   account: "Your sign-in email and password.",
+  security: "Two-factor authentication, passkeys and recovery codes.",
+  notifications: "What the hub tells you about, and on which channel.",
   subscription: "Your plan and billing.",
   usage: "This period\u2019s calls, data, tokens and spend, per principal.",
   profile: "Your public display name and profile URL.",
@@ -586,12 +620,10 @@ var PANELS = {
   archived: /* @__PURE__ */ jsx3(ArchivedPanel, {}),
   preferences: /* @__PURE__ */ jsx3(HubPreferencesPanel, {})
 };
-var SELF_TITLED = /* @__PURE__ */ new Set([
-  "notifications",
-  "security"
-]);
 var API_PATHS = {
   account: "/auth/me",
+  security: "/account/mfa",
+  notifications: "/notifications/preferences",
   usage: "/usage/summary",
   profile: "/auth/me",
   social: "/content/social-links",
@@ -615,7 +647,7 @@ function buildSettingsTopics() {
       // overlay's actual URL; there isn't one.
       href: `/settings/${t.id}`,
       content: /* @__PURE__ */ jsxs3("div", { className: "flex min-h-0 min-w-0 flex-1 flex-col", children: [
-        !SELF_TITLED.has(t.id) && /* @__PURE__ */ jsx3(
+        /* @__PURE__ */ jsx3(
           FeatureTitle,
           {
             title: t.label,
