@@ -15,6 +15,10 @@ extension ComposableSettings {
 
         private let viewModel: RangeViewModel<Double>
 
+        /// The view model's ``AbstractViewModel/explanation``, which the
+        /// ``GroupView`` this is placed in draws under the row.
+        public var settingExplanation: String? { viewModel.explanation }
+
         private let formatter: @MainActor (Double) -> String
 
         public init(
@@ -83,3 +87,5 @@ extension ComposableSettings {
         }
     }
 }
+
+extension ComposableSettings.CaptionedSliderView: ComposableSettings.ExplainedSettingsView {}

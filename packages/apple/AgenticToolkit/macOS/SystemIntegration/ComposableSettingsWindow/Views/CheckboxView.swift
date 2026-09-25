@@ -21,6 +21,10 @@ extension ComposableSettings {
 
         private let viewModel: ViewModel<Bool>
 
+        /// The view model's ``AbstractViewModel/explanation``, which the
+        /// ``GroupView`` this is placed in draws under the row.
+        public var settingExplanation: String? { viewModel.explanation }
+
         public init(with viewModel: ViewModel<Bool>) {
             self.viewModel = viewModel
             self.label = Self.createLabel(title: viewModel.title)
@@ -71,3 +75,5 @@ extension ComposableSettings {
         }
     }
 }
+
+extension ComposableSettings.CheckboxView: ComposableSettings.ExplainedSettingsView {}

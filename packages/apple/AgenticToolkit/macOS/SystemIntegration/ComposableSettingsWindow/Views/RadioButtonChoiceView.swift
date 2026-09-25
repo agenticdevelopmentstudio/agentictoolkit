@@ -10,6 +10,10 @@ extension ComposableSettings {
 
         private let viewModel: ChoiceViewModel<Value>
 
+        /// The view model's ``AbstractViewModel/explanation``, which the
+        /// ``GroupView`` this is placed in draws under the row.
+        public var settingExplanation: String? { viewModel.explanation }
+
         private var buttonValues: [(button: NSButton, value: Value)] = []
 
         public init(
@@ -81,3 +85,5 @@ extension ComposableSettings {
         }
     }
 }
+
+extension ComposableSettings.RadioButtonChoiceView: ComposableSettings.ExplainedSettingsView {}

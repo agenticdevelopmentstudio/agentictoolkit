@@ -10,6 +10,10 @@ extension ComposableSettings {
 
         private let viewModel: ColorViewModel
 
+        /// The view model's ``AbstractViewModel/explanation``, which the
+        /// ``GroupView`` this is placed in draws under the row.
+        public var settingExplanation: String? { viewModel.explanation }
+
         public init(viewModel: ColorViewModel) {
             self.viewModel = viewModel
             self.label = Self.createLabel(title: viewModel.title)
@@ -50,3 +54,5 @@ extension ComposableSettings {
         }
     }
 }
+
+extension ComposableSettings.ColorPickerView: ComposableSettings.ExplainedSettingsView {}

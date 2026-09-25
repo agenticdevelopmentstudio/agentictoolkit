@@ -22,6 +22,11 @@ extension ComposableSettings {
         NSView, SettingsViewProtocol, SelfHidingSettingsView {
         public let child: NSView
 
+        /// The child's explanation, when the child is a setting that has one.
+        public var settingExplanation: String? {
+            (child as? any ExplainedSettingsView)?.settingExplanation
+        }
+
         /// Told to whoever placed this view — a group's card closes up over a
         /// row whose content has taken itself off screen.
         public var onVisibilityChange: (() -> Void)?
@@ -68,3 +73,5 @@ extension ComposableSettings {
         }
     }
 }
+
+extension ComposableSettings.ConditionalView: ComposableSettings.ExplainedSettingsView {}

@@ -29,6 +29,19 @@ extension ComposableSettings {
         var onVisibilityChange: (() -> Void)? { get set }
     }
 
+    /// A setting row built from a view model, carrying that model's
+    /// ``AbstractViewModel/explanation``.
+    ///
+    /// `GroupView` draws the explanation as a secondary-label line tucked under
+    /// the row — the same ``ExplanationView`` a caller would add by hand, as a
+    /// `.continuation`. Before this, every view model took an `explanation:`
+    /// and no view drew it, so a panel's prose was silently thrown away.
+    @MainActor
+    public protocol ExplainedSettingsView: NSView {
+        /// The sentence to show under the row; nil or empty shows nothing.
+        var settingExplanation: String? { get }
+    }
+
     /// A group of settings, drawn the way System Settings draws one: a caption
     /// *outside* and above a rounded card, and inside the card one padded row
     /// per setting with a hairline between them.
@@ -112,18 +125,42 @@ extension ComposableSettings {
         /// failures into an unseparated run of jammed-together lines, and sliced
         /// one model description into six divided rows. What a view means in a
         /// card is not knowable from what class it is.
+        ///
+        /// A view built from a view model with an `explanation`
+        /// (``ExplainedSettingsView``) brings it along: the explanation is added
+        /// as a `.continuation` right under it, and comes and goes with it.
         public func addSettingSubview(_ view: NSView, style: CardRowStyle = .row) {
+            let explanation = Self.explanationView(for: view)
             let row = CardRow(content: view, style: style)
             if let selfHiding = view as? any SelfHidingSettingsView {
-                selfHiding.onVisibilityChange = { [weak self, weak row] in
+                selfHiding.onVisibilityChange = { [weak self, weak row, weak view, weak explanation] in
                     row?.syncVisibility()
+                    // Its own `onVisibilityChange` closes its row up with it.
+                    if let view { explanation?.isHidden = view.isHidden }
                     self?.updateSeparators()
                 }
             }
+            append(row)
+            if let explanation {
+                explanation.isHidden = view.isHidden
+                addSettingSubview(explanation, style: .continuation)
+            }
+        }
+
+        private func append(_ row: CardRow) {
             rows.append(row)
             rowStack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: rowStack.widthAnchor).isActive = true
             updateSeparators()
+        }
+
+        /// The line drawn under `view` for its view model's explanation, or nil
+        /// when it has none.
+        private static func explanationView(for view: NSView) -> ExplanationView? {
+            guard let text = (view as? any ExplainedSettingsView)?.settingExplanation,
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { return nil }
+            return ExplanationView(withText: text)
         }
 
         /// A divider belongs above a row only when there is a visible row for it

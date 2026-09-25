@@ -8,6 +8,10 @@ extension ComposableSettings {
 
         private let viewModel: ButtonViewModel
 
+        /// The view model's ``AbstractViewModel/explanation``, which the
+        /// ``GroupView`` this is placed in draws under the row.
+        public var settingExplanation: String? { viewModel.explanation }
+
         /// Where the button sits in the row it is given.
         public enum Placement: Sendable {
             /// Stretched across the whole card.
@@ -77,3 +81,5 @@ extension ComposableSettings {
         }
     }
 }
+
+extension ComposableSettings.ButtonView: ComposableSettings.ExplainedSettingsView {}

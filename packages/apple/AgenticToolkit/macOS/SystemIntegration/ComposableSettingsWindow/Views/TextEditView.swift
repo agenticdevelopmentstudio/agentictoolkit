@@ -10,6 +10,10 @@ extension ComposableSettings {
 
         private let viewModel: ViewModel<String>
 
+        /// The view model's ``AbstractViewModel/explanation``, which the
+        /// ``GroupView`` this is placed in draws under the row.
+        public var settingExplanation: String? { viewModel.explanation }
+
         public init(with viewModel: ViewModel<String>) {
             self.viewModel = viewModel
             self.label = Self.createLabel(title: viewModel.title)
@@ -79,3 +83,5 @@ extension ComposableSettings {
         }
     }
 }
+
+extension ComposableSettings.TextEditView: ComposableSettings.ExplainedSettingsView {}

@@ -151,3 +151,75 @@ struct ExplanationViewVisibilityTests {
         #expect(notice.text == "Deriving history for 2 sessions.")
     }
 }
+
+/// A view model's `explanation` is drawn: a secondary line tucked under the
+/// control it explains, which comes and goes with that control.
+@MainActor
+struct GroupViewExplanationTests {
+
+    private func explanations(in group: ComposableSettings.GroupView) -> [ComposableSettings.ExplanationView] {
+        func walk(_ view: NSView) -> [ComposableSettings.ExplanationView] {
+            view.subviews.flatMap { sub -> [ComposableSettings.ExplanationView] in
+                if let found = sub as? ComposableSettings.ExplanationView { return [found] }
+                return walk(sub)
+            }
+        }
+        return walk(group)
+    }
+
+    @Test("a setting's explanation is added as a line under it")
+    func explanationIsDrawnUnderItsSetting() {
+        let group = ComposableSettings.GroupView(withTitle: "Billing")
+        let checkbox = ComposableSettings.CheckboxView(with: ComposableSettings.ViewModel<Bool>(
+            title: "Round up", get: { false }, set: { _ in }, explanation: "Applies to new projects only."))
+
+        group.addSettingSubview(checkbox)
+
+        let lines = explanations(in: group)
+        #expect(lines.map(\.text) == ["Applies to new projects only."])
+        #expect(lines.first?.isHidden == false)
+        #expect(lines.first?.superview?.isHidden == false)
+    }
+
+    @Test("a setting without an explanation adds no line")
+    func noExplanationNoLine() {
+        let group = ComposableSettings.GroupView(withTitle: "Billing")
+        group.addSettingSubview(ComposableSettings.CheckboxView(with: ComposableSettings.ViewModel<Bool>(
+            title: "Round up", get: { false }, set: { _ in })))
+        group.addSettingSubview(ComposableSettings.CheckboxView(with: ComposableSettings.ViewModel<Bool>(
+            title: "Blank", get: { false }, set: { _ in }, explanation: "  \n")))
+
+        #expect(explanations(in: group).isEmpty)
+    }
+
+    @Test("the explanation of a conditional setting hides and reopens with it")
+    func explanationFollowsAConditionalSetting() async throws {
+        let setting = UserSetting<Bool>("agentic_toolkit_group_explanation_test", default: false)
+        setting.value = false
+        defer { setting.value = false }
+        let checkbox = ComposableSettings.CheckboxView(with: ComposableSettings.ViewModel<Bool>(
+            title: "Round up", get: { false }, set: { _ in }, explanation: "Shown only when enabled."))
+        let conditional = ComposableSettings.ConditionalView(observing: setting, child: checkbox) { $0 }
+        let group = ComposableSettings.GroupView(withTitle: "Billing")
+
+        group.addSettingSubview(conditional)
+        let line = try #require(explanations(in: group).first)
+        #expect(line.text == "Shown only when enabled.")
+        #expect(line.isHidden == true)
+        #expect(line.superview?.isHidden == true)
+
+        setting.value = true
+        for _ in 0..<100 where line.isHidden {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(line.isHidden == false)
+        #expect(line.superview?.isHidden == false)
+
+        setting.value = false
+        for _ in 0..<100 where !line.isHidden {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(line.isHidden == true)
+        #expect(line.superview?.isHidden == true)
+    }
+}

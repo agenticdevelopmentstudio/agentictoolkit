@@ -10,6 +10,10 @@ extension ComposableSettings {
 
         private let viewModel: ChoiceViewModel<Value>
 
+        /// The view model's ``AbstractViewModel/explanation``, which the
+        /// ``GroupView`` this is placed in draws under the row.
+        public var settingExplanation: String? { viewModel.explanation }
+
         /// Greys out the whole row — the popup and its title — the way
         /// `FontPickerView.isEnabled` does. Disabling only `popUpButton`
         /// leaves the title at full strength beside a dead control.
@@ -105,3 +109,5 @@ extension ComposableSettings {
         }
     }
 }
+
+extension ComposableSettings.PopupMenuChoiceView: ComposableSettings.ExplainedSettingsView {}

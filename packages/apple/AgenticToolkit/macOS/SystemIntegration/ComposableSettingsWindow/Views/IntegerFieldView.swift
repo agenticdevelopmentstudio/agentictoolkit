@@ -22,6 +22,9 @@ extension ComposableSettings {
 
         private let field: NumberFieldView<Int>
 
+        /// The explanation of the view model the field was built from.
+        public var settingExplanation: String? { field.settingExplanation }
+
         /// - Parameters:
         ///   - fieldWidth: Width of the number field.
         ///   - labelWidth: When set, the label is pinned to this width and
@@ -67,3 +70,5 @@ extension ComposableSettings {
         }
     }
 }
+
+extension ComposableSettings.IntegerFieldView: ComposableSettings.ExplainedSettingsView {}

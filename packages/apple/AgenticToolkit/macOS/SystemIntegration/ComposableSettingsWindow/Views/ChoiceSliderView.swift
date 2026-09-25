@@ -15,6 +15,10 @@ extension ComposableSettings {
 
         private let viewModel: ChoiceViewModel<Value>
 
+        /// The view model's ``AbstractViewModel/explanation``, which the
+        /// ``GroupView`` this is placed in draws under the row.
+        public var settingExplanation: String? { viewModel.explanation }
+
         public init(viewModel: ChoiceViewModel<Value>) {
             self.viewModel = viewModel
             self.label = Self.createLabel(title: viewModel.title)
@@ -125,3 +129,5 @@ extension ComposableSettings {
         }
     }
 }
+
+extension ComposableSettings.ChoiceSliderView: ComposableSettings.ExplainedSettingsView {}

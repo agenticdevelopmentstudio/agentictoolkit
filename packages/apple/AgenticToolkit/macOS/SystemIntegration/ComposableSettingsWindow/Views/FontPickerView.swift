@@ -18,6 +18,10 @@ extension ComposableSettings {
 
         private let viewModel: FontViewModel
 
+        /// The view model's ``AbstractViewModel/explanation``, which the
+        /// ``GroupView`` this is placed in draws under the row.
+        public var settingExplanation: String? { viewModel.explanation }
+
         public init(viewModel: FontViewModel) {
             self.viewModel = viewModel
             self.label = ComposableSettings.makeRowLabel(viewModel.title)
@@ -71,3 +75,5 @@ extension ComposableSettings {
         }
     }
 }
+
+extension ComposableSettings.FontPickerView: ComposableSettings.ExplainedSettingsView {}

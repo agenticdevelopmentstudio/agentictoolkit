@@ -220,6 +220,10 @@ extension ComposableSettings {
 
         private let viewModel: ViewModel<Value>
 
+        /// The view model's ``AbstractViewModel/explanation``, which the
+        /// ``GroupView`` this is placed in draws under the row.
+        public var settingExplanation: String? { viewModel.explanation }
+
         /// - Parameters:
         ///   - minimum: The lowest value the field will store, or `nil` to
         ///     clamp nothing at the bottom.
@@ -356,3 +360,5 @@ extension ComposableSettings {
         }
     }
 }
+
+extension ComposableSettings.NumberFieldView: ComposableSettings.ExplainedSettingsView {}

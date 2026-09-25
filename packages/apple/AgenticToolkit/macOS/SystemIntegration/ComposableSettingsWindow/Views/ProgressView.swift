@@ -9,6 +9,10 @@ extension ComposableSettings {
 
         private let viewModel: ProgressViewModel
 
+        /// The view model's ``AbstractViewModel/explanation``, which the
+        /// ``GroupView`` this is placed in draws under the row.
+        public var settingExplanation: String? { viewModel.explanation }
+
         private var cancellable: AnyCancellable?
 
         public init(viewModel: ProgressViewModel) {
@@ -49,3 +53,5 @@ extension ComposableSettings {
         }
     }
 }
+
+extension ComposableSettings.ProgressView: ComposableSettings.ExplainedSettingsView {}
