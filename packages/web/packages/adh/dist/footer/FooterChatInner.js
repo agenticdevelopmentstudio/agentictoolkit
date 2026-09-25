@@ -53,14 +53,32 @@ var REST_OFFSET_VAR = "--adh-footer-rest-x";
 var REST_SLOT_HOST_CLASS = "adh-footer__rest-slot-host";
 var REST_SLOT_SELECTOR = `.adh-footer--with-chat .${REST_SLOT_HOST_CLASS}`;
 var REST_DOCK_SELECTOR = ".bb-dock.adh-footer__chat";
-var RESIZE_SOURCES = ".adh-footer--with-chat, .adh-footer--with-chat .adh-footer__links";
+var REST_COPYRIGHT_SELECTOR = ".adh-footer--with-chat .adh-footer__copyright";
+var REST_CENTRE_CLEARANCE = 32;
+var RESIZE_SOURCES = [
+  ".adh-footer--with-chat",
+  ".adh-footer--with-chat .adh-footer__links",
+  REST_COPYRIGHT_SELECTOR
+].join(", ");
+var laidOut = (el) => el instanceof HTMLElement && el.getClientRects().length > 0;
+function leftNeighbour(doc, host) {
+  for (let el = host.previousElementSibling; el; el = el.previousElementSibling) {
+    if (laidOut(el)) return el;
+  }
+  const copyright = doc.querySelector(REST_COPYRIGHT_SELECTOR);
+  return laidOut(copyright) ? copyright : null;
+}
 function restOffset(doc) {
-  const host = Array.from(doc.querySelectorAll(REST_SLOT_SELECTOR)).find(
-    (el) => el.getClientRects().length > 0
-  );
+  const host = Array.from(doc.querySelectorAll(REST_SLOT_SELECTOR)).find(laidOut);
   if (!host) return null;
   const slot = parseFloat(getComputedStyle(host).marginLeft) || 0;
-  return host.getBoundingClientRect().left - slot / 2 - doc.documentElement.clientWidth / 2;
+  const centre = doc.documentElement.clientWidth / 2;
+  const right = host.getBoundingClientRect().left;
+  const neighbour = leftNeighbour(doc, host);
+  if (!neighbour) return right - slot / 2 - centre;
+  const left = neighbour.getBoundingClientRect().right;
+  const fitsCentred = centre - slot / 2 - left >= REST_CENTRE_CLEARANCE && right - (centre + slot / 2) >= REST_CENTRE_CLEARANCE;
+  return fitsCentred ? 0 : (left + right) / 2 - centre;
 }
 function useFooterRestOffset() {
   useLayoutEffect(() => {

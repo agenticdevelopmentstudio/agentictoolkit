@@ -257,10 +257,16 @@ a.adh-footer__brand-link:focus-visible {
    while the two copies stayed in step, which nothing checked. A hook needs no
    specificity contest: nothing but this rule sets them. The values are adh's, not
    bitbag's: the bar and its slot are this footer's, and the dock knows nothing of
-   either. */
+   either.
+
+   His chat is wider here than bitbag's default 560px — 784px, two-fifths more — so a
+   conversation on a desktop reads as a panel rather than a strip. Same kind of hook,
+   `--bb-dock-panel-width`; bitbag's own phone rule still takes the full width below
+   640px, whatever this says. */
 .bb-dock.adh-footer__chat {
   --bb-dock-rest-x: var(--adh-footer-rest-x, 0px);
   --bb-dock-rest-lift: 6px;
+  --bb-dock-panel-width: min(784px, calc(100% - 2rem));
 }
 
 /* The shared footer modal dialog (native HTML Popover API) — used by the About, Sites,

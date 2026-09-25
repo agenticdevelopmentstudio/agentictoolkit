@@ -262,6 +262,12 @@ function openLegalModal(dialogId) {
 import { useLayoutEffect } from "react";
 var REST_SLOT_HOST_CLASS = "adh-footer__rest-slot-host";
 var REST_SLOT_SELECTOR = `.adh-footer--with-chat .${REST_SLOT_HOST_CLASS}`;
+var REST_COPYRIGHT_SELECTOR = ".adh-footer--with-chat .adh-footer__copyright";
+var RESIZE_SOURCES = [
+  ".adh-footer--with-chat",
+  ".adh-footer--with-chat .adh-footer__links",
+  REST_COPYRIGHT_SELECTOR
+].join(", ");
 
 // src/footer/SiteFooter.tsx
 import { Fragment, jsx as jsx7, jsxs as jsxs6 } from "react/jsx-runtime";

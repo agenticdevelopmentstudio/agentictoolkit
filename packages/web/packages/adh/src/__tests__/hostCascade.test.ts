@@ -543,13 +543,15 @@ describe('what is no longer a contest', () => {
   })
 
   it("the host places the resting dock through bitbag's hooks, not by restating its rule", () => {
-    const hooks = ['--bb-dock-rest-x', '--bb-dock-rest-lift']
+    const hooks = ['--bb-dock-rest-x', '--bb-dock-rest-lift', '--bb-dock-panel-width']
     expect(rule('site .bb-dock.adh-footer__chat').properties.sort()).toEqual([...hooks].sort())
     const resting = rule(
       'bitbag .bb-dock--resting .bb-dock__avatar, .bb-dock--resting:has(.persona-chat.pc-collapsed) .bb-dock__avatar',
     )
     expect(resting.get('transform')).toContain('var(--bb-dock-rest-x')
     expect(resting.get('margin-bottom')).toContain('var(--bb-dock-rest-lift')
+    // The chat's width is bitbag's to lay out; the host only says how wide it may be.
+    expect(rule('bitbag .bb-dock').get('--bb-dock-panel-w')).toContain('var(--bb-dock-panel-width')
     for (const r of rulesOf('bitbag')) expect(r.properties.filter((p) => hooks.includes(p))).toEqual([])
     for (const sheet of HOSTS)
       for (const r of rulesOf(sheet))
