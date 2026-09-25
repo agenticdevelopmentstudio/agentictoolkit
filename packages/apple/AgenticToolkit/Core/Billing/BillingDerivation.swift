@@ -72,31 +72,23 @@ public enum BillingDerivation {
         let cutoff = cutoffSeconds > 0 ? cutoffSeconds : defaultCutoffSeconds
         guard let first = stamps.first else { return [] }
 
+        // Splitting at every gap longer than the cutoff is `ActivityRuns`: a
+        // run closes at the PREVIOUS event. The idle stretch is how the stop
+        // is detected; it is never billed.
+        var spans = ActivityRuns.split(stamps, idleGap: cutoff)
         // The first run may lead in from the session's own start: the minutes
         // spent reading the prompt that caused the first event are real work,
         // and this is the one place there is evidence for them. Later runs get
         // no lead-in — see the spec's head-of-run undercount note.
         // `sessions.started_at` is usually SQLite's space-separated form, which
         // `epochSeconds` accepts.
-        var runStart = first
         if let started = UTCTimestamp.epochSeconds(sessionStartedAt),
            started < first,
            first - started <= cutoff {
-            runStart = started
+            spans[0].start = started
         }
-
-        var result: [BillingRun] = []
-        var previous = first
-
-        for stamp in stamps.dropFirst() {
-            if stamp - previous > cutoff {
-                // Close at the PREVIOUS event. The idle stretch is how the stop
-                // is detected; it is never billed.
-                result.append(closed(from: runStart, to: previous))
-                runStart = stamp
-            }
-            previous = stamp
-        }
+        let last = spans.removeLast()
+        var result = spans.map { closed(from: $0.start, to: $0.end) }
 
         // The last run stays open only if the session is still live and its
         // most recent event is inside the cutoff. Anything else has stopped,
@@ -104,11 +96,11 @@ public enum BillingDerivation {
         // recency, so it closes the run rather than leaving it open forever.
         let nowSeconds = UTCTimestamp.epochSeconds(now)
         let stillRunning = sessionIsActive
-            && nowSeconds.map { $0 - previous <= cutoff } == true
+            && nowSeconds.map { $0 - last.end <= cutoff } == true
         result.append(
             stillRunning
-                ? BillingRun(startedAt: UTCTimestamp.string(epochSeconds: runStart), endedAt: "", seconds: 0)
-                : closed(from: runStart, to: previous)
+                ? BillingRun(startedAt: UTCTimestamp.string(epochSeconds: last.start), endedAt: "", seconds: 0)
+                : closed(from: last.start, to: last.end)
         )
         return result
     }
