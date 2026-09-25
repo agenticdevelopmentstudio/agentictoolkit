@@ -55,6 +55,14 @@ extension ComposableSettings {
                 self.label.stringValue = viewModel.title
                 self.textField.stringValue = viewModel.value
             }
+            viewModel.refreshHandler = { [weak self] force in
+                guard let self else { return }
+                if force {
+                    FieldSync.force(self.textField, viewModel.value)
+                } else {
+                    FieldSync.load(self.textField, viewModel.value)
+                }
+            }
         }
 
         @objc private func textFieldChanged(_ sender: NSTextField) {

@@ -595,6 +595,8 @@ targets:
       - SwiftLint
     sources:
       - Tests/AgenticToolkitMacOSTests
+      # The in-memory billing service, shared with the Core billing tests.
+      - path: Tests/AgenticToolkitCoreTests/Billing/FakeBillingClient.swift
     dependencies:
       - target: AgenticToolkitMacOS
         embed: true

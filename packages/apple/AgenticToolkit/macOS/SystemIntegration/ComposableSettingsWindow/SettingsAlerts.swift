@@ -14,6 +14,9 @@ extension ComposableSettings {
         public typealias Confirm = @MainActor (String, String, @escaping (Bool) -> Void) -> Void
         /// Says that something the user did was not saved.
         public typealias Report = @MainActor (String) -> Void
+        /// Shows a folder chooser on a window and answers with the folder, or
+        /// nil when it was cancelled or there was no window to show it on.
+        public typealias ChooseFolder = @MainActor (NSWindow?, @escaping (URL?) -> Void) -> Void
 
         private static let log = Logger(subsystem: "AgenticToolkit", category: "ComposableSettings.Alerts")
 
@@ -34,6 +37,61 @@ extension ComposableSettings {
             }
             let alert = makeDestructiveAlert(question, detail: detail, actionTitle: actionTitle)
             alert.beginSheetModal(for: window) { answer($0 == .alertFirstButtonReturn) }
+        }
+
+        /// `confirmDestructive`, awaited: true only when the destructive button
+        /// was clicked.
+        public static func confirmDestructive(
+            _ question: String,
+            detail: String,
+            actionTitle: String = "Delete",
+            on window: NSWindow?
+        ) async -> Bool {
+            await withCheckedContinuation { continuation in
+                confirmDestructive(question, detail: detail, actionTitle: actionTitle, on: window) {
+                    continuation.resume(returning: $0)
+                }
+            }
+        }
+
+        /// Awaits an injected ``Confirm`` — the form a window takes its
+        /// confirmation in so a test can answer it — the way
+        /// `confirmDestructive(_:detail:actionTitle:on:) async` awaits the sheet.
+        public static func ask(_ confirm: Confirm, _ question: String, detail: String) async -> Bool {
+            await withCheckedContinuation { continuation in
+                confirm(question, detail) { continuation.resume(returning: $0) }
+            }
+        }
+
+        /// A one-folder chooser, as a sheet on `window`, never app-modal — the
+        /// same rule as every other sheet here. `prompt` titles the choose
+        /// button; `message` says what the folder is for. With no window the
+        /// answer is nil: a chooser with nothing to attach to would have to be
+        /// app-modal.
+        public static func chooseFolder(
+            on window: NSWindow?,
+            prompt: String,
+            message: String,
+            _ answer: @escaping (URL?) -> Void
+        ) {
+            guard let window else {
+                log.warning("folder chooser with no window, cancelled: \(message, privacy: .public)")
+                answer(nil)
+                return
+            }
+            let panel = makeFolderPanel(prompt: prompt, message: message)
+            panel.beginSheetModal(for: window) { answer($0 == .OK ? panel.url : nil) }
+        }
+
+        /// The panel `chooseFolder` shows, built but not presented.
+        static func makeFolderPanel(prompt: String, message: String) -> NSOpenPanel {
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.allowsMultipleSelection = false
+            panel.prompt = prompt
+            panel.message = message
+            return panel
         }
 
         /// The sheet `confirmDestructive` shows, built but not presented.

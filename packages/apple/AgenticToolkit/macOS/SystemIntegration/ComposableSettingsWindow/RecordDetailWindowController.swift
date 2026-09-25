@@ -41,7 +41,8 @@ extension ComposableSettings {
         /// Asked whether the selected record may be removed. `−` is disabled
         /// when it answers false, and a remove is refused even if the button
         /// is bypassed. Nil allows every record. A built-in row — a catch-all
-        /// bucket rather than a record anyone made — answers false.
+        /// bucket rather than a record anyone made — belongs in `fixedPanels`,
+        /// which are never removable, not in the records.
         public var canRemoveRecord: ((Record) -> Bool)? {
             didSet { updateRemoveButton() }
         }
@@ -68,6 +69,24 @@ extension ComposableSettings {
         /// The `+`/`−` bar under the sidebar.
         public let footer: AddRemoveFooterView
 
+        /// Rows under the records that are places, not records: a catch-all
+        /// bucket such as "Unassigned". They are listed after every record,
+        /// are never passed to the record callbacks, and can never be removed.
+        /// While one is selected `selectedRecord` is nil.
+        public private(set) var fixedPanels: [any ComposableSettingsPanel] = []
+
+        /// Asks the window's destructive yes-or-no question, as a sheet on this
+        /// window. Replaceable, so a test can answer it.
+        public var confirm: Alerts.Confirm = { _, _, answer in answer(false) }
+        /// Says, as a sheet on this window, that a change was not saved.
+        /// Replaceable, so a test can record it.
+        public var reportFailure: Alerts.Report = { _ in }
+
+        /// Runs after `updateDetailPanel` for every record on every
+        /// `setRecords` — the place to wire a pane's callbacks to an owner that
+        /// did not exist yet when the pane factory was written.
+        public var onConfigurePanel: ((any ComposableSettingsPanel, Record) -> Void)?
+
         private let makeDetailPanel: (Record) -> any ComposableSettingsPanel
         private let updateDetailPanel: (any ComposableSettingsPanel, Record) -> Void
         private let emptyLabel = ThemedLabel(role: .secondaryText, textRole: .caption)
@@ -91,6 +110,12 @@ extension ComposableSettings {
             self.updateDetailPanel = updateDetailPanel
             super.init(windowID: windowID)
             self.windowTitle = title
+            confirm = { [weak self] question, detail, answer in
+                Alerts.confirmDestructive(question, detail: detail, on: self?.window, answer)
+            }
+            reportFailure = { [weak self] message in
+                Alerts.report(message, on: self?.window)
+            }
 
             footer.trailingView = emptyLabel
             footer.onAdd = { [weak self] in self?.onAddRecord?() }
@@ -123,6 +148,7 @@ extension ComposableSettings {
             for record in records {
                 let panel = panelsByRecordID[record.id] ?? makeDetailPanel(record)
                 updateDetailPanel(panel, record)
+                onConfigurePanel?(panel, record)
                 surviving[record.id] = panel
                 recordIDsByPanel[ObjectIdentifier(panel as AnyObject)] = record.id
                 panels.append(panel)
@@ -132,10 +158,36 @@ extension ComposableSettings {
             // identity across it — which is why reusing the objects is what
             // keeps the selected row selected.
             panelsByRecordID = surviving
-            viewController?.setPanels(panels)
+            viewController?.setPanels(panels + fixedPanels)
 
             emptyLabel.isHidden = !records.isEmpty
             restoreSelection(previousIndex: previousIndex)
+        }
+
+        /// Replaces the fixed rows listed under the records, keeping the
+        /// records and the selection.
+        public func setFixedPanels(_ panels: [any ComposableSettingsPanel]) {
+            fixedPanels = panels
+            setRecords(records)
+        }
+
+        /// The pane on screen for a record, or nil if the record is not listed.
+        public func panel(forRecordID id: String) -> (any ComposableSettingsPanel)? {
+            panelsByRecordID[id]
+        }
+
+        /// Selects one of the fixed rows. A panel not among them is ignored.
+        public func selectFixedPanel(_ panel: any ComposableSettingsPanel) {
+            guard let index = fixedPanels.firstIndex(where: { ($0 as AnyObject) === (panel as AnyObject) })
+            else { return }
+            viewController?.selectPanel(at: records.count + index)
+            syncSelection()
+        }
+
+        /// The fixed row on screen, or nil when a record — or nothing — is.
+        public var selectedFixedPanel: (any ComposableSettingsPanel)? {
+            guard let selected = viewController?.selectedPanel else { return nil }
+            return fixedPanels.first { ($0 as AnyObject) === (selected as AnyObject) }
         }
 
         /// Selects a record by id. A id no longer in the list is ignored, which
@@ -153,7 +205,7 @@ extension ComposableSettings {
         }
 
         private func restoreSelection(previousIndex: Int?) {
-            guard !records.isEmpty else {
+            guard !records.isEmpty || !fixedPanels.isEmpty else {
                 syncSelection()
                 return
             }
@@ -161,7 +213,7 @@ extension ComposableSettings {
             // panel survived. It did not if the record was just deleted — so
             // take its place in the list, or the last row if it was the last.
             if viewController?.selectedPanel == nil {
-                let target = min(previousIndex ?? 0, records.count - 1)
+                let target = min(previousIndex ?? 0, records.count + fixedPanels.count - 1)
                 viewController?.selectPanel(at: target)
             }
             syncSelection()

@@ -120,6 +120,15 @@ extension ComposableSettings {
                 }
             }
 
+            viewModel.refreshHandler = { [weak self] force in
+                guard let self else { return }
+                if force {
+                    FieldSync.force(self.textView, viewModel.value)
+                } else {
+                    FieldSync.load(self.textView, viewModel.value)
+                }
+            }
+
             // The visible label isn't associated with the text view by AppKit, so
             // VoiceOver would otherwise announce an unnamed editor.
             self.textView.setAccessibilityLabel(viewModel.title)

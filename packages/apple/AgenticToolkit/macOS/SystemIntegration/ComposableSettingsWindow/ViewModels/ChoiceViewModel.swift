@@ -12,8 +12,17 @@ extension ComposableSettings {
             didSet { onChoicesChange?() }
         }
 
-        /// Fired after `choices` is replaced.
+        /// Fired after `choices` or `commands` is replaced.
         public var onChoicesChange: (() -> Void)?
+
+        /// Actions offered after the choices, below a separator — "Add
+        /// Client…" at the foot of a client chooser. Picking one runs it and
+        /// leaves the stored value, and the selection, where they were: a
+        /// command is never a value, so no sentinel value can leak into the
+        /// setting. Only `PopupMenuChoiceView` shows them.
+        public var commands: [Command] = [] {
+            didSet { onChoicesChange?() }
+        }
 
         /// Replaces `choices` only when the list really differs — a label, a
         /// value, an icon or the order changed. A caller that re-reads its
@@ -21,12 +30,7 @@ extension ComposableSettings {
         /// which closes it under a person mid-pick. Answers whether it replaced.
         @discardableResult
         public func updateChoices(_ newChoices: [Choice]) -> Bool {
-            let same = newChoices.count == choices.count
-                && zip(newChoices, choices).allSatisfy { lhs, rhs in
-                    lhs.label == rhs.label && lhs.value == rhs.value
-                        && lhs.imageSystemName == rhs.imageSystemName
-                }
-            if same { return false }
+            if newChoices == choices { return false }
             choices = newChoices
             return true
         }
@@ -59,7 +63,7 @@ extension ComposableSettings.ChoiceViewModel {
 
     /// A label/value pair for a `ChoiceViewModel`. Optionally carries a system
     /// symbol name; views that support iconography render it next to the label.
-    public struct Choice: Sendable {
+    public struct Choice: Sendable, Equatable {
         public let label: String
         public let value: Value
         public let imageSystemName: String?
@@ -68,6 +72,19 @@ extension ComposableSettings.ChoiceViewModel {
             self.label = label
             self.value = value
             self.imageSystemName = imageSystemName
+        }
+    }
+
+    /// An action offered in a choice list — see `ChoiceViewModel.commands`.
+    public struct Command {
+        /// The menu item's title, e.g. "Add Client…".
+        public let title: String
+        /// Run when the item is picked.
+        public let action: @MainActor () -> Void
+
+        public init(title: String, action: @escaping @MainActor () -> Void) {
+            self.title = title
+            self.action = action
         }
     }
 }

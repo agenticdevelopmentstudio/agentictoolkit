@@ -46,6 +46,9 @@ extension ComposableSettings {
             viewModel.onChange = { [weak self] _ in
                 self?.update()
             }
+            viewModel.refreshHandler = { [weak self] _ in
+                self?.update()
+            }
 
             self.update()
         }

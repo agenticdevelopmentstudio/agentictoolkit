@@ -37,5 +37,24 @@ extension ComposableSettings {
         public var value: Value {
             settingObserver.value
         }
+
+        /// How the row this model backs re-shows the stored value. Set by the
+        /// row view; `force` says whether an edit in progress is discarded.
+        var refreshHandler: ((_ force: Bool) -> Void)?
+
+        /// Re-reads the stored value into the row, leaving alone a field the
+        /// user is typing in — a poll that lands mid-word never replaces what
+        /// is being typed. For a row bound through `get`/`set` to a record
+        /// that changes under it, which no `onChange` announces.
+        public func refresh() {
+            refreshHandler?(false)
+        }
+
+        /// Re-reads the stored value into the row and discards any edit in
+        /// progress: after a write that was refused, the text on screen is
+        /// exactly what failed, and ending the edit later must not send it again.
+        public func revert() {
+            refreshHandler?(true)
+        }
     }
 }

@@ -125,6 +125,25 @@ extension ComposableSettings {
             onChange?(storedDetails)
         }
 
+        /// Loads `stored` after a save of `attempted` was refused. Each field
+        /// whose attempted value was refused shows the stored one again, even
+        /// while it is being edited — its text is exactly what failed, so the
+        /// edit is discarded rather than sent again when it ends. The others
+        /// load as `details = stored` would, so a field the user has since
+        /// tabbed into keeps what is being typed.
+        public func revert(attempted: ContactDetails, stored: ContactDetails) {
+            details = stored
+            let fields: [(String, String, TextEditView)] = [
+                (attempted.contactName, stored.contactName, contactNameField),
+                (attempted.email, stored.email, emailField),
+                (attempted.phone, stored.phone, phoneField),
+                (attempted.url, stored.url, urlField)
+            ]
+            for (tried, kept, field) in fields where tried != kept {
+                FieldSync.force(field.textField, kept)
+            }
+        }
+
         private func applyToFields() {
             // Straight to the text fields: `ClosureSettingObserver` delivers its
             // change one main-queue hop later, and a record loaded into a field

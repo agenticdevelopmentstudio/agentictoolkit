@@ -28,7 +28,7 @@ extension ComposableSettings {
             self.viewModel = viewModel
             self.label = Self.createLabel(title: viewModel.title)
             self.popUpButton = NSPopUpButton(frame: .zero)
-            Self.populate(self.popUpButton, with: viewModel.choices)
+            Self.populate(self.popUpButton, with: viewModel.choices, commands: viewModel.commands)
 
             super.init(frame: .zero)
             self.translatesAutoresizingMaskIntoConstraints = false
@@ -55,9 +55,12 @@ extension ComposableSettings {
             viewModel.onChange = { [weak self] _ in
                 self?.syncSelection()
             }
+            viewModel.refreshHandler = { [weak self] _ in
+                self?.syncSelection()
+            }
             viewModel.onChoicesChange = { [weak self] in
                 guard let self else { return }
-                Self.populate(self.popUpButton, with: self.viewModel.choices)
+                Self.populate(self.popUpButton, with: self.viewModel.choices, commands: self.viewModel.commands)
                 self.syncSelection()
             }
 
@@ -80,7 +83,11 @@ extension ComposableSettings {
         /// One menu item per choice, built directly. `addItem(withTitle:)`
         /// silently drops an earlier item with the same title, and two records
         /// can share a name — two projects both called "Acme" are two choices.
-        private static func populate(_ button: NSPopUpButton, with choices: [ChoiceViewModel<Value>.Choice]) {
+        private static func populate(
+            _ button: NSPopUpButton,
+            with choices: [ChoiceViewModel<Value>.Choice],
+            commands: [ChoiceViewModel<Value>.Command]
+        ) {
             button.removeAllItems()
             guard let menu = button.menu else { return }
             for choice in choices {
@@ -91,9 +98,35 @@ extension ComposableSettings {
                 }
                 menu.addItem(item)
             }
+            if !commands.isEmpty, !choices.isEmpty { menu.addItem(.separator()) }
+            for (index, command) in commands.enumerated() {
+                let item = NSMenuItem(title: command.title, action: nil, keyEquivalent: "")
+                // A marker no `Value` can be, so a command never reads as a choice.
+                item.representedObject = CommandMarker(index: index)
+                menu.addItem(item)
+            }
+        }
+
+        /// What a command's menu item carries instead of a value.
+        private final class CommandMarker: NSObject {
+            let index: Int
+            init(index: Int) { self.index = index }
+        }
+
+        /// The command menu items, in order — so a test can pick one.
+        public var commandItems: [NSMenuItem] {
+            popUpButton.itemArray.filter { $0.representedObject is CommandMarker }
         }
 
         @objc private func popupChanged(_ sender: NSPopUpButton) {
+            if let marker = sender.selectedItem?.representedObject as? CommandMarker {
+                // The popup now shows the command's title; put the value back
+                // before the action runs, since the action may open a window.
+                syncSelection()
+                let commands = viewModel.commands
+                if commands.indices.contains(marker.index) { commands[marker.index].action() }
+                return
+            }
             guard let value = sender.selectedItem?.representedObject as? Value else { return }
             if viewModel.settingObserver.value != value {
                 viewModel.settingObserver.value = value

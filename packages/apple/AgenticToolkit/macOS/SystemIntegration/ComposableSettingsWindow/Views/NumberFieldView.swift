@@ -292,6 +292,15 @@ extension ComposableSettings {
             }
 
             viewModel.onChange = { [weak self] _ in self?.sync() }
+            viewModel.refreshHandler = { [weak self] force in
+                guard let self else { return }
+                let text = self.viewModel.value.settingsFieldString
+                if force {
+                    FieldSync.force(self.textField, text)
+                } else {
+                    FieldSync.load(self.textField, text)
+                }
+            }
             self.sync()
         }
 

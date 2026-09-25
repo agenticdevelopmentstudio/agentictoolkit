@@ -16,6 +16,30 @@ extension ComposableSettings {
             case toggle
             /// A filled or hollow dot — a running timer, a connected server.
             case indicator
+            /// A `yyyy-MM-dd` day, typed and read in the card's `timeZone`.
+            /// Edits arrive through `onTypedEdit` as `.day`.
+            case day
+            /// A time of day on the card's `locale`'s clock, 12- or 24-hour,
+            /// typed on either. Edits arrive through `onTypedEdit` as `.time`,
+            /// placed on whichever day puts them nearest the cell's reference.
+            case time
+            /// A duration in seconds, shown as decimal hours and typed as
+            /// hours or `h:mm`; accepted only inside `range`. Edits arrive
+            /// through `onTypedEdit` as `.duration`.
+            case duration(range: ClosedRange<Int>)
+            /// An amount in cents, in the cell's currency; accepted only
+            /// inside `range`. With `allowsBlank`, an empty cell is a valid
+            /// edit (nil). Edits arrive through `onTypedEdit` as `.money`.
+            case money(range: ClosedRange<Int>, allowsBlank: Bool = false)
+
+            /// Whether a cell of this kind is a text field that can be typed in.
+            var isEditableText: Bool {
+                switch self {
+                case .text(let editable): editable
+                case .toggle, .indicator: false
+                case .day, .time, .duration, .money: true
+                }
+            }
         }
 
         /// The caller's key for the column; what every callback reports.
@@ -54,6 +78,31 @@ extension ComposableSettings {
         case indicator(Bool)
         /// Greyed prompt text — a value not set yet, not a value that is empty.
         case placeholder(String)
+        /// A `yyyy-MM-dd` day, for a `.day` column.
+        case day(String)
+        /// An instant, shown as a time of day, for a `.time` column; nil shows
+        /// "—". A time typed into the cell is placed nearest `date`, or
+        /// `reference` when `date` is nil.
+        case time(Date?, reference: Date? = nil)
+        /// A number of seconds, for a `.duration` column.
+        case duration(Int)
+        /// An amount in cents in `currency`, for a `.money` column; nil shows
+        /// `placeholder`.
+        case money(Int?, currency: String, placeholder: String? = nil)
+    }
+
+    /// A typed column's edit, already parsed and checked — see
+    /// `EditableTableCard.onTypedEdit`.
+    public enum EditableTableEditValue: Equatable, Sendable {
+        /// A valid `yyyy-MM-dd` day.
+        case day(String)
+        /// An instant, or nil when the cell was cleared.
+        case time(Date?)
+        /// Seconds, inside the column's range.
+        case duration(Int)
+        /// Cents inside the column's range, or nil for a cleared cell the
+        /// column allows.
+        case money(Int?)
     }
 
     /// One row, keyed by column id. The `id` is the caller's own — a DTO id,
@@ -68,12 +117,22 @@ extension ComposableSettings {
         /// attention. Marking is all the card does; what it means is the
         /// owner's business.
         public let isFlagged: Bool
+        /// No cell in the row can be typed in or toggled — a record that is
+        /// locked, such as a billed entry. Its edits are refused through
+        /// `onRejectedEdit` rather than reported.
+        public let isReadOnly: Bool
 
         /// A row for the record `id`.
-        public init(id: String, cells: [String: EditableTableCellValue], isFlagged: Bool = false) {
+        public init(
+            id: String,
+            cells: [String: EditableTableCellValue],
+            isFlagged: Bool = false,
+            isReadOnly: Bool = false
+        ) {
             self.id = id
             self.cells = cells
             self.isFlagged = isFlagged
+            self.isReadOnly = isReadOnly
         }
     }
 
@@ -130,6 +189,13 @@ extension ComposableSettings {
         public var onSelectionChange: ((_ rowID: String?) -> Void)?
         /// A text cell's edit ended with text different from what it was filled with.
         public var onEdit: ((_ rowID: String, _ columnID: String, _ newValue: String) -> Void)?
+        /// A typed column's (`.day`, `.time`, `.duration`, `.money`) edit ended
+        /// with text that parses to a valid value different from the cell's.
+        public var onTypedEdit: ((_ rowID: String, _ columnID: String, _ value: EditableTableEditValue) -> Void)?
+        /// An edit was refused and the cell put back as it was: a typed
+        /// column's text did not parse or fell outside its range, or the row is
+        /// read-only. The owner says why, if it wants to.
+        public var onRejectedEdit: ((_ rowID: String, _ columnID: String, _ text: String) -> Void)?
         /// A toggle cell was flipped.
         public var onToggle: ((_ rowID: String, _ columnID: String, _ isOn: Bool) -> Void)?
         /// A sortable header was clicked. The card does not sort; the owner re-sorts and calls `setRows`.
@@ -152,6 +218,17 @@ extension ComposableSettings {
         }
 
         // MARK: State
+
+        /// Days and times in `.day` and `.time` columns are read and shown in
+        /// this zone. The user's own, except in tests.
+        public var timeZone: TimeZone = .current {
+            didSet { tableView.reloadData() }
+        }
+        /// Times are shown on this locale's clock and typed on either. The
+        /// user's own, except in tests.
+        public var locale: Locale = .current {
+            didSet { tableView.reloadData() }
+        }
 
         /// The rows on screen — the last `setRows` that was not held back by an edit.
         public private(set) var rows: [EditableTableRow] = []
@@ -294,15 +371,107 @@ extension ComposableSettings {
         /// without an NSTextField and a live field editor.
         public func commitEdit(rowIndex: Int, columnID: String, newValue: String) {
             guard rowIndex >= 0, rowIndex < rows.count else { return }
-            onEdit?(rows[rowIndex].id, columnID, newValue)
+            route(row: rows[rowIndex], columnID: columnID, text: newValue)
         }
 
         /// Applies one edited cell to the row with `rowID`. A row that is no
         /// longer in the table is ignored: the text was typed into a record
         /// that has since gone, and no other row may receive it.
         public func commitEdit(rowID: String, columnID: String, newValue: String) {
-            guard rows.contains(where: { $0.id == rowID }) else { return }
-            onEdit?(rowID, columnID, newValue)
+            guard let row = rows.first(where: { $0.id == rowID }) else { return }
+            route(row: row, columnID: columnID, text: newValue)
+        }
+
+        /// Sends an edit to the callback its column's kind reports through, or
+        /// refuses it and puts the row back as it was.
+        private func route(row: EditableTableRow, columnID: String, text: String) {
+            guard let column = columns.first(where: { $0.id == columnID }) else { return }
+            guard !row.isReadOnly else { return reject(row: row, columnID: columnID, text: text) }
+            if case .text = column.kind {
+                onEdit?(row.id, columnID, text)
+                return
+            }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            // The text the cell showed, untouched, is not an edit either: hours
+            // and money are shown rounded, and re-reading them would move them.
+            if !trimmed.isEmpty, display(row.cells[columnID]).0 == trimmed { return }
+            guard let value = parse(trimmed, kind: column.kind, cell: row.cells[columnID]) else {
+                return reject(row: row, columnID: columnID, text: text)
+            }
+            // What the cell already held is not an edit: a figure shown rounded
+            // (to 0.01 h, to the minute) re-read would move it.
+            guard value != current(row.cells[columnID]) else { return }
+            onTypedEdit?(row.id, columnID, value)
+        }
+
+        private func reject(row: EditableTableRow, columnID: String, text: String) {
+            // The field still shows what was typed. Redraw the row from the
+            // stored cells — after the edit has ended, or the field editor
+            // would keep the rejected text on screen.
+            if let index = rows.firstIndex(where: { $0.id == row.id }) {
+                DispatchQueue.main.async { [weak self] in
+                    MainActor.assumeIsolated {
+                        guard let self, index < self.rows.count, self.rows[index].id == row.id else { return }
+                        self.tableView.reloadData(
+                            forRowIndexes: IndexSet(integer: index),
+                            columnIndexes: IndexSet(integersIn: 0..<self.tableView.numberOfColumns))
+                    }
+                }
+            }
+            onRejectedEdit?(row.id, columnID, text)
+        }
+
+        /// The typed value a cell already holds, for the no-change check.
+        private func current(_ cell: EditableTableCellValue?) -> EditableTableEditValue? {
+            switch cell {
+            case .day(let day): .day(day)
+            case .time(let date, _): .time(date.map(Self.wholeMinute))
+            case .duration(let seconds): .duration(seconds)
+            case .money(let cents, _, _): .money(cents)
+            default: nil
+            }
+        }
+
+        /// `text` read as `kind`, or nil when it is not a valid value.
+        private func parse(
+            _ text: String, kind: EditableTableColumn.Kind, cell: EditableTableCellValue?
+        ) -> EditableTableEditValue? {
+            switch kind {
+            case .day:
+                let format = DateFormatter()
+                format.locale = Locale(identifier: "en_US_POSIX")
+                format.timeZone = timeZone
+                format.dateFormat = "yyyy-MM-dd"
+                format.isLenient = false
+                guard let date = format.date(from: text), format.string(from: date) == text else { return nil }
+                return .day(text)
+            case .time:
+                if text.isEmpty { return .time(nil) }
+                var anchor: Date?
+                if case .time(let date, let reference) = cell { anchor = date ?? reference }
+                let clocks = LocalTimeText.clocks(parsing: text, locale: locale)
+                guard !clocks.isEmpty, let anchor,
+                      let date = LocalTimeText.instant(nearest: anchor, clocks: clocks, timeZone: timeZone)
+                else { return nil }
+                return .time(date)
+            case .duration(let range):
+                guard let seconds = DurationFormatter.seconds(parsing: text), range.contains(seconds)
+                else { return nil }
+                return .duration(seconds)
+            case .money(let range, let allowsBlank):
+                if text.isEmpty { return allowsBlank ? .money(nil) : nil }
+                var currency = "USD"
+                if case .money(_, let code, _) = cell { currency = code }
+                guard let cents = MoneyFormatter(currency: currency).cents(parsing: text),
+                      range.contains(cents) else { return nil }
+                return .money(cents)
+            case .text, .toggle, .indicator:
+                return nil
+            }
+        }
+
+        private static func wholeMinute(_ date: Date) -> Date {
+            Date(timeIntervalSince1970: (date.timeIntervalSince1970 / 60).rounded(.down) * 60)
         }
 
         /// A push button in the footer, after `+`/`−`. The owner decides when
@@ -453,7 +622,7 @@ extension ComposableSettings {
 
         @objc fileprivate func togglePressed(_ sender: NSButton) {
             let row = sender.tag
-            guard row >= 0, row < rows.count else { return }
+            guard row >= 0, row < rows.count, !rows[row].isReadOnly else { return }
             guard let columnID = (sender as? EditableTableToggle)?.toggleColumnID else { return }
             onToggle?(rows[row].id, columnID, sender.state == .on)
         }
@@ -501,6 +670,7 @@ extension ComposableSettings.EditableTableCard: NSTableViewDelegate {
             // column id is carried in `toggleColumnID`.
             button.toggleColumnID = columnID
             button.tag = row
+            button.isEnabled = !rows[row].isReadOnly
             if case .toggle(let isOn) = value {
                 button.state = isOn ? .on : .off
             } else {
@@ -520,23 +690,38 @@ extension ComposableSettings.EditableTableCard: NSTableViewDelegate {
             }
             return label
 
-        case .text(let editable):
+        case .text, .day, .time, .duration, .money:
             let field = reusableField()
-            field.isEditable = editable
+            field.isEditable = column.kind.isEditableText && !rows[row].isReadOnly
             field.tag = row
-            switch value {
-            case .text(let text):
-                field.stringValue = text
-                field.placeholderString = nil
-            case .placeholder(let prompt):
-                field.stringValue = ""
-                field.placeholderString = prompt
-            default:
-                field.stringValue = ""
-                field.placeholderString = nil
-            }
+            let (text, placeholder) = display(value)
+            field.stringValue = text
+            field.placeholderString = placeholder
             field.bind(rowID: rows[row].id, columnID: columnID, shownText: field.stringValue)
             return field
+        }
+    }
+
+    /// The text and placeholder a text-like cell shows for `value`.
+    private func display(_ value: ComposableSettings.EditableTableCellValue?) -> (String, String?) {
+        Self.display(value, timeZone: timeZone, locale: locale)
+    }
+
+    /// The text and placeholder a text-like cell shows for `value` on a card
+    /// in `timeZone` and `locale`. Internal so a test reads a cell as drawn.
+    static func display(
+        _ value: ComposableSettings.EditableTableCellValue?, timeZone: TimeZone, locale: Locale
+    ) -> (String, String?) {
+        switch value {
+        case .text(let text): (text, nil)
+        case .placeholder(let prompt): ("", prompt)
+        case .day(let day): (day, nil)
+        case .time(let date, _):
+            date.map { (LocalTimeText.clock($0, timeZone: timeZone, locale: locale), nil) } ?? ("", "—")
+        case .duration(let seconds): (DurationFormatter.decimalHours(seconds: seconds), nil)
+        case .money(let cents, let currency, let placeholder):
+            cents.map { (MoneyFormatter(currency: currency).editableString(cents: $0), nil) } ?? ("", placeholder)
+        case .toggle, .indicator, nil: ("", nil)
         }
     }
 
