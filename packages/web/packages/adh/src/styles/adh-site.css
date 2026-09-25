@@ -234,14 +234,16 @@ a.adh-footer__brand-link:focus-visible {
    exists while he is being talked to. Nothing overhangs, so nothing under the page is
    paid for.
 
-   WHERE HE RESTS: the slot's centre. The dock is a full-width column that centres him,
-   and waking must bring him back to that centre — his chat opens under him there — so
-   the slot is a TRANSLATE off the centre, not a different layout. That is what makes the
+   WHERE HE RESTS: the bar's centre, when he clears the copyright there by a margin;
+   otherwise midway between the copyright and Legal, in the gap the slot keeps open.
+   Which one is `useFooterRestOffset`'s call (`restOffset`). The dock is a full-width
+   column that centres him, and waking must bring him back to that centre — his chat opens under him there — so
+   the rest is a TRANSLATE off the centre, not a different layout. That is what makes the
    wake a single motion: bitbag-dock.css drops the resting translate and grows his width,
-   both on its 0.34s curve, so he slides from the slot to the middle as he grows. A
+   both on its 0.34s curve, so he slides from his rest to the middle as he grows. A
    layout move (margin-left:auto, a justify change) would jump instead, because neither
    animates. The distance is `--adh-footer-rest-x`, measured by `useFooterRestOffset`
-   because Legal's width — which the slot sits beside — belongs to the theme's font, and
+   because the copyright's and Legal's widths belong to the theme's font, and
    written on the dock itself. Unmeasured (no JS yet, or no slot), he rests at the
    centre, which is bitbag's own default rather than a guess.
 

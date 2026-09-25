@@ -18,12 +18,48 @@ export const REST_SLOT_SELECTOR = `.adh-footer--with-chat .${REST_SLOT_HOST_CLAS
 /** bitbag's dock as FooterChatInner mounts it — the element the offset is written on. */
 export const REST_DOCK_SELECTOR = '.bb-dock.adh-footer__chat'
 
-/** What can move the slot when it changes size: the bar, and the links nav that holds
- *  the slot host and everything right of it. */
-const RESIZE_SOURCES = '.adh-footer--with-chat, .adh-footer--with-chat .adh-footer__links'
+/** The copyright line: the bar's left-hand item, which a centred face must keep clear of. */
+export const REST_COPYRIGHT_SELECTOR = '.adh-footer--with-chat .adh-footer__copyright'
 
-/** The horizontal distance from the dock's centre — where bitbag's face sits with no
- *  transform — to the centre of the slot, or null when there is no slot to rest in. */
+/** The least air, in px, between a CENTRED resting face and the bar items either side of
+ *  it. Closer than this and he reads as crowding the copyright, so he moves to the middle
+ *  of the gap instead. Px, like the slot: his resting box is laid out in px. */
+export const REST_CENTRE_CLEARANCE = 32
+
+/** What can move the slot when it changes size: the bar, the links nav that holds the
+ *  slot host and everything right of it, and the copyright whose right edge he keeps
+ *  clear of. */
+const RESIZE_SOURCES = [
+  '.adh-footer--with-chat',
+  '.adh-footer--with-chat .adh-footer__links',
+  REST_COPYRIGHT_SELECTOR,
+].join(', ')
+
+const laidOut = (el: Element | null): el is HTMLElement =>
+  el instanceof HTMLElement && el.getClientRects().length > 0
+
+/** The laid-out item just left of the slot: the nearest preceding link a site added to
+ *  the bar, or else the copyright. The hidden no-popover pair before Legal is skipped —
+ *  it has no box. */
+function leftNeighbour(doc: Document, host: HTMLElement): HTMLElement | null {
+  for (let el = host.previousElementSibling; el; el = el.previousElementSibling) {
+    if (laidOut(el)) return el
+  }
+  const copyright = doc.querySelector(REST_COPYRIGHT_SELECTOR)
+  return laidOut(copyright) ? copyright : null
+}
+
+/**
+ * The horizontal distance from the dock's centre — where bitbag's face sits with no
+ * transform — to where he rests, or null when the bar keeps no slot for him.
+ *
+ * Two places, in order of preference:
+ * 1. THE CENTRE (0) — the bar's middle, where he opens — when a face that wide sits there
+ *    with at least {@link REST_CENTRE_CLEARANCE} to spare on both sides.
+ * 2. MIDWAY between the item on his left (the copyright, on an adh bar) and the slot's
+ *    host (Legal). The slot guarantees that gap is at least his width, so the middle of it
+ *    always fits him.
+ */
 export function restOffset(doc: Document): number | null {
   // The host that is actually LAID OUT, not merely the first in the DOM. A host with no
   // layout box (display:none on it or an ancestor) reads `left: 0` while its computed
@@ -31,19 +67,30 @@ export function restOffset(doc: Document): number | null {
   // screen's LEFT edge, out of sight and out of reach — which is what every browser
   // without the Popover API got, because there the fallback hides Legal and shows the
   // inline Terms / Privacy pair instead.
-  const host = Array.from(doc.querySelectorAll<HTMLElement>(REST_SLOT_SELECTOR)).find(
-    (el) => el.getClientRects().length > 0,
-  )
+  const host = Array.from(doc.querySelectorAll<HTMLElement>(REST_SLOT_SELECTOR)).find(laidOut)
   if (!host) return null
+  // The slot is his resting box's width (adh-site.css), so it is also the width a centred
+  // face needs.
   const slot = parseFloat(getComputedStyle(host).marginLeft) || 0
   // The dock is `position: fixed; left: 0; right: 0`, so its centre is the middle of
   // the viewport EXCLUDING a classic scrollbar — clientWidth, not innerWidth. `vw`
   // (what this replaced) counts the scrollbar and put him half its width too far right.
-  return host.getBoundingClientRect().left - slot / 2 - doc.documentElement.clientWidth / 2
+  const centre = doc.documentElement.clientWidth / 2
+  const right = host.getBoundingClientRect().left
+  const neighbour = leftNeighbour(doc, host)
+  // Nothing on his left to measure: the slot's own centre, which is always clear.
+  if (!neighbour) return right - slot / 2 - centre
+  const left = neighbour.getBoundingClientRect().right
+  const fitsCentred =
+    centre - slot / 2 - left >= REST_CENTRE_CLEARANCE &&
+    right - (centre + slot / 2) >= REST_CENTRE_CLEARANCE
+  return fitsCentred ? 0 : (left + right) / 2 - centre
 }
 
 /**
- * Keeps {@link REST_OFFSET_VAR} on bitbag's dock pointing at the bar's reserved slot.
+ * Keeps {@link REST_OFFSET_VAR} on bitbag's dock pointing at where he rests in the bar —
+ * the centre where there is room, else midway along the gap the slot keeps open (see
+ * {@link restOffset}).
  *
  * MEASURED, because CSS alone cannot say where the slot is. It sits just left of the
  * Legal menu, which holds the far-right position, so its centre is the viewport's edge
