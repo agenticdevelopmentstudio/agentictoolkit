@@ -50,7 +50,9 @@ export interface CatalogFeature {
   featureSite?: boolean;
   /**
    * Not built yet: listed so the owner can see it is coming, never provisionable — the
-   * backend refuses it. The picker shows it under "Coming soon" with its checkbox disabled.
+   * backend refuses it. The picker shows it under "Coming soon" with its checkbox disabled,
+   * unless the ecosystem already holds it: that one can still be unticked, because the
+   * picker is the only way left to take a feature off.
    */
   comingSoon?: boolean;
 }
@@ -60,8 +62,12 @@ export interface CatalogFeature {
  *
  * `provisioning` is not a transient the client can ignore: provisioning CREATES things,
  * so it can fail partway, and a row left in that state is a feature that is neither on
- * nor safely re-addable-in-silence. The rail shows only `active`; the picker shows
- * `provisioning` as already-taken so the owner cannot queue it twice.
+ * nor safely re-addable-in-silence. So the one list is read two ways, each named below
+ * rather than re-filtered by every reader (the filters were copied by hand, and a copy
+ * drifts): {@link activeFeatureKeys} for what can be navigated into — the hub's workspace
+ * rail — and {@link presentFeatureKeys} for what the ecosystem has — the picker, which
+ * shows `provisioning` as already-taken so the owner cannot queue it twice, and a
+ * product's Features list, which has to agree with the picker.
  */
 export type FeatureState = "provisioning" | "active" | "removed";
 
@@ -71,6 +77,23 @@ export interface ProvisionedFeature {
   provisionedAt: string;
   provisionedBy: string | null;
   updatedAt: string;
+}
+
+/**
+ * The keys an ecosystem HAS: every row but `removed`, `provisioning` included — a feature still
+ * being built is in the ecosystem, and offering it for adding would queue it twice. What the
+ * picker ticks and what a product's Features list draws rows for: one rule, so the two agree.
+ */
+export function presentFeatureKeys(rows: readonly ProvisionedFeature[]): ReadonlySet<string> {
+  return new Set(rows.filter((f) => f.state !== "removed").map((f) => f.featureKey));
+}
+
+/**
+ * The keys an ecosystem can be NAVIGATED into: `active` rows only. A `provisioning` feature can
+ * have stopped partway, so a row for it could open onto a pane whose storage is not there.
+ */
+export function activeFeatureKeys(rows: readonly ProvisionedFeature[]): ReadonlySet<string> {
+  return new Set(rows.filter((f) => f.state === "active").map((f) => f.featureKey));
 }
 
 /** One visit to the picker, applied: features to add, and provisioned features to remove. */

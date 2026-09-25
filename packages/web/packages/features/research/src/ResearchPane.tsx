@@ -197,10 +197,10 @@ export function ResearchPane({
   }, [filters]);
 
   // The account's category TREE — the shared hierarchical rail's rows. Distinct from
-  // `categoryOptions` below (a flat name list, `markdownApi.categories()`), which stays exactly
-  // what it was: the button-bar filter's dropdown source, per Step 5 — the rail SCOPES which
-  // part of the list you are standing in, the flat filter NARROWS within it, and they are not
-  // the same axis (see `plan` below).
+  // `categoryOptions` below (a flat name list, `markdownApi.categories()`, the editor's
+  // autocomplete source) and from the Documents toolbar gear's category filter, whose options
+  // come from `universe`: the rail SCOPES which part of the list you are standing in, the gear's
+  // filter NARROWS within it, and they are not the same axis (see `plan` below).
   const loadCategoryTree = useCallback(async () => {
     try {
       return await markdownApi.categoryTree({ workspace: workspaceSlug });
@@ -251,7 +251,7 @@ export function ResearchPane({
   const activeCategory = chain[chain.length - 1] ?? null;
   const activeCategoryName = activeCategory?.name ?? "";
 
-  // What the rail's placement and the bar's category filter jointly ask for. Derived here rather
+  // What the rail's placement and the gear's category filter jointly ask for. Derived here rather
   // than inside the fetcher so the KEY can be built from the same answer: the plan is what
   // decides whether there is a request at all, and two different scopes must never share a key.
   // `scope`'s identity is NOT stable across every render that leaves it semantically unchanged —
@@ -319,8 +319,8 @@ export function ResearchPane({
   const universe = universeDocs ?? [];
 
   // The account's existing categories + tags — the editor's autocomplete/browse source
-  // (distinct from the home bar's filter dropdowns, whose options come from `universe` above).
-  // Refetched on save so a freshly-coined category/tag appears as a suggestion next time.
+  // (distinct from the Documents toolbar gear's filter menus, whose options come from `universe`
+  // above). Refetched on save so a freshly-coined category/tag appears as a suggestion next time.
   //
   // Workspace-scoped like the documents themselves: the backend scopes the category/tag
   // vocabulary to the same owner it scopes the docs to, so omitting the workspace here
@@ -715,12 +715,17 @@ export function ResearchPane({
   const validationHint = draft && dirty ? validationError : null;
   const editing = selectedId !== null;
 
+  // The gear's option lists, taken once: the gear draws them and `filterKey` below keys them, and
+  // the two must describe the same lists.
+  const filterCategories = categoriesOf(universe);
+  const filterTags = tagsOf(universe);
+
   // PUBLISH the documents list into the workspace shell's ONE merged stack (like the sibling
   // ecosystem panes) instead of a self-contained nested master/detail pane. Its controls are the
   // list's own toolbar: `+` to create, the pop-over search, and the gear holding the category/tag
   // filters. They sat in the page-wide home bar until that strip was removed as clunky (Mike,
   // 2026-09-24).
-  const documentsLevel: TopicLevel = {
+  const documentsLevel: TopicLevel & { filterKey: string } = {
     id: "research-documents",
     title: "Documents",
     items,
@@ -733,8 +738,15 @@ export function ResearchPane({
     // editor paints the cached copy instead of blanking to "Loading…".
     busy: fetchingDoc,
     onClear: onCancel,
-    // `emptyLabel` STAYS: it is the rail's own text for an empty list, not a control.
-    emptyLabel: docs === null ? "Loading…" : "No documents yet.",
+    // `emptyLabel` STAYS: it is the rail's own text for an empty list, not a control. A NARROWED
+    // list that comes back empty is not an empty library: "No documents yet." under a search or a
+    // gear filter told the user their documents were gone.
+    emptyLabel:
+      docs === null
+        ? "Loading…"
+        : filters.q || filters.category || filters.tag
+          ? "No documents match these filters."
+          : "No documents yet.",
     // UNCONDITIONAL, as the bar's button was: an empty list is exactly when the first create
     // matters most.
     onNew: () => setNewOpen(true),
@@ -751,10 +763,16 @@ export function ResearchPane({
       <ResearchFilters
         filters={filters}
         onChange={setFilters}
-        categories={categoriesOf(universe)}
-        tags={tagsOf(universe)}
+        categories={filterCategories}
+        tags={filterTags}
       />
     ),
+    // The gear's PLAIN companion, as the rail host's publish key asks of any node (`levelsKey` in
+    // @agentic-toolkit/resource): the host draws the level it REGISTERED, and a node is invisible
+    // to that key. Without this the gear froze at its last registration — options the universe
+    // read delivered late never appeared, and a filter cleared onto a cached list with the same
+    // rows stayed gold and checked. So it moves with everything the gear draws.
+    filterKey: JSON.stringify([filters.category, filters.tag, filterCategories, filterTags]),
     // A document row's identity is its title; it has no icon worth a column of its own, and the
     // published state it used to show there is now the row's `trailing` mark.
     hideItemIcons: true,
@@ -924,11 +942,11 @@ export function ResearchPane({
         />
       )}
 
-      {/* The gear's own dialogs — rename/move/delete/add, scoped to whichever category level
-          the gear was opened from. Research has no separate flat category MANAGER the way the
-          notebook does (Step 5: `ResearchFilters`' flat category select stays put, unmodified,
-          as the button-bar's own narrowing control) — the gear on the rail is the only category
-          editor this pane offers. */}
+      {/* The category gear's own dialogs — rename/move/delete/add, scoped to whichever category
+          level the gear was opened from. Research has no separate flat category MANAGER the way
+          the notebook does (`ResearchFilters`' gear on the Documents toolbar only NARROWS by
+          category; it edits nothing) — the category levels' gear (`CategoryGearMenu`) is the only
+          category editor this pane offers. */}
       {categoryDialogs}
 
       <AlertModal

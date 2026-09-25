@@ -1,8 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useResourceList } from "@agentic-toolkit/data";
-import { markdownApi, type ResearchSummary } from "@agentic-toolkit/data/markdown";
+import { docsApi } from "@agentic-toolkit/data/docs";
+import {
+  markdownApi,
+  type ResearchFilters,
+  type ResearchSummary,
+} from "@agentic-toolkit/data/markdown";
+import { notesApi } from "@agentic-toolkit/data/notes";
 import { CrudTable, type CrudRow, type CrudTableMeta } from "@agentic-toolkit/crud";
 import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
@@ -13,7 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@agenticdevelopertoolkit/ui/components/dialog";
-import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
+import { DialogErrorText, ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { Textarea } from "@agenticdevelopertoolkit/ui/components/textarea";
 import { UnsavedChangesAlert } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-alert";
 import { useExitGate } from "@agenticdevelopertoolkit/ui/hooks/useExitGate";
@@ -30,17 +36,48 @@ import { useExitGate } from "@agenticdevelopertoolkit/ui/hooks/useExitGate";
  * bucket table uses, rather than a second route set that would drift from markdownDocuments.ts.
  */
 
-/** A markdown-backed type → how to list it and how a new row lands on its shelf. */
+/** What this view needs of a markdown client. `markdownApi` fits it, and so do `docsApi` and
+ *  `notesApi`, which are `markdownApi` with their shelf's marker baked in. */
+interface MarkdownClient {
+  list(filters: ResearchFilters, opts?: { workspace?: string }): Promise<ResearchSummary[]>;
+  get(id: string, opts?: { workspace?: string }): Promise<{ content: string }>;
+  create(body: { content: string }, opts?: { workspace?: string }): Promise<unknown>;
+  update(id: string, body: { content: string }, opts?: { workspace?: string }): Promise<unknown>;
+  remove(id: string, opts?: { workspace?: string }): Promise<void>;
+}
+
+/**
+ * One list REQUEST: the client that sends it, and the cache key its answer is kept under. The key
+ * names the request, not a table type — `content.markdown` and `content.papers` send the same one,
+ * and while the cache was keyed per type, opening one table and then the other fetched the same
+ * page twice, under two entries. Declared once per request so a client and its key cannot part.
+ */
+interface ListSource {
+  api: MarkdownClient;
+  listKey: string;
+}
+const EVERY_DOCUMENT: ListSource = { api: markdownApi, listKey: "all" };
+const DOCS_SHELF: ListSource = { api: docsApi, listKey: "docs" };
+const NOTES_SHELF: ListSource = { api: notesApi, listKey: "notes" };
+
+/**
+ * A markdown-backed type → where its rows come from, whether a new row belongs here, and which of
+ * the listed rows are its own. A shelf's rows go through that shelf's own client, which adds the
+ * marker on the way in and lists by it on the way out, so a row made here cannot be misfiled. The
+ * marker flags used to be spelled here by hand, a second copy of what those clients already own.
+ */
 const MARKDOWN_TYPES: Record<
   string,
-  { list: { doc?: boolean; noted?: boolean }; create?: { doc?: boolean; note?: boolean }; keep?: (d: ResearchSummary) => boolean }
+  ListSource & { canCreate: boolean; keep?: (d: ResearchSummary) => boolean }
 > = {
-  "content.markdown": { list: {}, create: {} },
-  "content.docs": { list: { doc: true }, create: { doc: true } },
-  "content.notes": { list: { noted: true }, create: { note: true } },
+  "content.markdown": { ...EVERY_DOCUMENT, canCreate: true },
+  "content.docs": { ...DOCS_SHELF, canCreate: true },
+  "content.notes": { ...NOTES_SHELF, canCreate: true },
   // A paper is a PUBLISHED doc (publish mints the marker; visibility is the publish switch), so
-  // the list is filtered here and there is no New: a row created from this table is not a paper.
-  "content.papers": { list: {}, keep: (d) => d.visibility === "public" },
+  // there is no New — a row created from this table is not a paper — and the rows are the public
+  // ones of the page `content.markdown` lists: the list route has no visibility filter, so the
+  // view picks them out (`rows` below) and the two tables share one request.
+  "content.papers": { ...EVERY_DOCUMENT, canCreate: false, keep: (d) => d.visibility === "public" },
 };
 
 export function isMarkdownType(type: string): boolean {
@@ -69,16 +106,15 @@ const META: CrudTableMeta = {
 
 export function MarkdownRowsView({ type, workspace }: { type: string; workspace?: string }) {
   const spec = MARKDOWN_TYPES[type]!;
+  const { api } = spec;
   const opts = { workspace };
-  const load = useCallback(
-    async () =>
-      (await markdownApi.list({}, { ...spec.list, workspace })).filter(spec.keep ?? (() => true)),
-    // `spec` is a module constant per `type`.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [type, workspace],
-  );
+  // Unfiltered, and keyed on the request: `keep` runs over the cached list (`rows` below), so two
+  // types that send one request share one entry. Built from the client alone for the same
+  // reason — a `load` that changed with the type would re-read the shared entry on every switch
+  // between them.
+  const load = useCallback(() => api.list({}, { workspace }), [api, workspace]);
   const { items, reload, error, isFetching } = useResourceList<ResearchSummary>(
-    `bucket-markdown-rows:${type}:${workspace ?? ""}`,
+    `bucket-markdown-rows:${spec.listKey}:${workspace ?? ""}`,
     load,
   );
 
@@ -86,8 +122,14 @@ export function MarkdownRowsView({ type, workspace }: { type: string; workspace?
   const [editing, setEditing] = useState<{ id: string } | null>(null);
   const [content, setContent] = useState("");
   // What `content` was when the dialog opened (or the row loaded), so closing over an edit prompts
-  // instead of dropping it — "navigating away with an unsaved bucket didn't stop me with a warning … there's a whole system for this we built" (Mike, 2026-09-24).
+  // instead of dropping it — "navigating away with an unsaved bucket didn't stop me with a
+  // warning … there's a whole system for this we built" (Mike, 2026-09-24).
   const [original, setOriginal] = useState("");
+  // Whether the open row's stored content has arrived. Until it has, the empty box stands for a
+  // document not yet read, not an empty one: text typed into it was overwritten when the load
+  // landed, and a Save after a failed load replaced the stored document with whatever was typed.
+  // A new row has nothing to read, so it starts loaded.
+  const [loaded, setLoaded] = useState(true);
   const dirty = editing !== null && content !== original;
   const closeGate = useExitGate(dirty ? { isDirty: () => true } : null);
   const close = () => closeGate.attemptExit(() => setEditing(null));
@@ -101,12 +143,16 @@ export function MarkdownRowsView({ type, workspace }: { type: string; workspace?
     let live = true;
     setContent("");
     setOriginal("");
-    markdownApi.get(editing.id, opts).then(
+    setLoaded(false);
+    api.get(editing.id, opts).then(
       (doc) => {
         if (!live) return;
         setContent(doc.content);
         setOriginal(doc.content);
+        setLoaded(true);
       },
+      // A failed read stays unloaded: the error says why, and nothing typed can be saved over a
+      // document this dialog never saw.
       (e: unknown) => live && fail(e),
     );
     return () => {
@@ -119,8 +165,8 @@ export function MarkdownRowsView({ type, workspace }: { type: string; workspace?
     setBusy(true);
     setActionError(null);
     try {
-      if (editing?.id) await markdownApi.update(editing.id, { content }, opts);
-      else await markdownApi.create({ content, ...spec.create }, opts);
+      if (editing?.id) await api.update(editing.id, { content }, opts);
+      else await api.create({ content }, opts);
       setEditing(null);
       await reload();
     } catch (e) {
@@ -133,8 +179,10 @@ export function MarkdownRowsView({ type, workspace }: { type: string; workspace?
   async function remove() {
     if (!deleting) return;
     setBusy(true);
+    // A retry starts clean; the confirm shows only what THIS attempt said.
+    setActionError(null);
     try {
-      await markdownApi.remove(deleting.id, opts);
+      await api.remove(deleting.id, opts);
       setDeleting(null);
       await reload();
     } catch (e) {
@@ -144,7 +192,10 @@ export function MarkdownRowsView({ type, workspace }: { type: string; workspace?
     }
   }
 
-  const rows = (items ?? []) as unknown as CrudRow[];
+  const rows = useMemo(
+    () => (items ?? []).filter(spec.keep ?? (() => true)),
+    [items, spec],
+  ) as unknown as CrudRow[];
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 py-4">
       <CrudTable
@@ -152,19 +203,26 @@ export function MarkdownRowsView({ type, workspace }: { type: string; workspace?
         rows={rows}
         loading={isFetching && !items}
         error={error}
-        canWrite={spec.create !== undefined}
+        canWrite={spec.canCreate}
         readOnlyNote="Papers are published docs — publish a doc to add one."
         onNew={() => {
           setContent("");
           setOriginal("");
+          setLoaded(true);
           setActionError(null);
           setEditing({ id: "" });
         }}
         onEdit={(row) => {
           setActionError(null);
+          // Before the dialog opens, not in the load effect alone: the effect runs after the
+          // dialog's first paint, which would otherwise show an editable box for that frame.
+          setLoaded(false);
           setEditing({ id: String(row.id) });
         }}
-        onDelete={(row) => setDeleting(row as unknown as ResearchSummary)}
+        onDelete={(row) => {
+          setActionError(null);
+          setDeleting(row as unknown as ResearchSummary);
+        }}
       />
 
       <Dialog open={editing !== null} onOpenChange={(open) => !open && close()}>
@@ -177,17 +235,18 @@ export function MarkdownRowsView({ type, workspace }: { type: string; workspace?
             rows={14}
             className="font-mono"
             value={content}
-            readOnly={spec.create === undefined}
+            readOnly={!spec.canCreate || !loaded}
             onChange={(e) => setContent(e.target.value)}
-            placeholder="# Title"
+            // A failed read says so below; "Loading…" would claim it is still coming.
+            placeholder={loaded ? "# Title" : actionError ? undefined : "Loading…"}
           />
           <ErrorText error={actionError} />
           <DialogFooter>
             <Button variant="ghost" onClick={close}>
-              {spec.create === undefined ? "Close" : "Cancel"}
+              {spec.canCreate ? "Cancel" : "Close"}
             </Button>
-            {spec.create !== undefined && (
-              <Button onClick={() => void save()} disabled={busy || !content.trim()}>
+            {spec.canCreate && (
+              <Button onClick={() => void save()} disabled={busy || !loaded || !content.trim()}>
                 Save
               </Button>
             )}
@@ -197,15 +256,28 @@ export function MarkdownRowsView({ type, workspace }: { type: string; workspace?
 
       <UnsavedChangesAlert {...closeGate.exitAlertProps} />
 
+      {/* A confirm, not an alert: without `cancelLabel` AlertModal is a one-button alert whose ✕
+          runs `onConfirm`, so closing it re-sent the delete, and `onCancel` was unreachable. The
+          failure is shown HERE — it used to land in `actionError` under the edit dialog, which is
+          always closed while a delete is being confirmed, so a refused delete said nothing. */}
       <AlertModal
         open={deleting !== null}
         title={`Delete “${deleting?.title ?? ""}”?`}
-        description="The document is soft-deleted with its marker."
+        description={
+          <>
+            The document is soft-deleted with its marker.
+            <DialogErrorText error={actionError} />
+          </>
+        }
         destructive
         confirmLabel="Delete"
+        cancelLabel="Cancel"
         busy={busy}
         onConfirm={() => void remove()}
-        onCancel={() => setDeleting(null)}
+        onCancel={() => {
+          setDeleting(null);
+          setActionError(null);
+        }}
       />
     </div>
   );

@@ -1,5 +1,12 @@
 "use client";
 
+import type { Dispatch, SetStateAction } from "react";
+
+import {
+  CategoryTagFilterItems,
+  filteringGearLabel,
+  isCategoryTagFiltering,
+} from "@agentic-toolkit/categories";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -69,7 +76,11 @@ export function NoteListOptions({
   label = "Notes list options",
 }: {
   filters: FilterState;
-  onChange: (next: FilterState) => void;
+  /** The pane's state SETTER, not a value callback: a choice is written through the updater form,
+   *  so it lands on the filters as they are NOW. This gear is drawn from the rail host's REGISTERED
+   *  level, whose `filters` can be a render behind the pane's — spreading that snapshot put back a
+   *  filter the user had just cleared. */
+  onChange: Dispatch<SetStateAction<FilterState>>;
   /** Category names to offer. */
   categories: readonly string[];
   /** Tag labels to offer. */
@@ -80,41 +91,22 @@ export function NoteListOptions({
   label?: string;
 }) {
   const lines = usePreviewLines();
-  const axes = [
-    { name: "category", title: "Category", allLabel: "All categories", options: categories },
-    { name: "tag", title: "Tag", allLabel: "All tags", options: tags },
-  ] as const;
-  // The gear says whether it is narrowing anything: a filter chosen here is otherwise invisible
-  // once the menu closes, and a list that silently hides rows reads as a list that lost them.
-  const active = filters.category !== "" || filters.tag !== "";
+  // The gear says whether it is narrowing anything: gold, and marked in its name. The reason
+  // lives on `isCategoryTagFiltering`, which the Research documents gear shares.
+  const active = isCategoryTagFiltering(filters);
   return (
     <DropdownMenu>
       <GearMenuTrigger
-        label={active ? `${label} (filtered)` : label}
+        label={filteringGearLabel(label, active)}
         className={active ? "text-apt-gold" : undefined}
       />
       <DropdownMenuContent align="end">
-        {axes.map((axis) => (
-          <DropdownMenuSub key={axis.name}>
-            <DropdownMenuSubTrigger>
-              {axis.title}: {filters[axis.name] || axis.allLabel.toLowerCase()}
-            </DropdownMenuSubTrigger>
-            {/* No <DropdownMenuPortal> wrapper: this engine's SubContent portals itself. */}
-            <DropdownMenuSubContent>
-              <DropdownMenuRadioGroup
-                value={filters[axis.name]}
-                onValueChange={(value) => onChange({ ...filters, [axis.name]: value })}
-              >
-                <DropdownMenuRadioItem value="">{axis.allLabel}</DropdownMenuRadioItem>
-                {axis.options.map((opt) => (
-                  <DropdownMenuRadioItem key={opt} value={opt}>
-                    {opt}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        ))}
+        <CategoryTagFilterItems
+          filters={filters}
+          onChange={onChange}
+          categories={categories}
+          tags={tags}
+        />
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={onEditCategories}>Edit categories…</DropdownMenuItem>
         <DropdownMenuItem onClick={onEditTags}>Edit tags…</DropdownMenuItem>

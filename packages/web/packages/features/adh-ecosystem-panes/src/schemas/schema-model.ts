@@ -7,9 +7,12 @@
 // definition can be granted to many applications, each with its own permission
 // overlay.
 //
-// Persisted via the backend `bucket.schemas` + `bucket.schema_tables`
-// tables (see api/schemas.ts). Each table's `type` is one of the
-// `content`/`personal` table types the DB exposes (see available-types.ts).
+// Persisted via the backend `bucket.buckets` + `bucket.bucket_types` tables,
+// by the data client's `schemasApi` (`@agentic-toolkit/data/markdown`), which
+// also declares the model types re-exported below. Each table's `type` is one
+// of the `content`/`personal` table types the DB exposes (see available-types.ts).
+
+import type { SchemaTable } from "@agentic-toolkit/data/markdown";
 
 /**
  * The cache key the ecosystem's bucket catalog lives under — ONE entry, shared by the Buckets pane
@@ -31,38 +34,17 @@ export function bucketsCacheKey(ecosystemId: string | undefined): string {
   return `ecosystem:${ecosystemId ?? ""}:buckets`;
 }
 
-/** One ADH table within a schema definition. Structure only. */
-export interface SchemaTable {
-  /** Stable client id for React keys / cross-referencing grants. */
-  id: string;
-  /** User-defined slug, e.g. "contacts" — no spaces. */
-  name: string;
-  /** The underlying sql-table type id (e.g. "content.contacts"). */
-  type: string;
-}
-
-export interface SchemaDefinition {
-  id: string;
-  /** Unique display name. */
-  name: string;
-  /** The rdid leaf — unique among siblings; editing it moves `id`. */
-  slug: string;
-  description: string;
-  tables: SchemaTable[];
-  ecosystemId: string;
-  /** `custom` = an ordinary bucket, deletable; anything else is built in and the backend 409s its
-   *  delete. */
-  kind: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface SchemaDefinitionInput {
-  name: string;
-  slug: string;
-  description: string;
-  tables: SchemaTable[];
-}
+// The bucket model is the data client's — `schemasApi` returns it — so it is re-exported here, not
+// declared a second time. This file used to keep a structurally identical copy, and the two
+// drifted: when the default bucket went away, `kind` was re-documented in this copy only, while
+// the client's went on describing the auto-seeded bucket the backend no longer has. The corrected
+// rule, which SchemasPane's Delete follows, now lives on the one declaration: `custom` = an
+// ordinary bucket, deletable; anything else is built in and the backend 409s its delete.
+export type {
+  SchemaDefinition,
+  SchemaDefinitionInput,
+  SchemaTable,
+} from "@agentic-toolkit/data/markdown";
 
 /** Slugify a table name to the allowed shape (lowercase, underscores, no spaces). */
 export function slugifyTableName(raw: string): string {

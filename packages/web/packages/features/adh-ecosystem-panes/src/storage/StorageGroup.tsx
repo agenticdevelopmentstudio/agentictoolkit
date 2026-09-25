@@ -12,6 +12,7 @@ import {
   type GroupTopicItem,
 } from "@agentic-toolkit/resource";
 import { helpFor } from "@agentic-toolkit/adh/help/store";
+import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
 import { SchemasPane } from "../schemas/SchemasPane";
 import { ecosystemUsersApi } from "../api/customers";
 import { applicationsPrototypeApi } from "../api/applications-prototype";
@@ -27,13 +28,19 @@ import type { RenderTransferSection } from "../transfer-seam";
  * resolved — while the GATE below (what each outcome shows) must be one decision, not two.
  */
 export interface EcosystemScopeResolution {
-  /** Undefined while loading AND when the workspace has no infrastructure ecosystem: the panes
-   *  accept undefined and degrade gracefully, so this is not an error state. */
+  /** Undefined while loading AND when the workspace has no infrastructure ecosystem — neither is an
+   *  error state, and `isPending` tells them apart. The group settles both itself rather than
+   *  handing a pane an undefined that could mean either: Buckets and All Data mount only with a
+   *  resolved id. Access and Tokens are still handed it as it stands. */
   ecosystemId?: string;
   /** False only when the resolution definitively says the caller may VIEW this workspace but not
    *  MANAGE its infrastructure ecosystem (a plain org member). */
   canManage: boolean;
   isError: boolean;
+  /** True until the lookup settles. An undefined `ecosystemId` once this is false is the settled
+   *  "this workspace has no infrastructure ecosystem" — and so is a failed lookup, which is why
+   *  `isError` is checked first. */
+  isPending: boolean;
 }
 
 /**
@@ -95,11 +102,20 @@ export function StorageGroup({
    *  ecosystem, which it MUST scope to — see AllDataPane's ECOSYSTEM note. */
   renderAllData?: (ecosystemId: string | undefined) => ReactNode;
 }): ReactElement {
-  const { ecosystemId, canManage, isError } = scope;
+  const { ecosystemId, canManage, isError, isPending } = scope;
   if (isError) return <WorkspaceResolutionError />;
   // A plain org member can view the workspace but not manage its infrastructure ecosystem — its
   // reads/writes would 403 per-pane, so show the honest notice instead.
   if (ecosystemId && !canManage) return <WorkspaceNotManageable feature="Storage" />;
+  // What Buckets and All Data show until there is an ecosystem to scope them to. Both used to be
+  // handed the bare undefined, which meant "still asking" and "there is none" alike: a workspace
+  // with no infrastructure ecosystem showed "Loading…" forever on All Data, and Buckets listed
+  // every bucket unscoped and opened rows from other ecosystems. So neither mounts without a
+  // resolved id, and `isPending` says which of the two this is. The error gate above has to stay
+  // first: a failed lookup settles with no id and no pending flag, exactly like "none".
+  const unresolved = (
+    <EmptyState title={isPending ? "Loading…" : "This workspace has no ecosystem yet."} />
+  );
   // Keyed by member id and then mapped over STORAGE_MEMBER_IDS, so the record is TOTAL over the
   // grammar's list and the rail's order comes from it — that list stays the one description of
   // what this group is, for the panes here and for the parse a host validates a URL against.
@@ -107,15 +123,18 @@ export function StorageGroup({
     buckets: {
       label: "Buckets",
       icon: <Table2 size={16} aria-hidden />,
-      render: (subLeaf) => (
-        <SchemasPane
-          ecosystemId={ecosystemId}
-          workspaceSlug={workspaceSlug}
-          help={helpFor("ecosystems/schemas")}
-          leaf={subLeaf}
-          renderTransfer={renderTransfer}
-        />
-      ),
+      render: (subLeaf) =>
+        ecosystemId ? (
+          <SchemasPane
+            ecosystemId={ecosystemId}
+            workspaceSlug={workspaceSlug}
+            help={helpFor("ecosystems/schemas")}
+            leaf={subLeaf}
+            renderTransfer={renderTransfer}
+          />
+        ) : (
+          unresolved
+        ),
     },
     access: {
       label: "Access",
@@ -134,9 +153,11 @@ export function StorageGroup({
       label: "All Data",
       icon: <Database size={16} aria-hidden />,
       render: () =>
-        renderAllData?.(ecosystemId) ?? (
-          <AllDataPane workspace={workspaceSlug} ecosystemId={ecosystemId} />
-        ),
+        ecosystemId
+          ? (renderAllData?.(ecosystemId) ?? (
+              <AllDataPane workspace={workspaceSlug} ecosystemId={ecosystemId} />
+            ))
+          : unresolved,
     },
     // The `adh_…` storage-access principals, each of which owns its own isolated bucket — which
     // is what earns this row a place in THIS rail rather than only under Orgs ▸ Configuration,

@@ -25,6 +25,25 @@ export function rowKey(meta: CrudTableMeta, row: CrudRow): string {
   return meta.pkParams.map((param) => encodeURIComponent(String(row[param] ?? ''))).join('/')
 }
 
+/** The scope override every verb carries (see {@link useCrudResource}); empty means "none". */
+function scopeQueryOf(scopeEcosystemId?: string): string {
+  return scopeEcosystemId ? `ecosystemId=${encodeURIComponent(scopeEcosystemId)}` : ''
+}
+
+/** The URL {@link useCrudResource} lists `meta`'s rows from under `filter` and `scopeEcosystemId`.
+ *  Exported so a caller asking something of the SAME list — All Data's has-rows probe — sends
+ *  exactly the URL the open view would, rather than a second copy of it that can drift. */
+export function listUrl(
+  meta: CrudTableMeta,
+  filter?: Record<string, string>,
+  scopeEcosystemId?: string,
+): string {
+  const filterQuery =
+    filter && Object.keys(filter).length > 0 ? new URLSearchParams(filter).toString() : ''
+  const query = [scopeQueryOf(scopeEcosystemId), filterQuery].filter(Boolean).join('&')
+  return `${API_BASE}${meta.basePath}${query ? `?${query}` : ''}`
+}
+
 export interface CrudResource {
   rows: CrudRow[]
   /** Nothing to show YET — true until a list lands for the CURRENT table + filter, so a re-list of
@@ -73,12 +92,7 @@ export function useCrudResource(
   const [fetching, setFetching] = useState(true)
   const [error, setError] = useState<string | null>(null)
   // The scope override rides every verb's URL; empty string means "no override".
-  const scopeQuery = scopeEcosystemId ? `ecosystemId=${encodeURIComponent(scopeEcosystemId)}` : ''
-  // Serialized once so an inline `filter={{…}}` literal doesn't change identity
-  // every render and re-trigger the list effect.
-  const filterQuery =
-    filter && Object.keys(filter).length > 0 ? new URLSearchParams(filter).toString() : ''
-  const listQuery = [scopeQuery, filterQuery].filter(Boolean).join('&')
+  const scopeQuery = scopeQueryOf(scopeEcosystemId)
   // Guards against out-of-order responses: switching tables (a new `meta` on a
   // live hook) starts a new list call while the old one may still be in
   // flight — only the LATEST call may write state, or a slow stale response
@@ -91,7 +105,9 @@ export function useCrudResource(
   // Switching table or filter is not that case — nothing has loaded for the new list, and a
   // mount-scoped "has loaded" boolean would suppress the skeleton anyway and leave the PREVIOUS
   // table's rows sitting under the new table's header until its list lands.
-  const listId = `${meta.basePath}?${listQuery}`
+  // The list's URL is that identity. Serialized once, so an inline `filter={{…}}` literal doesn't
+  // change identity every render and re-trigger the list effect.
+  const listId = listUrl(meta, filter, scopeEcosystemId)
   const loadedFor = useRef<string | null>(null)
 
   const refresh = useCallback(async () => {
@@ -99,9 +115,7 @@ export function useCrudResource(
     setFetching(true)
     setError(null)
     try {
-      const fetched = await authedJson<CrudRow[]>(
-        `${API_BASE}${meta.basePath}${listQuery ? `?${listQuery}` : ''}`,
-      )
+      const fetched = await authedJson<CrudRow[]>(listId)
       if (seq !== listSeq.current) return
       loadedFor.current = listId
       setRows(fetched)
@@ -113,7 +127,7 @@ export function useCrudResource(
       // that the list it was overtaken by has finished.
       if (seq === listSeq.current) setFetching(false)
     }
-  }, [meta, listQuery, listId])
+  }, [meta, listId])
 
   // Nothing to show YET: a call is open and no answer for THIS list has arrived. Derived, so it
   // cannot be raised, lowered or forgotten independently of `fetching` — every branch that opens or

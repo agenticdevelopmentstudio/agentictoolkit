@@ -88,8 +88,13 @@ export function buildPayload(meta: CrudTableMeta, draft: CrudDraft, mode: CrudFo
         // An `unknown` (untyped jsonb) column holds ANY JSON value, a string included — so text
         // that isn't JSON is that string, not an error. Typing `bar` into a key/value pair's value
         // was refused as "value must be valid JSON" (Mike, 2026-09-24). A declared object/array
-        // column still demands its shape.
-        if (column.type !== 'unknown') throw new Error(`${column.name} must be valid JSON`)
+        // column still demands its shape. So does text that opens like JSON (`{`, `[` or `"`):
+        // that is a typo in a structured value, and saving it as a string silently replaced the
+        // object — a bucket's `metadata`, blanking its Settings description with no error. A
+        // literal string starting with one of those is typed JSON-quoted.
+        if (column.type !== 'unknown' || /^[[{"]/.test(text)) {
+          throw new Error(`${column.name} must be valid JSON`)
+        }
         payload[column.name] = text
       }
     } else {

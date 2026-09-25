@@ -5,7 +5,7 @@ import { slugifyTableName } from "./schema-model";
 
 const AVAILABLE = buildAvailableTypes();
 export const TYPE_BY_ID = new Map(AVAILABLE.map((t) => [t.id, t]));
-// Available types grouped by schema, in display order — drives the Add table dialog's picker.
+// Available types grouped by schema, in display order — drives the Add and Edit table pickers.
 const BY_SCHEMA: Array<{ schema: string; types: AvailableType[] }> = TYPE_SCHEMAS.map(
   (schema) => ({ schema, types: AVAILABLE.filter((t) => t.schema === schema) }),
 );

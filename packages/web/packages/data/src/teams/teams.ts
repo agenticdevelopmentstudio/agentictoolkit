@@ -50,7 +50,11 @@ export function toTeam(r: TeamRow): Team {
  *  shares — `team.teams.slug` carries only `UNIQUE (owner_id, slug)`, and every team the backend
  *  provisions is a plain slug (`participants`, `admins`). Renaming a team to `members` was
  *  refused with Save dark, for exactly the shape the server itself writes (Mike, 2026-09-24).
- *  Dotted names stay legal, so no identifier that passed before fails now. */
+ *  Well-formed dotted names stay legal, but the rule is tighter in one way: every hyphen must sit
+ *  between letters or digits, so shapes the old rule let through (`com.acme-`, `com.-acme`,
+ *  `com.a--b`) now fail. A team already stored in one of them stays saveable — an editor exempts
+ *  an unchanged stored identifier from the format rule — and only a new or changed identifier
+ *  must take the new shape. */
 export function validateTeamIdentifier(identifier: string): string | null {
   if (!identifier) return "Identifier is required.";
   if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(identifier)) {

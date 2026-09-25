@@ -120,9 +120,9 @@ export type SiteMenuChromeProps = {
   /** Whether the signed-in user is an adh admin. The ONLY flag that changes which
    *  destinations this menu offers: true appends {@link ADMIN_MENU_GROUPS} (the
    *  operations consoles) below the family tree. The {@link WorkspaceMenu} that takes
-   *  this menu's place for a signed-in hub user appends the same rows below its Help
-   *  row — it is the only switcher an admin on the hub sees, so a flag it dropped left
-   *  them no link to a console anywhere. Resolves asynchronously with the
+   *  this menu's place for a signed-in hub user on a workspace route appends the same
+   *  rows below its Help row — there it is the only switcher an admin sees, so a flag it
+   *  dropped left them no link to a console anywhere. Resolves asynchronously with the
    *  session, so `undefined` and `false` must behave identically — the section
    *  appears when the answer arrives, and a build that never resolves one shows the
    *  same menu as it does to a visitor.
@@ -279,8 +279,10 @@ export function SiteMenu({
     // placeholder: a flyout's rows are menuitems, and the "Loading…" row it used to
     // hold was one the arrow keys landed on and Enter "chose" — closing the menu and
     // going nowhere. A line of text in a list is a PopoverNotice, and notices live at
-    // the top level; the signed-in hub says loading / failed / empty that way, in the
-    // WorkspaceMenu that SiteMenuSwitcher mounts in place of this menu.
+    // the top level; on a workspace route the signed-in hub says loading / failed / empty
+    // that way, in the WorkspaceMenu that SiteMenuSwitcher mounts there in place of this
+    // menu. On `/` and the other marketing routes a signed-in visitor keeps this menu, and
+    // there a workspace list that is not ready yet is simply no flyout.
     if (workspacesMenu?.workspaces.length) {
       const items: PopoverItem[] = workspacesMenu.workspaces.map((w) => ({
         key: `ws:${w.id}`,

@@ -21,7 +21,7 @@ import { SiteMenuSwitcher } from '../SiteMenuSwitcher'
 function renderAt(pathname: string, authenticated: boolean) {
   route.pathname = pathname
   workspaces.current = { workspaces: [] }
-  render(<SiteMenuSwitcher {...({ currentSiteId: 'hub', authenticated } as never)} />)
+  render(<SiteMenuSwitcher currentSiteId="hub" authenticated={authenticated} />)
 }
 
 afterEach(() => {

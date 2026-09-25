@@ -126,11 +126,11 @@ export function NotebookPane({
 }) {
   const { api, noun } = corpus;
   // ── Data ────────────────────────────────────────────────────────────────
-  // Two filter values, not one. `filters` is what the button bar shows and changes on every
-  // keystroke; `applied` is what the list READS, and lags it by the debounce. The debounce used
-  // to sit on the request; it now sits on the query key, which is the same 200ms of typing
-  // without a request — and the key is what lets a filter set returned to paint from cache
-  // instead of re-reading.
+  // Two filter values, not one. `filters` is what the notes level's toolbar shows (its pop-over
+  // search and the gear's two filters) and changes on every keystroke; `applied` is what the list
+  // READS, and lags it by the debounce. The debounce used to sit on the request; it now sits on
+  // the query key, which is the same 200ms of typing without a request — and the key is what lets
+  // a filter set returned to paint from cache instead of re-reading.
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
   const [applied, setApplied] = useState<FilterState>(EMPTY_FILTERS);
   useEffect(() => {
@@ -141,7 +141,7 @@ export function NotebookPane({
     return () => clearTimeout(id);
   }, [filters]);
 
-  // The owner's categories + tags: the rail's rows, the bar's two filter menus, the editor's
+  // The owner's categories + tags: the rail's rows, the gear's two filter menus, the editor's
   // autocomplete sources and what the two manager dialogs edit. Re-read on save so a freshly
   // coined category/tag appears next time — and so a note moved into a new category puts that
   // category in the rail. Tags come back as id+label pairs because renaming or retiring one
@@ -241,7 +241,7 @@ export function NotebookPane({
   );
   const previewLines = usePreviewLines();
 
-  // What the rail's placement and the bar's category filter jointly ask for. Derived here rather
+  // What the rail's placement and the gear's category filter jointly ask for. Derived here rather
   // than inside the fetcher so the KEY can be built from the same answer: the plan is what
   // decides whether there is a request at all, and two different scopes must never share a key.
   // `scope`'s identity is NOT stable across every render that leaves it semantically unchanged:
@@ -359,8 +359,9 @@ export function NotebookPane({
   //
   // No `seedFrom`: a list row is a NoteSummary, whose `excerpt` is not the body, so there is no
   // partial Note to paint from. And no `absent`: this list is SCOPED by category and narrowed by
-  // the bar's filters, so a note missing from it has merely been filtered away — announcing that
-  // as a deletion would be a lie the user cannot argue with. The 404 is the honest signal.
+  // the toolbar's search and the gear's filters, so a note missing from it has merely been
+  // filtered away — announcing that as a deletion would be a lie the user cannot argue with. The
+  // 404 is the honest signal.
   const {
     item: selectedNote,
     isSettled,
@@ -499,7 +500,7 @@ export function NotebookPane({
 
   const rows = notes ?? [];
   const filtering = Boolean(filters.q || filters.category || filters.tag);
-  const notesLevel: TopicLevel = {
+  const notesLevel: TopicLevel & { filterKey: string } = {
     id: corpus.levelId,
     title: noun.Many,
     items: rows.map((note): TopicDetailItem => ({
@@ -561,6 +562,13 @@ export function NotebookPane({
         label={`${noun.Many} list options`}
       />
     ),
+    // The gear's PLAIN companion, as the rail host's publish key asks of any node (`levelsKey` in
+    // @agentic-toolkit/resource): the host draws the level it REGISTERED, and a node is invisible
+    // to that key. `filtering` above only moves when the filter set empties or fills, so with one
+    // filter already on, changing the other onto a cached list with the same rows re-registered
+    // nothing — the gear kept the old radio and text — and a tags read landing after the notes
+    // never reached the Tag menu at all. So it moves with everything the gear draws.
+    filterKey: JSON.stringify([filters.category, filters.tag, categoryOptions, tagOptions]),
   };
 
   // Registered only while DIRTY so the host's guard count is a render-value dirty signal.

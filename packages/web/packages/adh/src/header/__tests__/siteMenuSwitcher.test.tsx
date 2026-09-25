@@ -85,6 +85,11 @@ describe('SiteMenuSwitcher — signed in on the hub', () => {
     await openMenu('Workspaces — switch workspace')
     expect(screen.getByRole('status')).toHaveTextContent("Couldn't load your workspaces")
     expect(screen.queryByText('No workspaces yet')).toBeNull()
-    expect(screen.getAllByRole('menuitem').map((row) => row.textContent)).toEqual(['Help'])
+    expect(screen.getAllByRole('menuitem').map((row) => row.textContent)).toEqual([
+      'Help',
+      'Toolkit',
+      'Tools',
+      'Support',
+    ])
   })
 })

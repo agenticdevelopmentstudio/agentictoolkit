@@ -5,7 +5,8 @@ import {
   useFeatureCatalog,
   useApplyFeatureChange,
   useProvisionedFeatures,
-  type ProvisionedFeature,
+  presentFeatureKeys,
+  type CatalogFeature,
 } from "@agentic-toolkit/data/ecosystems";
 import { FeaturePickerDialog } from "./FeaturePickerDialog";
 
@@ -19,9 +20,10 @@ import { FeaturePickerDialog } from "./FeaturePickerDialog";
  * catalog on every page load for a dialog most visits never open. It also means every open
  * starts with a fresh `apply` mutation, so a failure from an earlier visit never greets the next.
  *
- * `alreadyProvisioned` counts `provisioning` as present — unlike the hub's rail, which draws only
- * `active`. The two answer different questions: the rail asks "can I navigate there yet", the
- * picker asks "is this in the ecosystem", and a feature still being built is.
+ * `alreadyProvisioned` counts `provisioning` as present (`presentFeatureKeys`) — unlike the hub's
+ * rail, which draws only `active` (`activeFeatureKeys`). The two answer different questions: the
+ * rail asks "can I navigate there yet", the picker asks "is this in the ecosystem", and a feature
+ * still being built is.
  */
 export function ManageFeaturesDialog({
   ecosystemId,
@@ -36,21 +38,26 @@ export function ManageFeaturesDialog({
   const apply = useApplyFeatureChange(ecosystemId);
 
   const alreadyProvisioned = useMemo(
-    () =>
-      new Set<string>(
-        (provisioned.data ?? [])
-          .filter((f: ProvisionedFeature) => f.state !== "removed")
-          .map((f: ProvisionedFeature) => f.featureKey),
-      ),
+    () => presentFeatureKeys(provisioned.data ?? []),
     [provisioned.data],
+  );
+  // Only once the catalog has arrived: before that every held key is "missing" from it, and the
+  // loading list would fill with stand-ins that the real rows then replace.
+  const rows = useMemo(
+    () => (catalog.data ? withStandIns(catalog.data, alreadyProvisioned) : []),
+    [catalog.data, alreadyProvisioned],
   );
 
   return (
     <FeaturePickerDialog
       open
-      catalog={catalog.data ?? []}
+      catalog={rows}
       alreadyProvisioned={alreadyProvisioned}
-      busy={apply.isPending || catalog.isPending || provisioned.isPending}
+      busy={apply.isPending}
+      // The READS are `loading`, not `busy`: busy takes away every way out of the dialog (no ×,
+      // Escape ignored, the footer only a spinner), and a read has no timeout — a hung or offline
+      // one, passed as busy, held the user in here until a reload.
+      loading={catalog.isPending || provisioned.isPending}
       catalogError={catalog.isError ? "Couldn't load the list of features." : null}
       error={
         provisioned.isError
@@ -63,4 +70,31 @@ export function ManageFeaturesDialog({
       onCancel={onClose}
     />
   );
+}
+
+/**
+ * The catalog, plus a stand-in row for each feature the ecosystem holds that the catalog does not
+ * list. The picker draws its rows from the catalog alone, and it is the only way left to take a
+ * feature off — the old features pane, which listed such a key with a Remove of its own, is gone
+ * — so a held key with no catalog entry would stay on with no way to switch it off. The backend
+ * calls catalog keys permanent and refuses unknown ones, so today this adds nothing; it is for
+ * the day a key is dropped all the same.
+ */
+function withStandIns(
+  catalog: CatalogFeature[],
+  held: ReadonlySet<string>,
+): CatalogFeature[] {
+  const listed = new Set(catalog.map((f) => f.key));
+  const missing = [...held].filter((key) => !listed.has(key));
+  if (missing.length === 0) return catalog;
+  return [
+    ...catalog,
+    ...missing.map((key) => ({
+      key,
+      label: key,
+      description: "No longer offered.",
+      // No tier to require: the picker leaves the subscription line off when this is empty.
+      subscriptionTier: "",
+    })),
+  ];
 }

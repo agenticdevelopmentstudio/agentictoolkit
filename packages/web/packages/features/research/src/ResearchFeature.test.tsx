@@ -174,7 +174,16 @@ afterEach(cleanup);
  *  than trusting that nothing else on the page could satisfy an unscoped query. Mirrors the real
  *  rail's `data-htd-toolbar` (`topic-detail.tsx`), standing in for it since this harness draws its
  *  own minimal rail rather than the real one — the page-wide home bar these controls used to
- *  publish into was removed as clunky (Mike, 2026-09-24).
+ *  publish into was removed as clunky (Mike, 2026-09-24). The three are drawn in the real rail's
+ *  order, `+` first, but ORDER is not this stand-in's to prove: the real rail decides it (and pops
+ *  its search over from a magnifier where this draws the field outright), so it is pinned against
+ *  the real rail, in `@agenticdevelopertoolkit/ui`'s `topic-rail-toolbar.test.tsx`. An earlier
+ *  stand-in drew the `+` LAST, and a placement test here pinned that order — the opposite of the
+ *  real toolbar's.
+ *
+ *  A level with no rows shows its `emptyLabel`, as the real rail does. The toolbar is published
+ *  before the list resolves, so that text is how a test knows it is looking at the LOADED empty
+ *  list rather than the loading one.
  *
  *  It also stands in for the two signals the real `TopicRail` owns: the header spinner it shows
  *  while `busy`, and the hover dwell after which it calls `onPrefetch`. The dwell's TIMING is the
@@ -190,21 +199,22 @@ function Rail({ levels }: { levels: TopicLevel[] }) {
            *  observable effect of `hideItemIcons`, which nothing here otherwise reads. */}
           <span data-testid={`hide-item-icons-${l.id}`}>{String(Boolean(l.hideItemIcons))}</span>
           <div data-testid={`toolbar-${l.id}`}>
-            {l.search ? (
-              <input
-                type="search"
-                aria-label={l.search.placeholder}
-                value={l.search.query}
-                onChange={(e) => l.search?.onQueryChange(e.target.value)}
-              />
-            ) : null}
-            {l.titleActions}
             {l.onNew ? (
               <button type="button" onClick={() => l.onNew?.()}>
                 {l.newLabel}
               </button>
             ) : null}
+            {l.search ? (
+              <input
+                type="search"
+                aria-label={l.search.placeholder}
+                value={l.search.query}
+                onChange={(e) => l.search?.onQueryChange?.(e.target.value)}
+              />
+            ) : null}
+            {l.titleActions}
           </div>
+          {l.items.length === 0 && <p>{l.emptyLabel}</p>}
           <ul>
             {l.items.map((item) => (
               <li key={item.id}>
@@ -903,27 +913,21 @@ describe("ResearchFeature", () => {
   // `screen.getByRole("button", { name: "Create Document" })` finds the button whether it was
   // published onto this level's toolbar or floating disconnected somewhere else on the page.
 
-  it("publishes the filters and Create Document onto the Documents list's toolbar, filters before the button", async () => {
+  // WIRING only: which of the level's fields each control arrives through. Their ORDER is the real
+  // rail's to decide, and this harness's `Rail` is a stand-in — see its doc for where it is pinned.
+  it("publishes the search, the filters and Create Document onto the Documents list's toolbar", async () => {
     render(
       <Harness>
         <ResearchFeature basePath="/w1/research" />
       </Harness>,
     );
 
-    const toolbarEl = await screen.findByTestId("toolbar-research-documents");
-    const toolbar = within(toolbarEl);
-    const search = toolbar.getByRole("searchbox", { name: "Search research documents" });
-    const create = toolbar.getByRole("button", { name: "Create Document" });
+    const toolbar = within(await screen.findByTestId("toolbar-research-documents"));
+    expect(toolbar.getByRole("searchbox", { name: "Search research documents" })).not.toBeNull();
+    expect(toolbar.getByRole("button", { name: "Create Document" })).not.toBeNull();
     // The whole filter cluster, not just the search field: `titleActions` carries both axes
     // behind one gear now, so the gear has to arrive too.
-    const gear = toolbar.getByRole("button", { name: "Document filters" });
-
-    // The fleet's placement rule — filters left, primary action right — which "both are present"
-    // cannot see. MASKED, not `toBe(4)`: `compareDocumentPosition` returns a BITMASK, and the
-    // FOLLOWING bit arrives OR-ed with others (CONTAINED_BY, IMPLEMENTATION_SPECIFIC) depending on
-    // the nesting, so an equality assertion on it passes or fails for reasons unrelated to order.
-    expect(search.compareDocumentPosition(gear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(gear.compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(toolbar.getByRole("button", { name: "Document filters" })).not.toBeNull();
 
     // And nowhere ELSE. A control published onto this toolbar but ALSO still handed to the rail
     // some other way would satisfy every assertion above; only counting the whole document
@@ -933,21 +937,93 @@ describe("ResearchFeature", () => {
   });
 
   it("opens the category and tag axes from the toolbar's gear — the whole filter cluster arrives", async () => {
-    categories.mockResolvedValue(["Physics"]);
-    tags.mockResolvedValue(["alpha"]);
+    // The axes' OPTIONS come from the unfiltered universe read (`list({})`), not from the
+    // editor's category/tag vocabulary — and that read is held back here until the rows are on
+    // screen, so it lands when nothing else on the level moves. The gear is a React node, which
+    // the rail host's publish key cannot see: before the level carried `filterKey`, a universe
+    // that arrived last never reached the menus, and they offered only their all-pass entries.
+    let landUniverse: (rows: ResearchSummary[]) => void = () => {};
+    const universe = new Promise<ResearchSummary[]>((resolve) => {
+      landUniverse = resolve;
+    });
+    list.mockImplementation((f) =>
+      "q" in (f ?? {}) ? Promise.resolve([structuredClone(SUMMARY)]) : universe,
+    );
     render(
       <Harness>
         <ResearchFeature basePath="/w1/research" />
       </Harness>,
     );
+    expect(await screen.findByText("Federated learning notes")).not.toBeNull();
+    await act(async () => {
+      landUniverse([
+        { ...structuredClone(SUMMARY), id: "doc-2", category: "Physics", tags: ["alpha"] },
+      ]);
+    });
 
-    const toolbar = within(await screen.findByTestId("toolbar-research-documents"));
+    const toolbar = within(screen.getByTestId("toolbar-research-documents"));
     fireEvent.click(toolbar.getByRole("button", { name: "Document filters" }));
     const menu = await screen.findByRole("menu");
     // Both axes, each announcing its own current (all-pass) value — the replacement for the two
     // plain `<select>`s this gear folded into one control.
     within(menu).getByRole("menuitem", { name: "Category: all categories" });
     within(menu).getByRole("menuitem", { name: "Tag: all tags" });
+    // And each offering what the universe holds.
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Category: all categories" }));
+    expect(await screen.findByRole("menuitemradio", { name: "Physics" })).not.toBeNull();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Tag: all tags" }));
+    expect(await screen.findByRole("menuitemradio", { name: "alpha" })).not.toBeNull();
+  });
+
+  // The gear writes through the pane's setter, and the level re-registers with every filter it
+  // draws. Both halves were missing: with a tag on, clearing the category moved no plain field —
+  // `emptyLabel` only moves when the filter set empties or fills, and the list key came back to a
+  // cached, identical result — so the gear stayed on "Category: ml", and the next pick spread that
+  // stale snapshot and put the cleared category straight back.
+  it("keeps a cleared filter cleared when the other one is picked next", async () => {
+    render(
+      <Harness>
+        <ResearchFeature basePath="/w1/research" />
+      </Harness>,
+    );
+    expect(await screen.findByText("Federated learning notes")).not.toBeNull();
+    const toolbar = within(screen.getByTestId("toolbar-research-documents"));
+    const pick = async (axis: RegExp, option: string) => {
+      fireEvent.click(toolbar.getByRole("button", { name: /^Document filters/ }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: axis }));
+      // Choosing a radio closes the menu (`closeOnClick`), so every pick reopens the gear.
+      fireEvent.click(await screen.findByRole("menuitemradio", { name: option }));
+    };
+
+    await pick(/^Tag:/, "notes");
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(
+        { q: "", tag: "notes", category: "" },
+        { workspace: undefined },
+      ),
+    );
+    await pick(/^Category:/, "ml");
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(
+        { q: "", tag: "notes", category: "ml" },
+        { workspace: undefined },
+      ),
+    );
+    await pick(/^Category:/, "All categories");
+    // Past the debounce, so the list is back on the tag-only key the first pick already read.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+
+    fireEvent.click(toolbar.getByRole("button", { name: "Document filters (filtered)" }));
+    expect(await screen.findByRole("menuitem", { name: "Category: all categories" })).not.toBeNull();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Tag: notes" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "All tags" }));
+
+    // Nothing narrows any more: the gear drops its "(filtered)" mark, and both axes read all-pass.
+    fireEvent.click(await toolbar.findByRole("button", { name: "Document filters" }));
+    expect(await screen.findByRole("menuitem", { name: "Category: all categories" })).not.toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Tag: all tags" })).not.toBeNull();
   });
 
   it("still publishes the toolbar with ZERO documents — the first create is when it matters most", async () => {
@@ -962,7 +1038,12 @@ describe("ResearchFeature", () => {
       </Harness>,
     );
 
-    const toolbar = within(await screen.findByTestId("toolbar-research-documents"));
+    // The toolbar is published while the list is still LOADING, so without this wait every
+    // assertion below ran against the loading level, and a create gated on a loaded-but-empty list
+    // would have passed. The loaded empty label is a plain field of the level, so its arrival is
+    // also what re-registers the level the host draws.
+    expect(await screen.findByText("No documents yet.")).not.toBeNull();
+    const toolbar = within(screen.getByTestId("toolbar-research-documents"));
     expect(toolbar.getByRole("button", { name: "Create Document" })).not.toBeNull();
     expect(toolbar.getByRole("searchbox", { name: "Search research documents" })).not.toBeNull();
   });

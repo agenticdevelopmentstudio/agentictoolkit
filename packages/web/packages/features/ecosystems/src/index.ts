@@ -22,6 +22,11 @@ export type { FeaturePickerDialogProps } from "./FeaturePickerDialog";
 export { ManageFeaturesDialog } from "./ManageFeaturesDialog";
 export { ManageFeaturesButton } from "./ManageFeaturesButton";
 
+// How every features list closes: Settings last, alone under a rule. Exported for the same reason
+// as the button: the hub's workspace rail is one of those lists, and it used to state the rule
+// again in its own words (railDividerBefore) — two copies of one rule, which is how two lists drift.
+export { settingsLast } from "./heldTopics";
+
 // The URL grammar lives at the SERVER-SAFE ./parse subpath ONLY — deliberately NOT
 // re-exported here: this barrel's dist is a "use client" module, so an RSC page that
 // imported the parse helper from it would throw in prod (render-only client refs).

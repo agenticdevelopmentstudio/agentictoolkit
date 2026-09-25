@@ -30,12 +30,13 @@
 // so list()/get() fetch all bucket-types and group them client-side. Fine at
 // settings-page volume; revisit if a tenant ever exceeds ~500 bucket-types.
 //
-// The UI model types (SchemaDefinition/SchemaTable/SchemaDefinitionInput) are
-// declared locally here (structurally identical to the hub's own
-// components/settings/schemas/schema-model.ts, which the hub keeps importing
-// UI code from directly) rather than imported — the toolkit can't reach into a
-// hub-local component file, and TS's structural typing makes this client's
-// return values assignable to the hub's types without any coupling.
+// The UI model types (SchemaDefinition/SchemaTable/SchemaDefinitionInput) are declared HERE, and
+// only here: this client returns them, and the data layer cannot import from the feature packages
+// built on it. adh-ecosystem-panes' schemas/schema-model.ts re-exports them rather than keeping a
+// copy. It used to declare a structurally identical twin (the heir of a hub-local
+// components/settings/schemas/schema-model.ts that no longer exists), and the two drifted: when the
+// default bucket went away, the `kind` doc was rewritten in that copy while this one went on
+// describing the auto-seeded bucket the backend no longer has.
 
 import { authedJson, authedRequest, rethrowConflict } from "../http";
 import { compact, enc, scopeByOwner, sortByText } from "../client-helpers";
@@ -53,7 +54,7 @@ export interface SchemaTable {
   id: string;
   /** User-defined slug, e.g. "contacts" — no spaces. */
   name: string;
-  /** The underlying sql-table type id (e.g. "personal.contacts"). */
+  /** The underlying sql-table type id (e.g. "content.contacts"). */
   type: string;
 }
 
@@ -66,8 +67,9 @@ export interface SchemaDefinition {
   description: string;
   tables: SchemaTable[];
   ecosystemId: string;
-  /** `default` = the auto-seeded "all available tables" bucket every ecosystem gets (undeletable —
-   *  the backend 409s a non-custom delete); `custom` = a developer-created bucket. */
+  /** `custom` = an ordinary bucket, deletable — every bucket the backend mints today,
+   *  feature-provisioned ones included; anything else is built in and the backend 409s its
+   *  delete. */
   kind: string;
   createdAt: string;
   updatedAt: string;
@@ -97,7 +99,10 @@ function toDefinition(s: BucketRow, allTables: BucketTypeRow[]): SchemaDefinitio
   return {
     id: s.id,
     name: s.name,
-    slug: s.slug,
+    // Required on the wire, and defaulted anyway, the way `kind` is below: a row without one (the
+    // hub's bucket-types e2e fixture was one) reached the editor's `draft.slug.trim()` and took the
+    // Buckets pane down with a TypeError the moment the bucket was opened.
+    slug: s.slug ?? "",
     description: descriptionOf(s.metadata),
     tables: allTables.filter((t) => t.bucketId === s.id).map(toTable),
     ecosystemId: s.ecosystemId,
@@ -109,11 +114,19 @@ function toDefinition(s: BucketRow, allTables: BucketTypeRow[]): SchemaDefinitio
 
 /**
  * A 409 from a bucket write, said in the user's words. The backend names the violated constraint
- * (`resource already exists (uq_bucket_buckets_owner_parent_slug)`), and a taken rdid is `id already
- * exists` — both are the SLUG; anything else "already exists" is the display name.
+ * (`resource already exists (uq_bucket_buckets_owner_parent_slug)`). A taken rdid — the address the
+ * slug derives — is spelled two ways: `id already exists` on create, and `resource already exists
+ * (identifiers_pkey)` on update, where the rename cascade's insert hits `rdid.identifiers`' primary
+ * key. All three are the SLUG: on a bucket write it is the only column that moves the address (a
+ * name edit moves nothing, and a re-parent is refused). Matching only the create spelling
+ * reported a slug rename onto an already-taken address as a clash on the bucket's own, unchanged
+ * name. Anything else "already exists" is the display name.
  */
 function rethrowBucketConflict(err: unknown, name: string, slug: string): never {
-  if (err instanceof Error && /_slug\b|\bid already exists/i.test(err.message)) {
+  if (
+    err instanceof Error &&
+    /_slug\b|\bid already exists|\bidentifiers_pkey\b/i.test(err.message)
+  ) {
     throw new Error(`A bucket with the slug "${slug}" already exists.`);
   }
   rethrowConflict(err, `A bucket named "${name}" already exists.`);

@@ -190,10 +190,18 @@ export function CrudDataView({
       if (name in draft) draft[name] = value
     return draft
   }, [meta, defaultsKey])
+  // Built once per table and defaults, not on every render: each keystroke in a field re-renders
+  // this view, and every reader of the blank draft only reads it (mergeDraft copies).
+  const draftBaseline = useMemo(() => blankDraft(), [blankDraft])
+  // The columns `createDefaults` fixes — the surface decided them, so the details pane hides them.
+  const pinnedNames = useMemo(
+    () => Object.keys(JSON.parse(defaultsKey) as Record<string, string>),
+    [defaultsKey],
+  )
   const baseline = useMemo<CrudDraft | null>(() => {
-    if (isDraftActive) return blankDraft()
+    if (isDraftActive) return draftBaseline
     return activeRow ? toDraft(meta, activeRow) : null
-  }, [meta, activeRow, isDraftActive, blankDraft])
+  }, [meta, activeRow, isDraftActive, draftBaseline])
 
   const setEdit = (key: string, name: string, value: string | boolean) =>
     setEdits((prev) => ({ ...prev, [key]: { ...prev[key], [name]: value } }))
@@ -292,7 +300,7 @@ export function CrudDataView({
       dropEdit(key) // persisted — drop its staged edits so a retry won't re-PUT it
     }
     for (const key of draftKeys) {
-      await resource.createRow(buildPayload(meta, mergeDraft(blankDraft(), edits[key]), 'create'))
+      await resource.createRow(buildPayload(meta, mergeDraft(draftBaseline, edits[key]), 'create'))
       // created — drop the draft + its edits so a retry won't re-POST a duplicate
       setDraftKeys((prev) => prev.filter((k) => k !== key))
       dropEdit(key)
@@ -442,7 +450,7 @@ export function CrudDataView({
             meta={meta}
             rows={rows}
             draftKeys={draftKeys}
-            draftBaseline={blankDraft()}
+            draftBaseline={draftBaseline}
             edits={edits}
             loading={loading}
             error={error}
@@ -458,7 +466,7 @@ export function CrudDataView({
         bottom={
           <RowDetails
             meta={meta}
-            pinned={defaultsKey}
+            pinned={pinnedNames}
             baseline={baseline}
             canWrite={canWrite}
             mode={isDraftActive ? 'create' : 'edit'}
@@ -846,8 +854,8 @@ function ColumnHeader({
 
 interface RowDetailsProps {
   meta: CrudTableMeta
-  /** The view's `createDefaults`, serialized: those columns are fixed by the surface and hidden. */
-  pinned: string
+  /** The columns the view's `createDefaults` names: fixed by the surface, so hidden here. */
+  pinned: readonly string[]
   /** The active row's baseline values as a draft buffer, or null when no row. */
   baseline: CrudDraft | null
   /** 'create' for an unsaved draft (createOnly columns editable), else 'edit'. */
@@ -880,9 +888,8 @@ function RowDetails({ meta, pinned, baseline, mode, canWrite, edits, onEdit }: R
       </p>
     )
   }
-  const pinnedNames = Object.keys(JSON.parse(pinned) as Record<string, string>)
   const columns = meta.columns.filter(
-    (column) => !isColumnHidden(column) && !pinnedNames.includes(column.name),
+    (column) => !isColumnHidden(column) && !pinned.includes(column.name),
   )
 
   return (

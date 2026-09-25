@@ -112,7 +112,7 @@ export function EcosystemSettingsPane({
     getId: (e) => e.id,
     blank: ecoBlank,
     toInput: (e) => ({ ...ecoToInput(e), identifier: savedIdentifier(e) }),
-    validate: (draft, others) => {
+    validate: (draft, others, base) => {
       if (!draft.name.trim()) return "Display name is required.";
       const slug = leafOf(draft.identifier.trim());
       if (!slug) return "Slug is required.";
@@ -121,9 +121,16 @@ export function EcosystemSettingsPane({
       if (others.some((o) => o.identifier === draft.identifier))
         return `Identifier "${draft.identifier}" is already in use.`;
       // A rename (or a create) needs the probe's go-ahead — same bar as the create
-      // dialog. An unchanged identifier skips it (status is "idle" then).
-      if (status === "unavailable") return `Identifier "${draft.identifier}" is already in use.`;
-      if (status !== "idle" && status !== "available")
+      // dialog. An unchanged identifier skips it.
+      //
+      // WHETHER THIS IS A RENAME IS A FACT ABOUT THE INPUT BEING VALIDATED, never about the
+      // render-scoped `status`. The hook also validates the STORED record and waives any reason
+      // that record reproduces; gated on `status` alone, the stored row reproduced "Waiting for
+      // the identifier availability check." whenever the probe was checking or had errored, the
+      // waiver cleared it, and Save sent the rename without the probe's go-ahead.
+      const renaming = base === null || draft.identifier.trim() !== base.identifier.trim();
+      if (renaming && status === "unavailable") return `Identifier "${draft.identifier}" is already in use.`;
+      if (renaming && status !== "idle" && status !== "available")
         return "Waiting for the identifier availability check.";
       return null;
     },

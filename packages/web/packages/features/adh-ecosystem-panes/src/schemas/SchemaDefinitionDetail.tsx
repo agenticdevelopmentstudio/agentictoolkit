@@ -45,8 +45,8 @@ export function withName(draft: SchemaDefinitionInput, name: string): SchemaDefi
 
 /**
  * The Slug box — the bucket's rdid leaf behind its fixed `storage.<eco path>.` prefix
- * ("buckets need unique slugs and rdids" (Mike, 2026-09-24)). Shared by the create modal and Settings so the two cannot disagree on
- * what a slug is.
+ * ("buckets need unique slugs and rdids" (Mike, 2026-09-24)). Shared by the create modal and
+ * Settings so the two cannot disagree on what a slug is.
  */
 export function BucketSlugField({
   draft,
@@ -82,7 +82,11 @@ export function tableNameValidate(name: string, tables: SchemaTable[]): string |
 }
 
 /** Returns an error message, or null when the draft is valid. `others` are the ecosystem's other
- *  buckets, whose names and slugs this one may not reuse. */
+ *  buckets, whose names and slugs this one may not reuse. The draft's `tables` are not checked:
+ *  neither form validated with this edits them (the create modal starts them empty; Settings
+ *  neither shows nor saves them), so a check here could only block a save over a stored list the
+ *  user cannot see. A table's name is {@link tableNameValidate}'s, as the table is added or
+ *  edited. */
 export function schemaValidate(
   draft: SchemaDefinitionInput,
   others: Pick<SchemaDefinition, "name" | "slug">[] = [],
@@ -96,24 +100,16 @@ export function schemaValidate(
   if (slugProblem) return `Slug: ${slugProblem}`;
   if (slug.length > 64) return "Slug: 64 characters at most.";
   if (others.some((o) => o.slug === slug)) return `A bucket with the slug "${slug}" already exists.`;
-  if (draft.tables.some((t) => !t.name.trim())) return "Every table needs a name.";
-  // Names are unique per bucket (backend unique (bucket, name) index). Catch
-  // duplicates inline — e.g. adding the same type twice pre-fills the same name —
-  // rather than letting the save throw mid-create.
-  const seen = new Set<string>();
-  for (const t of draft.tables) {
-    const key = t.name.trim().toLowerCase();
-    if (seen.has(key)) return `Two tables share the name "${t.name.trim()}". Names must be unique.`;
-    seen.add(key);
-  }
   return null;
 }
 
 /**
- * A bucket's Settings: name and description, then the danger zone — Transfer Ownership and
- * Delete. The tables are NOT edited here: each is its own row in the bucket's rail, under the
- * Settings row, added with that rail's "+" (Mike, 2026-09-24). Save/Cancel live in the pane's
- * button bar; the pane owns the draft + dirty/validity state.
+ * A bucket's Settings, in the dialog the gear in the bucket rail's header opens: name, slug (with
+ * the read-only Id it moves) and description, then the danger zone — Transfer Ownership and
+ * Delete. The tables are NOT edited here: each is its own row in the bucket's rail, added with
+ * that rail's "+" (Mike, 2026-09-24: "add a gear icon … show the settings in a dialog, remove
+ * settings from the tables list"). Save/Cancel are the dialog's button bar; the pane owns the
+ * draft and its dirty/validity state.
  */
 export function SchemaDefinitionDetail({
   title,

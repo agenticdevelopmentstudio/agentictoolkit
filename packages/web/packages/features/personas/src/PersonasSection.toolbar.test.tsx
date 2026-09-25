@@ -140,6 +140,9 @@ describe("PersonasSection puts New Persona on the list's toolbar", () => {
   it("keeps the + with an EMPTY persona list", async () => {
     // Unconditional: no personas is precisely when the first create matters most, so gating the
     // `+` on a loaded or non-empty list would strand a new tenant with no way to create anything.
+    // Under a host this sees the level as it was REGISTERED, and no plain field of it moves when
+    // the list lands (its empty label reads the same loading or loaded), so it cannot tell the two
+    // apart. The no-host case below is the one that waits for the load.
     listPersonas.mockResolvedValue([]);
     render(
       <Chrome railHost>
@@ -149,5 +152,24 @@ describe("PersonasSection puts New Persona on the list's toolbar", () => {
 
     const bar = await toolbar();
     expect(bar.getByRole("button", { name: "New Persona" })).not.toBeNull();
+  });
+
+  // The toolbar is drawn before the list resolves, so an assertion that does not wait for the load
+  // only ever sees the LOADING state, where a `+` gated on a loaded-but-empty list is still there.
+  // With no host the section draws its own rail from the level it renders now, so the load that
+  // lands is what the toolbar shows.
+  it("keeps the + once an EMPTY persona list has loaded, with no rail host above", async () => {
+    listPersonas.mockResolvedValue([]);
+    render(
+      <Chrome railHost={false}>
+        <PersonasSection />
+      </Chrome>,
+    );
+
+    expect(screen.getByText("Loading…")).not.toBeNull();
+    await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
+    const bar = await toolbar();
+    expect(bar.getByRole("button", { name: "New Persona" })).not.toBeNull();
+    expect(bar.getByRole("button", { name: "Search personas" })).not.toBeNull();
   });
 });

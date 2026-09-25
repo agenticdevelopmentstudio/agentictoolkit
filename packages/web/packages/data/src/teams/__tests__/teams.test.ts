@@ -31,8 +31,10 @@ describe("validateTeamIdentifier", () => {
     expect(validateTeamIdentifier("platform-team")).toBeNull();
   });
 
+  // `com.acme-` passed the old reverse-domain rule, which let a hyphen sit anywhere in a later
+  // segment; it is a dangling separator all the same, and the doc says so.
   it("rejects spaces, capitals and dangling separators", () => {
-    for (const bad of ["core team", "Members", "members.", "-members", "a..b"]) {
+    for (const bad of ["core team", "Members", "members.", "-members", "a..b", "com.acme-"]) {
       expect(validateTeamIdentifier(bad), bad).toMatch(/lowercase/i);
     }
   });

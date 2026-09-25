@@ -515,10 +515,11 @@ export function EcosystemsFeature({
 
   // Only the topics the scoped ecosystem holds. Read only when some row is feature-keyed, so a
   // host whose rows name no features (a feature site's own rail) never pays for the request.
+  // `activeTopic` keeps a deep link's own row while that read is in flight (see heldTopics).
   const featureKeyed = topicsConfig.some((t) => t.features != null);
   const provisionedQuery = useProvisionedFeatures(featureKeyed ? scopedId : undefined);
   const shownTopics = settingsLast(
-    heldTopics(topicsConfig, provisionedQuery.isError ? null : provisionedQuery.data),
+    heldTopics(topicsConfig, provisionedQuery.isError ? null : provisionedQuery.data, activeTopic),
   );
 
   const topics: ResourceTopic[] = shownTopics.map((t) => ({
@@ -571,8 +572,11 @@ export function EcosystemsFeature({
               // on the old (now-freed) id during the navigation that follows.
               writeLastId(basePath, newId);
               await reload();
+              // Back onto Settings, where the rename was made, under the new id. Not the first
+              // row: settingsLast puts Settings at the END, so that sent the user off the pane
+              // they were editing and onto whichever row happened to lead the list.
               router.replace(
-                `${basePath}/${newId}/${shownTopics[0]?.id}`,
+                `${basePath}/${newId}/${t.id}`,
                 { scroll: false },
               );
             }}
@@ -844,6 +848,10 @@ export function EcosystemsFeature({
             title: plural,
             help: `Open ${an(lowerSingular)} to manage it, or create a new one.`,
             emptyLabel: `No ${lowerPlural} yet.`,
+            // The rows stay one line (the identifier's second line was dropped on purpose), but
+            // the identifier is still what a user pastes into the filter — dropping the line took
+            // identifier search with it until the rail grew a search-only accessor.
+            getSearchText: (e) => e.identifier,
           }}
           // The selected entity's topics are the features it holds, so the list is headed
           // "Features" — the entity's own name still reads in the breadcrumb.

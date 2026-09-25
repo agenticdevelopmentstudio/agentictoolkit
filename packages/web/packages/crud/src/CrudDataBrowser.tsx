@@ -78,9 +78,10 @@ interface CrudDataBrowserCommon {
    *  browser. */
   workspace?: string
   /** The ecosystem (rdid or uuid) whose data this browser shows — narrower than `workspace`,
-   *  which spans every ecosystem the workspace owns. Every list is sent `?ecosystemId=<id>` and
-   *  the rail keeps only ecosystem-columned tables: an owner-pair table has no ecosystem to
-   *  narrow by, so under an ecosystem it would show the workspace's rows, not this ecosystem's.
+   *  which spans every ecosystem the workspace owns. Every list and every write is sent
+   *  `?ecosystemId=<id>`, a new row starts pinned to it, and the rail keeps only
+   *  ecosystem-columned tables: an owner-pair table has no ecosystem to narrow by, so under an
+   *  ecosystem it would show the workspace's rows, not this ecosystem's.
    *  "ONLY THE ECOSYSTEMS TABLES SHOULD SHOW - this is a huge huge huge data leak" (Mike,
    *  2026-09-24), from an ecosystem's Storage ▸ All Data listing its sibling ecosystem's
    *  buckets. */
@@ -165,15 +166,38 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
     if (ecosystemId) f.ecosystemId = ecosystemId
     return f
   }, [workspace, ecosystemId])
+  // Selection comes from the URL (activeSchema/activeTable) or, when embedded, the host's
+  // controlled `selection`. An unknown schema/table falls back to "nothing open".
+  const rawSchema = selection ? selection.schema : activeSchema ?? null
+  const rawTable = selection ? selection.table : activeTable ?? null
   // A SCOPED browser lists only the tables holding rows in its scope ("in All Data only show
   // tables and schemas in the list with data in them", Mike, 2026-09-24). The unscoped
-  // cross-tenant browser stays a catalogue of every table.
-  const populated = useTablesWithRows(candidates, viewerReady && listFilter ? listFilter : null)
-  const ready = viewerReady && (!listFilter || populated !== null)
+  // cross-tenant browser stays a catalogue of every table. Only a table a probe CONFIRMED holds
+  // rows is listed, even when other probes failed: falling back to every candidate would put
+  // back the tables with nothing in this scope, so a failed sweep says so in the rail instead.
+  // The open table is probed first and opens on its own probe's answer, instead of waiting on the
+  // whole sweep; until the sweep ends the rail holds at most that one confirmed table, marked busy.
+  const openCandidate =
+    rawSchema && rawTable
+      ? candidates.find((t) => t.schema === rawSchema && t.table === rawTable)
+      : undefined
+  const {
+    populated,
+    failed: probeFailed,
+    firstWithRows,
+  } = useTablesWithRows(candidates, viewerReady && listFilter ? listFilter : null, {
+    scopeEcosystemId: ecosystemId,
+    first: openCandidate?.key ?? null,
+  })
+  // Still asking which tables hold rows (only a scoped browser asks).
+  const sweeping = viewerReady && !!listFilter && populated === null
+  const ready = viewerReady && !sweeping
   const allTables = useMemo(
     () =>
-      !listFilter ? candidates : populated ? candidates.filter((t) => populated.has(t.key)) : [],
-    [candidates, listFilter, populated],
+      !listFilter
+        ? candidates
+        : candidates.filter((t) => (populated ? populated.has(t.key) : t.key === firstWithRows)),
+    [candidates, listFilter, populated, firstWithRows],
   )
 
   // level 0 = distinct schemas (sorted); level 1 = the open schema's tables (sorted). Schemas
@@ -184,10 +208,6 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
     () => [...new Set(allTables.map((t) => t.schema))].sort((a, b) => a.localeCompare(b)),
     [allTables],
   )
-  // Selection comes from the URL (activeSchema/activeTable) or, when embedded, the host's
-  // controlled `selection`. An unknown schema/table falls back to "nothing open".
-  const rawSchema = selection ? selection.schema : activeSchema ?? null
-  const rawTable = selection ? selection.table : activeTable ?? null
   const schemaSelected = rawSchema && schemas.includes(rawSchema) ? rawSchema : null
   const tablesInSchema = useMemo(
     () =>
@@ -241,8 +261,17 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
           if (selection) selection.onSelectSchema(null)
           else if (basePath) router.push(basePath, { scroll: false })
         },
-        // "None" and "not known yet" are different answers; say which one this is.
-        emptyLabel: !ready ? 'Loading…' : listFilter ? 'No data yet.' : 'No schemas.',
+        // "None" and "not known yet" are different answers; say which one this is. So are "none"
+        // and "couldn't ask": a sweep whose probes failed must not read as an empty scope.
+        emptyLabel: !ready
+          ? 'Loading…'
+          : listFilter
+            ? probeFailed
+              ? "Couldn't load this data. Try again."
+              : 'No data yet.'
+            : 'No schemas.',
+        // A rail still being swept is partial (at most the open table's own row), so say so.
+        busy: sweeping,
       },
       {
         id: 'table',
@@ -262,6 +291,7 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
             router.push(`${basePath}/${schemaSelected}`, { scroll: false })
         },
         emptyLabel: 'No tables.',
+        busy: sweeping,
       },
     ],
     [
@@ -274,6 +304,8 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
       selection,
       ready,
       listFilter,
+      probeFailed,
+      sweeping,
     ],
   )
 
@@ -287,18 +319,27 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
   // `children` land in the frontier pane: the table view once a table is open,
   // else a hint to drill in. Keyed per table so a switch is a fresh mount.
   // Before auth settles, a deep link has no answer yet — say "loading", not "pick a schema"
-  // (which would read as the deep link having failed).
-  const content = !ready ? (
-    <p className="p-6 font-mono text-sm text-apt-text-dim" role="status">
-      Loading…
-    </p>
-  ) : tableSelected ? (
+  // (which would read as the deep link having failed). The view comes FIRST: an open table its own
+  // probe confirmed mounts mid-sweep, and stays the same element when the sweep ends.
+  const content = tableSelected ? (
+    // Under an ecosystem the WRITES are scoped too, not just the list: without it a row created
+    // from one ecosystem's Storage ▸ All Data was stamped with the caller's JWT ecosystem (every
+    // hub JWT is ecosystem zero), and the re-list, filtered to this ecosystem, dropped it; and a
+    // non-admin's edit or delete on a `?ecosystemId=`-scoped table, whose row was listed only
+    // through that scope, was refused. The create default is pinned, as SchemasPane's bucket
+    // view pins its own.
     <CrudDataView
       key={tableSelected.key}
       meta={tableSelected}
       filter={listFilter}
+      scopeEcosystemId={ecosystemId}
+      createDefaults={ecosystemId ? { ecosystemId } : undefined}
       onGuardChange={registerGuard}
     />
+  ) : !ready ? (
+    <p className="p-6 font-mono text-sm text-apt-text-dim" role="status">
+      Loading…
+    </p>
   ) : (
     <p className="p-6 font-mono text-sm text-apt-text-dim" role="status">
       {schemaSelected ? 'Pick a table to view its data.' : 'Pick a schema, then a table.'}

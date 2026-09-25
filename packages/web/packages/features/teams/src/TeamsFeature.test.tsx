@@ -91,7 +91,7 @@ function Rail({ levels }: { levels: TopicLevel[] }) {
                 type="search"
                 aria-label={l.search.placeholder}
                 value={l.search.query}
-                onChange={(e) => l.search?.onQueryChange(e.target.value)}
+                onChange={(e) => l.search?.onQueryChange?.(e.target.value)}
               />
             )}
           </div>

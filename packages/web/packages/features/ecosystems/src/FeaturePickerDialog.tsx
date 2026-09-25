@@ -31,7 +31,10 @@ export interface FeaturePickerDialogProps {
   open: boolean;
   /**
    * Every feature in the catalog. Rendered alphabetically by label, whatever order this is in, with
-   * the `comingSoon` ones last under a "Coming soon" divider, their checkboxes disabled.
+   * the `comingSoon` ones last under a "Coming soon" divider, their checkboxes disabled — all but
+   * one the ecosystem already holds, which can still be unticked (never ticked), since this picker
+   * is the only way to take a feature off. For the same reason a caller may add rows the catalog
+   * no longer lists for features still held (`ManageFeaturesDialog` does).
    */
   catalog: CatalogFeature[];
   /**
@@ -41,6 +44,13 @@ export interface FeaturePickerDialogProps {
   alreadyProvisioned?: ReadonlySet<string>;
   /** The change is in flight — the footer shows a spinner and the dialog cannot be dismissed. */
   busy?: boolean;
+  /**
+   * The lists this works from (the catalog, `alreadyProvisioned`) are still being read. Ticks and
+   * Apply wait for them — a change computed before `alreadyProvisioned` arrives would re-add what
+   * the ecosystem already holds — but unlike `busy` the dialog stays dismissable. A read has no
+   * timeout: passed as `busy`, a hung or offline one left no way out of the dialog but a reload.
+   */
+  loading?: boolean;
   /** A failed change, shown under the list. The ticks survive so the user can simply retry. */
   error?: string | null;
   /**
@@ -76,6 +86,7 @@ export function FeaturePickerDialog({
   catalog,
   alreadyProvisioned,
   busy = false,
+  loading = false,
   error = null,
   catalogError = null,
   onApply,
@@ -121,7 +132,7 @@ export function FeaturePickerDialog({
     const add: string[] = [];
     const remove: string[] = [];
     for (const f of catalog) {
-      if (f.comingSoon) continue;
+      if (f.comingSoon && !provisioned.has(f.key)) continue; // a held one may still come OFF
       const on = desiredOn(f.key);
       if (on === provisioned.has(f.key)) continue;
       (on ? add : remove).push(f.key);
@@ -132,7 +143,10 @@ export function FeaturePickerDialog({
 
   const toggle = useCallback(
     (key: string) => {
-      if (byKey.get(key)?.comingSoon) return; // not built — nothing to provision
+      if (loading) return; // a tick against a list still loading would be read against the wrong baseline
+      // Not built — nothing to provision. One the ecosystem already holds is the exception: it can
+      // be unticked (and ticked back, which only cancels that removal).
+      if (byKey.get(key)?.comingSoon && !provisioned.has(key)) return;
       setDesired((prev) => {
         const current = prev.get(key) ?? provisioned.has(key);
         const flippedTo = !current;
@@ -144,7 +158,7 @@ export function FeaturePickerDialog({
         return next;
       });
     },
-    [byKey, provisioned],
+    [loading, byKey, provisioned],
   );
 
   const checkedIds = useMemo(() => {
@@ -161,13 +175,14 @@ export function FeaturePickerDialog({
           id: f.key,
           label: f.label,
           // Not built yet: the tick is DISABLED, while the row stays selectable so its details
-          // can still be read.
-          checkDisabled: !!f.comingSoon,
+          // can still be read. Unless the ecosystem already holds it: this picker is the only way
+          // to take a feature off, so a held one keeps its tick live for unticking.
+          checkDisabled: !!f.comingSoon && !provisioned.has(f.key),
           // The last available row carries the divider that opens the coming-soon group.
           ...(!f.comingSoon && next?.comingSoon ? { dividerAfter: true, dividerLabel: "Coming soon" } : {}),
         };
       }),
-    [visible],
+    [visible, provisioned],
   );
 
   // Keep the cursor on a row that still exists: filtering the active row away would otherwise
@@ -187,10 +202,12 @@ export function FeaturePickerDialog({
     [visible, activeId],
   );
 
+  // `loading` is checked here as well as on the Apply button: Enter reaches this without going
+  // through the button's disabled state.
   const openConfirm = useCallback(() => {
-    if (changeCount === 0 || busy) return;
+    if (changeCount === 0 || busy || loading) return;
     setConfirming(true);
-  }, [changeCount, busy]);
+  }, [changeCount, busy, loading]);
 
   /**
    * The picker's keyboard, wired on the filter row because that is where focus lives: the
@@ -251,7 +268,7 @@ export function FeaturePickerDialog({
     onToggleChecked: toggle,
     hideItemIcons: true,
     itemNoun: "feature",
-    emptyLabel: query.trim() ? "No features match" : "No features",
+    emptyLabel: loading ? "Loading…" : query.trim() ? "No features match" : "No features",
     overview: true,
     overviewHelp: "Tick a feature to add it to this ecosystem; untick one to remove it.",
     width: 280,
@@ -348,7 +365,7 @@ export function FeaturePickerDialog({
             onCancel={onCancel}
             confirmLabel="Apply"
             onConfirm={openConfirm}
-            confirmDisabled={changeCount === 0}
+            confirmDisabled={changeCount === 0 || loading}
             busy={busy}
             // The filter field autofocuses and owns the keyboard — the footer must not take
             // focus off it on mount, or the first keystroke goes to a button.
@@ -435,6 +452,9 @@ function ComingSoonMark(): ReactElement {
  * The subscription line is a PLACEHOLDER end to end — the backend serves `Free` for every
  * feature and nothing enforces it. It is rendered anyway because the picker is where the
  * gate will be explained, and a line that appears later changes the layout people learned.
+ * The one row without it is a stand-in for a held feature the catalog no longer offers
+ * (`ManageFeaturesDialog`), which has no tier: "Subscription Level Required:" followed by
+ * nothing would say less than no line at all.
  */
 function FeatureDetail({ feature }: { feature: CatalogFeature | undefined }): ReactElement | null {
   if (!feature) return null;
@@ -450,9 +470,11 @@ function FeatureDetail({ feature }: { feature: CatalogFeature | undefined }): Re
           Comes with a site of its own, published outside this ecosystem.
         </p>
       )}
-      <p className="text-sm text-apt-text-muted">
-        Subscription Level Required: {feature.subscriptionTier}
-      </p>
+      {feature.subscriptionTier && (
+        <p className="text-sm text-apt-text-muted">
+          Subscription Level Required: {feature.subscriptionTier}
+        </p>
+      )}
     </div>
   );
 }

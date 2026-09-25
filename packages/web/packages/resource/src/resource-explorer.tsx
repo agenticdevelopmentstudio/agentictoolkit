@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import {
+  filterTopicItems,
   HierarchicalTopicDetail,
   TopicSelectHint,
   type TopicDetailItem,
@@ -68,8 +69,16 @@ export interface ResourceRailConfig<T> {
    *  landing showed it and searched it; §1.5 took the LANDING, not the FACT, so the rail
    *  carries it as `TopicDetailItem.sublabel` and the rail filter matches it alongside the
    *  label — a user pasting an identifier out of a URL still finds the row. Omit for a list
-   *  whose labels are already unique and self-explaining. */
+   *  whose labels are already unique and self-explaining; a value the filter should FIND but
+   *  the row should not SHOW is `getSearchText`'s job. */
   getSublabel?: (item: T) => string;
+  /** Text the rail filter matches but the row never shows — the identifier behind a list kept to
+   *  one line per row. While the sublabel was the only searchable extra, one accessor drove both,
+   *  so the Products rail dropping the ecosystem identifier's second line quietly took identifier
+   *  search with it, though the identifier is still the string users paste in. Matched the way
+   *  the rail matches the label and sublabel (trimmed, case-folded substring), and ORed with
+   *  them: a row is found by any of the three. */
+  getSearchText?: (item: T) => string;
   /** The list's load failure, in the HOST's words. Shown as the rail's empty label instead
    *  of "Loading…": `items` stays `null` after a failed fetch (see `useResourceList`), which
    *  is indistinguishable from "still loading" from here, so without this the rail claims to
@@ -235,9 +244,12 @@ export function ResourceExplorer<T>({
   // The resource rail's filter. The removed card landing carried the only search over this
   // list (docs/ui/fleet-ui-audit.md §1.5 took the landing, not the FUNCTION), so the field moved
   // to the rail's `headerSlot`, then to the page-wide home bar — and, once that strip was judged
-  // clunky (Mike, 2026-09-24), back onto the rail as its toolbar's pop-over search. Held HERE
-  // rather than by the rail because the match reads more than a row shows and must keep the open
-  // entity; the rail is handed it controlled (`resourceLevel.search`).
+  // clunky (Mike, 2026-09-24), back onto the rail as its toolbar's pop-over search. The rows are
+  // matched as the rail would match them itself (`filterTopicItems`, below), but the query is held
+  // HERE and handed to the rail controlled (`resourceLevel.search`): HierarchicalTopicDetail's
+  // narrow, minimized and covered stacks are three different component types, so a window
+  // crossing the narrow breakpoint (or a disclosure-style change) remounts the TopicRail, and a
+  // query the rail held itself would be wiped out from under the user mid-search.
   const [filter, setFilter] = useState("");
 
   const validTopics = new Set(topics.map((t) => t.id));
@@ -304,30 +316,46 @@ export function ResourceExplorer<T>({
   // Level 0 = the resource list; level 1 = the topics scoped to the selection.
   // The rail shows just the name (one line) — the reverse-domain id / sublabel is the
   // entity pane's to show, so the list stays uncluttered.
-  const query = filter.trim().toLowerCase();
   const allEntityItems: TopicDetailItem[] = (items ?? []).map((it) => ({
     id: getId(it),
     label: getLabel(it),
     sublabel: rail?.getSublabel?.(it),
     icon: itemIcon,
   }));
+  // A query over a list that has loaded EMPTY has nothing left to narrow and no field left to
+  // clear it from — the magnifier below goes with the last row. Kept, it would narrow whatever
+  // rows arrive next (a refetch that picks up another session's creates) by a query typed against
+  // a list that no longer exists. Dropped during render, React's adjust-state-while-rendering
+  // pattern, so no frame commits with it; the `filter !== ""` guard makes it fire once.
+  if (loaded && allEntityItems.length === 0 && filter !== "") setFilter("");
   // Filtering narrows the ROWS only — `active`/`titleFor` above still read the unfiltered
   // `items`, so filtering away the selected entity never blanks its pane or its breadcrumb.
   //
-  // Two things the match deliberately does NOT do. It never drops the OPEN entity: a level whose
-  // `selectedId` names no row it renders is a selection the pointer cannot reach, and every
-  // consumer that resolves the selection by lookup — the breadcrumb (`items.find(...)?.label ??
-  // selectedId`, which would print a raw uuid), the row highlight, the scroll-into-view — reads
-  // the filtered array. And it matches the SUBLABEL as well as the label, because the identifier
-  // is the string users actually paste in (the card landing's search matched both).
-  const entityItems = query
-    ? allEntityItems.filter(
-        (i) =>
-          i.id === scopedId ||
-          i.label.toLowerCase().includes(query) ||
-          (i.sublabel ?? "").toLowerCase().includes(query),
-      )
-    : allEntityItems;
+  // The match is the rail's own (`filterTopicItems`), so a host-held query narrows exactly as a
+  // rail-held one would, and it brings two things with it. It never drops the OPEN entity (it is
+  // handed the level's own `selectedId`): a level whose `selectedId` names no row it renders is a
+  // selection the pointer cannot reach, and every consumer that resolves the selection by lookup
+  // — the breadcrumb (`items.find(...)?.label ?? selectedId`, which would print a raw uuid), the
+  // row highlight, the scroll-into-view — reads the filtered array. And it matches the SUBLABEL
+  // as well as the label, because the identifier is the string users actually paste in (the card
+  // landing's search matched both). A list that keeps the identifier OFF its rows still has it
+  // matched through `rail.getSearchText`, whose hits are added to the rail's; either way the rows
+  // keep their list order.
+  const railRows = filterTopicItems(allEntityItems, filter, isAll ? null : (scopedId ?? null));
+  const getSearchText = rail?.getSearchText;
+  const needle = filter.trim().toLowerCase();
+  const matchedIds =
+    getSearchText && needle
+      ? new Set([
+          ...railRows.map((row) => row.id),
+          ...(items ?? [])
+            .filter((it) => getSearchText(it).toLowerCase().includes(needle))
+            .map(getId),
+        ])
+      : null;
+  const entityItems = matchedIds
+    ? allEntityItems.filter((row) => matchedIds.has(row.id))
+    : railRows;
   const topicItems: TopicDetailItem[] = topics.map((t) => ({
     id: t.id,
     label: t.label,
@@ -337,15 +365,14 @@ export function ResourceExplorer<T>({
     leadsTo: t.leadsTo,
   }));
 
-  // The create affordance's own condition, and deliberately NOT `hasEntities`: this is the exact
-  // condition the pre-bar code used — `resourceLevel.onNew` was set whenever `newLabel != null`,
-  // and `resourceLevel` was spliced into `levels` only when `!promoteTopics` (see `levels`
-  // below). An empty list is precisely when a first create matters most, and a still-loading one
-  // resolves to a button that works; tying this to `hasEntities` left a brand-new tenant with no
-  // way to create anything at all. `!promoteTopics` stays for a second reason: in that mode the
-  // "New …" affordance lives on the promoted resource-list topic, which owns its own dialog (see
-  // the `renderDialog` prop doc above), so a second one here would be a duplicate — and there is
-  // no resource rail in that mode for `titleActions` to render into either.
+  // Whether this explorer offers a create at all: whenever the host names one (`newLabel`), and
+  // deliberately NOT gated on the list having rows. An empty list is precisely when a first
+  // create matters most, and a still-loading one resolves to a button that works; gating create
+  // on the row count once left a brand-new tenant with no way to create anything at all.
+  // `!promoteTopics` because that mode has no resource rail (see `levels` below) for the `+` or
+  // `titleActions` to render into, and its "New …" affordance lives on the promoted
+  // resource-list topic, which owns its own dialog (see the `renderDialog` prop doc above) — a
+  // second one here would be a duplicate.
   //
   // Declared HERE, above `resourceLevel`, which is its only reader: the rail's `+`, or the host's
   // own control in its place (`titleActions`).
@@ -364,11 +391,11 @@ export function ResourceExplorer<T>({
     // but only while there is something to pick: `overviewHelp` also FORCES the hint onto an
     // EMPTY list, and "Select a team" beside a rail reading "No teams yet." is a dead end.
     //
-    // Gated on the UNFILTERED list, like the rail's search: "there is nothing to pick" is a fact about the tenant's data, not about the
-    // box the user just typed in. Reading the filtered count here suppressed the blurb — and with
-    // it the whole nudge, since the frame's gate is `items.length > 0 || overviewHelp != null` —
-    // the moment a query matched nothing, and this pane's other branch is `null`, so a mistyped
-    // filter blanked the entire detail pane.
+    // Gated on the UNFILTERED list, like the rail's search: "there is nothing to pick" is a fact
+    // about the tenant's data, not about the box the user just typed in. Reading the filtered
+    // count here suppressed the blurb — and with it the whole nudge, since the frame's gate is
+    // `items.length > 0 || overviewHelp != null` — the moment a query matched nothing, and this
+    // pane's other branch is `null`, so a mistyped filter blanked the entire detail pane.
     itemNoun: nameSuffix.toLowerCase(),
     overviewHelp: allEntityItems.length > 0 ? rail?.help : undefined,
     selectedId: isAll ? null : (scopedId ?? null),
@@ -408,11 +435,17 @@ export function ResourceExplorer<T>({
     // fetch takes. (The card landing used to own this distinction; §1.5 took the landing, so the
     // rail states it now.) A FAILED load also leaves `items === null` and is indistinguishable
     // from a pending one from here, so the host names it: `rail.loadError` wins over "Loading…",
-    // which would otherwise sit there forever and read as an outage.
+    // which would otherwise sit there forever and read as an outage. The fourth, a query that
+    // matches nothing, is named HERE, in the rail's own words: the query is controlled, and a rail
+    // names a no-match only over rows it filtered itself (a controlled host's empty list may still
+    // be loading the query's read, which only the host can know). Only while the UNFILTERED list
+    // has rows: this label once outlived the field, so a list that emptied under a query read as
+    // a failed search with nothing to clear it from (the magnifier goes with the last row, and
+    // the stale query is dropped above).
     emptyLabel: !loaded
       ? (rail?.loadError ?? "Loading…")
-      : query
-        ? `No matches for “${filter.trim()}”.`
+      : needle && allEntityItems.length > 0
+        ? `Nothing matches “${filter.trim()}”.`
         : (rail?.emptyLabel ?? ""),
   };
   const topicLevel: TopicLevel = {

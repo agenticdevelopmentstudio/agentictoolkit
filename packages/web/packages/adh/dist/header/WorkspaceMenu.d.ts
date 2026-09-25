@@ -23,7 +23,9 @@ export type WorkspaceMenuProps = Pick<SiteMenuChromeProps, 'userIsAdmin' | 'curr
  *
  * What it keeps of the site menu it replaced is what is not about SITES: Help, the settings gear
  * (both {@link helpEntry} / {@link settingsTrailing}, shared with SiteMenu), the site's own nav on
- * a phone, and — for an adh admin — the operations consoles, after Help.
+ * a phone, and — for an adh admin — the operations consoles, after Help. Of the family's sites it
+ * carries three, the platform's Toolkit, Tools and Support, after Help too: the workspace rail gave
+ * them up to the site menu, which this one displaces on a workspace route (see PLATFORM_GROUPS).
  */
 export declare function WorkspaceMenu({ menu, userIsAdmin, currentSiteId, resolveHref, personalSlug, hubOffersFeature, onSettings, settingsHref, navLinks, triggerClassName, }: WorkspaceMenuProps): ReactElement;
 //# sourceMappingURL=WorkspaceMenu.d.ts.map

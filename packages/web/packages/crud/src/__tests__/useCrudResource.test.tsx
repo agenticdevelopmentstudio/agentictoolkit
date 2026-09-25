@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { itemUrl, rowKey, useCrudResource } from '../useCrudResource'
+import { itemUrl, listUrl, rowKey, useCrudResource } from '../useCrudResource'
 import type { CrudTableMeta } from '../types'
 
 vi.mock('@agentic-toolkit/auth/client', () => ({
@@ -56,6 +56,23 @@ describe('rowKey', () => {
   })
   it('is empty when a single-pk row carries no value (caller falls back)', () => {
     expect(rowKey(tiers, {})).toBe('')
+  })
+})
+
+// All Data's has-rows probe builds its URL with this, so it must be the very URL the hook lists.
+describe('listUrl', () => {
+  it('is the URL the hook lists from, scope first, then the filter', async () => {
+    authedJson.mockResolvedValueOnce([])
+    const { result } = renderHook(() =>
+      useCrudResource(tiers, { sourceProvider: 'reddit' }, 'eco-1'),
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    const url = listUrl(tiers, { sourceProvider: 'reddit' }, 'eco-1')
+    expect(url).toBe('/api/billing/subscription-tiers?ecosystemId=eco-1&sourceProvider=reddit')
+    expect(authedJson).toHaveBeenCalledWith(url)
+  })
+  it('has no query string with neither a filter nor a scope', () => {
+    expect(listUrl(tiers, {})).toBe('/api/billing/subscription-tiers')
   })
 })
 

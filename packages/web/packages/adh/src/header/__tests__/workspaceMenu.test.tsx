@@ -95,6 +95,28 @@ describe('WorkspaceMenu', () => {
     expect(workspaceItems().map((i) => i.label)).toEqual(['Mike Fullerton', 'Temporal'])
   })
 
+  it('adds no second "Workspace" to a label that already ends in the word', () => {
+    // The hub labels a nameless workspace with a placeholder that already says it: "My
+    // Workspace" (personal) or "Workspace" (organization, team). "My Workspace Workspace" is not
+    // a phrase.
+    for (const label of ['My Workspace', 'Workspace']) {
+      cleanup()
+      render(
+        <WorkspaceMenu
+          currentSiteId="hub"
+          menu={{
+            workspaces: [{ id: 'individual:mine', label, href: '/mine', current: true }],
+            loading: false,
+          }}
+        />,
+      )
+      expect(props().triggerLabel).toBe(`${label} — switch workspace`)
+      const trigger = render(<>{props().triggerContent}</>).container
+      expect(trigger.querySelector('.adh-workspace-trigger__suffix')).toBeNull()
+      expect(trigger.textContent).toBe(label)
+    }
+  })
+
   it('lists every workspace, marking the current one', () => {
     render(<WorkspaceMenu currentSiteId="hub" menu={{ workspaces: WORKSPACES, loading: false }} />)
     expect(workspaceItems().map((i) => [i.label, Boolean(i.current)])).toEqual([
@@ -172,9 +194,36 @@ describe('WorkspaceMenu', () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith('/temporal'))
   })
 
+  it("closes the list with the platform's Toolkit, Tools and Support, for everyone", () => {
+    // The workspace rail gave these three up because "the site menu already carries them" — but
+    // on a /<workspace>/* route this menu holds the site menu's slot, so without them here a
+    // signed-in user there had no door to any of them.
+    render(
+      <WorkspaceMenu
+        currentSiteId="hub"
+        hubOffersFeature={() => true}
+        menu={{ workspaces: WORKSPACES, loading: false }}
+      />,
+    )
+    const order = labels()
+    expect(order.slice(order.indexOf('Help'))).toEqual(['Help', 'Toolkit', 'Tools', 'Support'])
+    // In Help's own section: one divider sets them apart from the workspaces, none inside.
+    const leaves = props().entries.filter(
+      (e): e is Extract<PopoverEntry, { kind: 'leaf' }> => e.kind === 'leaf',
+    )
+    const help = leaves.find((e) => e.item.key === 'help')!
+    const platform = leaves.filter((e) => ['toolkit', 'tools', 'support'].includes(e.item.key))
+    expect(platform.map((e) => e.section)).toEqual([help.section, help.section, help.section])
+    // Resolved like any site row: onto the hub's own route where the workspace offers it.
+    expect(platform[0]!.item.href).toBe('/mine/toolkit')
+    // …and none of them is an admin console: a non-admin still gets no consoles.
+    expect(topic('Admin')).toBeUndefined()
+  })
+
   describe('for an adh admin', () => {
-    // This menu REPLACES the site menu for a signed-in hub user, and the site menu is where an
-    // admin's consoles live. Dropping them here left an admin on the hub no door to any console.
+    // This menu REPLACES the site menu for a signed-in hub user on a workspace route, and the site
+    // menu is where an admin's consoles live. Dropping them here left an admin on the hub no door
+    // to any console.
 
     it('offers the operations consoles, after Help and apart from it', () => {
       render(

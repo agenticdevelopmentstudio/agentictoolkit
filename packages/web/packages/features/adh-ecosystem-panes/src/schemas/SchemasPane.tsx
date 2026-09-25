@@ -3,10 +3,10 @@
 import { useCallback, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import { Settings, Table2, Trash2 } from "lucide-react";
+import { Pencil, Settings, Table2, Trash2 } from "lucide-react";
 import { useResourceList } from "@agentic-toolkit/data";
 import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
-import { Field } from "@agenticdevelopertoolkit/ui/blocks";
+import { Field, ListToolButton } from "@agenticdevelopertoolkit/ui/blocks";
 import type { TopicLevel } from "@agenticdevelopertoolkit/ui/blocks";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import {
@@ -42,7 +42,7 @@ import {
   schemaValidate,
   tableNameValidate,
 } from "./SchemaDefinitionDetail";
-import { nameForType, TypeOptions } from "./type-options";
+import { nameForType, TYPE_BY_ID, TypeOptions } from "./type-options";
 import { isMarkdownType, MarkdownRowsView } from "./MarkdownRowsView";
 import type { RenderTransferSection } from "../transfer-seam";
 
@@ -176,19 +176,30 @@ export function SchemasPane({
       : (bucket?.tables[0]?.id ?? null);
   const openTable: SchemaTable | undefined = bucket?.tables.find((t) => t.id === sub);
   const selectSub = (id: string | null) => bucket && setSubState({ bucketId: bucket.id, id });
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // WHICH bucket's Settings are open, not merely whether. A boolean outlived every way out that
+  // did not clear it — the dialog's Cancel deselected the bucket and left it set, so Settings
+  // popped open over the next bucket selected. Keyed to the id, the dialog can only ever show the
+  // bucket whose gear opened it.
+  const [settingsFor, setSettingsFor] = useState<string | null>(null);
 
-  // Unsaved work goes through the shared exit-guard system, as in every other pane — "navigating away with an unsaved bucket didn't stop me with a warning … there's a whole system for this we built" (Mike, 2026-09-24).
+  // Unsaved work goes through the shared exit-guard system, as in every other pane — "navigating
+  // away with an unsaved bucket didn't stop me with a warning … there's a whole system for this we
+  // built" (Mike, 2026-09-24).
   // Three ways to lose it here: (1) the open table's unsaved rows, published to the rail so Back,
-  // breadcrumbs and leaving the bucket prompt; (2) a click on a SIBLING table, a forward selection
-  // the rail does not guard, so it is gated here; (3) closing Settings with an edited name or
-  // description. (The bucket form's own guard is already published by useMasterDetailLevel.)
+  // breadcrumbs, leaving the bucket and a click on a SIBLING table prompt — the rail host runs a
+  // sibling swap past this published guard itself, so the table rail's `onSelect` must not gate
+  // it again (it did, and asked the same question twice); (2) the pane's own ways off the open
+  // table, which no rail sees — removing it, editing it (a retype swaps its rows), opening a table
+  // just added, and a Settings save that moves the slug the rows are keyed on — gated here by
+  // `rowsGate`; (3) closing Settings with an edited name or description. (The bucket form's own
+  // guard is already published by useMasterDetailLevel.)
   const { exitGuard: rowsGuard, registerGuard } = useExitGuardChannel();
   useRailExitGuard(rowsGuard);
   const rowsGate = useExitGate(rowsGuard);
-  // Read through a ref: the rail republishes a level only when its ids, selection or row count
-  // change, so an `onSelect` closing over `rowsGate` would still hold the CLEAN gate after a row
-  // was staged — and switch tables without asking.
+  // Read through a ref wherever a callback can outlive its render: Add table's `onCreated` runs
+  // once the create resolves, from the render that started it. That is how the rail's `onSelect`
+  // once switched tables without asking — the rail republishes a level only when its plain fields
+  // change, so it still held the CLEAN gate after a row was staged.
   const rowsGateRef = useRef(rowsGate);
   rowsGateRef.current = rowsGate;
   const settingsGate = useExitGate(form.dirty ? form.guard : null);
@@ -196,7 +207,7 @@ export function SchemasPane({
     settingsGate.attemptExit(() => {
       // Discard = re-hydrate the draft from the saved bucket, keeping it selected.
       if (form.dirty && bucket) form.select(bucket.id);
-      setSettingsOpen(false);
+      setSettingsFor(null);
     });
 
   // The bucket's own rail is its tables and nothing else; the bucket's Settings sit behind the
@@ -214,37 +225,76 @@ export function SchemasPane({
         })),
         // A table that has just been removed is no longer a row.
         selectedId: openTable ? sub : null,
-        onSelect: (id) => rowsGateRef.current.attemptExit(() => selectSub(id)),
+        // Ungated on purpose: the rail host already runs a sibling swap past the guard that
+        // `useRailExitGuard(rowsGuard)` above publishes — gating it here too asked the same
+        // question twice.
+        onSelect: (id) => selectSub(id),
         // Back/deselect is a level CLEAR, which the rail host already runs through the guard.
         onClear: () => selectSub(null),
         defaultSelectedId: bucket.tables[0]?.id,
         onNew: () => setAddTableOpen(true),
         newLabel: "Add table",
+        // The rail toolbar's own tool button, as the `+` beside it is drawn: a ghost Button here
+        // stood larger and brighter than the `+`, the look the list tools had already been moved
+        // off (Mike, 2026-09-24). One click, straight to a dialog — a gear opening a MENU would be
+        // GearMenuTrigger's.
         titleActions: (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => setSettingsOpen(true)}
-            title="Bucket settings"
-            aria-label="Bucket settings"
+          <ListToolButton
+            label="Bucket settings"
+            aria-haspopup="dialog"
+            onClick={() => setSettingsFor(bucket.id)}
           >
-            <Settings />
-          </Button>
+            <Settings size={15} aria-hidden />
+          </ListToolButton>
         ),
         itemNoun: "table",
         emptyLabel: "No tables yet.",
       }
     : null;
 
+  // Removing a table is a save of its own, so it gets what a save gets: one at a time, and its
+  // failure on screen. It used to be fired and forgotten (`void`) — a refused removal was an
+  // unhandled rejection with nothing shown, and a second click could send it again.
+  const [removing, setRemoving] = useState(false);
+  // Held WITH the table it is about, as `subState` is with its bucket, so another table's header
+  // never shows it.
+  const [tableError, setTableError] = useState<{ tableId: string; message: string } | null>(null);
+
+  // Renaming or retyping a table (the pencil beside the trash) is a save of its own as well, in a
+  // modal like Add table's, pre-filled. The deleted in-place tables editor used to do this;
+  // without it, the only fix for a wrong name or type was remove + re-add, which mints a new
+  // bucket_types id and strands whatever pointed at the old one (a persona interest's
+  // bucketTypeId). Held by id, as Settings is by bucket, so the dialog can only ever edit a table
+  // of the bucket on screen.
+  const [editTableId, setEditTableId] = useState<string | null>(null);
+  const editTable = bucket?.tables.find((t) => t.id === editTableId);
+
   async function removeTable(t: SchemaTable) {
-    if (!bucket) return;
-    await schemasApi.update(bucket.id, { tables: bucket.tables.filter((x) => x.id !== t.id) });
+    if (!bucket || removing) return;
+    setRemoving(true);
+    setTableError(null);
+    try {
+      await schemasApi.update(bucket.id, { tables: bucket.tables.filter((x) => x.id !== t.id) });
+    } catch (err) {
+      setTableError({
+        tableId: t.id,
+        message: err instanceof Error ? err.message : "Couldn't remove the table.",
+      });
+      return;
+    } finally {
+      setRemoving(false);
+    }
     selectSub(null);
-    await refresh();
+    // The removal has landed. A failed re-read is the list's own error (`loadError`, above the
+    // pane), never reported as a failed removal — that would tell the user to do it again.
+    await refresh().catch(() => {});
   }
 
   const meta = openTable ? crudMetaForType(openTable.type) : undefined;
+  // What the open table's rows view is keyed on: the bucket (its rdid moves with the slug), the
+  // table, and the table's TYPE — a retype makes it another sql table, and rows staged in the old
+  // one's grid must not carry onto the new one's.
+  const rowsKey = bucket && openTable ? `${bucket.id}/${openTable.id}/${openTable.type}` : "";
 
   return (
     <StackLevels levels={bucketLevel ? [bucketsLevel, bucketLevel] : [bucketsLevel]}>
@@ -262,24 +312,46 @@ export function SchemasPane({
               </h2>
               <Button
                 type="button"
+                variant="ghost"
+                size="icon"
+                // Asked on open, not on Save: a retype swaps the rows under the table, and the
+                // dialog's Save cannot wait on a second question (a Stay would leave it saving).
+                // The staged rows go only if the save retypes the table (`rowsKey`): a rename or
+                // a cancel leaves them staged, as a refused removal does.
+                onClick={() => rowsGateRef.current.attemptExit(() => setEditTableId(openTable.id))}
+                disabled={removing}
+                title="Edit table"
+                aria-label={`Edit ${openTable.name}`}
+              >
+                <Pencil />
+              </Button>
+              <Button
+                type="button"
                 variant="destructive-ghost"
                 size="icon"
-                onClick={() => void removeTable(openTable)}
+                // Removing the table unmounts its rows, so rows staged in them ask first — the
+                // same question leaving the table any other way asks.
+                onClick={() => rowsGateRef.current.attemptExit(() => void removeTable(openTable))}
+                disabled={removing}
                 title="Remove table from bucket"
                 aria-label={`Remove ${openTable.name} from bucket`}
               >
                 <Trash2 />
               </Button>
             </div>
+            <ErrorText
+              error={tableError?.tableId === openTable.id ? tableError.message : null}
+              className="px-6 pt-2"
+            />
             {isMarkdownType(openTable.type) ? (
               <MarkdownRowsView
-                key={`${bucket.id}/${openTable.id}`}
+                key={rowsKey}
                 type={openTable.type}
                 workspace={workspaceSlug}
               />
             ) : meta ? (
               <CrudDataView
-                key={`${bucket.id}/${openTable.id}`}
+                key={rowsKey}
                 meta={meta}
                 filter={{ ecosystemId: bucket.ecosystemId }}
                 createDefaults={{ ecosystemId: bucket.ecosystemId }}
@@ -308,15 +380,35 @@ export function SchemasPane({
 
         {/* The bucket's Settings, from the gear in its rail header. */}
         <Dialog
-          open={settingsOpen && !!bucket}
-          onOpenChange={(open) => (open ? setSettingsOpen(true) : closeSettings())}
+          open={!!bucket && settingsFor === bucket.id}
+          onOpenChange={(open) => (open ? setSettingsFor(bucket?.id ?? null) : closeSettings())}
         >
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>{bucket?.name}</DialogTitle>
             </DialogHeader>
             <ButtonBar
-              actions={form.actions}
+              // Inside the dialog, always. The default hoists the bar into the host's toolbar slot,
+              // and a host that publishes a real one (StandaloneRailHost, on the storage and
+              // products sites) put Save and Cancel outside the modal, behind its backdrop.
+              hoist={false}
+              actions={{
+                ...form.actions,
+                // The form's Cancel deselects the bucket — right for a detail pane, wrong for a
+                // dialog over the bucket's own tables: it closed the bucket out from under the
+                // user. Cancel here drops the edit (the same re-hydrate `closeSettings` discards
+                // with) and closes, leaving the bucket and its open table where they were.
+                onCancel: () => {
+                  if (form.dirty && bucket) form.select(bucket.id);
+                  setSettingsFor(null);
+                },
+                // A new slug is a new rdid, and the open table and its rows are keyed on it, so a
+                // save that moves it leaves them — rows staged there ask first.
+                onSave: () =>
+                  bucket && form.draft && form.draft.slug.trim() !== bucket.slug
+                    ? rowsGateRef.current.attemptExit(form.actions.onSave)
+                    : form.actions.onSave(),
+              }}
               showCreate={false}
               // Deleting lives in the danger zone below; a bar Delete would only ever be a
               // disabled second button naming the same action.
@@ -344,7 +436,7 @@ export function SchemasPane({
                     bucket?.kind === "custom"
                       ? async () => {
                           await schemasApi.delete(bucket.id);
-                          setSettingsOpen(false);
+                          setSettingsFor(null);
                           if (leaf) leaf.onSelect(null);
                           else form.actions.onCancel();
                           await refresh();
@@ -423,11 +515,13 @@ export function SchemasPane({
             onCreated={(updated) => {
               setAddTableOpen(false);
               void refresh();
-              // Open the table just added — the saved row carries the backend's id for it.
+              // Open the table just added — the saved row carries the backend's id for it. Opening
+              // it leaves the open table, so rows staged there ask first; the ref, because this
+              // runs once the create resolves, from the render that opened the dialog.
               const added = updated.tables.find(
                 (t) => !bucket.tables.some((x) => x.name === t.name),
               );
-              if (added) selectSub(added.id);
+              if (added) rowsGateRef.current.attemptExit(() => selectSub(added.id));
             }}
             renderForm={(draft, onChange, error) => (
               <>
@@ -443,6 +537,61 @@ export function SchemasPane({
                     }}
                   >
                     <option value="">Choose a type…</option>
+                    <TypeOptions />
+                  </Select>
+                </Field>
+                <Field label="Name" hint="Unique in this bucket; lowercase, no spaces.">
+                  <Input
+                    value={draft.name}
+                    placeholder="contacts"
+                    onChange={(e) => onChange({ ...draft, name: slugifyTableName(e.target.value) })}
+                  />
+                </Field>
+                <ErrorText error={error} />
+              </>
+            )}
+          />
+        )}
+
+        {editTable && bucket && (
+          <CreateResourceDialog<NewTableDraft, SchemaDefinition>
+            ariaLabel="Edit table"
+            heading={`Edit ${editTable.name}`}
+            blank={() => ({ name: editTable.name, type: editTable.type })}
+            validate={(d) =>
+              tableNameValidate(d.name, bucket.tables.filter((x) => x.id !== editTable.id))
+            }
+            // The same id, patched in place: the data client PUTs a known table rather than
+            // re-creating it, so the table keeps its bucket_types id.
+            create={(d) =>
+              schemasApi.update(bucket.id, {
+                tables: bucket.tables.map((x) =>
+                  x.id === editTable.id ? { ...x, name: d.name.trim(), type: d.type } : x,
+                ),
+              })
+            }
+            onClose={() => setEditTableId(null)}
+            onCreated={() => {
+              setEditTableId(null);
+              void refresh();
+              // Pinned by id rather than left to the default (the bucket's first table): the
+              // re-read list comes back in the backend's order, which nothing promises is the same.
+              selectSub(editTable.id);
+            }}
+            renderForm={(draft, onChange, error) => (
+              <>
+                <Field label="Type (sql-table)">
+                  <Select
+                    aria-label="Type (sql-table)"
+                    value={draft.type}
+                    // Unlike Add table, a retype leaves the name alone: this one is already named.
+                    onChange={(e) => onChange({ ...draft, type: e.target.value })}
+                  >
+                    {/* A stored type the curated catalogue no longer lists still shows its real
+                        value, not a silently mismatched first option. */}
+                    {!TYPE_BY_ID.has(editTable.type) && (
+                      <option value={editTable.type}>{editTable.type} (unlisted)</option>
+                    )}
                     <TypeOptions />
                   </Select>
                 </Field>

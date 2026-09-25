@@ -99,6 +99,54 @@ describe('FeaturePickerDialog', () => {
   })
 })
 
+// The picker is the only way left to take a feature off. A coming-soon feature the ecosystem
+// already holds used to sit ticked behind a disabled checkbox, on for good; it can come off now,
+// though it still can never be put on.
+describe('FeaturePickerDialog — a held coming-soon feature', () => {
+  function renderHeld(onApply = vi.fn()) {
+    render(
+      <FeaturePickerDialog
+        open
+        catalog={CATALOG}
+        alreadyProvisioned={new Set(['personas', 'messaging'])}
+        onApply={onApply}
+        onCancel={vi.fn()}
+      />,
+    )
+  }
+
+  it('can be unticked, and removed behind the same confirm', () => {
+    const onApply = vi.fn()
+    renderHeld(onApply)
+    const box = screen.getByRole('checkbox', { name: 'Messaging' })
+    expect(box).toBeChecked()
+    expect(box).not.toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(box)
+    expect(screen.getByRole('checkbox', { name: 'Messaging' })).not.toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    expect(screen.getByText('Remove 1 feature?')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    expect(onApply).toHaveBeenCalledWith({ add: [], remove: ['messaging'] })
+  })
+
+  it('ticking it back only cancels the removal', () => {
+    renderHeld()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Messaging' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Messaging' }))
+    expect(screen.getByRole('checkbox', { name: 'Messaging' })).toBeChecked()
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled()
+  })
+
+  it('leaves a coming-soon feature it does not hold disabled and unticked', () => {
+    renderHeld()
+    const box = screen.getByRole('checkbox', { name: 'Code Reviews' })
+    expect(box).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(box)
+    expect(screen.getByRole('checkbox', { name: 'Code Reviews' })).not.toBeChecked()
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled()
+  })
+})
+
 // A partial `useApplyFeatureChange` failure re-triggers `useProvisionedFeatures`, which arrives
 // with a DIFFERENT `alreadyProvisioned` set mid-visit. The old XOR-against-provisioned state
 // inverted intent on that refetch (a key that DID get added was then shown as pending removal);
@@ -181,6 +229,45 @@ describe('FeaturePickerDialog — Enter-to-confirm ignores IME composition', () 
     renderPicker()
     fireEvent.click(screen.getByRole('checkbox', { name: 'Research' }))
     fireEvent.keyDown(filterField(), { key: 'Enter', keyCode: 229 })
+    expect(screen.queryByText('Add 1 feature?')).toBeNull()
+  })
+})
+
+// ManageFeaturesDialog used to pass its two READS (the catalog, and what the ecosystem already
+// holds) as `busy`, and busy removes every way out of the dialog: no ×, Escape ignored, the footer
+// only a spinner. A read has no timeout, so a hung or offline one held the user in the dialog until
+// a reload. The reads are `loading` now — the dialog stays dismissable and only the change waits.
+describe('FeaturePickerDialog — loading', () => {
+  it('says it is loading, and can still be left by Cancel or the ×', () => {
+    const onCancel = vi.fn()
+    render(<FeaturePickerDialog open catalog={[]} loading onApply={vi.fn()} onCancel={onCancel} />)
+    expect(screen.getByText('Loading…')).toBeInTheDocument()
+    expect(screen.queryByRole('status', { name: 'Working…' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onCancel).toHaveBeenCalledTimes(2)
+  })
+
+  it('takes no ticks, by click or by Space, until the lists arrive', () => {
+    render(<FeaturePickerDialog open catalog={CATALOG} loading onApply={vi.fn()} onCancel={vi.fn()} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Research' }))
+    // Space toggles the cursor row — Personas, the first — from the filter field.
+    fireEvent.keyDown(screen.getByRole('searchbox', { name: 'Filter features' }), { key: ' ' })
+    expect(screen.getByRole('checkbox', { name: 'Research' })).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Personas' })).not.toBeChecked()
+  })
+
+  // The picker is presentational and cannot know WHEN its caller sets `loading`, so a change the
+  // user already made is held back too, from the Apply button and from Enter alike (Enter reaches
+  // the confirm without going through the button's disabled state).
+  it('holds back a change it already has, from Apply and from Enter', () => {
+    const props = { open: true, catalog: CATALOG, onApply: vi.fn(), onCancel: vi.fn() }
+    const { rerender } = render(<FeaturePickerDialog {...props} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Research' }))
+    rerender(<FeaturePickerDialog {...props} loading />)
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled()
+    fireEvent.keyDown(screen.getByRole('searchbox', { name: 'Filter features' }), { key: 'Enter' })
     expect(screen.queryByText('Add 1 feature?')).toBeNull()
   })
 })

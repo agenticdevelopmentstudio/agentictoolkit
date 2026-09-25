@@ -31,8 +31,10 @@ export const PRODUCT_TOPICS = [
   { id: "storage", label: "Storage", dividerAfter: false, features: ["storage"] },
   { id: "integrations", label: "Integrations", dividerAfter: false, features: ["integrations"] },
   // Messaging: send email/SMS to this product's customers via its OWN connected
-  // Postmark/Twilio integration (the promoted admin Messaging tool). Always shown; each
-  // channel is disabled until its provider is connected on Integrations.
+  // Postmark/Twilio integration (the promoted admin Messaging tool). Drawn only while the
+  // product holds the catalog's `messaging` feature — so not at all while the catalog lists
+  // it as coming soon — and each channel is disabled until its provider is connected on
+  // Integrations.
   { id: "messaging", label: "Messaging", dividerAfter: false, features: ["messaging"] },
   { id: "applications", label: "Applications", dividerAfter: false, features: ["applications"] },
   { id: "dashboards", label: "Dashboards", dividerAfter: true, features: ["dashboards"] },

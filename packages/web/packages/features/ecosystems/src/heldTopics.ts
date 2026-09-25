@@ -1,7 +1,8 @@
-import type { ProvisionedFeature } from "@agentic-toolkit/data/ecosystems";
+import { presentFeatureKeys, type ProvisionedFeature } from "@agentic-toolkit/data/ecosystems";
 
-/** The one field of a topic row this module reads: see `EcosystemsTopicConfig.features`. */
+/** The fields of a topic row {@link heldTopics} reads: see `EcosystemsTopicConfig.features`. */
 interface FeatureKeyedTopic {
+  id: string;
   features?: readonly string[];
 }
 
@@ -39,22 +40,31 @@ export function settingsLast<T extends DividedTopic>(topics: readonly T[]): T[] 
  *
  * The Features list used to draw every product topic whether or not the product had it — the
  * child "Agentic Developer Hub" showed nineteen rows while its Manage features dialog showed
- * nothing ticked (Mike, 2026-09-24). The list and the dialog now read the same provisioned set,
- * so they cannot disagree. A coming-soon feature is never provisionable, so its row stays off
- * until the catalog ships it.
+ * nothing ticked (Mike, 2026-09-24). The list and the dialog now read the same provisioned set
+ * through the same rule, `presentFeatureKeys`, so once the read has landed a keyed row is drawn
+ * exactly when the dialog opens with one of its features ticked. A coming-soon feature is never
+ * provisionable, so its row stays off until the catalog ships it.
  *
  * `provisioned` is `undefined` while the read is in flight: keyed rows are withheld until it
- * lands rather than drawn and then yanked. On a FAILED read the caller passes `null` and every
- * row is shown — a transient error must not make a product look empty, and each pane still
- * reports its own failure.
+ * lands rather than drawn and then yanked — all but `routed`, the row the URL names. Withholding
+ * that one too left a deep link to a product feature on "Select a topic to view.", beside a list
+ * holding only Settings, for as long as the read took; the hub's workspace rail draws its routed
+ * feature for the same reason (`railGrants`). Should the product turn out not to hold it, that
+ * one row goes when the read lands. On a FAILED read the caller passes `null` and every row is
+ * shown — a transient error must not make a product look empty, and each pane still reports its
+ * own failure.
  */
 export function heldTopics<T extends FeatureKeyedTopic>(
   topics: readonly T[],
   provisioned: readonly ProvisionedFeature[] | null | undefined,
+  routed?: string,
 ): T[] {
   if (provisioned === null) return [...topics];
-  const held = new Set(
-    (provisioned ?? []).filter((f) => f.state !== "removed").map((f) => f.featureKey),
+  const held = presentFeatureKeys(provisioned ?? []);
+  return topics.filter(
+    (t) =>
+      t.features == null ||
+      (provisioned === undefined && t.id === routed) ||
+      t.features.some((k) => held.has(k)),
   );
-  return topics.filter((t) => t.features == null || t.features.some((k) => held.has(k)));
 }

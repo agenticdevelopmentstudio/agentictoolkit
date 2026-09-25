@@ -117,8 +117,8 @@ export function PersonasSection({
       : "Failed to load personas."
     : servicesError;
   // Creating a persona is a MODAL over the stack, never a blank editor leaf (HTD recipe
-  // `must-create-in-modal`): the home bar's "New Persona" button opens it, and on save the created
-  // persona is selected so its full editor (personality, purpose, abilities, …) opens.
+  // `must-create-in-modal`): the persona list's toolbar `+` ("New Persona") opens it, and on save
+  // the created persona is selected so its full editor (personality, purpose, abilities, …) opens.
   const [newOpen, setNewOpen] = useState(false);
   // Dual-mode selection: URL-driven (deep-linkable) when `urlSelection` is passed, else internal
   // state (the embedded /home launcher / ecosystem rail).

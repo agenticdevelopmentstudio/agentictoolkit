@@ -155,10 +155,21 @@ function plainFields(o: object): string {
  *  so keying on them would re-register every level on every render — and their handlers are
  *  closures, which is worse. A level whose ONLY change is inside such a node keeps the previously
  *  registered one until some plain field moves. Give such a node a plain companion field (the way
- *  `busy` carries the spinner) rather than expecting the node itself to be noticed. */
+ *  `busy` carries the spinner) rather than expecting the node itself to be noticed.
+ *
+ *  `search` is the one OBJECT that is keyed, and only its plain half — `query` and `placeholder`,
+ *  never the `onQueryChange` closure. The rail's pop-over field is CONTROLLED from the REGISTERED
+ *  level, so while the query went unkeyed the stored level kept the old one: a keystroke set the
+ *  publisher's state, re-registered nothing, and React put the field back to the stale committed
+ *  value. A key survived only when some plain field happened to move with it — fast typing in
+ *  Research kept only the last key, "abc" became "ac" in the notebook, and a space could never be
+ *  typed into the ResourceExplorer filter, whose empty label moves with the TRIMMED query. */
 function levelsKey(levels: TopicLevel[]): string {
   return levels
-    .map((l) => `${plainFields(l)}[${l.items.map(plainFields).join(",")}]`)
+    .map((l) => {
+      const search = l.search ? [l.search.query ?? null, l.search.placeholder ?? null] : null;
+      return `${plainFields(l)}${JSON.stringify(search)}[${l.items.map(plainFields).join(",")}]`;
+    })
     .join("|");
 }
 
@@ -176,8 +187,9 @@ export function StackLevels({ levels, children }: { levels: TopicLevel[]; childr
   const id = useId();
   const register = ctx?.registerLevels;
   const unregister = ctx?.unregisterLevels;
-  // Re-runs whenever `key` (id + selection + row count per level) changes; the effect closure holds
-  // the latest `levels` at that point, so no ref is needed to register fresh values.
+  // Re-runs whenever `key` moves — every plain field `levelsKey` can see, the controlled search
+  // query included; the effect closure holds the latest `levels` at that point, so no ref is needed
+  // to register fresh values.
   const key = levelsKey(levels);
   useLayoutEffect(() => {
     if (!register || !unregister) return;

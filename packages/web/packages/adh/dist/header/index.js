@@ -2114,7 +2114,10 @@ import { Fragment as Fragment6, jsx as jsx18, jsxs as jsxs10 } from "react/jsx-r
 var WORKSPACES_SECTION = 0;
 var HELP_SECTION = 1;
 var SECTION_LABELS = { [WORKSPACES_SECTION]: "Workspaces" };
-var NO_GROUPS = [];
+var PLATFORM_GROUPS = ["toolkit", "tools", "support"].map(
+  (site) => ({ kind: "leaf", section: HELP_SECTION, link: { site } })
+);
+var PLATFORM_AND_ADMIN_GROUPS = [...PLATFORM_GROUPS, ...ADMIN_MENU_GROUPS];
 function WorkspaceMenu({
   menu,
   userIsAdmin,
@@ -2133,7 +2136,8 @@ function WorkspaceMenu({
   const openHelp = useHelp2().open;
   const current = menu.workspaces.find((w) => w.current);
   const label = current?.label ?? (menu.loading ? "Loading\u2026" : "Workspaces");
-  const triggerText = current ? `${label} Workspace` : label;
+  const suffixed = current != null && !/\bworkspace$/i.test(label.trim());
+  const triggerText = suffixed ? `${label} Workspace` : label;
   const workspaceRows = useMemo4(() => {
     if (!menu.workspaces.length) {
       return [
@@ -2159,8 +2163,8 @@ function WorkspaceMenu({
       }
     }));
   }, [menu]);
-  const { entries: adminEntries, navigate: navigateSiteRow } = useSiteMenu(
-    userIsAdmin === true ? ADMIN_MENU_GROUPS : NO_GROUPS,
+  const { entries: siteEntries, navigate: navigateSiteRow } = useSiteMenu(
+    userIsAdmin === true ? PLATFORM_AND_ADMIN_GROUPS : PLATFORM_GROUPS,
     { currentSiteId, resolveHref, personalSlug, authenticated: true, hubOffersFeature }
   );
   const linksCollapsed = useHeaderLinksCollapsed();
@@ -2169,8 +2173,8 @@ function WorkspaceMenu({
     [linksCollapsed, navLinks, pathname]
   );
   const entries = useMemo4(
-    () => [...navSection, ...workspaceRows, helpEntry(openHelp, HELP_SECTION), ...adminEntries],
-    [navSection, workspaceRows, openHelp, adminEntries]
+    () => [...navSection, ...workspaceRows, helpEntry(openHelp, HELP_SECTION), ...siteEntries],
+    [navSection, workspaceRows, openHelp, siteEntries]
   );
   const navigate = useCallback4(
     (item) => {
@@ -2198,7 +2202,7 @@ function WorkspaceMenu({
         /* @__PURE__ */ jsx18(HubMark3, { className: "adh-nav-popover__mark" }),
         /* @__PURE__ */ jsxs10("span", { className: "adh-workspace-trigger__name", children: [
           /* @__PURE__ */ jsx18("span", { className: "adh-workspace-trigger__label", children: label }),
-          current ? /* @__PURE__ */ jsx18("span", { className: "adh-workspace-trigger__suffix", children: "Workspace" }) : null,
+          suffixed ? /* @__PURE__ */ jsx18("span", { className: "adh-workspace-trigger__suffix", children: "Workspace" }) : null,
           /* @__PURE__ */ jsx18(ChevronDown4, { className: "adh-nav-popover__chevron", "aria-hidden": true })
         ] })
       ] }),

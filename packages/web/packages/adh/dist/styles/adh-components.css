@@ -1058,13 +1058,14 @@
    `--adh-header-height` a number nothing actually measures. `.adh-header__preview`
    centres its text in exactly this height.
 
-   - `--adh-chrome-bar-height` is every bar UNDER the workspace chooser: the home bar
-     (`resource`'s strip), the stack's toolbar strip and its breadcrumb strip. They were
-     each sized by their own content and so came out ragged — a bar holding a search
-     field (`Input` is `h-9`) stood 53px, one holding a `size="sm"` button 45px, the
-     breadcrumb 33px. One token, read as a `min-height` by all three, makes them exactly
-     equal at 2.75rem for any content up to 36px tall, which is the tallest control any
-     of them carries. A MINIMUM and not a fixed height because the breadcrumb trail
+   - `--adh-chrome-bar-height` is every bar UNDER the workspace chooser: the stack's
+     toolbar strip and its breadcrumb strip. (A third, the home bar — `resource`'s
+     strip — read it too until it went on 2026-09-24, when every list took its own
+     toolbar.) They were each sized by their own content and so came out ragged — a bar
+     holding a search field (`Input` is `h-9`) stood 53px, one holding a `size="sm"`
+     button 45px, the breadcrumb 33px. One token, read as a `min-height` by both, makes
+     them exactly equal at 2.75rem for any content up to 36px tall, which is the tallest
+     control either carries. A MINIMUM and not a fixed height because the breadcrumb trail
      wraps: a two-line trail must make its bar taller rather than be clipped by it.
      Chosen to fit that 36px control with the `py-1` the bars keep, so the common case
      lands on the token exactly rather than merely above it.

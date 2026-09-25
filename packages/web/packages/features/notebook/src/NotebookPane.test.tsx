@@ -59,6 +59,7 @@ import {
   type Note,
   type NoteCategory,
   type NoteSummary,
+  type NoteTag,
 } from "@agentic-toolkit/data/notes";
 
 const list = vi.mocked(notesApi.list);
@@ -154,7 +155,7 @@ function Rail({ published }: { published: TopicLevel[] }) {
                 type="search"
                 aria-label={l.search.placeholder}
                 value={l.search.query}
-                onChange={(e) => l.search?.onQueryChange(e.target.value)}
+                onChange={(e) => l.search?.onQueryChange?.(e.target.value)}
               />
             )}
             {l.titleActions}
@@ -344,6 +345,80 @@ describe("the notes list's gear and search", () => {
         { workspace: "acme" },
       ),
     );
+  });
+
+  it("offers a tag the vocabulary read delivers after the notes", async () => {
+    // The Tag menu's options are the tag vocabulary read, held back here until the notes AND the
+    // category rows are on screen, so it lands when nothing else on any published level moves.
+    // The gear is a React node, which the rail host's publish key cannot see: before the level
+    // carried `filterKey`, a vocabulary that arrived last never reached the menu, which offered
+    // only "All tags".
+    let landTags: (tags: NoteTag[]) => void = () => {};
+    tagSet.mockReturnValue(
+      new Promise<NoteTag[]>((resolve) => {
+        landTags = resolve;
+      }),
+    );
+    renderPane();
+    await screen.findByRole("button", { name: "Standup" });
+    await screen.findByRole("button", { name: "Work" });
+    await act(async () => {
+      landTags([
+        { id: "kw-1", label: "meeting" },
+        { id: "kw-2", label: "retro" },
+      ]);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Notes list options" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^Tag:/ }));
+    expect(await screen.findByRole("menuitemradio", { name: "retro" })).not.toBeNull();
+  });
+
+  // The gear writes through the pane's setter, and the level re-registers with every filter it
+  // draws. Both halves were missing: with a tag on, clearing the category moved no plain field —
+  // `filtering` only moves when the filter set empties or fills, and the list key came back to a
+  // cached, identical result — so the gear stayed on "Category: Work", and the next pick spread
+  // that stale snapshot and put the cleared category straight back.
+  it("keeps a cleared filter cleared when the other one is picked next", async () => {
+    renderPane();
+    await screen.findByRole("button", { name: "Standup" });
+    const toolbar = within(screen.getByTestId("toolbar-notebook-notes"));
+    const pick = async (axis: RegExp, option: string) => {
+      fireEvent.click(toolbar.getByRole("button", { name: /^Notes list options/ }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: axis }));
+      // Choosing a radio closes the menu (`closeOnClick`), so every pick reopens the gear.
+      fireEvent.click(await screen.findByRole("menuitemradio", { name: option }));
+    };
+
+    await pick(/^Tag:/, "meeting");
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(
+        { q: "", tag: "meeting", category: "" },
+        { workspace: "acme" },
+      ),
+    );
+    await pick(/^Category:/, "Work");
+    await waitFor(() =>
+      expect(list).toHaveBeenLastCalledWith(
+        { q: "", tag: "meeting", category: "Work" },
+        { workspace: "acme" },
+      ),
+    );
+    await pick(/^Category:/, "All categories");
+    // Past the debounce, so the list is back on the tag-only key the first pick already read.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+
+    fireEvent.click(toolbar.getByRole("button", { name: "Notes list options (filtered)" }));
+    expect(await screen.findByRole("menuitem", { name: "Category: all categories" })).not.toBeNull();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Tag: meeting" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "All tags" }));
+
+    // Nothing narrows any more: the gear drops its "(filtered)" mark, and both axes read all-pass.
+    fireEvent.click(await toolbar.findByRole("button", { name: "Notes list options" }));
+    expect(await screen.findByRole("menuitem", { name: "Category: all categories" })).not.toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Tag: all tags" })).not.toBeNull();
   });
 
   it("publishes onto the notes level's own toolbar, not some shared strip", async () => {

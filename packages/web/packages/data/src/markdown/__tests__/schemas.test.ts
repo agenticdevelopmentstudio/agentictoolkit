@@ -58,10 +58,18 @@ describe("schemasApi — bucket slugs", () => {
       schemasApi.create({ name: "New", slug: "crm", description: "", tables: [] }, "ecosystem.acme"),
     ).rejects.toThrow('A bucket with the slug "crm" already exists.');
 
+    // A taken ADDRESS is spelled differently by the two verbs: create answers `id already exists`,
+    // while an update's rename cascade trips `rdid.identifiers`' primary key. Both are the slug —
+    // even though the pane's update sends the unchanged name alongside it.
     json.mockRejectedValueOnce(new Error("id already exists"));
-    await expect(schemasApi.update("storage.acme.x", { slug: "crm" })).rejects.toThrow(
-      'A bucket with the slug "crm" already exists.',
-    );
+    await expect(
+      schemasApi.create({ name: "New", slug: "crm", description: "", tables: [] }, "ecosystem.acme"),
+    ).rejects.toThrow('A bucket with the slug "crm" already exists.');
+
+    json.mockRejectedValueOnce(new Error("resource already exists (identifiers_pkey)"));
+    await expect(
+      schemasApi.update("storage.acme.x", { name: "Customer CRM", slug: "crm" }),
+    ).rejects.toThrow('A bucket with the slug "crm" already exists.');
 
     json.mockRejectedValueOnce(new Error("resource already exists (uq_bucket_buckets_owner_parent_name)"));
     await expect(

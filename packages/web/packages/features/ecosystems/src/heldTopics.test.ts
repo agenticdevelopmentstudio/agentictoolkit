@@ -40,6 +40,18 @@ describe("heldTopics", () => {
     expect(ids(heldTopics(TOPICS, undefined))).toEqual(["settings"]);
   });
 
+  // Except the row the URL names: withholding it too left a deep link to a product feature on
+  // "Select a topic to view." for as long as the read took.
+  it("keeps the routed row while the read is in flight, and only then", () => {
+    expect(ids(heldTopics(TOPICS, undefined, "storage"))).toEqual(["storage", "settings"]);
+    // Once the read lands the routed row is held to the same rule as the rest.
+    expect(ids(heldTopics(TOPICS, [], "storage"))).toEqual(["settings"]);
+    expect(ids(heldTopics(TOPICS, [row("dashboards")], "storage"))).toEqual([
+      "dashboards",
+      "settings",
+    ]);
+  });
+
   // A failed read must not make a product look empty.
   it("shows every row when the read failed", () => {
     expect(ids(heldTopics(TOPICS, null))).toEqual(ids(TOPICS));

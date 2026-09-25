@@ -51,7 +51,9 @@ import { useRdidAvailability } from "./EcosystemForm";
 
 afterEach(() => {
   cleanup();
-  vi.mocked(useRdidAvailability).mockClear();
+  // mockReset, not mockClear: it also drops a verdict a test set for itself (the rename-gate
+  // tests below) and puts back the factory's "available" for the next one.
+  vi.mocked(useRdidAvailability).mockReset();
   vi.mocked(ecosystemsApi.update).mockReset();
 });
 
@@ -195,4 +197,28 @@ describe("EcosystemSettingsPane between a rename and the host's navigation", () 
     expect(probedFor()).toBeNull();
     expect(screen.getByTestId("eco-fields").getAttribute("data-status")).toBe("idle");
   });
+});
+
+// A RENAME WAITS FOR THE PROBE'S GO-AHEAD. useMasterDetailForm waives any reason the STORED record
+// reproduces (a problem the backend wrote is not the edit's fault), and this pane's `validate` used
+// to judge "is this a rename?" by the probe's render-scoped verdict instead of by the identifier it
+// was handed. So while the probe was checking or had errored, the untouched stored row reproduced
+// "Waiting for the identifier availability check.", the waiver cleared it, and Save sent the
+// rename without the probe's go-ahead.
+describe("EcosystemSettingsPane rename gate", () => {
+  it.each(["checking", "error"] as const)(
+    "keeps Save disabled, and says why, while the probe is %s",
+    async (verdict) => {
+      vi.mocked(useRdidAvailability).mockReturnValue(verdict);
+      renderPane();
+      await act(async () => {
+        screen.getByRole("button", { name: "rename" }).click();
+      });
+      // The pane really is asking about the NEW address, so the verdict is about this rename.
+      expect(probedFor()).toBe("ecosystem.acme.gizmos");
+      expect(screen.getByTestId("eco-fields").getAttribute("data-status")).toBe(verdict);
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(screen.getByText("Waiting for the identifier availability check.")).toBeInTheDocument();
+    },
+  );
 });

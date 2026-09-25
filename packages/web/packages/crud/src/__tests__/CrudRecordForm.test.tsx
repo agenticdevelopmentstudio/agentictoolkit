@@ -155,6 +155,17 @@ describe('buildPayload', () => {
       name: 'x',
       payload: 'bar',
     })
+    // …but text that opens like JSON is a typo in a structured value, not a string: saving it
+    // silently replaced the object.
+    expect(() => buildPayload(meta, { name: 'x', payload: '{nope' }, 'create')).toThrow(
+      'payload must be valid JSON',
+    )
+    expect(() => buildPayload(meta, { name: 'x', payload: '[1, 2' }, 'edit')).toThrow(
+      'payload must be valid JSON',
+    )
+    expect(() => buildPayload(meta, { name: 'x', payload: '"open' }, 'edit')).toThrow(
+      'payload must be valid JSON',
+    )
   })
   it('skips createOnly columns on edit, before the required check', () => {
     expect(buildPayload(rdidMeta, { id: '', name: 'Thing' }, 'edit')).toEqual({ name: 'Thing' })
@@ -269,6 +280,18 @@ describe('CrudRecordForm', () => {
     await user.paste('bar')
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ name: 'Widget', payload: 'bar' }))
+  })
+
+  it('shows the field-named error for broken JSON in an unknown column', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    render(<CrudRecordForm meta={meta} canWrite onSubmit={onSubmit} onCancel={vi.fn()} />)
+    await user.type(screen.getByLabelText('name *'), 'Widget')
+    await user.click(screen.getByLabelText(/^payload/))
+    await user.paste('{nope')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('payload must be valid JSON')
+    expect(onSubmit).not.toHaveBeenCalled()
   })
 
   it('disables createOnly columns on edit (seeded) and drops them from the payload', async () => {
