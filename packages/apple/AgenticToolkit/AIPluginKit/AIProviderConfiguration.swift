@@ -1,4 +1,5 @@
 import Foundation
+import AgenticToolkitCore
 
 /// A user's named instance of a provider template: which plugin serves it, which
 /// template it was created from, and a display name. Per-configuration field
@@ -21,9 +22,6 @@ public struct AIProviderConfiguration: Codable, Sendable, Identifiable, Equatabl
     /// A configuration name not already in `taken`, appending " 2", " 3", … until
     /// free. One source of truth for the UI (add/rename) and the migration planner.
     public static func uniqueName(_ base: String, avoiding taken: Set<String>) -> String {
-        guard taken.contains(base) else { return base }
-        var suffix = 2
-        while taken.contains("\(base) \(suffix)") { suffix += 1 }
-        return "\(base) \(suffix)"
+        UniqueName.next(base: base, taken: taken)
     }
 }
