@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -16,6 +17,7 @@ import {
   type ChatBackend,
   type GazeVector,
 } from '@agenticdevelopertoolkit/chat'
+import { travelFrom } from '@agenticdevelopertoolkit/avatar'
 import type { ThemeKey } from '@agenticdevelopertoolkit/themes'
 import { useKeyboardInset, usePageScrollLock } from '@agenticdevelopertoolkit/viewport'
 import { BitbagChat } from './BitbagChat'
@@ -28,9 +30,28 @@ import { DEFAULT_THEME } from './voice'
  *  composer. */
 const CORNER_SCALE = 0.75
 
-/** How long closing waits for the panel's exit animation before hiding it anyway —
- *  comfortably past the animation's own length in bitbag-dock.css. */
-const CLOSE_FALLBACK_MS = 600
+/** How long his chat takes to slide up onto the screen, and back off it — and so how
+ *  long he takes to travel between the bar and its corner, in step with it. The one
+ *  copy: they reach bitbag-dock.css as `--bb-dock-slide-*`, so the panel's slide and
+ *  his travel cannot drift apart. In quick and settling; out accelerating away. */
+const SLIDE_IN_MS = 420
+const SLIDE_OUT_MS = 320
+const SLIDE_IN_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'
+const SLIDE_OUT_EASE = 'cubic-bezier(0.5, 0, 0.75, 0)'
+
+/** How high he hops when he lands on his chat's corner, px. */
+const LANDING_BOUNCE = 7
+
+/** How long closing waits for the panel's slide out before hiding it anyway —
+ *  comfortably past the slide itself. */
+const CLOSE_FALLBACK_MS = SLIDE_OUT_MS + 300
+
+const SLIDE_VARS = {
+  '--bb-dock-slide-in': `${SLIDE_IN_MS}ms`,
+  '--bb-dock-slide-out': `${SLIDE_OUT_MS}ms`,
+  '--bb-dock-slide-in-ease': SLIDE_IN_EASE,
+  '--bb-dock-slide-out-ease': SLIDE_OUT_EASE,
+} as CSSProperties
 
 export interface BitbagDockProps {
   /** The toolkit theme that skins his chat. Defaults to the adh house style. */
@@ -137,8 +158,6 @@ export function BitbagDock({
   // to be seen leaving.
   const [closing, setClosing] = useState(false)
   const showing = open && !closing
-  // Whether he has been back to rest at least once — see `bb-dock--returned`.
-  const [returned, setReturned] = useState(false)
   const [chatEngaged, setChatEngaged] = useState(false)
   // The frame his chat and his `i` share, which `hidden` takes away when he rests.
   const panelRef = useRef<HTMLDivElement>(null)
@@ -150,6 +169,31 @@ export function BitbagDock({
   // part of the page.
   usePageScrollLock(avatarRest ? showing : chatEngaged, panelRef)
 
+  // He travels between the bar and his chat's corner, and those are two unrelated
+  // layouts — in the column at rest, absolutely on the corner open — that no CSS
+  // transition joins. So each move is FLIP (`travelFrom`): where he is drawn is
+  // measured just BEFORE the state change that re-lays him out, and once the new
+  // layout is committed he is drawn back there and animated home. Measuring the
+  // drawn box, not the layout, means a move that interrupts another starts from
+  // wherever the first had got him to.
+  const travelFromRect = useRef<DOMRect | null>(null)
+  const markTravel = useCallback((): void => {
+    if (avatarRest) travelFromRect.current = bitbagRef.current?.getBoundingClientRect() ?? null
+  }, [avatarRest])
+  useLayoutEffect(() => {
+    const from = travelFromRect.current
+    const el = bitbagRef.current
+    travelFromRect.current = null
+    if (!from || !el) return
+    travelFrom(
+      el,
+      from,
+      showing
+        ? { duration: SLIDE_IN_MS, easing: SLIDE_IN_EASE, bounce: LANDING_BOUNCE }
+        : { duration: SLIDE_OUT_MS, easing: SLIDE_OUT_EASE },
+    )
+  }, [showing])
+
   // Every way back to rest comes through here. Focus first: `hidden` stops the
   // panel rendering, and a focused composer or `i` inside it dropped focus to
   // <body> — a keyboard user lost their place on every Escape. It goes back to
@@ -157,9 +201,9 @@ export function BitbagDock({
   // ends, so a phone's keyboard drops with the panel rather than after it.
   const close = useCallback((): void => {
     if (panelRef.current?.contains(document.activeElement)) bitbagRef.current?.focus()
+    markTravel()
     setClosing(true)
-    setReturned(true)
-  }, [])
+  }, [markTravel])
 
   // The end of the way out. The chat stays engaged until here — folding it the
   // moment the close began would snap it to its one-line size mid-fade — and folds
@@ -253,11 +297,13 @@ export function BitbagDock({
   const face = useRef<BitbagHandle>(null)
   const activate = (): void => {
     if (!open) {
+      markTravel()
       setOpen(true)
       return
     }
-    // Caught on his way out: he stays.
+    // Caught on his way out: he stays, and goes back up to the corner.
     if (closing) {
+      markTravel()
       setClosing(false)
       return
     }
@@ -284,15 +330,14 @@ export function BitbagDock({
 
   // Resting, he is laid out at half width rather than scaled to it: a transform leaves
   // the full-size box in place, and that invisible box would sit over the host bar's
-  // own controls taking their clicks. `bb-dock--returned` marks a rest he came back
-  // to, which he settles into; the rest a page loads with has nothing to settle from.
+  // own controls taking their clicks. Closing, he is already laid out at rest — the
+  // panel slides away beneath him while he travels down to the bar.
   const resting = avatarRest && !open
   const rootClass = [
     'bb-dock',
     avatarRest && 'bb-dock--rest-avatar',
     resting && 'bb-dock--resting',
     closing && 'bb-dock--closing',
-    returned && 'bb-dock--returned',
     className,
   ]
     .filter(Boolean)
@@ -301,13 +346,13 @@ export function BitbagDock({
   // Open from the rest he sits on the chat's corner, smaller, and the composer keeps
   // clear of him: `--bb-dock-corner-w` is how much room it leaves at its right end.
   const cornerWidth = Math.round(size * CORNER_SCALE)
-  const width = !avatarRest ? size : resting ? size / 2 : cornerWidth
+  const width = !avatarRest ? size : resting || closing ? size / 2 : cornerWidth
   const panelStyle = avatarRest
     ? ({ '--bb-dock-corner-w': `${cornerWidth}px` } as CSSProperties)
     : undefined
 
   return (
-    <div className={rootClass}>
+    <div className={rootClass} style={avatarRest ? SLIDE_VARS : undefined}>
       <div
         ref={bitbagRef}
         className="bb-dock__avatar"

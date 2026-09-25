@@ -98,12 +98,8 @@
 @media (prefers-reduced-motion: reduce) {
   .bb-dock,
   .bb-dock::before,
-  .bb-dock__avatar,
-  .bb-dock--rest-avatar .bb-dock__avatar {
+  .bb-dock__avatar {
     transition: none;
-  }
-  .bb-dock.bb-dock--rest-avatar:not(.bb-dock--resting) .bb-dock__avatar {
-    animation: none;
   }
 }
 
@@ -214,9 +210,14 @@
  * width here instead of leaning on the doze transform above — a scaled box keeps
  * its full-size footprint, and on a host whose bottom edge is a bar of its own
  * that invisible 132px box sits over the bar's controls and takes their clicks.
- * So the doze scale is switched off while resting, or he would be quartered. The
- * width change is animated with the transform's own curve, so waking still reads
- * as him growing up out of the bar.
+ * So the doze scale is switched off while resting, or he would be quartered.
+ *
+ * None of his moves between the bar and the chat's corner are CSS transitions. The
+ * two places are laid out in unrelated ways (in the column here, absolutely on the
+ * corner below), so BitbagDock carries him between them itself — FLIP, with
+ * `travelFrom` — in step with the panel's slide. A transition here would fight it:
+ * FLIP measures where the new layout puts him, and a width or transform still
+ * transitioning would be measured as part of that place.
  *
  * Where in the bar he rests is the HOST's to say, and it says it through two hooks
  * this rule reads with neutral fallbacks — the way `--kb-inset` reaches the rig:
@@ -227,27 +228,36 @@
  *   --bb-dock-rest-lift  room under him beyond this rule's own 0.1rem.
  * The adh footer sets both on its dock, to park him in the slot its bar keeps for
  * him. Before these existed it restated both selectors below, one class stronger,
- * which held only while the two copies stayed in step — and nothing checked that. */
+ * which held only while the two copies stayed in step — and nothing checked that.
+ *
+ * Closing (`bb-dock--closing`) he is already laid out at rest, so the travel down
+ * has somewhere to land while the panel is still sliding away; he is raised over
+ * the panel for it, or the chat would pass across his face on its way down. */
 .bb-dock--rest-avatar .bb-dock__avatar {
-  transition:
-    transform 0.34s cubic-bezier(0.16, 1, 0.3, 1),
-    width 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: none;
 }
 .bb-dock--resting .bb-dock__avatar,
-.bb-dock--resting:has(.persona-chat.pc-collapsed) .bb-dock__avatar {
+.bb-dock--resting:has(.persona-chat.pc-collapsed) .bb-dock__avatar,
+.bb-dock--closing .bb-dock__avatar,
+.bb-dock--closing:has(.persona-chat.pc-collapsed) .bb-dock__avatar {
   transform: translateX(var(--bb-dock-rest-x, 0px));
   margin-bottom: calc(0.1rem + var(--bb-dock-rest-lift, 0px));
+}
+.bb-dock--closing .bb-dock__avatar {
+  position: relative;
+  z-index: 1;
 }
 /* Open, he moves onto his chat's lower-right corner, in place of the send button —
  * tapping him there is the send (BitbagDock), and he giggles for it. Out of the
  * column, so the chat alone sets the dock's height and he sits over it; placed
  * against the dock, whose bottom is the chat's bottom and whose width is the
  * viewport's, so the chat's right edge is half the leftover width in from its
- * own. He comes in with a plain settle — a fade and a small rise — rather than
- * any of his moods: opening is not a reaction, and the laugh it used to play
- * read as a wince. The selector outranks the doze scale's `:has()` above, which
- * would otherwise halve him in the moment before the caret unfolds the chat. */
-.bb-dock.bb-dock--rest-avatar:not(.bb-dock--resting) .bb-dock__avatar {
+ * own. He travels there from the bar as the chat slides up, and lands with a small
+ * hop (BitbagDock) — not one of his moods: opening is not a reaction, and the laugh
+ * it used to play read as a wince. The selector outranks the doze scale's `:has()`
+ * above, which would otherwise halve him in the moment before the caret unfolds
+ * the chat. */
+.bb-dock.bb-dock--rest-avatar:not(.bb-dock--resting):not(.bb-dock--closing) .bb-dock__avatar {
   position: absolute;
   z-index: 1;
   right: calc((100% - var(--bb-dock-panel-w)) / 2 + 0.3rem);
@@ -255,62 +265,50 @@
   margin: 0;
   transform: none;
   transform-origin: bottom right;
-  animation: bb-dock-corner-in 0.34s cubic-bezier(0.16, 1, 0.3, 1);
 }
-@keyframes bb-dock-corner-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.9);
-  }
+/* His chat slides up onto the screen from below it, and back down off it — the dock
+ * is fixed to the bottom edge, so its own height and a margin (for the `i` astride
+ * its top edge, and a keyboard dropping as it leaves) clear the screen. The timing
+ * is BitbagDock's (`--bb-dock-slide-*`), the one copy, which his travel shares; the
+ * fallbacks here are only for a dock rendered without it.
+ *
+ * Closing, the dock keeps the panel rendered under `.bb-dock--closing` until the
+ * panel's `animationend`, then hides it. So the slide out is the clock — its name
+ * must not be `none` here, or the dock reads that as "nothing to wait for" and hides
+ * it at once (which is what reduced motion wants, below). The panel leaves the flow
+ * for it, pinned where it was, so he can be laid out at rest while it goes. */
+.bb-dock.bb-dock--rest-avatar:not(.bb-dock--resting):not(.bb-dock--closing) .bb-dock__panel {
+  animation: bb-dock-panel-in var(--bb-dock-slide-in, 420ms)
+    var(--bb-dock-slide-in-ease, cubic-bezier(0.22, 1, 0.36, 1)) both;
 }
-/* And back to rest. A tap away, Escape, or a tap on him before he has engaged
- * starts it (BitbagDock's `close`); the dock keeps the panel rendered under
- * `.bb-dock--closing` until the panel's `animationend`, then hides it. So the panel
- * animation is the clock — its name must not be `none` here, or the dock reads
- * that as "nothing to wait for" and hides it at once (which is what reduced motion
- * wants, below). The panel sinks toward his corner as it fades, the way it would
- * fold into him; he fades on the corner with it, and the wash fades from under
- * both on the same curve. */
 .bb-dock--closing .bb-dock__panel {
-  transform-origin: bottom right;
-  animation: bb-dock-panel-out 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
+  position: absolute;
+  bottom: 0;
+  left: calc((100% - var(--bb-dock-panel-w)) / 2);
+  animation: bb-dock-panel-out var(--bb-dock-slide-out, 320ms)
+    var(--bb-dock-slide-out-ease, cubic-bezier(0.5, 0, 0.75, 0)) forwards;
+}
+@keyframes bb-dock-panel-in {
+  from {
+    transform: translateY(calc(100% + 3rem));
+  }
 }
 @keyframes bb-dock-panel-out {
   to {
-    opacity: 0;
-    transform: translateY(18px) scale(0.96);
+    transform: translateY(calc(100% + 3rem));
   }
 }
-.bb-dock.bb-dock--rest-avatar.bb-dock--closing:not(.bb-dock--resting) .bb-dock__avatar {
-  animation: bb-dock-corner-out 0.24s cubic-bezier(0.4, 0, 1, 1) forwards;
-}
-@keyframes bb-dock-corner-out {
-  to {
-    opacity: 0;
-    transform: translateY(10px) scale(0.85);
-  }
-}
-/* Outranks the lit rule above — same `:not()` and `:has()`, one class more. */
+/* The wash fades from under it as it goes. Outranks the lit rule above — same
+ * `:not()` and `:has()`, one class more. */
 .bb-dock.bb-dock--closing:not(.bb-dock--resting):has(.persona-chat)::before {
   opacity: 0;
   pointer-events: none;
 }
-/* Back on the bar he settles in — the rest he came back to, never the one the page
- * loads with. `--bb-dock-rest-x` is in the keyframe because a keyframe transform
- * replaces the resting one rather than adding to it. */
-.bb-dock--returned.bb-dock--resting .bb-dock__avatar {
-  animation: bb-dock-rest-in 0.34s cubic-bezier(0.16, 1, 0.3, 1);
-}
-@keyframes bb-dock-rest-in {
-  from {
-    opacity: 0;
-    transform: translateX(var(--bb-dock-rest-x, 0px)) translateY(8px) scale(0.85);
-  }
-}
+/* No slide: the chat is simply there, and simply gone. Same selectors as the two
+ * above, so source order settles it. */
 @media (prefers-reduced-motion: reduce) {
-  .bb-dock--closing .bb-dock__panel,
-  .bb-dock.bb-dock--rest-avatar.bb-dock--closing:not(.bb-dock--resting) .bb-dock__avatar,
-  .bb-dock--returned.bb-dock--resting .bb-dock__avatar {
+  .bb-dock.bb-dock--rest-avatar:not(.bb-dock--resting):not(.bb-dock--closing) .bb-dock__panel,
+  .bb-dock--closing .bb-dock__panel {
     animation: none;
   }
 }

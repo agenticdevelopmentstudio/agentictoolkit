@@ -12,6 +12,15 @@ import type { BitbagChatProps } from '../BitbagChat'
 const chat = vi.hoisted(() => ({ props: {} as Partial<BitbagChatProps> }))
 // The page lock's last word: whether the dock is holding the page still right now.
 const pageLock = vi.hoisted(() => ({ active: false }))
+// His travels between the bar and the chat's corner: what the dock asked for, and
+// how he was drawn when it asked. jsdom does no layout, so each is a stand-in.
+const travels = vi.hoisted(() => ({ calls: [] as { from: DOMRect; options: Record<string, unknown> }[] }))
+vi.mock('@agenticdevelopertoolkit/avatar', () => ({
+  travelFrom: (_el: HTMLElement, from: DOMRect, options: Record<string, unknown>) => {
+    travels.calls.push({ from, options })
+    return null
+  },
+}))
 vi.mock('../avatar', () => ({ Bitbag: () => <span data-testid="bitbag" /> }))
 vi.mock('../BitbagInfo', () => ({ BitbagInfo: () => null }))
 vi.mock('../BitbagChat', () => ({
@@ -245,7 +254,6 @@ describe('BitbagDock', () => {
         expect(panel.hidden).toBe(true)
         expect(chat.props.engaged).toBe(false)
         expect(container.firstElementChild).not.toHaveClass('bb-dock--closing')
-        expect(container.firstElementChild).toHaveClass('bb-dock--returned')
       })
 
       it('hides the panel anyway if the animation never ends', () => {
@@ -255,9 +263,13 @@ describe('BitbagDock', () => {
           fireEvent.click(screen.getByRole('button', { name: 'Chat with bitbag' }))
           const panel = animated(container)
           fireEvent.pointerDown(document.body)
+          act(() => {
+            vi.advanceTimersByTime(400)
+          })
+          // Past the slide itself, which is 320ms, and still waiting on it.
           expect(panel.hidden).toBe(false)
           act(() => {
-            vi.advanceTimersByTime(600)
+            vi.advanceTimersByTime(300)
           })
           expect(panel.hidden).toBe(true)
         } finally {
@@ -278,9 +290,79 @@ describe('BitbagDock', () => {
         expect(panel.hidden).toBe(false)
       })
 
-      it('does not settle him in on the rest the page loads with', () => {
+      it('lays him out at rest while the panel slides away beneath him', () => {
+        const { container } = render(<BitbagDock rest="avatar" size={100} />)
+        const face = screen.getByRole('button', { name: 'Chat with bitbag' })
+        fireEvent.click(face)
+        expect(face.style.width).toBe('75px')
+        animated(container)
+        fireEvent.pointerDown(document.body)
+        expect(face.style.width).toBe('50px')
+      })
+    })
+
+    describe('his travel between the bar and the chat', () => {
+      function drawnAt(el: HTMLElement, left: number): void {
+        el.getBoundingClientRect = () => DOMRect.fromRect({ x: left, y: 0, width: 10, height: 10 })
+      }
+
+      it('does not travel on the rest the page loads with', () => {
+        travels.calls = []
+        render(<BitbagDock rest="avatar" />)
+        expect(travels.calls).toHaveLength(0)
+      })
+
+      it('travels up from where he rested as the chat slides in, and lands with a bounce', () => {
+        travels.calls = []
         const { container } = render(<BitbagDock rest="avatar" />)
-        expect(container.firstElementChild).not.toHaveClass('bb-dock--returned')
+        const face = screen.getByRole('button', { name: 'Chat with bitbag' })
+        drawnAt(face, 11)
+        fireEvent.click(face)
+        expect(travels.calls).toHaveLength(1)
+        expect(travels.calls[0].from.left).toBe(11)
+        expect(travels.calls[0].options).toMatchObject({ duration: 420 })
+        expect(travels.calls[0].options.bounce).toBeGreaterThan(0)
+        // The same clock as the panel's slide, which reads it from the dock.
+        expect((container.firstElementChild as HTMLElement).style.getPropertyValue('--bb-dock-slide-in')).toBe('420ms')
+      })
+
+      it('travels back down from the corner as the chat slides out, without a bounce', () => {
+        travels.calls = []
+        const { container } = render(<BitbagDock rest="avatar" />)
+        const face = screen.getByRole('button', { name: 'Chat with bitbag' })
+        fireEvent.click(face)
+        panelOf(container).style.animationName = 'bb-dock-panel-out'
+        drawnAt(face, 22)
+        fireEvent.pointerDown(document.body)
+        expect(travels.calls).toHaveLength(2)
+        expect(travels.calls[1].from.left).toBe(22)
+        expect(travels.calls[1].options).toMatchObject({ duration: 320 })
+        expect(travels.calls[1].options.bounce).toBeFalsy()
+        // And not again when the panel is finally hidden: he is already home.
+        fireEvent.animationEnd(panelOf(container))
+        expect(travels.calls).toHaveLength(2)
+      })
+
+      it('turns back up to the corner when he is tapped on his way down', () => {
+        travels.calls = []
+        const { container } = render(<BitbagDock rest="avatar" />)
+        const face = screen.getByRole('button', { name: 'Chat with bitbag' })
+        fireEvent.click(face)
+        panelOf(container).style.animationName = 'bb-dock-panel-out'
+        fireEvent.pointerDown(document.body)
+        drawnAt(face, 33)
+        fireEvent.click(face)
+        expect(travels.calls).toHaveLength(3)
+        expect(travels.calls[2].from.left).toBe(33)
+        expect(travels.calls[2].options.bounce).toBeGreaterThan(0)
+      })
+
+      it('never travels in the dock that rests on its entry line', () => {
+        travels.calls = []
+        render(<BitbagDock />)
+        chatReports(true)
+        chatReports(false)
+        expect(travels.calls).toHaveLength(0)
       })
     })
 
