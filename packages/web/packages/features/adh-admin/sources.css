@@ -1,0 +1,27 @@
+/* Tailwind source self-registration for @agentic-toolkit/adh-admin.
+ *
+ * Tailwind does not scan node_modules, so a consumer app must tell it to scan this
+ * package's className-bearing components. Rather than every host copying @source
+ * globs into its own globals.css (drift-prone, and a missed line renders unstyled
+ * with no error), the package OWNS them here and a host adds one line:
+ *
+ *   @import "@agentic-toolkit/adh-admin/sources.css";
+ *
+ * The paths are relative to THIS file (the package root) and therefore travel with
+ * the package — they resolve identically through a dev pnpm link: symlink and a
+ * materialized prod copy. `src` covers `next dev` (the whole package is symlinked,
+ * so HMR sees source edits); `dist` covers prod builds, where `files` ships only
+ * `dist` + this file and the `src` glob simply matches nothing.
+ *
+ * This package composes @agentic-toolkit/resource's rail (StackGroupDetail /
+ * RailHostBoundary) and @agentic-toolkit/api-explorer's ApiButton, so a host
+ * importing this file gets their sources too and needs no further lines on their
+ * account.
+ *
+ * @import must come before every other at-rule, including @source below: a conformant CSS
+ * parser drops a misplaced @import silently, with no build error, which would mean these
+ * packages' utilities are never registered and the admin console ships unstyled. */
+@import "@agentic-toolkit/resource/sources.css";
+@import "@agentic-toolkit/api-explorer/sources.css";
+@source "./src/**/*.{ts,tsx}";
+@source "./dist/**/*.js";

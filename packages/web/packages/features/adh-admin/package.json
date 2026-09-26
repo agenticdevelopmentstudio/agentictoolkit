@@ -1,0 +1,72 @@
+{
+  "name": "@agentic-toolkit/adh-admin",
+  "version": "0.1.0",
+  "description": "The Admin console feature: users, invitations, feature flags, server bags, sync, audit, messaging, feedback, authentication, LLM providers, usage limits, and reserved identifiers.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "sources.css"
+  ],
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "comment:tier": "VOCABULARY, not mechanism — see scripts/check_boundaries.py, which classifies on the `@agentic-toolkit/adh` name boundary alone. This package imports BOTH vocabulary (adh, adh-api-types, adh-ui) and mechanism (api-explorer, auth, resource) packages, which only a vocabulary name may do. The `adh-` prefix is a deliberate claim about the CONTENT — every shape in src/api/*.ts is a column of adh's own schema (customer.customers, system.feature_flags, usage.rate_limit_tiers, …), and the panes' copy names adh's own admin surface (isAdmin(), the hub ecosystem, adh's messaging providers) — so a non-adh host mounting this would be mounting adh's model of administration, not a general one.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "import": "./dist/index.js"
+    },
+    "./sources.css": "./sources.css"
+  },
+  "scripts": {
+    "build": "tsup && pnpm run build:types",
+    "build:types": "tsc --emitDeclarationOnly -p tsconfig.build.json",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agentic-toolkit/adh": "workspace:*",
+    "@agentic-toolkit/adh-api-types": "workspace:*",
+    "@agentic-toolkit/adh-ui": "workspace:*",
+    "@agentic-toolkit/api-explorer": "workspace:*",
+    "@agentic-toolkit/auth": "workspace:*",
+    "@agentic-toolkit/resource": "workspace:*",
+    "@tanstack/react-query": "^5.62.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.16.0",
+    "tailwind-merge": "^2.6.0",
+    "@agenticdevelopertoolkit/ui": "link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui"
+  },
+  "peerDependencies": {
+    "next": ">=15",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@base-ui/react": "1.5.0",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "19.2.16",
+    "@types/react-dom": "19.2.3",
+    "class-variance-authority": "^0.7.1",
+    "esbuild-plugin-preserve-directives": "^0.0.11",
+    "harper.js": "^2.4.0",
+    "jsdom": "^29.0.2",
+    "next": "^15.1.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.4"
+  }
+}
