@@ -1672,6 +1672,7 @@
 		E10E5FE2D4268F3E1798011A /* ComposableTabsMoveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 092B04C39C683A6735C1412E /* ComposableTabsMoveTests.swift */; };
 		E11925F3E5FAF07A8C37B196 /* TTYResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4344896C3D142D30AC54BB97 /* TTYResolver.swift */; };
 		E15ED7FC86962D109CA597FB /* OnceOnlyContinuationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EE08F5008E7986F28B19B53 /* OnceOnlyContinuationTests.swift */; };
+		E1A795AD9884C0D68635B18A /* SetupStampTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D5EF913C63DC33558A2C324 /* SetupStampTests.swift */; };
 		E1B06ECD85FC07FC6B04DA9C /* HubEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 960CB1D0B8395783C6C4FF2F /* HubEnvironment.swift */; };
 		E1F033A6E64E0391B5B98665 /* FileEditorHighlightProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 709AC1D916C7F34F31438D09 /* FileEditorHighlightProviderTests.swift */; };
 		E1F5AD2FB4A52A627D7B36EE /* MultiTabbedHostedItemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3049C1C30EAC6D3BEFCBFF9 /* MultiTabbedHostedItemTests.swift */; };
@@ -1720,6 +1721,7 @@
 		E8214376DEFF51DB34CE6AC0 /* SyncID.swift in Sources */ = {isa = PBXBuildFile; fileRef = CED6D92BE5D6C405930E5386 /* SyncID.swift */; };
 		E83AD2A7DA8D7435D157602A /* PermissionPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09C1D47037BB4EDCAD1B5026 /* PermissionPresenter.swift */; };
 		E8635919F9DA6D002BF4EB80 /* NSWindow+FitWidth.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6F1577CDCB5AAF25B24F230 /* NSWindow+FitWidth.swift */; };
+		E8A491DB14685E4DCB28C9C9 /* SetupStamp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82F1AAA0CCD47BFD24A2C13C /* SetupStamp.swift */; };
 		E917C415CCDAF5F4CEA9E32B /* LaunchAtLoginManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 956F50EE328345009C16B24F /* LaunchAtLoginManager.swift */; };
 		E91D8F1917D077F9E3057CF0 /* ComposableTabsClosePersistTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D39641986D609698360C2E4A /* ComposableTabsClosePersistTests.swift */; };
 		E91DCE68BD43E5E956B68A1F /* AgenticToolkitDisplays.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C4549C0F49FF13D5D7E441FE /* AgenticToolkitDisplays.framework */; };
@@ -4221,6 +4223,7 @@
 		82538E75945AB1B852828948 /* FormSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormSheetTests.swift; sourceTree = "<group>"; };
 		826CDAA2A6D6987982ADBDD5 /* CustomersAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomersAdapterTests.swift; sourceTree = "<group>"; };
 		82A5A8F3A23FA0BDA066E3F4 /* HubPermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubPermissions.swift; sourceTree = "<group>"; };
+		82F1AAA0CCD47BFD24A2C13C /* SetupStamp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupStamp.swift; sourceTree = "<group>"; };
 		831448F23EB8464AE194DE61 /* SqliteStorageProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SqliteStorageProvider.swift; sourceTree = "<group>"; };
 		8318DF130A192B04FB8A6DA6 /* DisplayIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayIdentityTests.swift; sourceTree = "<group>"; };
 		8346E6091CA80DA71C5FAF8D /* EcosystemsAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EcosystemsAdapter.swift; sourceTree = "<group>"; };
@@ -4365,6 +4368,7 @@
 		9CDC9B0B2105E4D905A709BB /* SocialSignInProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocialSignInProvider.swift; sourceTree = "<group>"; };
 		9CFF1AE8F79942315B79A27A /* OpenVSXClientLimitsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenVSXClientLimitsTests.swift; sourceTree = "<group>"; };
 		9D57AD5D38D8C72ADF74A428 /* ProjectTreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectTreeTests.swift; sourceTree = "<group>"; };
+		9D5EF913C63DC33558A2C324 /* SetupStampTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupStampTests.swift; sourceTree = "<group>"; };
 		9D765E77B7BFED0BB68C437A /* RawSettingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RawSettingTests.swift; sourceTree = "<group>"; };
 		9DA75948C3BB76100EE4877F /* ScreenChange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenChange.swift; sourceTree = "<group>"; };
 		9DAF64962DEEAE53CF2569CE /* ComposableTabsWorkingDirectoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposableTabsWorkingDirectoryTests.swift; sourceTree = "<group>"; };
@@ -6230,6 +6234,7 @@
 				E44C16FF5550600D6EF44C65 /* Loggable.swift */,
 				B6C9D05F7EB1D05CAFE73F5E /* MathUtils.swift */,
 				37836BD300050CA744399708 /* SemanticVersion.swift */,
+				82F1AAA0CCD47BFD24A2C13C /* SetupStamp.swift */,
 				479EF98E8FD110CC98412170 /* TextFolding.swift */,
 				96102571DB127C5B589E4E8A /* UniqueName.swift */,
 				4127E3BFCDEB387146120544 /* UTF8Search.swift */,
@@ -8180,6 +8185,7 @@
 				CC4A0AAA4B763C7C6BBD40FE /* AppendOnlyFileCursorTests.swift */,
 				72782B25A2B8702832516759 /* FileSignatureTests.swift */,
 				EE5CE1385F51628013682355 /* FileSystemServiceTests.swift */,
+				9D5EF913C63DC33558A2C324 /* SetupStampTests.swift */,
 			);
 			path = FileSystem;
 			sourceTree = "<group>";
@@ -10801,6 +10807,7 @@
 				D8026CBED5D7B3FB59430A21 /* RawSettingTests.swift in Sources */,
 				07501F145925E28E1C3D80C5 /* SemanticVersionTests.swift in Sources */,
 				D35788BA91E0E2FF4BA260E6 /* SettingsKeyTests.swift in Sources */,
+				E1A795AD9884C0D68635B18A /* SetupStampTests.swift in Sources */,
 				FA6C8E856602A0B23C805403 /* SqliteStorageProviderTests.swift in Sources */,
 				6D1196350DCDDEE8619B4E31 /* StubbedRegistrySession.swift in Sources */,
 				5589D9698D9879A781C600E1 /* SubprocessChannelRunTests.swift in Sources */,
@@ -11568,6 +11575,7 @@
 				E6F688EACAF18E5472A39FA7 /* SemanticVersion.swift in Sources */,
 				A6C33026C2885BCC4E7F5999 /* SettingsSnapshotPush.swift in Sources */,
 				0AA7EC3695C61BB3449125B4 /* SettingsStore.swift in Sources */,
+				E8A491DB14685E4DCB28C9C9 /* SetupStamp.swift in Sources */,
 				3E4FBCAC30712619E45DA1FC /* SqliteStorageProvider.swift in Sources */,
 				5A423EDBDBC36FFC6215E4DD /* StorableSetting.swift in Sources */,
 				2379C7574D0AAF1D97F00B48 /* StoredSettingPropertyWrapper.swift in Sources */,
