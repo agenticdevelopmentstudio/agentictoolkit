@@ -74,6 +74,12 @@ import AppKit
 /// every card — one mark, different colours — needs no such column, and a host
 /// that marks only some can hand the unmarked ones a spacer of its own.
 ///
+/// `titleTrailingAccessory` hangs one mark of the host's immediately AFTER the
+/// name — a flag on this one card in a stack, say. It sits against the name
+/// rather than out at the right end, so it reads as something said about the
+/// name, and like the leading accessory it never gives up a point: the name is
+/// what goes short.
+///
 /// `titlebarAccessory` hangs one control of the host's off the masthead's right
 /// end, immediately in front of the disclosure triangle — a menu for the thing
 /// this particular card is about, typically. The card places it and measures it
@@ -269,6 +275,7 @@ public final class DisclosureCardView: NSView, Themeable {
         title: String,
         titleIsAccent: Bool,
         titleAccessory: NSView? = nil,
+        titleTrailingAccessory: NSView? = nil,
         titlebarAccessory: NSView? = nil,
         subtitle: String? = nil,
         summary: [SummaryPart] = [],
@@ -320,7 +327,7 @@ public final class DisclosureCardView: NSView, Themeable {
         configureSummary(isCollapsed: isCollapsed)
         configureStatusBadge()
         configureDisclosure(isCollapsed: isCollapsed)
-        configureTitleLine(accessory: titleAccessory)
+        configureTitleLine(accessory: titleAccessory, trailing: titleTrailingAccessory)
         configureTrailingLine(accessory: titlebarAccessory)
         configureTitlebar()
 
@@ -454,7 +461,7 @@ public final class DisclosureCardView: NSView, Themeable {
     /// Nothing is done to the accessory but place it and refuse to let it
     /// shrink — see the type's own documentation for why the card has no
     /// opinion about how the host's mark looks.
-    private func configureTitleLine(accessory: NSView?) {
+    private func configureTitleLine(accessory: NSView?, trailing: NSView?) {
         titleLine.orientation = .horizontal
         titleLine.alignment = .centerY
         titleLine.spacing = Self.iconGap
@@ -465,6 +472,12 @@ public final class DisclosureCardView: NSView, Themeable {
             titleLine.addArrangedSubview(accessory)
         }
         titleLine.addArrangedSubview(titleField)
+        if let trailing {
+            trailing.translatesAutoresizingMaskIntoConstraints = false
+            trailing.setContentCompressionResistancePriority(.required, for: .horizontal)
+            trailing.setContentHuggingPriority(.required, for: .horizontal)
+            titleLine.addArrangedSubview(trailing)
+        }
         titleLine.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLine.setContentHuggingPriority(.defaultLow, for: .horizontal)
     }
@@ -663,10 +676,12 @@ public final class DisclosureCardView: NSView, Themeable {
         // that cannot be any wider. Against the summary, not added to it: the
         // summary has a row to itself, and the wider of the two rows is what the
         // masthead needs.
-        mastheadWidthFloor = summary.isEmpty ? 0 : max(
+        // Every card, summary or not: a name cut short while the window could
+        // still grow is a card that asked for less than it needs.
+        mastheadWidthFloor = max(
             ceil(titleLine.fittingSize.width)
                 + Self.mastheadGap + ceil(trailingLine.fittingSize.width),
-            ceil(line.size().width)
+            summary.isEmpty ? 0 : ceil(line.size().width)
         )
         updateContentWidthFloor()
     }

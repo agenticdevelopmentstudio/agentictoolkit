@@ -171,12 +171,14 @@ final class DisclosureCardTests: XCTestCase {
     private func bare(
         isCollapsed: Bool,
         summary: [DisclosureCardView.SummaryPart] = [],
-        titleAccessory: NSView? = nil
+        titleAccessory: NSView? = nil,
+        titleTrailingAccessory: NSView? = nil
     ) -> DisclosureCardView {
         let card = DisclosureCardView(
             title: "mike@example.com",
             titleIsAccent: true,
             titleAccessory: titleAccessory,
+            titleTrailingAccessory: titleTrailingAccessory,
             summary: summary,
             status: .init(
                 symbolName: "octagon.fill", colorName: "red", accessibilityLabel: "Spent"
@@ -277,6 +279,21 @@ final class DisclosureCardTests: XCTestCase {
         // its place in the accessibility tree. A host that hands over a view
         // has already decided both.
         XCTAssertFalse(given.isAccessibilityElement())
+    }
+
+    func testTheHostsMarkAfterTheNameStandsRightAgainstIt() {
+        // Against the name, not out at the line's far end by the toggle: it is
+        // something said about the name, so it has to read as part of it.
+        let given = mark()
+        let card = bare(isCollapsed: false, titleTrailingAccessory: given)
+        guard let name = field("mike@example.com", in: card), let line = name.superview else {
+            return XCTFail("a card sets its name on a line of its own")
+        }
+
+        XCTAssertTrue(line.subviews.contains(given), "the mark goes on the title's own line")
+        XCTAssertGreaterThanOrEqual(given.frame.minX, name.frame.maxX - 0.5)
+        XCTAssertLessThan(given.frame.minX - name.frame.maxX, 12,
+                          "the mark drifted away from the name it is about")
     }
 
     func testACardWithNoMarkLeavesNoGapWhereOneWouldHaveStood() {
@@ -468,6 +485,26 @@ final class DisclosureCardTests: XCTestCase {
 
         // At exactly the width the card asks for — a window that hugs its
         // content gives it that and no more.
+        host(card, width: card.fittingSize.width)
+        guard let label = field(title, in: card) else { return XCTFail("no title") }
+        XCTAssertGreaterThanOrEqual(label.frame.width, label.fittingSize.width - 0.5,
+                                    "the address was squeezed by a card that could have grown")
+    }
+
+    func testACardWithNoSummaryStillAsksForItsTitleWhole() {
+        // A card with nothing to summarise is still a card whose name is its
+        // handle: the window grows for it rather than cutting it short.
+        let title = "a-very-long-address@some-organisation.example.com"
+        let card = DisclosureCardView(
+            title: title, titleIsAccent: true, titleTrailingAccessory: mark(),
+            isCollapsed: false, scaledSize: 13
+        )
+        let tiny = NSView()
+        tiny.translatesAutoresizingMaskIntoConstraints = false
+        tiny.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        tiny.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        card.addContent(tiny)
+
         host(card, width: card.fittingSize.width)
         guard let label = field(title, in: card) else { return XCTFail("no title") }
         XCTAssertGreaterThanOrEqual(label.frame.width, label.fittingSize.width - 0.5,
