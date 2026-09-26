@@ -413,6 +413,17 @@ def test_signing_order_signs_bare_helper_executable_inside_nested_framework(tmp_
     assert framework / "Versions/B/Sparkle" not in order
 
 
+def test_signing_order_breaks_depth_ties_by_path(tmp_path):
+    # rglob yields filesystem-traversal order; the tiebreak keeps the
+    # order identical on every machine.
+    app = _build_fake_sparkle_app(tmp_path)
+    b = app / "Contents/Frameworks/Sparkle.framework/Versions/B"
+    order = mr.signing_order(app)
+
+    assert order.index(b / "XPCServices/Downloader.xpc") < order.index(b / "XPCServices/Installer.xpc")
+    assert order.index(b / "Autoupdate") < order.index(b / "Updater.app")
+
+
 def test_signing_order_resolves_versions_current_symlink_without_duplicates(tmp_path):
     app = _build_fake_sparkle_app(tmp_path)
     framework = app / "Contents/Frameworks/Sparkle.framework"

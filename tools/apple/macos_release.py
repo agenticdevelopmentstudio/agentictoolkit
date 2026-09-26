@@ -253,7 +253,9 @@ def signing_order(bundle: Path) -> list[Path]:
             macho_paths.append(path)
 
     nested = bundle_paths + macho_paths
-    nested.sort(key=lambda p: len(p.relative_to(bundle).parts), reverse=True)
+    # Deepest first; siblings have no signing dependency on each other, so the
+    # path tiebreak only makes the order stable across filesystems.
+    nested.sort(key=lambda p: (-len(p.relative_to(bundle).parts), str(p)))
     nested.append(bundle)
     return nested
 
