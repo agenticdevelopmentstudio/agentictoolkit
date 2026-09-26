@@ -259,14 +259,19 @@ public final class DisclosureCardView: NSView, Themeable {
     /// How far a dimmed card recedes. Far enough to sort one card out of a list
     /// at a glance, not so far that the dimmed cards stop being readable.
     private static let dimmedAlpha: CGFloat = 0.55
-    /// The masthead's own spacing, named once because the folded width floor
-    /// has to add up the same line the layout builds.
-    private static let mastheadGap: CGFloat = 8
+    /// The least room between the name and the toggle, at the system text
+    /// size — scaled like the card's insets (`mastheadGapFor`). Wide enough
+    /// that the longest name still reads as a name and the toggle as a control
+    /// of its own; at 8 points a long address ran right up to the triangle.
+    static let mastheadGapAtSystemSize: CGFloat = 24
 
     private let padX: CGFloat
     /// The masthead's leading gutter at this text size — tighter than `padX`,
     /// which the content rows keep through `content.edgeInsets`.
     private let padMastheadX: CGFloat
+    /// The masthead's own spacing, kept because the width floor has to add up
+    /// the same line the layout builds.
+    private let mastheadGap: CGFloat
     private let padY: CGFloat
     /// The titlebar's vertical inset at this text size.
     private let padTitleY: CGFloat
@@ -292,6 +297,7 @@ public final class DisclosureCardView: NSView, Themeable {
         self.onToggle = onToggle
         self.padX = Self.padXFor(scaledSize: scaledSize)
         self.padMastheadX = Self.padMastheadXFor(scaledSize: scaledSize)
+        self.mastheadGap = Self.mastheadGapFor(scaledSize: scaledSize)
         self.padY = ceil(Self.verticalInset * scaledSize / CGFloat(NSFont.systemFontSize))
         self.padTitleY = ceil(Self.titlebarInset * scaledSize / CGFloat(NSFont.systemFontSize))
         super.init(frame: .zero)
@@ -349,7 +355,7 @@ public final class DisclosureCardView: NSView, Themeable {
         // every card has, so it lands in the same place on all of them.
         let header = PinnedEndsLine.make(
             leading: titleLine, trailing: trailingLine,
-            minimumGap: Self.mastheadGap, alignment: .centerY
+            minimumGap: mastheadGap, alignment: .centerY
         )
 
         body.orientation = .vertical
@@ -568,6 +574,11 @@ public final class DisclosureCardView: NSView, Themeable {
         ceil(Self.mastheadInset * scaledSize / CGFloat(NSFont.systemFontSize))
     }
 
+    /// The gap between the name and the toggle, scaled the same way `padX` is.
+    static func mastheadGapFor(scaledSize: CGFloat) -> CGFloat {
+        ceil(Self.mastheadGapAtSystemSize * scaledSize / CGFloat(NSFont.systemFontSize))
+    }
+
     private static func statusSymbolConfiguration(
         scaledSize: CGFloat
     ) -> NSImage.SymbolConfiguration {
@@ -680,7 +691,7 @@ public final class DisclosureCardView: NSView, Themeable {
         // still grow is a card that asked for less than it needs.
         mastheadWidthFloor = max(
             ceil(titleLine.fittingSize.width)
-                + Self.mastheadGap + ceil(trailingLine.fittingSize.width),
+                + mastheadGap + ceil(trailingLine.fittingSize.width),
             summary.isEmpty ? 0 : ceil(line.size().width)
         )
         updateContentWidthFloor()

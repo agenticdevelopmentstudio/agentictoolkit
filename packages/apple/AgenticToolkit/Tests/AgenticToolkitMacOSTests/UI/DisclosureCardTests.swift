@@ -552,6 +552,23 @@ final class DisclosureCardTests: XCTestCase {
         guard let label = field(long, in: cards[1]) else { return XCTFail("no title") }
         XCTAssertGreaterThanOrEqual(label.frame.width, label.fittingSize.width - 0.5,
                                     "stack \(width) cut the name short")
+        // And the name stops well short of the toggle, not flush against it.
+        func buttons(_ view: NSView) -> [NSButton] {
+            view.subviews.flatMap { ($0 as? NSButton).map { [$0] } ?? buttons($0) }
+        }
+        guard let toggle = buttons(cards[1]).first(where: { $0.bezelStyle == .disclosure })
+        else { return XCTFail("no toggle") }
+        // Both edges by their alignment rects — what the layout pins, and where
+        // the glyphs and the triangle are drawn; each frame carries a couple of
+        // points of padding the eye never sees.
+        func visible(_ view: NSView) -> NSRect {
+            view.superview?.convert(view.alignmentRect(forFrame: view.frame), to: cards[1]) ?? .zero
+        }
+        XCTAssertGreaterThanOrEqual(
+            visible(toggle).minX - visible(label).maxX,
+            DisclosureCardView.mastheadGapFor(scaledSize: 16) - 0.5,
+            "the longest name runs up against the toggle"
+        )
     }
 
     // MARK: - The summary is a row of its own
