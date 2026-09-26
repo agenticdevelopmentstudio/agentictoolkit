@@ -964,6 +964,13 @@ export const HUB_EXTRA_FEATURE_SEGMENTS = [
   // Email Signup: a bespoke rail route (audience.* lists/templates/campaigns), no
   // distinct registry site of its own — same lockstep as the row above.
   'email-signup',
+  // Admin: the operations console (admin.agenticdeveloperhub.com's panes, from
+  // @agentic-toolkit/adh-admin) mounted inside the hub for viewers holding the `admin`
+  // capability. A hub knob and NOT a HUB_FEATURE_SEGMENT entry, although the `admin` site
+  // exists: that map means "mount this site's SiteHomeModel", and admin has no home
+  // (`hasHome: false`) — gen-hub-fleet-routes.py would generate a route onto a model that
+  // does not exist. The site stays where it is; this is a second door onto the same panes.
+  'admin',
 ] as const
 
 /** A hub workspace segment with no site behind it — the hub's own knobs, as a type. */
