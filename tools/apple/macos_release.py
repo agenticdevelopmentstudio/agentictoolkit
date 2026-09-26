@@ -21,6 +21,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
+from xml.parsers.expat import ExpatError
 from xml.sax.saxutils import escape
 
 Runner = Callable[[list[str]], "subprocess.CompletedProcess[str]"]
@@ -235,8 +236,12 @@ def signing_order(bundle: Path) -> list[Path]:
             if not path.is_symlink() and _is_bundle_dir(path):
                 bundle_paths.append(path)
 
+        # The outer bundle's own main executable is signed by signing the
+        # bundle itself; signing it separately first would only give it a
+        # second, stale signature (with whatever entitlements it was built
+        # with) that the bundle signature then replaces.
         main_executables = {
-            exe for b in bundle_paths if (exe := _main_executable_path(b)) is not None
+            exe for b in [*bundle_paths, bundle] if (exe := _main_executable_path(b)) is not None
         }
 
         seen: set[Path] = set()
@@ -260,6 +265,88 @@ def signing_order(bundle: Path) -> list[Path]:
     return nested
 
 
+#: Entitlements AMFI honours only when a provisioning profile embedded in the
+#: same code item authorises them. A Developer ID binary that claims one with
+#: no profile of its own is SIGKILLed at launch ("no matching profile"), yet
+#: notarization accepts it — so nothing downstream catches it.
+PROFILE_RESTRICTED_ENTITLEMENTS = (
+    "com.apple.application-identifier",
+    "com.apple.developer.team-identifier",
+)
+
+
+def has_own_profile(path: Path) -> bool:
+    """True when `path` is a bundle carrying its own
+    `Contents/embedded.provisionprofile`. A bare Mach-O never does."""
+    return path.is_dir() and (path / "Contents/embedded.provisionprofile").is_file()
+
+
+def signed_entitlements(path: Path, *, run: Runner) -> dict:
+    """The entitlements in `path`'s existing code signature, read with
+    `codesign -d --entitlements :- <path>`. Unsigned code, or a signature
+    carrying no entitlements, yields `{}`."""
+    shown = run(["codesign", "-d", "--entitlements", ":-", str(path)])
+    text = (shown.stdout or "").strip()
+    if shown.returncode != 0 or not text:
+        return {}
+    try:
+        value = plistlib.loads(text.encode())
+    except (ValueError, ExpatError) as exc:
+        raise RuntimeError(f"cannot parse the entitlements codesign reports for {path}: {exc}")
+    return value if isinstance(value, dict) else {}
+
+
+def _entitlements_file(path: Path) -> dict:
+    try:
+        with path.open("rb") as f:
+            value = plistlib.load(f)
+    except (OSError, ValueError, ExpatError) as exc:
+        raise RuntimeError(f"cannot read entitlements file {path}: {exc}")
+    if not isinstance(value, dict):
+        raise RuntimeError(f"entitlements file {path} is not a dictionary plist")
+    return value
+
+
+def restricted_entitlement_problems(
+    bundle: Path, *, entitlements: dict[Path, Path], run: Runner
+) -> list[str]:
+    """One line per nested code item (never `bundle` itself) that has no
+    embedded provisioning profile of its own yet would be signed with a
+    `PROFILE_RESTRICTED_ENTITLEMENTS` key.
+
+    An item mapped in `entitlements` is judged by that file; every other item
+    by the entitlements already in its signature — exactly what
+    `sign_bundle`'s `--preserve-metadata=entitlements` would carry forward.
+    Call it with `entitlements={}` after signing to check what was actually
+    signed.
+    """
+    problems: list[str] = []
+    for path in signing_order(bundle):
+        if path == bundle or has_own_profile(path):
+            continue
+        mapped = entitlements.get(path)
+        claimed = _entitlements_file(mapped) if mapped is not None else signed_entitlements(path, run=run)
+        restricted = [key for key in PROFILE_RESTRICTED_ENTITLEMENTS if key in claimed]
+        if restricted:
+            source = f"entitlements file {mapped}" if mapped is not None else "its existing signature"
+            problems.append(
+                f"{path.relative_to(bundle.parent)} has no embedded.provisionprofile but "
+                f"{source} carries {', '.join(restricted)} — AMFI kills it at launch under "
+                "Developer ID; sign it with an entitlements file that omits "
+                f"{' and '.join(PROFILE_RESTRICTED_ENTITLEMENTS)}"
+            )
+    return problems
+
+
+def check_restricted_entitlements(
+    bundle: Path, *, entitlements: dict[Path, Path], run: Runner
+) -> None:
+    """Raise `RuntimeError` listing every `restricted_entitlement_problems` line."""
+    problems = restricted_entitlement_problems(bundle, entitlements=entitlements, run=run)
+    if problems:
+        raise RuntimeError("\n".join(problems))
+
+
 def sign_bundle(
     bundle: Path,
     *,
@@ -276,7 +363,15 @@ def sign_bundle(
     instead, so a nested bundle that already carries entitlements it needs
     (e.g. Sparkle's `Downloader.xpc`, sandboxed and unmapped) keeps them —
     matching Sparkle's documented Developer ID re-signing order.
+
+    Before any `codesign`, and again on the finished signatures,
+    `check_restricted_entitlements` refuses a nested item without its own
+    provisioning profile that would claim `com.apple.application-identifier`
+    or `com.apple.developer.team-identifier` — Xcode injects both into
+    development-signed helpers, and preserving them into a Developer ID
+    signature gets the helper SIGKILLed at launch.
     """
+    check_restricted_entitlements(bundle, entitlements=entitlements, run=run)
     for path in signing_order(bundle):
         argv = ["codesign", "--force", "--sign", identity]
         if runtime:
@@ -296,6 +391,8 @@ def sign_bundle(
     verify = run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(bundle)])
     if verify.returncode != 0:
         raise RuntimeError(verify.stderr)
+
+    check_restricted_entitlements(bundle, entitlements={}, run=run)
 
 
 def notarize(path: Path, *, profile: str, run: Runner) -> None:

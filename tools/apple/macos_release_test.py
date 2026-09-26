@@ -87,6 +87,21 @@ def test_merge_release_sorts_numerically_not_by_merge_order():
     assert [r["version"] for r in doc["releases"]] == ["2.155.0", "2.154.1"]
 
 
+def test_merge_release_sorts_2_10_ahead_of_2_9():
+    # A lexical sort would put "2.9.0" first and make /downloads/latest
+    # redirect to an older build.
+    def entry(version: str, build: int) -> mr.ReleaseEntry:
+        return mr.ReleaseEntry(
+            version, build, "d", "26.0", f"notes/{version}.md",
+            mr.ReleaseAsset("u", 1, "s"), mr.ReleaseAsset("u", 1, "s"),
+        )
+
+    empty = {"schema": 1, "latest": None, "releases": []}
+    doc = mr.merge_release(mr.merge_release(empty, entry("2.10.0", 2)), entry("2.9.0", 1))
+    assert doc["latest"] == "2.10.0"
+    assert [r["version"] for r in doc["releases"]] == ["2.10.0", "2.9.0"]
+
+
 # ---------------------------------------------------------------------------
 # preflight
 # ---------------------------------------------------------------------------
@@ -442,7 +457,7 @@ def test_sign_bundle_preserves_entitlements_on_unmapped_nested_items(tmp_path):
     framework = app / "Contents/Frameworks/Sparkle.framework"
     downloader_xpc = framework / "Versions/B/XPCServices/Downloader.xpc"
     downloader_ent = tmp_path / "downloader.entitlements"
-    downloader_ent.write_text("<plist/>")
+    downloader_ent.write_bytes(plistlib.dumps({"com.apple.security.network.client": True}))
 
     calls, run = recorder()
     mr.sign_bundle(
@@ -472,6 +487,112 @@ def test_sign_bundle_preserves_entitlements_on_unmapped_nested_items(tmp_path):
     app_call = sign_calls[str(app)]
     assert "--preserve-metadata=entitlements" not in app_call
     assert "--entitlements" not in app_call
+
+
+def test_signing_order_skips_the_outer_bundles_own_main_executable(tmp_path):
+    # Contents/MacOS/A is what signing A.app signs; a separate
+    # preserve-metadata pass over it first would only leave a stale signature.
+    app = _build_fake_sparkle_app(tmp_path)
+    assert app / "Contents/MacOS/A" not in mr.signing_order(app)
+
+
+_APP_ID = "com.apple.application-identifier"
+_TEAM_ID = "com.apple.developer.team-identifier"
+
+
+def _ents_runner(signed: dict[Path, dict], *, after_sign: dict[Path, dict] | None = None):
+    """A run() whose `codesign -d --entitlements :- <p>` prints `signed[p]`
+    (or `after_sign[p]` once any `codesign --force` has run) as an XML plist.
+    Every other call succeeds silently and is recorded."""
+    calls: list[list[str]] = []
+
+    def run(argv: list[str]) -> subprocess.CompletedProcess:
+        calls.append(argv)
+        if argv[:4] == ["codesign", "-d", "--entitlements", ":-"]:
+            path = Path(argv[-1])
+            signed_yet = any(c[0] == "codesign" and "--force" in c for c in calls)
+            table = after_sign if (signed_yet and after_sign is not None) else signed
+            if path in table:
+                return subprocess.CompletedProcess(argv, 0, plistlib.dumps(table[path]).decode(), "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    return calls, run
+
+
+def test_sign_bundle_refuses_preserved_application_identifier_without_profile(tmp_path):
+    # Xcode's development signature on a profile-less helper carries
+    # application-identifier; --preserve-metadata=entitlements would carry it
+    # into the Developer ID signature and AMFI would kill the helper.
+    app = _build_fake_sparkle_app(tmp_path)
+    autoupdate = app / "Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
+    calls, run = _ents_runner({autoupdate: {_APP_ID: "org.sparkle-project.Sparkle.Autoupdate"}})
+
+    with pytest.raises(RuntimeError) as err:
+        mr.sign_bundle(app, identity="X", entitlements={}, runtime=True, timestamp=False, run=run)
+
+    message = str(err.value)
+    assert "Sparkle.framework/Versions/B/Autoupdate" in message
+    assert _APP_ID in message and "existing signature" in message
+    # Refused while planning: nothing was signed.
+    assert not any(c[0] == "codesign" and "--force" in c for c in calls)
+
+
+def test_sign_bundle_refuses_mapped_file_claiming_team_identifier(tmp_path):
+    app = _build_fake_sparkle_app(tmp_path)
+    helper = app / "Contents/Helpers/cli"
+    _write_macho(helper)
+    ent = tmp_path / "cli.entitlements"
+    ent.write_bytes(plistlib.dumps({_TEAM_ID: "T"}))
+    _, run = _ents_runner({})
+
+    with pytest.raises(RuntimeError, match=r"Contents/Helpers/cli.*cli\.entitlements.*team-identifier"):
+        mr.sign_bundle(app, identity="X", entitlements={helper: ent},
+                       runtime=True, timestamp=False, run=run)
+
+
+def test_sign_bundle_mapped_empty_entitlements_replace_a_restricted_signature(tmp_path):
+    # Mapping the helper to an entitlements file without the restricted keys
+    # is the fix: the stale signature no longer matters.
+    app = _build_fake_sparkle_app(tmp_path)
+    autoupdate = app / "Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
+    empty = tmp_path / "none.entitlements"
+    empty.write_bytes(plistlib.dumps({}))
+    calls, run = _ents_runner({autoupdate: {_APP_ID: "x"}}, after_sign={})
+
+    mr.sign_bundle(app, identity="X", entitlements={autoupdate: empty},
+                   runtime=True, timestamp=False, run=run)
+    sign_calls = {c[-1]: c for c in calls if c[0] == "codesign" and "--force" in c}
+    assert str(empty) in sign_calls[str(autoupdate)]
+
+
+def test_sign_bundle_allows_restricted_entitlements_on_item_with_its_own_profile(tmp_path):
+    app = _build_fake_sparkle_app(tmp_path)
+    appex = app / "Contents/PlugIns/W.appex"
+    _write_macho(appex / "Contents/MacOS/W")
+    _write_plist(appex / "Contents/Info.plist", "W")
+    (appex / "Contents/embedded.provisionprofile").write_bytes(b"profile")
+    _, run = _ents_runner({appex: {_APP_ID: "T.w", _TEAM_ID: "T"}})
+
+    mr.sign_bundle(app, identity="X", entitlements={}, runtime=True, timestamp=False, run=run)
+
+
+def test_sign_bundle_rechecks_the_finished_signatures(tmp_path):
+    # Clean before signing, but the signature codesign actually produced
+    # carries application-identifier: the post-sign check must catch it.
+    app = _build_fake_sparkle_app(tmp_path)
+    installer = app / "Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc"
+    _, run = _ents_runner({}, after_sign={installer: {_APP_ID: "x"}})
+
+    with pytest.raises(RuntimeError, match="Installer.xpc"):
+        mr.sign_bundle(app, identity="X", entitlements={}, runtime=True, timestamp=False, run=run)
+
+
+def test_signed_entitlements_treats_unsigned_code_as_none(tmp_path):
+    def run(argv):
+        return subprocess.CompletedProcess(argv, 1, "", "code object is not signed at all")
+
+    assert mr.signed_entitlements(tmp_path / "x", run=run) == {}
 
 
 def test_sign_bundle_passes_runtime_timestamp_and_entitlements(tmp_path):
