@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import plistlib
 import subprocess
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -21,10 +23,17 @@ import macos_release as mr
 
 
 def recorder():
+    """A run() that records every call and, for a `pkgbuild --analyze` call,
+    also writes a minimal component plist to the path it was asked to
+    analyze into — standing in for what real pkgbuild would write, since
+    `build_pkg` reads that file back to flip `BundleIsRelocatable`."""
     calls: list[list[str]] = []
 
     def run(argv: list[str]) -> subprocess.CompletedProcess:
         calls.append(argv)
+        if argv[0] == "pkgbuild" and "--analyze" in argv:
+            with Path(argv[-1]).open("wb") as f:
+                plistlib.dump([{"RootRelativeBundlePath": "A.app", "BundleIsRelocatable": True}], f)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     return calls, run
@@ -60,6 +69,22 @@ def test_merge_release_replaces_same_version():
 def test_merge_release_refuses_unknown_schema():
     with pytest.raises(ValueError):
         mr.merge_release({"schema": 2, "releases": []}, None)
+
+
+def test_merge_release_sorts_numerically_not_by_merge_order():
+    # Merging the newer release FIRST, then an older one, must not leave the
+    # older one at the front just because it was merged in last.
+    newer = mr.ReleaseEntry(
+        "2.155.0", 412, "2026-09-28T00:00:00Z", "26.0", "n2",
+        mr.ReleaseAsset("u3", 3, "s3"), mr.ReleaseAsset("u4", 4, "s4"),
+    )
+    older = mr.ReleaseEntry(
+        "2.154.1", 411, "2026-09-27T00:00:00Z", "26.0", "n1",
+        mr.ReleaseAsset("u1", 1, "s1"), mr.ReleaseAsset("u2", 2, "s2"),
+    )
+    doc = mr.merge_release(mr.merge_release({"schema": 1, "latest": None, "releases": []}, newer), older)
+    assert doc["latest"] == "2.155.0"
+    assert [r["version"] for r in doc["releases"]] == ["2.155.0", "2.154.1"]
 
 
 # ---------------------------------------------------------------------------
@@ -125,6 +150,50 @@ def test_preflight_require_clean_main_wrong_branch_fails(tmp_path):
             run=run, require_clean_main=repo,
         )
     assert "not main" in str(exc.value) and "feature" in str(exc.value)
+
+
+def test_preflight_require_clean_main_git_status_failure_is_a_failure_not_clean(tmp_path):
+    repo = tmp_path / "repo"
+
+    def run(argv):
+        if argv[:2] == ["security", "find-identity"]:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[:2] == ["git", "-C"] and "status" in argv:
+            return subprocess.CompletedProcess(argv, 128, "", "not a git repository")
+        if argv[:2] == ["git", "-C"] and "rev-parse" in argv:
+            return subprocess.CompletedProcess(argv, 0, "main\n", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    with pytest.raises(mr.PreflightError) as exc:
+        mr.preflight(
+            identities=[], notary_profile=None,
+            releases_json={"schema": 1, "releases": []}, version="1.0",
+            run=run, require_clean_main=repo,
+        )
+    msg = str(exc.value)
+    assert "git status failed" in msg and str(repo) in msg
+    assert "has uncommitted changes" not in msg
+
+
+def test_preflight_require_clean_main_respects_main_branch_param(tmp_path):
+    repo = tmp_path / "repo"
+
+    def run(argv):
+        if argv[:2] == ["security", "find-identity"]:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[:2] == ["git", "-C"] and "status" in argv:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[:2] == ["git", "-C"] and "rev-parse" in argv:
+            return subprocess.CompletedProcess(argv, 0, "release\n", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    # Would fail against the "main" default; passing main_branch="release"
+    # makes the current branch the accepted one.
+    mr.preflight(
+        identities=[], notary_profile=None,
+        releases_json={"schema": 1, "releases": []}, version="1.0",
+        run=run, require_clean_main=repo, main_branch="release",
+    )  # no raise
 
 
 def test_preflight_sparkle_account_fails(tmp_path):
@@ -198,6 +267,28 @@ def test_preflight_github_repo_fails_on_insufficient_permission():
     assert "insufficient permission" in str(exc.value) and "me/repo" in str(exc.value)
 
 
+def test_preflight_github_repo_fails_when_tag_already_released():
+    def run(argv):
+        if argv[:2] == ["security", "find-identity"]:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[:2] == ["gh", "auth"]:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[:3] == ["gh", "repo", "view"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"viewerPermission": "WRITE"}), "")
+        if argv[:3] == ["gh", "release", "view"]:
+            return subprocess.CompletedProcess(argv, 0, "", "")  # tag exists
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    with pytest.raises(mr.PreflightError) as exc:
+        mr.preflight(
+            identities=[], notary_profile=None,
+            releases_json={"schema": 1, "releases": []}, version="1.0",
+            run=run, github_repo="me/repo",
+        )
+    msg = str(exc.value)
+    assert "v1.0" in msg and "already exists" in msg and "me/repo" in msg
+
+
 def test_preflight_passes_when_everything_succeeds(tmp_path):
     repo = tmp_path / "repo"
     generate_keys = tmp_path / "generate_keys"
@@ -220,6 +311,8 @@ def test_preflight_passes_when_everything_succeeds(tmp_path):
             return subprocess.CompletedProcess(argv, 0, "", "")
         if argv[:3] == ["gh", "repo", "view"]:
             return subprocess.CompletedProcess(argv, 0, json.dumps({"viewerPermission": "ADMIN"}), "")
+        if argv[:3] == ["gh", "release", "view"]:
+            return subprocess.CompletedProcess(argv, 1, "", "release not found")  # tag not yet released
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     mr.preflight(
@@ -324,6 +417,29 @@ def test_notarize_raises_with_log_when_not_accepted(tmp_path):
         mr.notarize(app, profile="p", run=run)
 
 
+def test_notarize_cleans_up_temp_zip_directory(tmp_path):
+    # Minor fix 6: notarize() must stage the .app zip in a TemporaryDirectory,
+    # not a leaked mkdtemp() — assert the staging directory is gone afterward.
+    app = tmp_path / "A.app"
+    app.mkdir()
+    seen: dict[str, object] = {}
+
+    def run(argv):
+        if argv[0] == "ditto":
+            zip_path = Path(argv[-1])
+            seen["zip_dir"] = zip_path.parent
+            zip_path.write_bytes(b"")  # simulate ditto having created the zip
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[:3] == ["xcrun", "notarytool", "submit"]:
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"status": "Accepted", "id": "abc"}), "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    mr.notarize(app, profile="p", run=run)
+
+    assert "zip_dir" in seen
+    assert not seen["zip_dir"].exists()
+
+
 # ---------------------------------------------------------------------------
 # make_update_zip
 # ---------------------------------------------------------------------------
@@ -353,8 +469,8 @@ def test_render_distribution_has_optional_choice_default_off_and_check():
     assert 'id="acct"' in xml and 'start_selected="false"' in xml
     assert "<installation-check" in xml and "return true;" in xml
 
-    # each pkg-ref has a top-level <pkg-ref id=…>file</pkg-ref> entry
-    assert '<pkg-ref id="default">S.pkg</pkg-ref>' in xml
+    # the main pkg-ref carries both identifier and version, per fix round 1 minor 5
+    assert '<pkg-ref id="com.x" version="1.0">S.pkg</pkg-ref>' in xml
     assert '<pkg-ref id="acct">acct.pkg</pkg-ref>' in xml
 
     # ...and the optional choice's <pkg-ref id="…"/> reference lives inside its own <choice>
@@ -370,6 +486,40 @@ def test_render_distribution_escapes_text_and_omits_check_when_absent():
     assert "<installation-check" not in xml
     assert "S & \"Co\"" not in xml
     assert "&amp;" in xml and "&quot;" in xml
+
+
+def test_render_distribution_wraps_check_js_in_cdata_and_parses(tmp_path):
+    xml = mr.render_distribution(
+        title="S", identifier="com.x", version="1.0", pkg_ref="S.pkg",
+        optional_choices=[], installation_check_js='if (a < b && c > 1) { return true; }',
+    )
+    assert "<![CDATA[" in xml and "]]>" in xml
+    # The CDATA section must actually contain the raw, unescaped JS.
+    assert 'if (a < b && c > 1) { return true; }' in xml
+    # And the whole document must still be well-formed XML once CDATA-wrapped.
+    ET.fromstring(xml)
+
+
+def test_render_distribution_raises_when_check_js_contains_cdata_terminator():
+    with pytest.raises(ValueError, match=r"\]\]>"):
+        mr.render_distribution(
+            title="S", identifier="com.x", version="1.0", pkg_ref="S.pkg",
+            optional_choices=[], installation_check_js="var x = ']]>';",
+        )
+
+
+def test_render_distribution_allow_external_scripts_emits_attribute():
+    xml_default = mr.render_distribution(
+        title="S", identifier="com.x", version="1.0", pkg_ref="S.pkg",
+        optional_choices=[], installation_check_js=None,
+    )
+    assert "allow-external-scripts" not in xml_default
+
+    xml_allowed = mr.render_distribution(
+        title="S", identifier="com.x", version="1.0", pkg_ref="S.pkg",
+        optional_choices=[], installation_check_js=None, allow_external_scripts=True,
+    )
+    assert 'allow-external-scripts="yes"' in xml_allowed
 
 
 # ---------------------------------------------------------------------------
@@ -390,8 +540,13 @@ def test_build_pkg_writes_distribution_and_copies_extra_packages(tmp_path):
     seen: dict[str, object] = {}
 
     def run(argv):
+        if argv[0] == "pkgbuild" and "--analyze" in argv:
+            with Path(argv[-1]).open("wb") as f:
+                plistlib.dump([{"RootRelativeBundlePath": "A.app", "BundleIsRelocatable": True}], f)
+            return subprocess.CompletedProcess(argv, 0, "", "")
         if argv[0] == "pkgbuild":
-            assert "--component" in argv and str(app) in argv
+            assert "--component-plist" in argv
+            assert "--install-location" in argv and "/Applications" in argv
             assert "--identifier" in argv and "com.x" in argv
             assert "--version" in argv and "1.0" in argv
             assert "--scripts" in argv and str(scripts) in argv
@@ -412,6 +567,101 @@ def test_build_pkg_writes_distribution_and_copies_extra_packages(tmp_path):
     assert seen["package_path_has_extra"] is True
     assert seen["distribution_contents"] == distribution_xml
     assert seen["has_sign"] is True
+
+
+def test_build_pkg_stages_app_via_ditto_before_analyzing(tmp_path):
+    # Fix round 1, Important 3: the app must be staged into a temp root via
+    # `ditto` (keeping symlinks) before pkgbuild ever sees it, so the
+    # resulting component is built from that root, never from `app` directly.
+    app = tmp_path / "A.app"
+    app.mkdir()
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    dest = tmp_path / "A.pkg"
+    seen: dict[str, object] = {}
+
+    def run(argv):
+        if argv[0] == "ditto":
+            seen["ditto_call"] = argv
+            assert argv[1] == str(app)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[0] == "pkgbuild" and "--analyze" in argv:
+            seen["analyze_root"] = argv[argv.index("--root") + 1]
+            with Path(argv[-1]).open("wb") as f:
+                plistlib.dump([{"RootRelativeBundlePath": "A.app", "BundleIsRelocatable": True}], f)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[0] == "pkgbuild":
+            seen["component_root"] = argv[argv.index("--root") + 1]
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    mr.build_pkg(
+        app, identifier="com.x", version="1.0", scripts=scripts, distribution="<x/>",
+        identity=None, dest=dest, run=run,
+    )
+
+    assert "ditto_call" in seen
+    staged_app = Path(seen["ditto_call"][2])
+    assert staged_app != app
+    assert staged_app.name == app.name
+    # analyze and the final component build must both run against the same staged root
+    assert seen["analyze_root"] == seen["component_root"] == str(staged_app.parent)
+
+
+def test_build_pkg_forces_bundle_non_relocatable_via_component_plist(tmp_path):
+    # Fix round 1, Important 3: every entry pkgbuild --analyze wrote must be
+    # flipped to BundleIsRelocatable=False before the final --component-plist
+    # build, and the final pkgbuild argv must actually use --component-plist.
+    app = tmp_path / "A.app"
+    app.mkdir()
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    dest = tmp_path / "A.pkg"
+    seen: dict[str, object] = {}
+
+    def run(argv):
+        if argv[0] == "pkgbuild" and "--analyze" in argv:
+            plist_path = Path(argv[-1])
+            with plist_path.open("wb") as f:
+                plistlib.dump(
+                    [{"RootRelativeBundlePath": "A.app", "BundleIsRelocatable": True}], f
+                )
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        if argv[0] == "pkgbuild":
+            seen["component_call"] = argv
+            plist_path = Path(argv[argv.index("--component-plist") + 1])
+            with plist_path.open("rb") as f:
+                seen["component_plist_entries"] = plistlib.load(f)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    mr.build_pkg(
+        app, identifier="com.x", version="1.0", scripts=scripts, distribution="<x/>",
+        identity=None, dest=dest, run=run,
+    )
+
+    assert "--component-plist" in seen["component_call"]
+    entries = seen["component_plist_entries"]
+    assert entries and all(entry["BundleIsRelocatable"] is False for entry in entries)
+
+
+def test_build_pkg_raises_when_extra_package_collides_with_component_pkg(tmp_path):
+    # Fix round 1, Important 2: an extra_packages entry named the same as the
+    # reserved COMPONENT_PKG filename must raise, never silently overwrite it.
+    app = tmp_path / "A.app"
+    app.mkdir()
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    dest = tmp_path / "A.pkg"
+    colliding = tmp_path / mr.COMPONENT_PKG
+    colliding.write_text("not the real component")
+    calls, run = recorder()
+
+    with pytest.raises(ValueError, match="component.pkg"):
+        mr.build_pkg(
+            app, identifier="com.x", version="1.0", scripts=scripts, distribution="<x/>",
+            identity=None, dest=dest, run=run, extra_packages=[colliding],
+        )
 
 
 def test_build_pkg_omits_sign_flag_when_no_identity(tmp_path):
@@ -438,6 +688,10 @@ def test_build_pkg_raises_with_stderr_on_pkgbuild_failure(tmp_path):
     dest = tmp_path / "A.pkg"
 
     def run(argv):
+        if argv[0] == "pkgbuild" and "--analyze" in argv:
+            with Path(argv[-1]).open("wb") as f:
+                plistlib.dump([{"RootRelativeBundlePath": "A.app", "BundleIsRelocatable": True}], f)
+            return subprocess.CompletedProcess(argv, 0, "", "")
         if argv[0] == "pkgbuild":
             return subprocess.CompletedProcess(argv, 1, "", "bad component")
         return subprocess.CompletedProcess(argv, 0, "", "")

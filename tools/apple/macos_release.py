@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import plistlib
 import shutil
 import subprocess
 import tempfile
@@ -27,6 +28,11 @@ Runner = Callable[[list[str]], "subprocess.CompletedProcess[str]"]
 _BUNDLE_SUFFIXES = {".framework", ".appex", ".xpc", ".app", ".aiplugin", ".bundle"}
 _MACHO_MAGICS = {"cafebabe", "feedfacf", "cffaedfe", "feedface", "cefaedfe"}
 _PERMITTED_VIEWER_PERMISSIONS = {"WRITE", "MAINTAIN", "ADMIN"}
+
+#: Filename `build_pkg` gives the component package it builds from the
+#: staged app root. `render_distribution`'s `pkg_ref` defaults to the same
+#: constant so the two agree by construction instead of by convention.
+COMPONENT_PKG = "component.pkg"
 
 
 @dataclass(frozen=True)
@@ -59,6 +65,7 @@ def preflight(
     version: str,
     run: Runner,
     require_clean_main: Path | None = None,
+    main_branch: str = "main",
     sparkle_account: str | None = None,
     generate_keys: Path | None = None,
     github_repo: str | None = None,
@@ -92,16 +99,27 @@ def preflight(
     if require_clean_main is not None:
         repo = require_clean_main
         status = run(["git", "-C", str(repo), "status", "--porcelain"])
-        if (status.stdout or "").strip():
+        if status.returncode != 0:
+            failures.append(
+                f"git status failed in {repo} — {(status.stderr or '').strip() or 'check the repo path'}"
+            )
+        elif (status.stdout or "").strip():
             failures.append(
                 f"{repo} has uncommitted changes — commit or stash them before releasing"
             )
+
         branch = run(["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"])
-        current = (branch.stdout or "").strip()
-        if current != "main":
+        if branch.returncode != 0:
             failures.append(
-                f"{repo} is on branch '{current}', not main — checkout main before releasing"
+                f"git rev-parse failed in {repo} — {(branch.stderr or '').strip() or 'check the repo path'}"
             )
+        else:
+            current = (branch.stdout or "").strip()
+            if current != main_branch:
+                failures.append(
+                    f"{repo} is on branch '{current}', not {main_branch} — "
+                    f"checkout {main_branch} before releasing"
+                )
 
     if sparkle_account is not None:
         if generate_keys is None:
@@ -121,6 +139,7 @@ def preflight(
         auth = run(["gh", "auth", "status"])
         if auth.returncode != 0:
             failures.append("gh is not authenticated — run `gh auth login`")
+
         view = run(["gh", "repo", "view", github_repo, "--json", "viewerPermission"])
         if view.returncode != 0:
             failures.append(
@@ -136,6 +155,14 @@ def preflight(
                     f"insufficient permission on {github_repo} (have {permission!r}) — "
                     "request write access to the repo"
                 )
+
+        tag = f"v{version}"
+        released = run(["gh", "release", "view", tag, "--repo", github_repo])
+        if released.returncode == 0:
+            failures.append(
+                f"GitHub release {tag} already exists on {github_repo} — bump the version, or "
+                f"delete it with `gh release delete {tag} --repo {github_repo}`"
+            )
 
     if failures:
         raise PreflightError("\n".join(failures))
@@ -206,29 +233,29 @@ def sign_bundle(
 
 
 def notarize(path: Path, *, profile: str, run: Runner) -> None:
-    target = path
-    if path.suffix == ".app":
-        tmp_dir = Path(tempfile.mkdtemp(prefix="macos_release_notarize_"))
-        target = tmp_dir / f"{path.stem}.zip"
-        zipped = run(["ditto", "-c", "-k", "--keepParent", str(path), str(target)])
-        if zipped.returncode != 0:
-            raise RuntimeError(zipped.stderr)
+    with tempfile.TemporaryDirectory(prefix="macos_release_notarize_") as tmp:
+        target = path
+        if path.suffix == ".app":
+            target = Path(tmp) / f"{path.stem}.zip"
+            zipped = run(["ditto", "-c", "-k", "--keepParent", str(path), str(target)])
+            if zipped.returncode != 0:
+                raise RuntimeError(zipped.stderr)
 
-    submit = run(
-        [
-            "xcrun", "notarytool", "submit", str(target),
-            "--keychain-profile", profile,
-            "--wait", "--output-format", "json",
-        ]
-    )
-    if submit.returncode != 0:
-        raise RuntimeError(submit.stderr)
+        submit = run(
+            [
+                "xcrun", "notarytool", "submit", str(target),
+                "--keychain-profile", profile,
+                "--wait", "--output-format", "json",
+            ]
+        )
+        if submit.returncode != 0:
+            raise RuntimeError(submit.stderr)
 
-    info = json.loads(submit.stdout)
-    if info.get("status") != "Accepted":
-        submission_id = info.get("id", "")
-        log = run(["xcrun", "notarytool", "log", submission_id, "--keychain-profile", profile])
-        raise RuntimeError(log.stdout or log.stderr)
+        info = json.loads(submit.stdout)
+        if info.get("status") != "Accepted":
+            submission_id = info.get("id", "")
+            log = run(["xcrun", "notarytool", "log", submission_id, "--keychain-profile", profile])
+            raise RuntimeError(log.stdout or log.stderr)
 
     staple = run(["xcrun", "stapler", "staple", str(path)])
     if staple.returncode != 0:
@@ -251,9 +278,10 @@ def render_distribution(
     title: str,
     identifier: str,
     version: str,
-    pkg_ref: str,
+    pkg_ref: str = COMPONENT_PKG,
     optional_choices: list[tuple[str, str, str, str]],
     installation_check_js: str | None,
+    allow_external_scripts: bool = False,
 ) -> str:
     """Render a productbuild Distribution.xml.
 
@@ -261,31 +289,47 @@ def render_distribution(
     optional choice references its own small component pkg, since Installer
     does not tell postinstall scripts which choices were selected — the
     optional choice installs a marker-file component instead.
+
+    `installation_check_js` is wrapped in a `<![CDATA[…]]>` section so it can
+    contain `<`, `&&`, etc. without XML-escaping; it must not itself contain
+    the CDATA terminator `]]>`. `allow_external_scripts=True` emits
+    `allow-external-scripts="yes"` on `<options>`, required for check/postinstall
+    JS that calls `system.run` (e.g. to probe `/usr/bin/python3`).
     """
+    if installation_check_js and "]]>" in installation_check_js:
+        raise ValueError("installation_check_js must not contain the CDATA terminator ']]>'")
 
     def esc(text: str) -> str:
         return escape(text, {'"': "&quot;"})
+
+    options_attrs = 'customize="allow" require-scripts="false" hostArchitectures="arm64"'
+    if allow_external_scripts:
+        options_attrs += ' allow-external-scripts="yes"'
 
     lines = [
         '<?xml version="1.0" encoding="utf-8"?>',
         '<installer-gui-script minSpecVersion="2">',
         f"    <title>{esc(title)}</title>",
-        '    <options customize="allow" require-scripts="false" hostArchitectures="arm64"/>',
+        f"    <options {options_attrs}/>",
         '    <domains enable_localSystem="true"/>',
     ]
 
     if installation_check_js:
         lines.append('    <installation-check script="pm_install_check();"/>')
-        lines.append(f"    <script>function pm_install_check() {{ {installation_check_js} }}</script>")
+        lines.append(
+            "    <script><![CDATA[function pm_install_check() { "
+            f"{installation_check_js}"
+            " }]]></script>"
+        )
 
     lines.append("    <choices-outline>")
-    lines.append('        <line choice="default"/>')
+    lines.append(f'        <line choice="{esc(identifier)}"/>')
     for choice_id, _title, _description, _pkg in optional_choices:
         lines.append(f'        <line choice="{esc(choice_id)}"/>')
     lines.append("    </choices-outline>")
 
-    lines.append(f'    <choice id="default" title="{esc(title)}" visible="false">')
-    lines.append('        <pkg-ref id="default"/>')
+    lines.append(f'    <choice id="{esc(identifier)}" title="{esc(title)}" visible="false">')
+    lines.append(f'        <pkg-ref id="{esc(identifier)}"/>')
     lines.append("    </choice>")
 
     for choice_id, choice_title, choice_description, _pkg in optional_choices:
@@ -296,7 +340,7 @@ def render_distribution(
         lines.append(f'        <pkg-ref id="{esc(choice_id)}"/>')
         lines.append("    </choice>")
 
-    lines.append(f'    <pkg-ref id="default">{esc(pkg_ref)}</pkg-ref>')
+    lines.append(f'    <pkg-ref id="{esc(identifier)}" version="{esc(version)}">{esc(pkg_ref)}</pkg-ref>')
     for choice_id, _title, _description, choice_pkg in optional_choices:
         lines.append(f'    <pkg-ref id="{esc(choice_id)}">{esc(choice_pkg)}</pkg-ref>')
 
@@ -316,14 +360,40 @@ def build_pkg(
     run: Runner,
     extra_packages: Sequence[Path] = (),
 ) -> Path:
+    """Build the component pkg from a *staged, non-relocatable* root so that
+    Installer always targets the copy at `/Applications`, never "upgrading"
+    some other same-bundle-ID copy in place (e.g. a DerivedData build).
+    """
     with tempfile.TemporaryDirectory(prefix="macos_release_pkg_") as tmp:
         tmp_path = Path(tmp)
-        component = tmp_path / "component.pkg"
 
+        root = tmp_path / "root"
+        root.mkdir()
+        staged_app = root / app.name
+        stage_result = run(["ditto", str(app), str(staged_app)])
+        if stage_result.returncode != 0:
+            raise RuntimeError(stage_result.stderr)
+
+        component_plist = tmp_path / "component.plist"
+        analyze_result = run(["pkgbuild", "--analyze", "--root", str(root), str(component_plist)])
+        if analyze_result.returncode != 0:
+            raise RuntimeError(analyze_result.stderr)
+        if not component_plist.exists():
+            raise RuntimeError(f"pkgbuild --analyze did not write {component_plist}")
+
+        with component_plist.open("rb") as f:
+            component_entries = plistlib.load(f)
+        for entry in component_entries:
+            entry["BundleIsRelocatable"] = False
+        with component_plist.open("wb") as f:
+            plistlib.dump(component_entries, f)
+
+        component = tmp_path / COMPONENT_PKG
         component_result = run(
             [
                 "pkgbuild",
-                "--component", str(app),
+                "--root", str(root),
+                "--component-plist", str(component_plist),
                 "--install-location", "/Applications",
                 "--scripts", str(scripts),
                 "--identifier", identifier,
@@ -335,6 +405,11 @@ def build_pkg(
             raise RuntimeError(component_result.stderr)
 
         for extra in extra_packages:
+            if extra.name == COMPONENT_PKG:
+                raise ValueError(
+                    f"extra_packages entry {extra} collides with the reserved component "
+                    f"pkg filename {COMPONENT_PKG!r}"
+                )
             shutil.copy2(extra, tmp_path / extra.name)
 
         distribution_path = tmp_path / "Distribution.xml"
@@ -370,16 +445,21 @@ def _asset_dict(asset: ReleaseAsset) -> dict:
     return {"url": asset.url, "size": asset.size, "sha256": asset.sha256}
 
 
+def _version_tuple(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
 def merge_release(existing: dict, entry: ReleaseEntry) -> dict:
-    """Schema 1: newest merged-in release goes first; merging an entry whose
-    version already exists replaces that entry in place."""
+    """Schema 1: `releases` is always kept sorted newest-first by numeric
+    version (descending), regardless of merge order; `latest` is the version
+    at the front. Merging an entry whose version already exists replaces
+    that entry in place."""
     schema = existing.get("schema")
     if schema != 1:
         raise ValueError(f"unsupported releases schema: {schema!r}")
 
     releases = [r for r in existing.get("releases", []) if r.get("version") != entry.version]
-    releases.insert(
-        0,
+    releases.append(
         {
             "version": entry.version,
             "build": entry.build,
@@ -388,8 +468,9 @@ def merge_release(existing: dict, entry: ReleaseEntry) -> dict:
             "notes": entry.notes,
             "pkg": _asset_dict(entry.pkg),
             "zip": _asset_dict(entry.zip),
-        },
+        }
     )
+    releases.sort(key=lambda r: _version_tuple(r["version"]), reverse=True)
     return {"schema": 1, "latest": releases[0]["version"], "releases": releases}
 
 
