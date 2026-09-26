@@ -15,7 +15,7 @@
  * source. Everything else was emitted anyway because some registered package
  * happened to use the same utility. That is luck, not coverage: the next novel
  * utility written here would simply not render, with nothing red anywhere.
- * `recipes/site-wordmark.md:173-176` records this fleet hitting exactly that.
+ * `cookbook/site-wordmark.md` records this fleet hitting exactly that.
  *
  * PACKAGE-WIDE, not per subtree, matching @agentic-toolkit/adh/sources.css: one
  * glob pair over the whole package cannot develop a hole, and a new subtree is

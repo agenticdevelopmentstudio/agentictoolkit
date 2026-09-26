@@ -681,11 +681,11 @@
     {
       "name": "component-recipes",
       "paths": [
-        "recipes/"
+        "cookbook/"
       ],
       "depends_on": [],
       "shared": false,
-      "holds": "The component catalogue \u2014 one dated, versioned markdown recipe per shared component (button, dialog, data-table, crud-table\u2026), each naming the package that owns it. Prose, and the human-readable index of what web-ui and its siblings already export: read it before proposing a new component."
+      "holds": "The library cookbook \u2014 cookbook/cookbook.json plus one dated, versioned markdown spec per shared component (button, dialog, data-table, crud-table\u2026), arranged in directories that mirror the code, each listing its code in a Reference Implementations table. Prose, and the human-readable index of what web-ui and its siblings already export: read it before proposing a new component."
     },
     {
       "name": "repo-scripts",
@@ -703,7 +703,7 @@
       ],
       "depends_on": [],
       "shared": false,
-      "holds": "One-off maintenance scripts run by hand against the repo itself \u2014 currently the recipe classifier that sorts `recipes/` by component tier. Nothing imports these; they are invoked, not built on."
+      "holds": "One-off maintenance scripts run by hand against the repo itself \u2014 currently the recipe classifier that sorts the specs under `cookbook/` by component tier. Nothing imports these; they are invoked, not built on."
     }
   ],
   "rules": {

@@ -8,7 +8,7 @@ together. This is the client counterpart of the adh backend's server-side
 
 **Read this for the _how_.** For the _what_ — the platform-neutral behavioral
 contract every sync client must satisfy (17 requirements + conformance test
-vectors) — read [`../recipes/offline-sync-client.md`](../recipes/offline-sync-client.md).
+vectors) — read [`../cookbook/adh-offline-sync-client.md`](../cookbook/adh-offline-sync-client.md).
 This document does not restate that requirement list; it links to it and
 describes the Swift implementation that conforms to it.
 
@@ -21,7 +21,7 @@ describes the Swift implementation that conforms to it.
   and **§4 Resync** sections are the semantics the client code cites directly
   (see `SyncEngine.performResync` and `SyncEngine.pushLoop`). The wire shapes
   are defined in `backend/src/adh/src/sync/wire.ts`.
-- **Behavioral contract:** [`../recipes/offline-sync-client.md`](../recipes/offline-sync-client.md)
+- **Behavioral contract:** [`../cookbook/adh-offline-sync-client.md`](../cookbook/adh-offline-sync-client.md)
   — the platform-neutral requirement list and its conformance vectors.
 - **Pinned to adh main `64825b107`** (per-ecosystem sync enrollment, merged
   2026-07-22). The catalog (`ADHSyncCatalog`) was generated against that
@@ -241,7 +241,7 @@ treated as a resync — it cannot be behind a cursor that does not exist yet.
 
 The rationale has a single home — the recipe's `appearance-forces-full-resync`
 requirement and its "Appearance ⇒ full resync" Design Decision
-([`../recipes/offline-sync-client.md`](../recipes/offline-sync-client.md#design-decisions)).
+([`../cookbook/adh-offline-sync-client.md`](../cookbook/adh-offline-sync-client.md#design-decisions)).
 In short: the server keeps one cursor stream per cohort and does not re-serve a
 resource's rows when it is enrolled-enabled, so rows that changed while the
 resource sat outside the effective set are permanently behind the cursor; only a
@@ -258,7 +258,7 @@ as a silent resumption.
 
 Same single source — the recipe's `disappearance-quarantines-outbox` requirement
 and its "Quarantine over drop or indefinite hold" Design Decision
-([`../recipes/offline-sync-client.md`](../recipes/offline-sync-client.md#design-decisions)).
+([`../cookbook/adh-offline-sync-client.md`](../cookbook/adh-offline-sync-client.md#design-decisions)).
 In short: a local op for a departed resource can neither be pushed (the server
 would reject it) nor kept live (the host must stop serving it), so it is
 quarantined — surfaced, never silently dropped (that loses the user's edit) and
@@ -546,7 +546,7 @@ applied pull batch. See the recipe's conformance vectors (`cursor-is-opaque`,
 
 ## See also
 
-- [`../recipes/offline-sync-client.md`](../recipes/offline-sync-client.md) —
+- [`../cookbook/adh-offline-sync-client.md`](../cookbook/adh-offline-sync-client.md) —
   the platform-neutral behavioral contract (17 requirements + conformance
   vectors). The source of truth for _what_ the client must do.
 - adh `backend/src/adh/docs/architecture/sync.md` — the server-side contract

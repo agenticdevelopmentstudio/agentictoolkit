@@ -1,0 +1,847 @@
+{
+  "$schema": "https://github.com/agenticdevelopercookbook/cookbook/blob/main/cookbook/reference/cookbook.schema.json",
+  "type": "cookbook",
+  "schema_version": "1.0.0",
+  "name": "cookbook",
+  "id": "eb43aec5-c57d-48c2-acc5-f3ebae99aec1",
+  "version": "1.0.0",
+  "description": "Specs for cookbook's shared code, arranged as the code is.",
+  "author": "Mike Fullerton",
+  "license": "MIT",
+  "created": "2026-09-25",
+  "modified": "2026-09-25",
+  "platforms": [
+    "apple",
+    "web"
+  ],
+  "cookbook": {
+    "repo": "https://github.com/agenticdevelopercookbook/cookbook",
+    "version": "1.1.0"
+  },
+  "structure": {
+    "name": "cookbook",
+    "kind": "library"
+  },
+  "code": {
+    "roots": [
+      {
+        "path": "packages/web/packages/adh-ui/src/components",
+        "platform": "web",
+        "kind": "ui",
+        "recipes": "adh-ui/components"
+      },
+      {
+        "path": "packages/web/packages/adh-ui/src/blocks",
+        "platform": "web",
+        "kind": "ui",
+        "recipes": "adh-ui/blocks"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/CoreUI",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "core-ui",
+        "ignore": [
+          "packages/apple/AgenticToolkit/CoreUI/KeyViewLoop.swift",
+          "packages/apple/AgenticToolkit/CoreUI/NSWindow+Center.swift",
+          "packages/apple/AgenticToolkit/CoreUI/NSWindow+FitHeight.swift",
+          "packages/apple/AgenticToolkit/CoreUI/NSWindow+FitWidth.swift",
+          "packages/apple/AgenticToolkit/CoreUI/Placeholder.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/PermissionsUI",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "permissions-ui",
+        "ignore": [
+          "packages/apple/AgenticToolkit/PermissionsUI/PermissionPresenter.swift",
+          "packages/apple/AgenticToolkit/PermissionsUI/Walkthrough/**"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/AIChatWindow",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/features/ai-chat-window",
+        "ignore": [
+          "packages/apple/AgenticToolkit/macOS/Features/AIChatWindow/AIChatCoordinator.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/AIChatWindow/AIChatViewModel.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/AIChatWindow/AIChatWindowController.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/AIChatWindow/AIModelChatConfig.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/AIChatWindow/ChatBackend.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/AIChatWindow/ChatBackendSession.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/AIChatWindow/WhippetChatBackend.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/AIChatWindow/Scripting/**"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/Extensions",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/features/extensions",
+        "ignore": [
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/ConfigurationContributionPoint.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/ExtensionsCoordinator.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/LanguageContributionPoint.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/OnceOnlyContinuation.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/ThemeContributionPoint.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/ViewsContributionPoint.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/Host/**",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/Settings/**",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/Tree/ContributedTreeItem.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/Tree/ExtensionTreeRowTable.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/UI/ExtensionInputBoxModel.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/UI/ExtensionPickerPresenter.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/UI/ExtensionPickerWindowController.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/UI/ExtensionQuickPickModel.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/UI/WindowFooterStatusBarPresenter.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/VSCodeAPI/**",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/Webview/ExtensionWebviewPanePlacer.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/Webview/PaneWebviewPresenter.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/Webview/WebviewPanelSerializer.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Extensions/Webview/WebviewSchemeHandler.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/KeyCommands",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/features/key-commands",
+        "ignore": [
+          "packages/apple/AgenticToolkit/macOS/Features/KeyCommands/KeyCommand.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/KeyCommands/KeyCommandRegistry.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/KeyCommands/KeyCommandsSettingsPanelViewController.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/KeyCommands/UserSettings+KeyCommands.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/LoggingWindow",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/features/logging-window",
+        "ignore": [
+          "packages/apple/AgenticToolkit/macOS/Features/LoggingWindow/LogBuffer.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/LoggingWindow/LogCellValue.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/LoggingWindow/LogColumn.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/LoggingWindow/LogController.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/LoggingWindow/LogLine.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/LoggingWindow/LogProvider.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/LoggingWindow/LogWindowController.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/SessionWatcher",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/features/session-watcher",
+        "ignore": [
+          "packages/apple/AgenticToolkit/macOS/Features/SessionWatcher/SessionWatcher.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/SessionWatcher/SessionWatcherActionHandler.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/SessionWatcher/SessionWatcherClickAction.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/SessionWatcher/TerminalTextInjector.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/SessionWatcher/UserSettings+SessionWatcher.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/SessionWatcher/SessionListWindow/SessionListView.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/SessionWatcher/SessionListWindow/SessionListViewController.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/SessionWatcher/SessionListWindow/SessionWatcherListViewModel.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/SessionWatcher/SessionWatcherDataModel/**"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/TerminalSession",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/features/terminal-session",
+        "ignore": [
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/NSColor+Hex.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/ScriptableTerminalSession.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/TerminalAppearance.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/TerminalCoordinator.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/TerminalSession.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/TerminalSessionContentViewController.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/TerminalSessionLayoutState.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/TerminalSessionListViewController.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/TerminalSessionManager.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/TerminalSessionRowCellView.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/TerminalSessionSplitViewController.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/TerminalSessionSummarizationCoordinator.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/TerminalSessionSummarizer.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/TerminalSessionWindowController.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/Scripting/**",
+          "packages/apple/AgenticToolkit/macOS/Features/TerminalSession/Settings/**"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/system-integration/composable-settings-window",
+        "ignore": [
+          "packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/ComposableSettings.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/SettingsCoordinator.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/UserSettings+ComposableSettings.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/ViewLayout.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Help/**",
+          "packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/SettingsPanel/ComposableSettingsPanel.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/SettingsPanel/SettingsPanelDescriptor.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/SplitViewController/SettingsNavigationHistory.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/SplitViewController/SettingsSearchIndex.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/ViewModels/**",
+          "packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/SettingsLabels.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/Views/SettingsViewProtocol.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/SystemIntegration/WindowManager/Windows",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/system-integration/window-manager/windows",
+        "ignore": [
+          "packages/apple/AgenticToolkit/macOS/SystemIntegration/WindowManager/Windows/WindowSpec.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/SystemWindows/UI",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/system-windows/ui",
+        "ignore": [
+          "packages/apple/AgenticToolkit/macOS/SystemWindows/UI/Color+Hex.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemWindows/UI/ContextPickerView.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemWindows/UI/ContextVisualizationView.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemWindows/UI/ContextsSettingsTab.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemWindows/UI/DiscoveryView.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemWindows/UI/GeneralSettingsTab.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemWindows/UI/HeuristicsSettingsTab.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemWindows/UI/ReconcileView.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemWindows/UI/ShortcutsSettingsTab.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemWindows/UI/SystemWindowContextNotifications.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemWindows/UI/SystemWindowSettingsView.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemWindows/UI/WorkGroupsView.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/UI/Badge",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/ui/badge"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/UI/Cards",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/ui/cards",
+        "ignore": [
+          "packages/apple/AgenticToolkit/macOS/UI/Cards/CardFoldMemory.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/Cards/NSStackView+FullWidth.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/Cards/PinnedEndsLine.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/UI/Controls",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/ui/controls",
+        "ignore": [
+          "packages/apple/AgenticToolkit/macOS/UI/Controls/Spacing/Spacing.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/Controls/Spacing/SpacingControlLayout.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/Controls/Spacing/SpacingSettingsBinding.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/UI/Help",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/ui/help",
+        "ignore": [
+          "packages/apple/AgenticToolkit/macOS/UI/Help/HelpContent.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/Help/HelpPresenting.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/UI/Panels",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/ui/panels"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/UI/ViewControllers",
+        "platform": "apple",
+        "kind": "ui",
+        "recipes": "macos/ui/view-controllers",
+        "ignore": [
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/ComposableTabLayoutSpec.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/ComposableTabsArrangeMode.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/ComposableTabsFocusable.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/ComposableTabsLayout.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/ComposableTabsMove.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/ComposableTabsMoveMenu.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/ComposableTabsPaneHost.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/ComposableTabsTabItemDataSource.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/ComposableTabsViewID.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/LayoutNode.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/PaneArranger.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/PaneMinimizeGeometry.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/ProjectPaneStateStore.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/ComposableTabs/Scripting/**",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/DocumentPane/DocumentTabsViewController.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/DocumentPane/EditorOptionsOverride.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/DocumentPane/EditorPeripherals.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/FileBrowser/DocumentDestination.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/FileBrowser/FileBrowserSelection.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/FileBrowser/Model/**",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/FileBrowser/Settings/**",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/FileBrowser/Views/FileEditorState.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/FileBrowser/Views/FilePreviewLoader.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/FileBrowser/Views/FileTypesSettingsView.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/MultiTabbedViewController/Edge.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/MultiTabbedViewController/MultiTabbedViewControllerDelegate.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/MultiTabbedViewController/TabItem.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/MultiTabbedViewController/TabPane/TabPaneDataSource.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/MultiTabbedViewController/TabPane/TabPaneDelegate.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/MultiTabbedViewController/TabPane/TabPaneStatusSymbol.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/Panes/PaneCapabilities.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/Panes/PaneHost.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/Panes/PaneSpacingOverride.swift",
+          "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/Panes/PaneStateStore.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Hub/Features/Applications",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "hub/features/applications"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Hub/Features/Buckets",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "hub/features/buckets"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Hub/Features/Customers",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "hub/features/customers"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Hub/Features/EcosystemConfig",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "hub/features/ecosystem-config"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Hub/Features/Ecosystems",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "hub/features/ecosystems"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Hub/Features/Invitations",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "hub/features/invitations"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Hub/Features/Messaging",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "hub/features/messaging"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Hub/Features/Personas",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "hub/features/personas"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Hub/Features/Support",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "hub/features/support"
+      },
+      {
+        "path": "packages/web/packages/data/src",
+        "platform": "web",
+        "kind": "logic",
+        "recipes": "data"
+      },
+      {
+        "path": "packages/web/packages/messaging/src/hooks",
+        "platform": "web",
+        "kind": "logic",
+        "recipes": "messaging/hooks"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Hub/Features/Authentication",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "hub/features/authentication"
+      },
+      {
+        "path": "packages/web/packages/auth/src",
+        "platform": "web",
+        "kind": "logic",
+        "recipes": "auth",
+        "ignore": [
+          "**/*.tsx",
+          "packages/web/packages/auth/src/ui/**",
+          "packages/web/packages/auth/src/styles/**"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Core",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core",
+        "ignore": [
+          "packages/apple/AgenticToolkit/Core/AI/**",
+          "packages/apple/AgenticToolkit/Core/AIPlugins/**",
+          "packages/apple/AgenticToolkit/Core/Chat/**",
+          "packages/apple/AgenticToolkit/Core/Extensions/**",
+          "packages/apple/AgenticToolkit/Core/FileSystem/**",
+          "packages/apple/AgenticToolkit/Core/Git/**",
+          "packages/apple/AgenticToolkit/Core/MCP/**",
+          "packages/apple/AgenticToolkit/Core/Networking/**",
+          "packages/apple/AgenticToolkit/Core/RPC/**",
+          "packages/apple/AgenticToolkit/Core/SettingStorage/**",
+          "packages/apple/AgenticToolkit/Core/SystemWindows/**",
+          "packages/apple/AgenticToolkit/Core/Theme/**"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/CoreMacOS/DebugAutomation",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core-macos/debug-automation"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Scripting",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/scripting"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Core/FileSystem",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core/file-system"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/UI/ViewControllers/FileBrowser/Model",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/ui/view-controllers/file-browser/model"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Core/Networking",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core/networking"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Core/RPC",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core/rpc"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Core/MCP",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core/mcp"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/MCP",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/features/mcp",
+        "ignore": [
+          "**/*View.swift",
+          "**/*ViewController.swift",
+          "**/*WindowController.swift",
+          "**/*Cell.swift",
+          "**/*Panel.swift",
+          "**/*Hosting.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Core/Git",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core/git"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/Projects",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/features/projects",
+        "ignore": [
+          "**/*View.swift",
+          "**/*ViewController.swift",
+          "**/*WindowController.swift",
+          "**/*Cell.swift",
+          "**/*Panel.swift",
+          "**/*Hosting.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Core/SettingStorage",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core/setting-storage"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/SystemIntegration/Appearance",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/system-integration/appearance",
+        "ignore": [
+          "**/*View.swift",
+          "**/*ViewController.swift",
+          "**/*WindowController.swift",
+          "**/*Cell.swift",
+          "**/*Panel.swift",
+          "**/*Hosting.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/SystemIntegration/LaunchAtLogin",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/system-integration/launch-at-login",
+        "ignore": [
+          "**/*View.swift",
+          "**/*ViewController.swift",
+          "**/*WindowController.swift",
+          "**/*Cell.swift",
+          "**/*Panel.swift",
+          "**/*Hosting.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/SystemIntegration/ComposableSettingsWindow/ViewModels",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/system-integration/composable-settings-window/view-models"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/CommandPalette",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/features/command-palette",
+        "ignore": [
+          "**/*View.swift",
+          "**/*ViewController.swift",
+          "**/*WindowController.swift",
+          "**/*Cell.swift",
+          "**/*Panel.swift",
+          "**/*Hosting.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Core/Theme",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core/theme"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/SystemIntegration/Theme",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/system-integration/theme"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Core/AI",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core/ai"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Core/AIPlugins",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core/ai-plugins"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/AIPluginKit",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "ai-plugin-kit"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/AIPlugins",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/features/ai-plugins",
+        "ignore": [
+          "**/*View.swift",
+          "**/*ViewController.swift",
+          "**/*WindowController.swift",
+          "**/*Cell.swift",
+          "**/*Panel.swift",
+          "**/*Hosting.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/AIPlugins/Settings/**",
+          "packages/apple/AgenticToolkit/macOS/Features/AIPlugins/ChatWindow/**"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Core/Extensions",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core/extensions"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/Extensions/Host",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/features/extensions/host"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/Extensions/VSCodeAPI",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/features/extensions/vs-code-api"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Core/Chat",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core/chat"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/ConversationsWindow",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/features/conversations-window",
+        "ignore": [
+          "**/*View.swift",
+          "**/*ViewController.swift",
+          "**/*WindowController.swift",
+          "**/*Cell.swift",
+          "**/*Panel.swift",
+          "**/*Hosting.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/SessionWatcher/SessionWatcherDataModel",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/features/session-watcher/session-watcher-data-model"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Core/SystemWindows",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core/system-windows"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/CoreMacOS/SystemWindows",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "core-macos/system-windows"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/SystemWindows",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/system-windows",
+        "ignore": [
+          "**/*View.swift",
+          "**/*ViewController.swift",
+          "**/*WindowController.swift",
+          "**/*Cell.swift",
+          "**/*Panel.swift",
+          "**/*Hosting.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemWindows/UI/**"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/WindowDiscovery",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/features/window-discovery",
+        "ignore": [
+          "**/*View.swift",
+          "**/*ViewController.swift",
+          "**/*WindowController.swift",
+          "**/*Cell.swift",
+          "**/*Panel.swift",
+          "**/*Hosting.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/SystemIntegration/WindowManager",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/system-integration/window-manager",
+        "ignore": [
+          "**/*View.swift",
+          "**/*ViewController.swift",
+          "**/*WindowController.swift",
+          "**/*Cell.swift",
+          "**/*Panel.swift",
+          "**/*Hosting.swift",
+          "packages/apple/AgenticToolkit/macOS/SystemIntegration/WindowManager/Windows/**"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Language",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "language"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/Editor",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/features/editor",
+        "ignore": [
+          "**/*View.swift",
+          "**/*ViewController.swift",
+          "**/*WindowController.swift",
+          "**/*Cell.swift",
+          "**/*Panel.swift",
+          "**/*Hosting.swift",
+          "packages/apple/AgenticToolkit/macOS/Features/Editor/Settings/**"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Sync",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "sync"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/SyncGRDB",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "sync-grdb"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Database",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "database"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Markdown",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "markdown"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/Permissions",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "permissions"
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/SystemIntegration/PermissionWalkthrough",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/system-integration/permission-walkthrough",
+        "ignore": [
+          "**/*View.swift",
+          "**/*ViewController.swift",
+          "**/*WindowController.swift",
+          "**/*Cell.swift",
+          "**/*Panel.swift",
+          "**/*Hosting.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/macOS/Features/NotesWindow",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "macos/features/notes-window",
+        "ignore": [
+          "**/*View.swift",
+          "**/*ViewController.swift",
+          "**/*WindowController.swift",
+          "**/*Cell.swift",
+          "**/*Panel.swift",
+          "**/*Hosting.swift"
+        ]
+      },
+      {
+        "path": "packages/apple/AgenticToolkit/HTDV",
+        "platform": "apple",
+        "kind": "logic",
+        "recipes": "htdv",
+        "ignore": [
+          "packages/apple/AgenticToolkit/HTDV/Views/**"
+        ]
+      },
+      {
+        "path": "packages/web/packages/status-server/src",
+        "platform": "web",
+        "kind": "logic",
+        "recipes": "status-server"
+      },
+      {
+        "path": "packages/web/packages/status-web/src",
+        "platform": "web",
+        "kind": "logic",
+        "recipes": "status-web",
+        "ignore": [
+          "**/*.tsx",
+          "packages/web/packages/status-web/src/components/**",
+          "packages/web/packages/status-web/src/styles/**"
+        ]
+      },
+      {
+        "path": "packages/web/packages/crud/src",
+        "platform": "web",
+        "kind": "logic",
+        "recipes": "crud",
+        "ignore": [
+          "**/*.tsx"
+        ]
+      },
+      {
+        "path": "packages/web/packages/api-explorer/src",
+        "platform": "web",
+        "kind": "logic",
+        "recipes": "api-explorer",
+        "ignore": [
+          "**/*.tsx"
+        ]
+      },
+      {
+        "path": "packages/web/packages/adh-api-types/src",
+        "platform": "web",
+        "kind": "logic",
+        "recipes": "adh-api-types"
+      },
+      {
+        "path": "packages/web/packages/adh-registry/src",
+        "platform": "web",
+        "kind": "logic",
+        "recipes": "adh-registry"
+      },
+      {
+        "path": "packages/web/packages/deploy-platform/src",
+        "platform": "web",
+        "kind": "logic",
+        "recipes": "deploy-platform"
+      }
+    ],
+    "ignore": [
+      "**/__tests__/**",
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "**/index.ts",
+      "**/Tests/**",
+      "**/Resources/**",
+      "**/*.xcodeproj/**",
+      "**/*.test-d.ts",
+      "**/*.d.ts",
+      "**/*.fixture.ts",
+      "**/generated/**",
+      "**/Generated/**",
+      "**/*ReExports.swift",
+      "packages/web/packages/adh-api-types/src/schema.ts"
+    ]
+  }
+}

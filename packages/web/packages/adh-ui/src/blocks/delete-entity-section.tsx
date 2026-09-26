@@ -75,7 +75,7 @@ const article = (noun: string): string =>
  * Delete"/"cannot be undone" wording unchanged; pass `actionVerb` with
  * `reversible: true` (e.g. "Archive") to swap in non-destructive copy throughout —
  * every "Permanently"/"cannot be undone"/"deletion" phrase, not just the verb.
- * Shared across every FTD route (see recipes/focused-topic-detail.md).
+ * Shared across every FTD route (see cookbook/focused-topic-detail.md).
  */
 export function DeleteEntitySection({
   entityNoun,

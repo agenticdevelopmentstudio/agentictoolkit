@@ -40,12 +40,12 @@ def classify(path: Path) -> tuple[str, list[str]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[1] / "recipes"
+        "--root", type=Path, default=Path(__file__).resolve().parents[1] / "cookbook"
     )
     parser.add_argument("--bucket", choices=("clean", "unmoved", "carve-out"))
     args = parser.parse_args()
 
-    files = sorted(args.root.glob("*.md"))
+    files = sorted(args.root.rglob("*.md"))
     if not files:
         # An empty scan is a broken path, never a pass.
         print(f"classify_recipes: no recipes under {args.root}", file=sys.stderr)
