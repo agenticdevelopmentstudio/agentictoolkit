@@ -7,6 +7,8 @@
 // index drawer — belongs to two of them.
 export { LandingDeck, LandingTour } from './LandingDeck'
 export type { LandingDeckProps } from './LandingDeck'
+export { landingFromData } from './fromData'
+export type { InlineNode, LandingDataOptions } from './fromData'
 export type {
   LandingContent,
   LandingHero,

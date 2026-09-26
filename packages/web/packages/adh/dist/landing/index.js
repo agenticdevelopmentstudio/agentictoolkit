@@ -150,8 +150,40 @@ function tourStep(edge) {
   if (edge === void 0) return void 0;
   return { href: siteProdUrl(edge.site, "/tour"), label: edge.label, note: edge.note };
 }
+
+// src/landing/fromData.ts
+import { createElement, Fragment as Fragment2 } from "react";
+function landingFromData(data, options = {}) {
+  return revive(data, options);
+}
+function revive(value, options) {
+  if (Array.isArray(value)) return value.map((v) => revive(v, options));
+  if (value === null || typeof value !== "object") return value;
+  if ("$inline" in value) {
+    const nodes = value.$inline;
+    return createElement(Fragment2, null, ...nodes.map((n) => node(n, options)));
+  }
+  const out = {};
+  for (const [key, v] of Object.entries(value)) {
+    if (!key.startsWith("$")) out[key] = revive(v, options);
+  }
+  return out;
+}
+function node(n, options) {
+  if (typeof n === "string") return n;
+  const children = n.c.map((c) => node(c, options));
+  switch (n.t) {
+    case "link":
+      return createElement(options.link ?? "a", { href: n.href }, ...children);
+    case "a":
+      return createElement("a", { href: n.href }, ...children);
+    default:
+      return createElement(n.t, null, ...children);
+  }
+}
 export {
   LandingDeck,
-  LandingTour
+  LandingTour,
+  landingFromData
 };
 //# sourceMappingURL=index.js.map

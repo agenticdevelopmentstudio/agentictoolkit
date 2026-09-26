@@ -13,8 +13,9 @@ import type {
 /**
  * A family site's landing deck, as DATA.
  *
- * Every site in the family writes one of these — `src/landing.tsx`, generated from that
- * site's markdown by `landing sites generate` — and mounts it through `<LandingDeck>` and
+ * Every site in the family writes one of these — `src/landing.json`, generated from that
+ * site's markdown by `buildr update` and loaded by the `src/landing.tsx` beside it through
+ * `landingFromData` — and mounts it through `<LandingDeck>` and
  * `<LandingTour>`. Which is to say: the deck's STRUCTURE lives here, in shared code, and
  * a site carries only its own copy.
  *
@@ -27,8 +28,8 @@ import type {
  *
  * The values are ReactNodes rather than strings because the copy carries markup: a
  * headline's `**bold**` is the accent colour in the deck's heading grammar, and a link in
- * a bullet is a link. The generator emits each as a JSX fragment, which is why a site's
- * data module is a `.tsx`.
+ * a bullet is a link. The generator writes each as a small node tree in the JSON, and
+ * `landingFromData` (./fromData) turns the tree back into a fragment.
  */
 export interface LandingContent {
   hero: LandingHero
