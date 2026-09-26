@@ -122,6 +122,9 @@ packages:
     url: https://github.com/apple/swift-openapi-urlsession
     minVersion: "1.3.0"
     maxVersion: "2.0.0"
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.10.0"
 
 targets:
   AIPluginKit:
@@ -233,6 +236,7 @@ targets:
       - package: CodeEditSourceEditor
       - package: CodeEditLanguages
       - package: KeyboardShortcuts
+      - package: Sparkle
 
   AgenticToolkitPermissions:
     type: framework
@@ -695,6 +699,11 @@ targets:
         codeSign: true
       - package: GRDB
         product: GRDB
+      # AgenticToolkitMacOS links Sparkle (AppUpdater); the test bundle loads
+      # its frameworks out of its own Frameworks directory, so Sparkle has to
+      # be there too — same "closure completion" reason as GRDB above.
+      - package: Sparkle
+        product: Sparkle
 
   # A per-platform pair rather than one `supportedDestinations: [macOS, iOS]`
   # target, for the reason spelled out above AgenticToolkitMarkdown: this

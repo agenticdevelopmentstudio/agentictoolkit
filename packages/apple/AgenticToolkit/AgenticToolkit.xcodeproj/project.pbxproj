@@ -882,6 +882,7 @@
 		70EE750AAD28BBA31E42DA56 /* AppCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D67FBD862648F5730FF4F6C6 /* AppCoordinatorTests.swift */; };
 		710F9477084896665E0AFBC2 /* MainThreadWindowStatusBarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B4551503A5EC9FD911E147 /* MainThreadWindowStatusBarTests.swift */; };
 		714A30B11184345E6CA70746 /* WorkspacesProviding.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0429F15C60F4A7618407E53 /* WorkspacesProviding.swift */; };
+		716B44FE870CBC3F2F6F87C3 /* AppUpdaterConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F1EC5E0A7EF535A71F31CDF /* AppUpdaterConfiguration.swift */; };
 		716D59311E5D2BD2B901DC23 /* AgenticToolkitCoreMacOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 61310A916E242BA60A9FE8C1 /* AgenticToolkitCoreMacOS.framework */; };
 		71720A0A12DBBB746DC28093 /* AgenticToolkitSyncGRDB.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 2811A57B61C48C21BD8A4995 /* AgenticToolkitSyncGRDB.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		71789777072271560E44DE3D /* ExtensionsSettingsPanelViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB4472AB4265BF6DAA7843F7 /* ExtensionsSettingsPanelViewController.swift */; };
@@ -1270,6 +1271,7 @@
 		A5D1CAD9A0175C0B47256631 /* ProjectDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50521AF5F88C835BEE200B38 /* ProjectDatabase.swift */; };
 		A5EF0F7E9192666B4BB2190B /* HTDVBreadcrumbBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAC1CC4808D9A7AB305F3220 /* HTDVBreadcrumbBar.swift */; };
 		A613C5F2D328BBE242EAF7CA /* AgenticDeveloperToolkitUI-macOS.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 12692636CB83EBEA82DE2F7C /* AgenticDeveloperToolkitUI-macOS.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A62708B07F15FDF5517725CB /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = F4D89F5EB4563ED9B943D92C /* Sparkle */; };
 		A66C1C82523C06ADD2917478 /* FileBrowserRestorationStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B1F0239679848C60E329A25 /* FileBrowserRestorationStateTests.swift */; };
 		A66F75512582A9198D0402EB /* SystemWindowContextManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A3684C3A0440E061B80E868 /* SystemWindowContextManager.swift */; };
 		A68B6F745019C14AFC2FB782 /* SettingsPanelListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9A1E913777AA53295489FAA /* SettingsPanelListViewController.swift */; };
@@ -1496,6 +1498,7 @@
 		C6D769EEE3F1E8B3731FF58E /* ComposableTabsActivePane.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5F868954F010209325A6F8A /* ComposableTabsActivePane.swift */; };
 		C6E67BEA73648AF98A5B4A17 /* SessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A4FEBCABBDC39A364BDD1E4 /* SessionController.swift */; };
 		C73427E9ABB53504DC3B0A0E /* AgenticDeveloperToolkit-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0AA33F0AF418F0DDFE05C6BF /* AgenticDeveloperToolkit-macOS.framework */; };
+		C77BB780B915D9167D042078 /* AppUpdaterConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFD6107B34880BEF9BE2CFC7 /* AppUpdaterConfigurationTests.swift */; };
 		C7A890893A4479B28E5C3CBB /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 14F85C6998F7EFA09B8D25E0 /* GRDB */; };
 		C7F03C965556F0C669394526 /* MultiChoiceFilterButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = A87319972A8D5FC214E263BC /* MultiChoiceFilterButton.swift */; };
 		C809A29138DB5B9488FD0D22 /* ExtensionQuickPickModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8210E21B331ACFCEC3E0E04 /* ExtensionQuickPickModel.swift */; };
@@ -1503,6 +1506,7 @@
 		C80DD668F297C9680A16B1B2 /* NotesSplitViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4ED71A3B2B4EAEBE0483F9 /* NotesSplitViewController.swift */; };
 		C82D44998AABAE3610465998 /* ProjectsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58F784C63C686AFC00326D6E /* ProjectsWindowController.swift */; };
 		C8354FE19B099D6E1A823630 /* AgenticDeveloperHubClient.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1135775DADF0951E93877DC0 /* AgenticDeveloperHubClient.framework */; };
+		C83A58B75785FF8FD833898B /* AppUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7226398D6A1644CFE7D83966 /* AppUpdater.swift */; };
 		C8A23084B93D18173A26A4D0 /* PasskeyAssertion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 602F3AC5CB3CAE6B6926612A /* PasskeyAssertion.swift */; };
 		C8B62D7C202C5A9D914D4D47 /* FormSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9062F785C82CCA723737F06F /* FormSheet.swift */; };
 		C8E996A4068A3D904E74FB90 /* NotesWindowToolbarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6872272FD02DECD612348394 /* NotesWindowToolbarTests.swift */; };
@@ -1620,6 +1624,7 @@
 		D99AB3F77295156AA916517B /* GitBranchParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE01EEC3B4545A12481C68CD /* GitBranchParserTests.swift */; };
 		D9A144BC2DCD94266E5386E4 /* CodeEditLanguages in Frameworks */ = {isa = PBXBuildFile; productRef = 84234475813CD09DE51A130E /* CodeEditLanguages */; };
 		D9B386B67255C3A6B3C62BB7 /* FileTypesSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBF568C4E57FFEE3670544C8 /* FileTypesSettingsView.swift */; };
+		D9B4CC7D17BEE222CCB78934 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 5B3AE3165D614D3644CA483D /* Sparkle */; };
 		D9C57D9FFF155F40788582F5 /* BillingActivityCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = D280465E595A20A303F1770B /* BillingActivityCache.swift */; };
 		DA485DDD89BAFDB6DCC77F92 /* ProjectsMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F3F977105890D47BB212F99 /* ProjectsMenuTests.swift */; };
 		DA5C67A986AF209BD2D9C620 /* SignInConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DBE1A7C0E8F8329052D887F /* SignInConfiguration.swift */; };
@@ -3833,6 +3838,7 @@
 		3F025F4833518303ADE9E6D8 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		3F0A4D8851518FB0C91C052A /* SnippetFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnippetFile.swift; sourceTree = "<group>"; };
 		3F1D41467A6A8A798CF10C50 /* AppendOnlyFileCursor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppendOnlyFileCursor.swift; sourceTree = "<group>"; };
+		3F1EC5E0A7EF535A71F31CDF /* AppUpdaterConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdaterConfiguration.swift; sourceTree = "<group>"; };
 		3F1F5B51E2A4B2B408E601DC /* HubEnvironmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubEnvironmentTests.swift; sourceTree = "<group>"; };
 		3F3E98FAC4584B9490DD7714 /* ScreenSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenSnapshot.swift; sourceTree = "<group>"; };
 		3F60AC90190F9171055091FE /* UTCTimestamp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UTCTimestamp.swift; sourceTree = "<group>"; };
@@ -4131,6 +4137,7 @@
 		71D446C028BB104EDA5C25BD /* ExtensionHostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionHostTests.swift; sourceTree = "<group>"; };
 		71DB9A31A6BF882E73FBA5FC /* AuthenticationModuleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthenticationModuleTests.swift; sourceTree = "<group>"; };
 		71FC0CFF8A190FE13E818A71 /* ThemeContributionPointTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeContributionPointTests.swift; sourceTree = "<group>"; };
+		7226398D6A1644CFE7D83966 /* AppUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdater.swift; sourceTree = "<group>"; };
 		72337013C6184C5FFEF921CE /* ScriptablePane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptablePane.swift; sourceTree = "<group>"; };
 		72395568A17CD97EBCF65F2D /* ExtensionIdentityComponentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionIdentityComponentTests.swift; sourceTree = "<group>"; };
 		725F4B47141C0C0EB5A8B6EA /* AgenticToolkitDisplaysTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AgenticToolkitDisplaysTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -4550,6 +4557,7 @@
 		BF9445944246F3D7C853A2BB /* FormState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormState.swift; sourceTree = "<group>"; };
 		BFA95BA5018DA1B03D25F0AC /* HelpContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelpContent.swift; sourceTree = "<group>"; };
 		BFC94090E060D17E84BC222D /* HTDVStatusViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTDVStatusViews.swift; sourceTree = "<group>"; };
+		BFD6107B34880BEF9BE2CFC7 /* AppUpdaterConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdaterConfigurationTests.swift; sourceTree = "<group>"; };
 		C06565E869F681D15040B831 /* LayoutOverrideTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutOverrideTests.swift; sourceTree = "<group>"; };
 		C0834287E30C68BA64EE1A11 /* HubErrorMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubErrorMapping.swift; sourceTree = "<group>"; };
 		C0DC77B8A669145B772CD78A /* ConversationsWorkOutputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationsWorkOutputTests.swift; sourceTree = "<group>"; };
@@ -4978,6 +4986,7 @@
 				61F0B29C25C9B4905A355938 /* CodeEditSourceEditor in Frameworks */,
 				D9A144BC2DCD94266E5386E4 /* CodeEditLanguages in Frameworks */,
 				676D3CAB645D60F7A9F23F2F /* KeyboardShortcuts in Frameworks */,
+				A62708B07F15FDF5517725CB /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -5058,6 +5067,7 @@
 				7F320FEDD7A5282AD201AF86 /* AgenticToolkitSync.framework in Frameworks */,
 				45AF6FD7AC66750F9ED6050C /* AgenticToolkitSyncGRDB.framework in Frameworks */,
 				C7A890893A4479B28E5C3CBB /* GRDB in Frameworks */,
+				D9B4CC7D17BEE222CCB78934 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -5440,6 +5450,15 @@
 			);
 			name = AgenticToolkitHubUITests;
 			path = Tests/AgenticToolkitHubUITests;
+			sourceTree = "<group>";
+		};
+		05BC78C62A3DE51AE4E285FD /* AppUpdates */ = {
+			isa = PBXGroup;
+			children = (
+				7226398D6A1644CFE7D83966 /* AppUpdater.swift */,
+				3F1EC5E0A7EF535A71F31CDF /* AppUpdaterConfiguration.swift */,
+			);
+			path = AppUpdates;
 			sourceTree = "<group>";
 		};
 		0601F49267B31230E6B07C82 /* HubService */ = {
@@ -7126,6 +7145,7 @@
 			children = (
 				733D20409A1039EF07E644D3 /* AIPlugins */,
 				99DFB18462E9CC5EF1C5690F /* AppShell */,
+				D27A1A8E4DA898086137787E /* AppUpdates */,
 				AEE56A64B4F4DF1C0E2E07A0 /* Billing */,
 				FFAB40EE19296D2C5E16C65E /* Chat */,
 				23915CA3618C2236FB898614 /* ClaudeAccounts */,
@@ -8288,6 +8308,14 @@
 			path = WindowDiscovery;
 			sourceTree = "<group>";
 		};
+		D27A1A8E4DA898086137787E /* AppUpdates */ = {
+			isa = PBXGroup;
+			children = (
+				BFD6107B34880BEF9BE2CFC7 /* AppUpdaterConfigurationTests.swift */,
+			);
+			path = AppUpdates;
+			sourceTree = "<group>";
+		};
 		D2B8DDD185D1B6C7C861D089 /* Git */ = {
 			isa = PBXGroup;
 			children = (
@@ -8683,6 +8711,7 @@
 			children = (
 				B9A533F31AF543304B6BF725 /* AIChatWindow */,
 				D3C9139ADE6E7860D5B91112 /* AIPlugins */,
+				05BC78C62A3DE51AE4E285FD /* AppUpdates */,
 				EF17F27C37CF1EFB33E35383 /* Billing */,
 				507F1AF829A7FD3286602B6C /* ClaudeAccounts */,
 				DB5D004A040E3AE970F8E8A7 /* CommandPalette */,
@@ -9048,6 +9077,7 @@
 				1EDC63C498C59B04B7F63C42 /* CodeEditSourceEditor */,
 				84234475813CD09DE51A130E /* CodeEditLanguages */,
 				8F9AB10D3AC2FB3C5BB6FE4D /* KeyboardShortcuts */,
+				F4D89F5EB4563ED9B943D92C /* Sparkle */,
 			);
 			productName = AgenticToolkitMacOS;
 			productReference = F03FB5CC81FF718A106A6513 /* AgenticToolkitMacOS.framework */;
@@ -9792,6 +9822,7 @@
 			name = AgenticToolkitMacOSTests;
 			packageProductDependencies = (
 				14F85C6998F7EFA09B8D25E0 /* GRDB */,
+				5B3AE3165D614D3644CA483D /* Sparkle */,
 			);
 			productName = AgenticToolkitMacOSTests;
 			productReference = B6DD4B195BF0A65AE3DF6DF4 /* AgenticToolkitMacOSTests.xctest */;
@@ -9826,6 +9857,7 @@
 				CAC6258039C7EA83D3D5C132 /* XCRemoteSwiftPackageReference "LanguageClient" */,
 				C5022CEED870782A5664E08B /* XCRemoteSwiftPackageReference "LanguageServerProtocol" */,
 				D93DFEB73962A0C47092BEFF /* XCRemoteSwiftPackageReference "swift-sdk" */,
+				560BC1B70C77CA3BA2802360 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				FD865BFA13E614B94554F325 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
 				DFFC716EB6F47B033B113571 /* XCRemoteSwiftPackageReference "swift-http-types" */,
 				225AEE111E874AB8F7DA0577 /* XCRemoteSwiftPackageReference "swift-openapi-runtime" */,
@@ -10934,6 +10966,8 @@
 				3AD1633725AC96987B8873C6 /* AddRemoveFooterView.swift in Sources */,
 				70BF8765D4A701A3081C9801 /* AppCommand.swift in Sources */,
 				BFA5C197382FA80A40BFFD08 /* AppFeature.swift in Sources */,
+				C83A58B75785FF8FD833898B /* AppUpdater.swift in Sources */,
+				716B44FE870CBC3F2F6F87C3 /* AppUpdaterConfiguration.swift in Sources */,
 				371CA289D649C85620E0EA06 /* AppearanceManager.swift in Sources */,
 				86DE2D3368738D7C9142D885 /* AppearanceSettingsPanelViewController.swift in Sources */,
 				AFF6BD88A69CBC9D016A8724 /* ApplicationShutdownCoordinator.swift in Sources */,
@@ -12003,6 +12037,7 @@
 				3CBCD0A41F04581E70F5932C /* AIRequestBuilderTests.swift in Sources */,
 				EC8019B4198DE72AC5C44E4C /* AgenticFileBrowserTests.swift in Sources */,
 				D30B841253F2092E830FE5E6 /* AppFeatureRegistryTests.swift in Sources */,
+				C77BB780B915D9167D042078 /* AppUpdaterConfigurationTests.swift in Sources */,
 				02CE8B8B3EF061F8561BD836 /* AppleScriptRunnerTests.swift in Sources */,
 				0903807E114E447606B2DABB /* ApplicationShutdownCoordinatorTests.swift in Sources */,
 				D4B134F4318F31AB42F75D1D /* BillingActivityViewControllerTests.swift in Sources */,
@@ -15711,6 +15746,14 @@
 				minimumVersion = 1.3.0;
 			};
 		};
+		560BC1B70C77CA3BA2802360 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.10.0;
+			};
+		};
 		A69DE775E6F79098F9419D3C /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/groue/GRDB.swift";
@@ -15822,6 +15865,11 @@
 			package = D93DFEB73962A0C47092BEFF /* XCRemoteSwiftPackageReference "swift-sdk" */;
 			productName = MCP;
 		};
+		5B3AE3165D614D3644CA483D /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 560BC1B70C77CA3BA2802360 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
 		5C4F29C769271BCA75C90CD3 /* HTTPTypes */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = DFFC716EB6F47B033B113571 /* XCRemoteSwiftPackageReference "swift-http-types" */;
@@ -15911,6 +15959,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 4E59BC0284168A3EE882868B /* XCRemoteSwiftPackageReference "swift-openapi-urlsession" */;
 			productName = OpenAPIURLSession;
+		};
+		F4D89F5EB4563ED9B943D92C /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 560BC1B70C77CA3BA2802360 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 		F7FD7C3B63AAEE0C618AE65A /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
