@@ -35,12 +35,20 @@ const HOST: RailHostRegistry = {
   toolbarSlot: null,
 };
 
-const IN_FLIGHT: EcosystemScopeResolution = { canManage: true, isError: false, isPending: true };
-const NO_ECOSYSTEM: EcosystemScopeResolution = { canManage: true, isError: false, isPending: false };
+const IN_FLIGHT: EcosystemScopeResolution = {
+  canManage: true,
+  isLoadingError: false,
+  isPending: true,
+};
+const NO_ECOSYSTEM: EcosystemScopeResolution = {
+  canManage: true,
+  isLoadingError: false,
+  isPending: false,
+};
 const RESOLVED: EcosystemScopeResolution = {
   ecosystemId: "ecosystem.acme",
   canManage: true,
-  isError: false,
+  isLoadingError: false,
   isPending: false,
 };
 
@@ -102,17 +110,27 @@ describe("StorageGroup — Buckets and All Data mount only with a resolved ecosy
   it("a failed lookup still shows the retry surface, not the no-ecosystem notice", () => {
     // A failed lookup settles with no id and `isPending` false — the same shape as "no ecosystem",
     // which is why the error branch has to stay ahead of the members' gate.
-    renderMember("all-data", { canManage: true, isError: true, isPending: false });
+    renderMember("all-data", { canManage: true, isLoadingError: true, isPending: false });
     expect(screen.getByText("Couldn't load this workspace")).toBeInTheDocument();
     expect(screen.queryByText("This workspace has no ecosystem yet.")).not.toBeInTheDocument();
   });
 
   it("a re-read failing behind a resolved ecosystem keeps the panes on it", () => {
     // react-query's `isError` stays true when a background refetch fails behind the answer on
-    // screen. That is not a failed resolution: the id is still known and still right.
+    // screen, and `isLoadingError` does not — the scope carries only the latter. That is not a
+    // failed resolution: the id is still known and still right.
     const renderAllData = vi.fn((id: string | undefined) => <p>{`Host All Data for ${String(id)}`}</p>);
-    renderMember("all-data", { ...RESOLVED, isError: true }, renderAllData);
+    renderMember("all-data", { ...RESOLVED, isLoadingError: false }, renderAllData);
     expect(screen.getByText("Host All Data for ecosystem.acme")).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't load this workspace")).not.toBeInTheDocument();
+  });
+
+  it("a re-read failing behind a settled \"no ecosystem\" keeps that answer", () => {
+    // The case the old `isError && no id` gate got wrong: "none" has no id either, so a failed
+    // refetch behind it read as a failed lookup and swapped the notice for "couldn't load". The
+    // hook reports that refetch as `isError` true, `isLoadingError` false.
+    renderMember("all-data", NO_ECOSYSTEM);
+    expect(screen.getByText("This workspace has no ecosystem yet.")).toBeInTheDocument();
     expect(screen.queryByText("Couldn't load this workspace")).not.toBeInTheDocument();
   });
 });

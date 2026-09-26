@@ -13,12 +13,22 @@
   "sideEffects": [
     "**/*.css"
   ],
-  "comment:tier": "VOCABULARY, not mechanism — see scripts/check_boundaries.py, which classifies on the `@agentic-toolkit/adh` name boundary alone. This package imports BOTH vocabulary (adh, adh-api-types, adh-ui) and mechanism (api-explorer, auth, resource) packages, which only a vocabulary name may do. The `adh-` prefix is a deliberate claim about the CONTENT — every shape in src/api/*.ts is a column of adh's own schema (customer.customers, system.feature_flags, usage.rate_limit_tiers, …), and the panes' copy names adh's own admin surface (isAdmin(), the hub ecosystem, adh's messaging providers) — so a non-adh host mounting this would be mounting adh's model of administration, not a general one.",
+  "comment:tier": "VOCABULARY, not mechanism — see scripts/check_boundaries.py, which classifies on the `@agentic-toolkit/adh` name boundary alone. This package imports BOTH vocabulary (adh, adh-api-types, adh-ui) and mechanism (api-explorer, auth, data, resource) packages, which only a vocabulary name may do. The `adh-` prefix is a deliberate claim about the CONTENT — every shape in src/api/*.ts is a column of adh's own schema (customer.customers, system.feature_flags, usage.rate_limit_tiers, …), and the panes' copy names adh's own admin surface (isAdmin(), the hub ecosystem, adh's messaging providers) — so a non-adh host mounting this would be mounting adh's model of administration, not a general one.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "development": "./src/index.ts",
       "import": "./dist/index.js"
+    },
+    "./topics": {
+      "types": "./dist/adminTopics.d.ts",
+      "development": "./src/adminTopics.ts",
+      "import": "./dist/adminTopics.js"
+    },
+    "./query": {
+      "types": "./dist/AdminQueryProvider.d.ts",
+      "development": "./src/AdminQueryProvider.tsx",
+      "import": "./dist/AdminQueryProvider.js"
     },
     "./sources.css": "./sources.css"
   },
@@ -36,6 +46,7 @@
     "@agentic-toolkit/adh-ui": "workspace:*",
     "@agentic-toolkit/api-explorer": "workspace:*",
     "@agentic-toolkit/auth": "workspace:*",
+    "@agentic-toolkit/data": "workspace:*",
     "@agentic-toolkit/resource": "workspace:*",
     "@tanstack/react-query": "^5.62.0",
     "clsx": "^2.1.1",

@@ -1,8 +1,12 @@
 "use client";
 
+import { useCallback } from "react";
 import { RailHostBoundary, StackGroupDetail, useBasePathRoute } from "@agentic-toolkit/resource";
+import { confirmNavigation } from "@agenticdevelopertoolkit/ui/lib/navigation-guard";
 
-import { ADMIN_PANES, ADMIN_TOPICS, type AdminTopicId } from "./adminTopics";
+import { AdminQueryProvider } from "./AdminQueryProvider";
+import { ADMIN_PANES } from "./adminPanes";
+import { ADMIN_TOPICS, type AdminTopicId } from "./adminTopics";
 
 /**
  * The admin console as a mountable, hierarchical topic/detail feature: one rail of sections
@@ -10,12 +14,15 @@ import { ADMIN_PANES, ADMIN_TOPICS, type AdminTopicId } from "./adminTopics";
  *
  * This is the SAME rail `admin.agenticdeveloperhub`'s own `AdminShell` renders, but built on the
  * fleet's shared `StackGroupDetail` / `RailHostBoundary` instead of admin's own
- * `HierarchicalDetailView` call — because unlike the standalone admin site, a host mounting this
- * (the hub, at `/<workspace>/admin`) is ALREADY inside its own merged topic/detail stack, and
- * `RailHostBoundary` + `StackGroupDetail` is what lets this rail join that stack as one more
- * level rather than opening a second, nested one. The admin site keeps its own `AdminShell`
- * rather than switching to this component, because it is not nested inside anything — it IS the
- * top-level stack, and `HierarchicalDetailView` is the right tool for owning one outright.
+ * `HierarchicalDetailView` call, because that is the shape the hub's features share. The hub
+ * mounts it as its Admin workspace at the top-level `/admin`, where no rail host sits above it, so
+ * `RailHostBoundary` hosts the stack itself and the twelve sections ARE the root list. Under a host
+ * that already owns a merged topic/detail stack the same boundary would instead join it as one
+ * more level — nothing here depends on which. The admin site keeps its own `AdminShell` because it
+ * IS its site's whole stack, and `HierarchicalDetailView` is the right tool for owning one outright.
+ *
+ * It brings its own query scope ({@link AdminQueryProvider}), so the panes fetch through the
+ * toolkit's client with the admin freshness whatever the host mounts above it.
  *
  * Gating is deliberately NOT this component's job. Whether the signed-in caller may see admin at
  * all, and which of the twelve sections (if fewer than all) they may open, is a host decision —
@@ -36,39 +43,54 @@ export function AdminFeature({
   topicId?: AdminTopicId;
 }) {
   const { pushSegment } = useBasePathRoute(basePath);
+  // A rail row is a button that pushes — which the shared UnsavedChangesGuard does NOT intercept
+  // (it catches anchor clicks and navigations that consult confirmNavigation). Without this a
+  // section switch with an editor open dropped its edits silently; the admin site's AdminShell
+  // guards its rail the same way (`navigateGuarded`). With no dirty guard mounted it resolves at
+  // once, so an ordinary switch is unaffected.
+  const selectGuarded = useCallback(
+    (id: string | null) => {
+      void confirmNavigation().then((ok) => {
+        if (ok) pushSegment(id);
+      });
+    },
+    [pushSegment],
+  );
 
   return (
-    <RailHostBoundary>
-      <StackGroupDetail
-        levelId="admin-topics"
-        title="Admin"
-        itemNoun="admin section"
-        urlSelection={{ selectedId: topicId ?? null, onSelect: pushSegment }}
-        items={ADMIN_TOPICS.map((topic) => {
-          const Icon = topic.icon;
-          const Pane = ADMIN_PANES[topic.id];
-          return {
-            id: topic.id,
-            label: topic.label,
-            description: topic.description,
-            icon: <Icon size={16} aria-hidden />,
-            // Every member IS its section's detail — none of the twelve publish a further rail of
-            // their own — so choosing one is the final choice, same as `leadsTo`'s documented
-            // default. Named explicitly anyway so a reader doesn't have to know the default to
-            // know this rail never nests.
-            leadsTo: "detail",
-            render: () => (
-              // The section pages were built for the old `<main className="p-8">` / admin site's
-              // detail pane, neither of which has padding of its own — restore it here so a pane
-              // looks identical whether it renders under the admin site's own AdminShell or under
-              // a host's rail (mirrors admin-shell.tsx's own wrapper div exactly).
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-8">
-                <Pane />
-              </div>
-            ),
-          };
-        })}
-      />
-    </RailHostBoundary>
+    <AdminQueryProvider>
+      <RailHostBoundary>
+        <StackGroupDetail
+          levelId="admin-topics"
+          title="Admin"
+          itemNoun="admin section"
+          urlSelection={{ selectedId: topicId ?? null, onSelect: selectGuarded }}
+          items={ADMIN_TOPICS.map((topic) => {
+            const Icon = topic.icon;
+            const Pane = ADMIN_PANES[topic.id];
+            return {
+              id: topic.id,
+              label: topic.label,
+              description: topic.description,
+              icon: <Icon size={16} aria-hidden />,
+              // Every member IS its section's detail — none of the twelve publish a further rail of
+              // their own — so choosing one is the final choice, same as `leadsTo`'s documented
+              // default. Named explicitly anyway so a reader doesn't have to know the default to
+              // know this rail never nests.
+              leadsTo: "detail",
+              render: () => (
+                // The section pages were built for the old `<main className="p-8">` / admin site's
+                // detail pane, neither of which has padding of its own — restore it here so a pane
+                // looks identical whether it renders under the admin site's own AdminShell or under
+                // a host's rail (mirrors admin-shell.tsx's own wrapper div exactly).
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-8">
+                  <Pane />
+                </div>
+              ),
+            };
+          })}
+        />
+      </RailHostBoundary>
+    </AdminQueryProvider>
   );
 }

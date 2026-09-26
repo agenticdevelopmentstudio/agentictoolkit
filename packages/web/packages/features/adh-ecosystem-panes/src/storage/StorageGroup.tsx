@@ -36,12 +36,16 @@ export interface EcosystemScopeResolution {
   /** False only when the resolution definitively says the caller may VIEW this workspace but not
    *  MANAGE its infrastructure ecosystem (a plain org member). */
   canManage: boolean;
-  /** The last lookup failed. The group shows its retry surface only when that failure left NO
-   *  `ecosystemId`: a re-read failing behind a resolution already in hand keeps the panes on it. */
-  isError: boolean;
+  /** The lookup failed with NO answer ever settled — react-query's `isLoadingError`, which
+   *  `useWorkspaceDefaultEcosystemId` returns as-is. The group's retry surface shows on this alone.
+   *  NOT `isError`, which stays true when a background re-read fails behind an answer still on
+   *  screen — and that answer may be "none": a workspace with no ecosystem has no id to tell a
+   *  settled "none" from a failed first lookup, so the old `isError && no id` gate replaced a
+   *  correct "no ecosystem yet" with "couldn't load" over a refetch hiccup. */
+  isLoadingError: boolean;
   /** True until the lookup settles. An undefined `ecosystemId` once this is false is the settled
    *  "this workspace has no infrastructure ecosystem" — and so is a failed lookup, which is why
-   *  `isError` is checked first. */
+   *  `isLoadingError` is checked first. */
   isPending: boolean;
 }
 
@@ -104,12 +108,13 @@ export function StorageGroup({
    *  ecosystem, which it MUST scope to — see AllDataPane's ECOSYSTEM note. */
   renderAllData?: (ecosystemId: string | undefined) => ReactNode;
 }): ReactElement {
-  const { ecosystemId, canManage, isError, isPending } = scope;
-  // `isError && no id`, not `isError`: react-query's `isError` stays true when a background re-read
+  const { ecosystemId, canManage, isLoadingError, isPending } = scope;
+  // `isLoadingError`, not `isError`: react-query's `isError` stays true when a background re-read
   // fails behind an answer still on screen, and gating on it alone replaced a working Storage group
-  // with "couldn't load" over a hiccup. Read off the id rather than a hook-only flag, so a host
-  // that builds its own resolution gets the same rule.
-  if (isError && ecosystemId === undefined) return <WorkspaceResolutionError />;
+  // with "couldn't load" over a hiccup. Nor `isError && no id`, the rule that replaced it: "no id"
+  // is also the settled answer for a workspace with NO ecosystem, so a failed refetch there still
+  // swapped a correct "no ecosystem yet" for the error. Only a lookup that never answered is one.
+  if (isLoadingError) return <WorkspaceResolutionError />;
   // A plain org member can view the workspace but not manage its infrastructure ecosystem — its
   // reads/writes would 403 per-pane, so show the honest notice instead.
   if (ecosystemId && !canManage) return <WorkspaceNotManageable feature="Storage" />;

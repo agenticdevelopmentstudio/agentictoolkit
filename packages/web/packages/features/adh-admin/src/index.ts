@@ -1,15 +1,21 @@
 // @agentic-toolkit/adh-admin — the admin console's panes and rail, extracted from
-// admin.agenticdeveloperhub so a second host (the hub, at /<workspace>/admin) can mount the same
-// twelve sections without depending on that site's app/ tree.
+// admin.agenticdeveloperhub so a second host (the hub's Admin workspace, at the top-level /admin)
+// can mount the same twelve sections without depending on that site's app/ tree.
 
-// The topic list, the pane lookup it drives, and the URL-segment guard — the admin site's own
-// AdminShell imports ADMIN_TOPICS from here instead of defining it locally.
-export { ADMIN_TOPICS, ADMIN_PANES, isAdminTopicId } from "./adminTopics";
+// The topic list and the URL-segment guard. Also published on their own as `./topics`, which is
+// what a caller that needs only the names should import — this barrel carries every pane.
+export { ADMIN_TOPICS, isAdminTopicId } from "./adminTopics";
 export type { AdminTopic, AdminTopicId } from "./adminTopics";
+export { ADMIN_PANES } from "./adminPanes";
 
-// The rail-hosted mount for a host already inside its own topic/detail stack (the hub). The
-// admin site keeps its own AdminShell (HierarchicalDetailView-based) rather than this component —
-// see AdminFeature's docstring for why the two hosts genuinely want different shells.
+// The query scope every pane reads through — the toolkit's client with the admin freshness pinned.
+// Also published on its own as `./query`, for a host layout that wraps panes it does not import.
+export { AdminQueryProvider, ADMIN_STALE_TIME } from "./AdminQueryProvider";
+
+// The self-contained mount (rail + panes + query scope) for a host that wants the whole console
+// under one base path (the hub). The admin site keeps its own AdminShell
+// (HierarchicalDetailView-based) rather than this component — see AdminFeature's docstring for
+// why the two hosts genuinely want different shells.
 export { AdminFeature } from "./AdminFeature";
 
 // Every pane, standalone — the admin site's twelve app/(admin)/<topic>/page.tsx mounts import

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ADMIN_PANES, ADMIN_TOPICS, isAdminTopicId } from "../adminTopics";
+import { ADMIN_PANES } from "../adminPanes";
+import { ADMIN_TOPICS, isAdminTopicId } from "../adminTopics";
 
 describe("ADMIN_TOPICS / ADMIN_PANES", () => {
   it("gives every topic a pane", () => {

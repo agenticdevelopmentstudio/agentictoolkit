@@ -1,9 +1,11 @@
 import { featureTsup } from '../tsup.preset'
 
-// One entry: unlike adh-billing (which splits ./parse, ./context, ./claim onto their
-// own chunks so a route/shell that needs only one of them doesn't pull all five panes),
-// nothing here has a caller that needs less than the whole feature. AdminFeature is
-// always mounted behind a rail selection (the hub) or a page (admin.agenticdeveloperhub),
-// never probed ahead of a render the way BillingGroup's context hook is — so there is no
-// caller this split would serve, and one barrel is the simpler true shape.
-export default featureTsup(['src/index.ts'])
+// Three entries, split by WHO IMPORTS WHAT (the same reasoning as adh-billing's config).
+//
+// The barrel is the twelve panes plus the AdminFeature mount. A static import of ANY barrel export
+// pulls that whole bundled module, so the admin site's AdminShell — which needs only the section
+// names and icons to draw its rail — once loaded every pane, react-query and all the editors into
+// the shell chunk of every admin page. `./topics` (src/adminTopics.ts: the list and the id guard,
+// no panes) is what a rail or a route reads instead. `./query` (the AdminQueryProvider) is for a
+// host layout that wraps panes it does not itself import.
+export default featureTsup(['src/index.ts', 'src/adminTopics.ts', 'src/AdminQueryProvider.tsx'])

@@ -31,9 +31,13 @@ const HELP_SECTION = 1
 // list, and without a heading nothing says where one population ends and the other begins.
 const SECTION_LABELS = { [WORKSPACES_SECTION]: 'Workspaces' }
 // No site rows. The platform's Toolkit, Tools and Support, and an admin's operations consoles,
-// used to close this list; Mike took them out on 2026-09-26 — this menu is the WORKSPACES, and
-// the hub's Admin workspace (listed among them by the host, for an admin) replaced the consoles
-// group. useSiteMenu is still called for its `navigate`, which the phone's nav rows go through.
+// used to close this list; Mike took them out on 2026-09-26 — this menu is the WORKSPACES.
+// That is not a like-for-like swap. The hub's Admin workspace (listed among the workspaces by the
+// host, for an admin) carries the admin site's sections, but Builds and Fleet Monitor were
+// consoles with no Admin section, and they lost their door on a workspace route: an admin reaches
+// them from the site menu on the landing and the marketing routes (ADMIN_MENU_GROUPS), and from
+// nowhere inside a workspace. The same holds for Toolkit, Tools and Support.
+// useSiteMenu is still called for its `navigate`, which the phone's nav rows go through.
 // Module-level so it keeps one identity across renders — useSiteMenu memoizes its rows on it.
 const NO_SITE_GROUPS: MenuGroup[] = []
 
