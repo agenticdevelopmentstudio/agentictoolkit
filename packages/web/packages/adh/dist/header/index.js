@@ -2116,13 +2116,9 @@ import { Fragment as Fragment6, jsx as jsx18, jsxs as jsxs10 } from "react/jsx-r
 var WORKSPACES_SECTION = 0;
 var HELP_SECTION = 1;
 var SECTION_LABELS = { [WORKSPACES_SECTION]: "Workspaces" };
-var PLATFORM_GROUPS = ["toolkit", "tools", "support"].map(
-  (site) => ({ kind: "leaf", section: HELP_SECTION, link: { site } })
-);
-var PLATFORM_AND_ADMIN_GROUPS = [...PLATFORM_GROUPS, ...ADMIN_MENU_GROUPS];
+var NO_SITE_GROUPS = [];
 function WorkspaceMenu({
   menu,
-  userIsAdmin,
   currentSiteId,
   resolveHref,
   personalSlug,
@@ -2165,18 +2161,21 @@ function WorkspaceMenu({
       }
     }));
   }, [menu]);
-  const { entries: siteEntries, navigate: navigateSiteRow } = useSiteMenu(
-    userIsAdmin === true ? PLATFORM_AND_ADMIN_GROUPS : PLATFORM_GROUPS,
-    { currentSiteId, resolveHref, personalSlug, authenticated: true, hubOffersFeature }
-  );
+  const { navigate: navigateSiteRow } = useSiteMenu(NO_SITE_GROUPS, {
+    currentSiteId,
+    resolveHref,
+    personalSlug,
+    authenticated: true,
+    hubOffersFeature
+  });
   const linksCollapsed = useHeaderLinksCollapsed();
   const navSection = useMemo4(
     () => linksCollapsed ? buildSiteNavEntries(navLinks, { pathname }) : [],
     [linksCollapsed, navLinks, pathname]
   );
   const entries = useMemo4(
-    () => [...navSection, ...workspaceRows, helpEntry(openHelp, HELP_SECTION), ...siteEntries],
-    [navSection, workspaceRows, openHelp, siteEntries]
+    () => [...navSection, ...workspaceRows, helpEntry(openHelp, HELP_SECTION)],
+    [navSection, workspaceRows, openHelp]
   );
   const navigate = useCallback4(
     (item) => {
@@ -2265,7 +2264,6 @@ function SiteMenuSwitcher(props) {
       WorkspaceMenu,
       {
         menu: workspacesMenu,
-        userIsAdmin: props.userIsAdmin,
         currentSiteId: props.currentSiteId,
         resolveHref: props.resolveHref,
         personalSlug: props.personalSlug,

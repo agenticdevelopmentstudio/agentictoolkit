@@ -26,8 +26,8 @@ export type SiteMenuSwitcherProps = SiteMenuChromeProps;
  *
  * The swap drops what is about SITES (the family tree, Home, Recents), the signed-out rows (which
  * cannot apply) and `triggerContent` (the WorkspaceMenu's trigger is its own). Everything else
- * passes through — `userIsAdmin` above all: on a workspace route the WorkspaceMenu is the only
- * switcher a signed-in admin sees, and the admin consoles have no other door there.
+ * passes through, except `userIsAdmin`: the WorkspaceMenu carries no admin consoles (the host
+ * lists its own Admin workspace among the workspaces instead).
  */
 export declare function SiteMenuSwitcher(props: SiteMenuSwitcherProps): ReactElement;
 //# sourceMappingURL=SiteMenuSwitcher.d.ts.map

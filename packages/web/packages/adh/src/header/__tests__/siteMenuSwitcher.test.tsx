@@ -1,8 +1,7 @@
 /** SiteMenuSwitcher's hand-over, end to end through the real popover: signed in on a host that
  *  supplies workspaces (the hub), the slot holds the WorkspaceMenu instead of the site menu — and
  *  what the site menu carried that is not about SITES has to come across with it. The admin
- *  consoles are the case that went missing: the swap passed the WorkspaceMenu no `userIsAdmin`,
- *  so an admin signed in to the hub had no door to any console anywhere in the header. */
+ *  consoles do NOT: the hub lists its own Admin workspace among the workspaces instead. */
 /// <reference types="@testing-library/jest-dom/vitest" />
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { describe, it, expect, afterEach, vi } from 'vitest'
@@ -39,7 +38,7 @@ async function openMenu(trigger: string): Promise<void> {
 }
 
 describe('SiteMenuSwitcher — signed in on the hub', () => {
-  it('swaps in the workspace menu, which still offers an admin the operations consoles', async () => {
+  it('swaps in the workspace menu, with no operations consoles even for an admin', async () => {
     render(
       <WorkspacesMenuProvider value={MENU}>
         <SiteMenuSwitcher currentSiteId="hub" authenticated userIsAdmin />
@@ -51,17 +50,6 @@ describe('SiteMenuSwitcher — signed in on the hub', () => {
       'aria-current',
       'page',
     )
-    expect(screen.getByRole('menuitem', { name: 'Help' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: /^Admin/ })).toBeInTheDocument()
-  })
-
-  it('offers the consoles to nobody else', async () => {
-    render(
-      <WorkspacesMenuProvider value={MENU}>
-        <SiteMenuSwitcher currentSiteId="hub" authenticated />
-      </WorkspacesMenuProvider>,
-    )
-    await openMenu('Mike Fullerton Workspace — switch workspace')
     expect(screen.getByRole('menuitem', { name: 'Help' })).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: /^Admin/ })).toBeNull()
   })
@@ -87,9 +75,6 @@ describe('SiteMenuSwitcher — signed in on the hub', () => {
     expect(screen.queryByText('No workspaces yet')).toBeNull()
     expect(screen.getAllByRole('menuitem').map((row) => row.textContent)).toEqual([
       'Help',
-      'Toolkit',
-      'Tools',
-      'Support',
     ])
   })
 })

@@ -1,6 +1,6 @@
 // src/site/hubWorkspacePath.ts
 import { HUB_ROUTE_SEGMENTS } from "@agentic-toolkit/adh-registry";
-var SLUGLESS_APP_SEGMENTS = /* @__PURE__ */ new Set(["home", "settings"]);
+var SLUGLESS_APP_SEGMENTS = /* @__PURE__ */ new Set(["home", "settings", "admin"]);
 function isRouteSegment(segment) {
   return HUB_ROUTE_SEGMENTS.has(segment.toLowerCase());
 }

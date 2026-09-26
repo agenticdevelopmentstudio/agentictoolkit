@@ -32,15 +32,18 @@ describe('isHubWorkspacePath', () => {
     expect(isHubWorkspacePath('/acme/about')).toBe(true)
   })
 
-  it('matches the two slug-less workspace routes, and reports no slug for them', () => {
-    // `/home` resolves a workspace and replaces itself; `/settings` is the account. Both are
-    // signed-in surfaces, so the switcher stays in-hub — and both carry no slug, so the caller
-    // falls back to the signed-in user's own.
+  it('matches the slug-less workspace routes, and reports no slug for them', () => {
+    // `/home` resolves a workspace and replaces itself; `/settings` is the account; `/admin` is
+    // the Admin workspace. All are signed-in surfaces, so the switcher stays in-hub — and none
+    // carries a slug, so the caller falls back to the signed-in user's own.
     expect(isHubWorkspacePath('/home')).toBe(true)
     expect(isHubWorkspacePath('/settings')).toBe(true)
     expect(isHubWorkspacePath('/settings/profile')).toBe(true)
+    expect(isHubWorkspacePath('/admin')).toBe(true)
+    expect(isHubWorkspacePath('/admin/users')).toBe(true)
     expect(hubWorkspaceSlug('/home')).toBeNull()
     expect(hubWorkspaceSlug('/settings')).toBeNull()
+    expect(hubWorkspaceSlug('/admin/users')).toBeNull()
   })
 
   it('rejects the root and the site’s own routes', () => {

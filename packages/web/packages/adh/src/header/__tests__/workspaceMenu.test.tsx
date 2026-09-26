@@ -194,10 +194,10 @@ describe('WorkspaceMenu', () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith('/temporal'))
   })
 
-  it("closes the list with the platform's Toolkit, Tools and Support, for everyone", () => {
-    // The workspace rail gave these three up because "the site menu already carries them" — but
-    // on a /<workspace>/* route this menu holds the site menu's slot, so without them here a
-    // signed-in user there had no door to any of them.
+  it('ends on Help: no platform rows and no admin consoles, for anyone', () => {
+    // Toolkit, Tools, Support and an admin's operations consoles used to close this list. They
+    // left on 2026-09-26: this menu is the workspaces, and the hub lists its own Admin workspace
+    // among them for an admin.
     render(
       <WorkspaceMenu
         currentSiteId="hub"
@@ -206,86 +206,9 @@ describe('WorkspaceMenu', () => {
       />,
     )
     const order = labels()
-    expect(order.slice(order.indexOf('Help'))).toEqual(['Help', 'Toolkit', 'Tools', 'Support'])
-    // In Help's own section: one divider sets them apart from the workspaces, none inside.
-    const leaves = props().entries.filter(
-      (e): e is Extract<PopoverEntry, { kind: 'leaf' }> => e.kind === 'leaf',
-    )
-    const help = leaves.find((e) => e.item.key === 'help')!
-    const platform = leaves.filter((e) => ['toolkit', 'tools', 'support'].includes(e.item.key))
-    expect(platform.map((e) => e.section)).toEqual([help.section, help.section, help.section])
-    // Resolved like any site row: onto the hub's own route where the workspace offers it.
-    expect(platform[0]!.item.href).toBe('/mine/toolkit')
-    // …and none of them is an admin console: a non-admin still gets no consoles.
+    expect(order.at(-1)).toBe('Help')
+    for (const gone of ['Toolkit', 'Tools', 'Support']) expect(order).not.toContain(gone)
     expect(topic('Admin')).toBeUndefined()
-  })
-
-  describe('for an adh admin', () => {
-    // This menu REPLACES the site menu for a signed-in hub user on a workspace route, and the site
-    // menu is where an admin's consoles live. Dropping them here left an admin on the hub no door
-    // to any console.
-
-    it('offers the operations consoles, after Help and apart from it', () => {
-      render(
-        <WorkspaceMenu
-          currentSiteId="hub"
-          userIsAdmin
-          menu={{ workspaces: WORKSPACES, loading: false }}
-        />,
-      )
-      const admin = topic('Admin')
-      expect(admin).toBeDefined()
-      expect(admin!.items.map((i) => i.label)).toContain('Fleet Monitor')
-      const order = labels()
-      expect(order.indexOf('Admin')).toBeGreaterThan(order.indexOf('Help'))
-      // A different section is what rules a divider between the two.
-      const help = props().entries.find((e) => e.kind === 'leaf' && e.item.key === 'help')!
-      expect(admin!.section).not.toBe(help.section)
-    })
-
-    it('offers them to nobody else', () => {
-      render(<WorkspaceMenu currentSiteId="hub" menu={{ workspaces: WORKSPACES, loading: false }} />)
-      expect(topic('Admin')).toBeUndefined()
-      cleanup()
-      render(
-        <WorkspaceMenu
-          currentSiteId="hub"
-          userIsAdmin={false}
-          menu={{ workspaces: WORKSPACES, loading: false }}
-        />,
-      )
-      expect(topic('Admin')).toBeUndefined()
-    })
-
-    it('opens a console on its own host, not as a route on this one, and not as a workspace', async () => {
-      // A console is a cross-site destination. A router.push of its absolute URL is not how you
-      // get there, and handing it to the host's workspace switch would be a pick of nothing.
-      const select = vi.fn()
-      render(
-        <WorkspaceMenu
-          currentSiteId="hub"
-          userIsAdmin
-          menu={{ workspaces: WORKSPACES, loading: false, select }}
-        />,
-      )
-      const monitor = topic('Admin')!.items.find((i) => i.label === 'Fleet Monitor')!
-      const assign = vi.fn()
-      const loc = Object.getOwnPropertyDescriptor(window, 'location')
-      Object.defineProperty(window, 'location', {
-        configurable: true,
-        value: { host: 'localhost', hostname: 'localhost', assign },
-      })
-      try {
-        props().onChoose(monitor)
-        await waitFor(() =>
-          expect(assign).toHaveBeenCalledWith('https://lewis.agenticdeveloperhub.com'),
-        )
-      } finally {
-        if (loc) Object.defineProperty(window, 'location', loc)
-      }
-      expect(push).not.toHaveBeenCalled()
-      expect(select).not.toHaveBeenCalled()
-    })
   })
 
   describe('the command row', () => {

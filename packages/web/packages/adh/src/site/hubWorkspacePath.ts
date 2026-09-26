@@ -1,15 +1,19 @@
 import { HUB_ROUTE_SEGMENTS } from '@agentic-toolkit/adh-registry'
 
 /**
- * The hub's two workspace routes that carry NO slug.
+ * The hub's workspace routes that carry NO slug.
  *
  * `/home` is the redirect that resolves one — the family's signal, identical on all 38 sites.
  * `/settings` is the account (not a workspace): it used to be `/home/settings` and moved off
  * when `/home` stopped being a page. Both are signed-in surfaces, so the switcher stays in its
  * in-hub mode there; `useSiteMenu` fills the slug the feature links need from the signed-in
  * user's own (`personalSlug`), which is what those links pointed at anyway.
+ *
+ * `/admin` is the hub's Admin workspace — the operations console, listed in the workspace menu
+ * for an admin. Its data is platform-wide, so it belongs to no backend workspace and carries no
+ * slug, but it IS a workspace in the switcher, so the switcher must stay in in-hub mode there.
  */
-const SLUGLESS_APP_SEGMENTS: ReadonlySet<string> = new Set(['home', 'settings'])
+const SLUGLESS_APP_SEGMENTS: ReadonlySet<string> = new Set(['home', 'settings', 'admin'])
 
 /** Is this first path segment one the HUB's own routes have spoken for? */
 function isRouteSegment(segment: string): boolean {
