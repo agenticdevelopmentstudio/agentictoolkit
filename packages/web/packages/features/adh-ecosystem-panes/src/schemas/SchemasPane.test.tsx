@@ -16,7 +16,7 @@ const { push } = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }), usePathname: () => "/" }));
 
 const { schemasApi, markdownApi } = vi.hoisted(() => ({
-  schemasApi: { list: vi.fn(), update: vi.fn(), delete: vi.fn(), create: vi.fn() },
+  schemasApi: { list: vi.fn(), get: vi.fn(), update: vi.fn(), delete: vi.fn(), create: vi.fn() },
   markdownApi: { list: vi.fn(), get: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
 }));
 vi.mock("@agentic-toolkit/data/markdown", async (importOriginal) => ({
@@ -220,6 +220,12 @@ beforeEach(() => {
   schemasApi.update.mockImplementation((_id: string, patch: Partial<typeof BUCKET>) =>
     Promise.resolve({ ...BUCKET, ...patch, id: `storage.acme.${patch.slug ?? BUCKET.slug}` }),
   );
+  // A table op re-reads the bucket before it saves. By default the server holds what the list
+  // holds; a test that needs them to differ says so.
+  schemasApi.get.mockImplementation(async (id: string) => {
+    const all = (await schemasApi.list()) as (typeof BUCKET)[];
+    return all.find((b) => b.id === id) ?? null;
+  });
   markdownApi.list.mockResolvedValue([]);
 });
 
@@ -452,6 +458,7 @@ describe("SchemasPane — the bucket layout", () => {
     });
     const added = { id: "t-9", name: "contacts", type: "content.contacts" };
     const withAdded = { ...BUCKET, tables: [...BUCKET.tables, added] };
+    schemasApi.get.mockResolvedValueOnce(BUCKET);
     schemasApi.update.mockResolvedValueOnce(withAdded);
     schemasApi.list.mockResolvedValue([withAdded]);
     await act(async () => {
@@ -645,5 +652,160 @@ describe("SchemasPane — the bucket layout", () => {
       {},
       { workspace: "acme", ecosystemId: "eco-uuid", noted: true },
     );
+  });
+});
+
+// Every table op sends the bucket's WHOLE table list, which the data client reconciles against the
+// server — tables missing from it are deleted, unknown ids created. So the ops are serialized, and
+// each one is built from the tables the server holds when it runs, never the render-time list.
+describe("SchemasPane — table ops are serialized and built from the server's tables", () => {
+  /** Start removing the open `people` table, leaving its save pending. Returns its settle. */
+  async function startPendingRemoval() {
+    let settle!: (saved: typeof BUCKET) => void;
+    schemasApi.update.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Remove people from bucket" }));
+    await confirmRemove();
+    await waitFor(() => expect(schemasApi.update).toHaveBeenCalledTimes(1));
+    return settle;
+  }
+
+  it("while one op saves, +, the pencil, the trash and Add all are all disabled", async () => {
+    const contents = await openBucket();
+    const settle = await startPendingRemoval();
+
+    // The rail republished the level, so its toolbar reflects the op in flight.
+    expect(within(contents).queryByRole("button", { hidden: true, name: "Add table" })).toBeNull();
+    expect(screen.getByRole("button", { hidden: true, name: "Edit people" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { hidden: true, name: "Remove people from bucket" }),
+    ).toBeDisabled();
+    fireEvent.click(within(contents).getByRole("button", { hidden: true, name: "Table actions" }));
+    const addAll = await screen.findByRole("menuitem", { hidden: true, name: "Add all tables" });
+    expect(addAll).toHaveAttribute("data-disabled");
+    fireEvent.click(addAll);
+    expect(schemasApi.update).toHaveBeenCalledTimes(1);
+
+    await act(async () => settle({ ...BUCKET, tables: [] }));
+    await waitFor(() =>
+      expect(
+        within(contents).getByRole("button", { hidden: true, name: "Add table" }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("a removal keeps a table the server gained since the list was read", async () => {
+    await openBucket();
+    // An earlier Add landed on the server; the list on screen has not caught up yet.
+    schemasApi.get.mockResolvedValueOnce({ ...BUCKET, tables: [...BUCKET.tables, LEADS] });
+    fireEvent.click(screen.getByRole("button", { name: "Remove people from bucket" }));
+    await confirmRemove();
+    await waitFor(() =>
+      expect(schemasApi.update).toHaveBeenCalledWith(BUCKET.id, { tables: [LEADS] }),
+    );
+  });
+
+  it("Add all builds on the server's tables, never deleting one the screen hasn't seen", async () => {
+    await openBucket();
+    schemasApi.get.mockResolvedValueOnce({ ...BUCKET, tables: [...BUCKET.tables, LEADS] });
+    fireEvent.click(screen.getByRole("button", { name: "Table actions" }));
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Add all tables" }));
+    });
+    await waitFor(() => expect(schemasApi.update).toHaveBeenCalledTimes(1));
+    const [, patch] = schemasApi.update.mock.calls[0]! as [string, { tables: typeof BUCKET.tables }];
+    expect(patch.tables.slice(0, 2)).toEqual([BUCKET.tables[0], LEADS]);
+  });
+
+  it("an edit of a table the server no longer holds is refused, not re-created", async () => {
+    await openBucket();
+    const dialog = await editPeople();
+    schemasApi.get.mockResolvedValueOnce({ ...BUCKET, tables: [] });
+    fireEvent.change(within(dialog).getByPlaceholderText("contacts"), {
+      target: { value: "persons" },
+    });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    });
+    expect(
+      await within(dialog).findByText("“people” is no longer in this bucket."),
+    ).toBeInTheDocument();
+    expect(schemasApi.update).not.toHaveBeenCalled();
+  });
+
+  it("an add whose name another op took meanwhile is refused", async () => {
+    const contents = await openBucket();
+    fireEvent.click(within(contents).getByRole("button", { name: "Add table" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add table" });
+    fireEvent.change(within(dialog).getByLabelText("Type (sql-table)"), {
+      target: { value: "content.contacts" },
+    });
+    fireEvent.change(within(dialog).getByPlaceholderText("contacts"), {
+      target: { value: "leads" },
+    });
+    schemasApi.get.mockResolvedValueOnce({ ...BUCKET, tables: [...BUCKET.tables, LEADS] });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    });
+    expect(
+      await within(dialog).findByText('A table named "leads" already exists in this bucket.'),
+    ).toBeInTheDocument();
+    expect(schemasApi.update).not.toHaveBeenCalled();
+  });
+});
+
+// The name field used to run the full slugify on every keystroke, which trims trailing
+// separators: "customer_leads" could not be typed, and a backspace over "x_y" landed on "x".
+describe("SchemasPane — table name field", () => {
+  it("keeps a trailing underscore while typing and trims it on save", async () => {
+    const contents = await openBucket();
+    fireEvent.click(within(contents).getByRole("button", { name: "Add table" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add table" });
+    fireEvent.change(within(dialog).getByLabelText("Type (sql-table)"), {
+      target: { value: "content.contacts" },
+    });
+    const name = within(dialog).getByPlaceholderText("contacts");
+    fireEvent.change(name, { target: { value: "Customer_" } });
+    expect(name).toHaveValue("customer_");
+    fireEvent.change(name, { target: { value: "customer_leads" } });
+    expect(name).toHaveValue("customer_leads");
+    fireEvent.change(name, { target: { value: "x_y" } });
+    fireEvent.change(name, { target: { value: "x_" } });
+    expect(name).toHaveValue("x_");
+    fireEvent.change(name, { target: { value: "customer leads_" } });
+    expect(name).toHaveValue("customer_leads_");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    });
+    await waitFor(() => expect(schemasApi.update).toHaveBeenCalled());
+    const [, patch] = schemasApi.update.mock.calls[0]! as [string, { tables: typeof BUCKET.tables }];
+    expect(patch.tables.map((t) => t.name)).toEqual(["people", "customer_leads"]);
+  });
+
+  it("the edit dialog keeps a trailing underscore while typing, too", async () => {
+    await openBucket();
+    const dialog = await editPeople();
+    const name = within(dialog).getByPlaceholderText("contacts");
+    fireEvent.change(name, { target: { value: "people_" } });
+    expect(name).toHaveValue("people_");
+  });
+
+  it("a name of separators only is refused as empty", async () => {
+    const contents = await openBucket();
+    fireEvent.click(within(contents).getByRole("button", { name: "Add table" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add table" });
+    fireEvent.change(within(dialog).getByLabelText("Type (sql-table)"), {
+      target: { value: "content.contacts" },
+    });
+    fireEvent.change(within(dialog).getByPlaceholderText("contacts"), { target: { value: "__" } });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    });
+    expect(within(dialog).getByText("Name is required.")).toBeInTheDocument();
+    expect(schemasApi.update).not.toHaveBeenCalled();
   });
 });

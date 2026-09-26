@@ -11,7 +11,13 @@ import { WorkspaceKnowledgeBases } from "./WorkspaceKnowledgeBases";
 
 afterEach(cleanup);
 
-const settled = { canManage: true, isError: false, isPending: false, isFetching: false };
+const settled = {
+  canManage: true,
+  isError: false,
+  isLoadingError: false,
+  isPending: false,
+  isFetching: false,
+};
 
 function show() {
   render(
@@ -47,10 +53,18 @@ describe("WorkspaceKnowledgeBases", () => {
   });
 
   it("a failed resolution is an error, not an empty workspace", () => {
-    resolution.mockReturnValue({ ...settled, isError: true });
+    resolution.mockReturnValue({ ...settled, isError: true, isLoadingError: true });
     show();
     expect(screen.queryByText("This workspace has no ecosystem yet.")).toBeNull();
     expect(screen.queryByText(/^scoped:/)).toBeNull();
+  });
+
+  // A background re-read that fails behind a resolution already in hand is not a failed
+  // resolution: the pane keeps working on the answer it has.
+  it("keeps the pane when a re-read fails behind a resolved ecosystem", () => {
+    resolution.mockReturnValue({ ...settled, ecosystemId: "eco-acme", isError: true });
+    show();
+    expect(screen.getByText("scoped:eco-acme")).toBeInTheDocument();
   });
 
   // The backend refuses an ecosystem scope the caller cannot manage.

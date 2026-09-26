@@ -16,6 +16,12 @@ export interface CrudViewer {
    * back a paint later.
    */
   ready: boolean
+  /**
+   * WHO the viewer is — the signed-in user's id, or `null` when anonymous (or still bootstrapping).
+   * For caches of per-viewer answers: a module-scope cache keyed without it serves one user's
+   * answer to the next person who signs in on the same machine.
+   */
+  principal: string | null
 }
 
 /**
@@ -26,6 +32,6 @@ export interface CrudViewer {
  */
 export function useViewer(): CrudViewer {
   const auth = useOptionalAuth()
-  if (!auth) return { isAdmin: false, ready: true }
-  return { isAdmin: isAdmin(auth.user), ready: !auth.isLoading }
+  if (!auth) return { isAdmin: false, ready: true, principal: null }
+  return { isAdmin: isAdmin(auth.user), ready: !auth.isLoading, principal: auth.user?.id ?? null }
 }

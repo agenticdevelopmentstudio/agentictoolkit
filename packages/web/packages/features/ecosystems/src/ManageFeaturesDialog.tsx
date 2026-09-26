@@ -41,6 +41,20 @@ export function ManageFeaturesDialog({
     () => presentFeatureKeys(provisioned.data ?? []),
     [provisioned.data],
   );
+  // Held but not yet finished — badged in the picker, so a feature stuck in `provisioning` is not
+  // just a ticked box that looks exactly like one that works.
+  const stillProvisioning = useMemo(
+    () =>
+      new Set(
+        (provisioned.data ?? []).filter((f) => f.state === "provisioning").map((f) => f.featureKey),
+      ),
+    [provisioned.data],
+  );
+  // No BASELINE: what the ecosystem holds has never been read. Pending and failed alike — a failed
+  // first read used to fall through to `alreadyProvisioned = ∅` with the ticks live, so every held
+  // feature looked absent and Apply would queue it again. A failed REFRESH keeps its last answer,
+  // and that answer is still a baseline.
+  const noBaseline = provisioned.data === undefined;
   // Only once the catalog has arrived: before that every held key is "missing" from it, and the
   // loading list would fill with stand-ins that the real rows then replace.
   const rows = useMemo(
@@ -57,15 +71,21 @@ export function ManageFeaturesDialog({
       // The READS are `loading`, not `busy`: busy takes away every way out of the dialog (no ×,
       // Escape ignored, the footer only a spinner), and a read has no timeout — a hung or offline
       // one, passed as busy, held the user in here until a reload.
-      loading={catalog.isPending || provisioned.isPending}
+      // `noBaseline`, not `isPending`, is what keeps the ticks and Apply waiting: a failed first
+      // read is no longer pending, and a change computed against no baseline is wrong.
+      loading={catalog.isPending || noBaseline}
       catalogError={catalog.isError ? "Couldn't load the list of features." : null}
-      error={
+      provisioning={stillProvisioning}
+      // Both, each in its own slot: a failed read and a failed apply are two different problems,
+      // and one slot for the pair hid the apply failure behind the read failure.
+      loadError={
         provisioned.isError
-          ? "Couldn't load which features are already on."
-          : apply.isError
-            ? "Failed to change the features. Check the list and try again."
-            : null
+          ? noBaseline
+            ? "Couldn't load which features are already on, so nothing can be changed yet. Close and try again."
+            : "Couldn't refresh which features are already on — the ticks show the last list that loaded."
+          : null
       }
+      error={apply.isError ? "Failed to change the features. Check the list and try again." : null}
       onApply={(change) => apply.mutate(change, { onSuccess: onClose })}
       onCancel={onClose}
     />

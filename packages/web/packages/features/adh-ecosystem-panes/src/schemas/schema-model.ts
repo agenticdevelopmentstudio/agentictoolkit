@@ -46,12 +46,19 @@ export type {
   SchemaTable,
 } from "@agentic-toolkit/data/markdown";
 
-/** Slugify a table name to the allowed shape (lowercase, underscores, no spaces). */
+/** Slugify a table name to the allowed shape (lowercase, underscores, no spaces, no leading or
+ *  trailing underscore). The FINAL shape — run on submit and validation, never per keystroke (see
+ *  {@link tableNameInput}). */
 export function slugifyTableName(raw: string): string {
-  return raw
-    .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+  return tableNameInput(raw).replace(/^_+|_+$/g, "");
+}
+
+/** What a table-name field keeps WHILE it is being typed: lowercase, every run of disallowed
+ *  characters turned into one underscore — but separators at either end kept. Trimming them per
+ *  keystroke made "customer_leads" untypable (the `_` vanished the moment it was typed) and turned
+ *  a backspace over `x_y` into `x`. {@link slugifyTableName} trims them on submit. */
+export function tableNameInput(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9_]+/g, "_");
 }
 
 /**

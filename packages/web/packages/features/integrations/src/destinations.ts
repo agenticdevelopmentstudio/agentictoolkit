@@ -160,7 +160,9 @@ function useDestinationRows(
   const {
     ecosystemId: workspaceEcosystemId,
     isPending: workspacePending,
-    isError: workspaceFailed,
+    // A failure with NO answer: a re-read failing behind the resolved id keeps the row working, and
+    // is not "couldn't resolve".
+    isLoadingError: workspaceFailed,
     canManage: workspaceManageable,
   } = useWorkspaceDefaultEcosystemId(slug);
 

@@ -29,14 +29,23 @@ import { SHIPR_DIALOG_SURFACE } from '../dialogSurface';
  * machinery or not at all.
  */
 
+/** The resolution the dialog is handed. Reset before every test to the resolved answer; the
+ *  failure cases below overwrite it. */
+const RESOLVED = {
+  ecosystemId: 'eco-1' as string | undefined,
+  canManage: true,
+  isPending: false,
+  isFetching: false,
+  isError: false,
+  isLoadingError: false,
+};
+const resolution = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+beforeEach(() => {
+  resolution.current = { ...RESOLVED };
+});
+
 vi.mock('@agentic-toolkit/data/ecosystems', () => ({
-  useWorkspaceDefaultEcosystemId: () => ({
-    ecosystemId: 'eco-1',
-    canManage: true,
-    isPending: false,
-    isFetching: false,
-    isError: false,
-  }),
+  useWorkspaceDefaultEcosystemId: () => resolution.current,
 }));
 
 // `CONNECTIONS_HASH` is taken from the REAL module rather than spelled again here. It is the
@@ -149,6 +158,31 @@ describe('the Connections dialog frame', () => {
     render(<ConnectionsDialog {...PROPS} open={false} />);
     expect(screen.queryByText('integrations detail')).toBeNull();
     expect(dialog('Integrations')).toBeUndefined();
+  });
+});
+
+// react-query's `isError` is also true when a background re-read fails behind an ecosystem
+// already resolved. Gating on it swapped a working pane for "couldn't read" over a hiccup.
+describe('a failed ecosystem resolution', () => {
+  it('keeps the pane when a re-read fails behind the resolved ecosystem', async () => {
+    resolution.current = { ...RESOLVED, isError: true, isLoadingError: false };
+    draw();
+    expect(await screen.findByText('integrations detail')).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't read this workspace's integrations.")).toBeNull();
+  });
+
+  it('says so when the first read failed with no answer', async () => {
+    resolution.current = {
+      ...RESOLVED,
+      ecosystemId: undefined,
+      isError: true,
+      isLoadingError: true,
+    };
+    draw();
+    expect(
+      await screen.findByText("Couldn't read this workspace's integrations."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('integrations detail')).toBeNull();
   });
 });
 

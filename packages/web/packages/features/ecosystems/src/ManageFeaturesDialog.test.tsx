@@ -104,3 +104,68 @@ describe('ManageFeaturesDialog — a held feature the catalog no longer lists', 
     expect(screen.queryByRole('checkbox', { name: 'retired' })).toBeNull()
   })
 })
+
+// A feature stuck in `provisioning` used to be a ticked box exactly like one that works.
+describe('ManageFeaturesDialog — a feature still provisioning', () => {
+  it('is ticked and badged, and its details say it is still being set up', () => {
+    stubReads(read([PERSONAS]), read([held('personas', 'provisioning')]))
+    render(<ManageFeaturesDialog ecosystemId="ecosystem.acme.widgets" onClose={vi.fn()} />)
+    expect(screen.getByRole('checkbox', { name: 'Personas' })).toBeChecked()
+    // The row's badge and the detail pane's (the row is the cursor) both say it.
+    expect(screen.getAllByText('Provisioning').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText(/Still being set up/)).toBeInTheDocument()
+  })
+
+  it('badges nothing for an active feature', () => {
+    stubReads(read([PERSONAS]), read([held('personas')]))
+    render(<ManageFeaturesDialog ecosystemId="ecosystem.acme.widgets" onClose={vi.fn()} />)
+    expect(screen.queryByText('Provisioning')).toBeNull()
+    expect(screen.queryByText(/Still being set up/)).toBeNull()
+  })
+})
+
+// A failed FIRST read of what the ecosystem holds left `alreadyProvisioned` empty with the ticks
+// live: every held feature looked absent, and Apply would have queued it again.
+describe('ManageFeaturesDialog — the provisioned read failed', () => {
+  const FAILED_FIRST = { data: undefined, isPending: false, isError: true }
+
+  it('keeps the ticks and Apply disabled while there is no baseline', () => {
+    const mutate = stubReads(read([PERSONAS]), FAILED_FIRST)
+    render(<ManageFeaturesDialog ecosystemId="ecosystem.acme.widgets" onClose={vi.fn()} />)
+    const box = screen.getByRole('checkbox', { name: 'Personas' })
+    fireEvent.click(box)
+    expect(box).not.toBeChecked()
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled()
+    expect(screen.getByText(/Couldn't load which features are already on/)).toBeInTheDocument()
+    expect(mutate).not.toHaveBeenCalled()
+  })
+
+  it('still offers Cancel', () => {
+    const onClose = vi.fn()
+    stubReads(read([PERSONAS]), FAILED_FIRST)
+    render(<ManageFeaturesDialog ecosystemId="ecosystem.acme.widgets" onClose={onClose} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  // A failed REFRESH keeps its last answer, which is still a baseline: the picker works, and says
+  // the list may be out of date.
+  it('keeps working on the last answer when only a refresh failed', () => {
+    stubReads(read([PERSONAS]), { data: [], isPending: false, isError: true })
+    render(<ManageFeaturesDialog ecosystemId="ecosystem.acme.widgets" onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Personas' }))
+    expect(screen.getByRole('checkbox', { name: 'Personas' })).toBeChecked()
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled()
+    expect(screen.getByText(/Couldn't refresh which features are already on/)).toBeInTheDocument()
+  })
+
+  // One error slot for both hid the apply failure behind the read failure.
+  it('shows the load error AND the apply error together', () => {
+    vi.mocked(useFeatureCatalog).mockReturnValue(read([PERSONAS]) as never)
+    vi.mocked(useProvisionedFeatures).mockReturnValue({ data: [], isPending: false, isError: true } as never)
+    vi.mocked(useApplyFeatureChange).mockReturnValue({ isPending: false, isError: true, mutate: vi.fn() } as never)
+    render(<ManageFeaturesDialog ecosystemId="ecosystem.acme.widgets" onClose={vi.fn()} />)
+    expect(screen.getByText(/Couldn't refresh which features are already on/)).toBeInTheDocument()
+    expect(screen.getByText(/Failed to change the features/)).toBeInTheDocument()
+  })
+})

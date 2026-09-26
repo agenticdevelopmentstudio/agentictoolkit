@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { DialogActions } from "@agenticdevelopertoolkit/ui/components/dialog-actions";
 import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
+import { Badge } from "@agenticdevelopertoolkit/ui/components/badge";
 import type { CatalogFeature, FeatureChange } from "@agentic-toolkit/data/ecosystems";
 
 /**
@@ -42,6 +43,12 @@ export interface FeaturePickerDialogProps {
    * one queues its removal.
    */
   alreadyProvisioned?: ReadonlySet<string>;
+  /**
+   * The held keys whose provisioning has not finished (a subset of `alreadyProvisioned`). Each
+   * row gets a "Provisioning" badge and its details say so: a feature stuck there is otherwise a
+   * ticked box indistinguishable from one that works.
+   */
+  provisioning?: ReadonlySet<string>;
   /** The change is in flight — the footer shows a spinner and the dialog cannot be dismissed. */
   busy?: boolean;
   /**
@@ -53,6 +60,12 @@ export interface FeaturePickerDialogProps {
   loading?: boolean;
   /** A failed change, shown under the list. The ticks survive so the user can simply retry. */
   error?: string | null;
+  /**
+   * A failed READ of what the ecosystem holds, shown under the list ALONGSIDE `error` rather than
+   * instead of it: one slot for both meant a failed apply behind a failed refresh said only one of
+   * the two things that went wrong. Whether ticks may proceed is `loading`'s call, not this one's.
+   */
+  loadError?: string | null;
   /**
    * The catalog failed to load. Without this the dialog has nothing to distinguish from — an
    * empty `catalog` prop looks exactly like a catalog that is still loading or genuinely empty,
@@ -85,14 +98,17 @@ export function FeaturePickerDialog({
   open,
   catalog,
   alreadyProvisioned,
+  provisioning: provisioningKeys,
   busy = false,
   loading = false,
   error = null,
+  loadError = null,
   catalogError = null,
   onApply,
   onCancel,
 }: FeaturePickerDialogProps): ReactElement {
   const provisioned = alreadyProvisioned ?? EMPTY;
+  const stillProvisioning = provisioningKeys ?? EMPTY;
 
   const [query, setQuery] = useState("");
   // The TARGET state per row the user has touched this visit: key -> desired on/off. A row not
@@ -178,11 +194,14 @@ export function FeaturePickerDialog({
           // can still be read. Unless the ecosystem already holds it: this picker is the only way
           // to take a feature off, so a held one keeps its tick live for unticking.
           checkDisabled: !!f.comingSoon && !provisioned.has(f.key),
+          ...(stillProvisioning.has(f.key)
+            ? { trailing: <Badge variant="orange">Provisioning</Badge> }
+            : {}),
           // The last available row carries the divider that opens the coming-soon group.
           ...(!f.comingSoon && next?.comingSoon ? { dividerAfter: true, dividerLabel: "Coming soon" } : {}),
         };
       }),
-    [visible, provisioned],
+    [visible, provisioned, stillProvisioning],
   );
 
   // Keep the cursor on a row that still exists: filtering the active row away would otherwise
@@ -353,11 +372,15 @@ export function FeaturePickerDialog({
                 manualCollapse={false}
                 minDetailWidth="18rem"
               >
-                <FeatureDetail feature={active} />
+                <FeatureDetail
+                  feature={active}
+                  provisioning={active != null && stillProvisioning.has(active.key)}
+                />
               </HierarchicalDetailView>
             )}
           </div>
 
+          <ErrorText error={loadError} />
           <ErrorText error={error} />
 
           <DialogActions
@@ -456,15 +479,29 @@ function ComingSoonMark(): ReactElement {
  * (`ManageFeaturesDialog`), which has no tier: "Subscription Level Required:" followed by
  * nothing would say less than no line at all.
  */
-function FeatureDetail({ feature }: { feature: CatalogFeature | undefined }): ReactElement | null {
+function FeatureDetail({
+  feature,
+  provisioning,
+}: {
+  feature: CatalogFeature | undefined;
+  /** Held, but its provisioning has not finished. */
+  provisioning: boolean;
+}): ReactElement | null {
   if (!feature) return null;
   return (
     <div className="flex flex-col gap-4 p-5">
       <div className="flex items-baseline gap-3">
         <h3 className="text-base font-semibold text-apt-text">{feature.label}</h3>
         {feature.comingSoon && <ComingSoonMark />}
+        {provisioning && <Badge variant="orange">Provisioning</Badge>}
       </div>
       <p className="text-sm text-apt-text-dim">{feature.description}</p>
+      {provisioning && (
+        <p className="text-sm text-apt-text-dim">
+          Still being set up for this ecosystem — it opens once provisioning finishes. Untick it to
+          remove it.
+        </p>
+      )}
       {feature.featureSite && (
         <p className="text-sm text-apt-text-dim">
           Comes with a site of its own, published outside this ecosystem.

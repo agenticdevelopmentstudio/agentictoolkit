@@ -33,44 +33,55 @@ export function settingsLast<T extends DividedTopic>(topics: readonly T[]): T[] 
   return [...rest, { ...settings, dividerAfter: false }];
 }
 
+/** A row {@link heldTopics} kept, marked when its feature is still being set up. */
+export type HeldTopic<T> = T & {
+  /** Every one of the row's features that the ecosystem holds is still `provisioning` — none is
+   *  `active` yet. The row is SHOWN, so the list agrees with the Manage features dialog that ticked
+   *  it, but it must not open onto its pane: see {@link heldTopics}. */
+  provisioning?: boolean;
+};
+
 /**
  * The topic rows an ecosystem actually holds: every row that names no catalog feature (Settings,
  * Child Ecosystems, a feature site's own rows), plus each row with at least one of its `features`
- * ACTIVE.
+ * ACTIVE or still PROVISIONING — the latter marked `provisioning: true`.
  *
  * The Features list used to draw every product topic whether or not the product had it — the
  * child "Agentic Developer Hub" showed nineteen rows while its Manage features dialog showed
- * nothing ticked (Mike, 2026-09-24). That first fix read the dialog's own rule
- * (`presentFeatureKeys`), on the theory that a list and the dialog that turns its rows on could
- * not disagree if they read one set. They can, and do: `provisioning` is a row the dialog must
- * tick (queuing it twice would be a bug) but a row this list must NOT draw, because a
- * still-provisioning feature can fail partway and a topic row that opens onto storage that isn't
- * there is worse than a row that briefly lags behind the dialog. So a list and the picker are
- * different questions after all — "can I navigate there" versus "is this in the ecosystem" — and
- * each reads the rule for its own question: this list `activeFeatureKeys`, the same one the hub's
- * workspace rail reads, and the dialog `presentFeatureKeys` (Mike, 2026-09-25). A coming-soon
- * feature is never provisionable, so its row stays off until the catalog ships it.
+ * nothing ticked (Mike, 2026-09-24). A still-provisioning feature is the other half of that
+ * disagreement: the dialog ticks it (`presentFeatureKeys` — queuing it twice would be a bug), and
+ * a list that simply HID it left a feature the user had just added nowhere on screen but a ticked
+ * box, and one stuck in `provisioning` invisible for good. So the row is drawn, and marked:
+ * `provisioning` is set only when none of the row's features is `active` (`activeFeatureKeys`, the
+ * rule the hub's workspace rail reads), so the caller shows its status and — because a
+ * provisioning feature can have stopped partway — a "still being set up" notice in place of a pane
+ * that could open onto storage that isn't there. A coming-soon feature is never provisionable, so
+ * its row stays off until the catalog ships it.
  *
  * `provisioned` is `undefined` while the read is in flight: keyed rows are withheld until it
  * lands rather than drawn and then yanked — all but `routed`, the row the URL names. Withholding
  * that one too left a deep link to a product feature on "Select a topic to view.", beside a list
  * holding only Settings, for as long as the read took; the hub's workspace rail draws its routed
  * feature for the same reason (`railGrants`). Should the product turn out not to hold it, that
- * one row goes when the read lands. On a FAILED read the caller passes `null` and every row is
- * shown — a transient error must not make a product look empty, and each pane still reports its
- * own failure.
+ * one row goes when the read lands. On a read that failed with NO answer the caller passes `null`
+ * and every row is shown, unmarked — a transient error must not make a product look empty, and
+ * each pane still reports its own failure.
  */
 export function heldTopics<T extends FeatureKeyedTopic>(
   topics: readonly T[],
   provisioned: readonly ProvisionedFeature[] | null | undefined,
   routed?: string,
-): T[] {
+): HeldTopic<T>[] {
   if (provisioned === null) return [...topics];
-  const held = activeFeatureKeys(provisioned ?? []);
-  return topics.filter(
-    (t) =>
-      t.features == null ||
-      (provisioned === undefined && t.id === routed) ||
-      t.features.some((k) => held.has(k)),
+  const active = activeFeatureKeys(provisioned ?? []);
+  const provisioning = new Set(
+    (provisioned ?? []).filter((f) => f.state === "provisioning").map((f) => f.featureKey),
   );
+  const held: HeldTopic<T>[] = [];
+  for (const t of topics) {
+    if (t.features == null || t.features.some((k) => active.has(k))) held.push(t);
+    else if (t.features.some((k) => provisioning.has(k))) held.push({ ...t, provisioning: true });
+    else if (provisioned === undefined && t.id === routed) held.push(t);
+  }
+  return held;
 }

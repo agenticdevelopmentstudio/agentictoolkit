@@ -216,6 +216,43 @@ describe("the destinations list", () => {
     // Not instead of them: the workspace row and the products are unaffected by the failure.
     expect(destinationRows()).toEqual(["My Integrations", "Acme App"]);
   });
+
+  // `isError` is also true when a re-read fails behind the resolved id; that id still works.
+  it("reports no resolution failure when a re-read fails behind a resolved ecosystem", async () => {
+    const ws = workspaceFor("individual", "Mike Fullerton");
+    defaultEcosystem.mockReturnValue({
+      ecosystemId: "eco-workspace",
+      canManage: true,
+      isError: true,
+      isLoadingError: false,
+      isPending: false,
+      isFetching: false,
+    });
+    render(
+      <Harness>
+        <IntegrationsFeature basePath="/home" workspace={ws} destinationId="workspace" />
+      </Harness>,
+    );
+    await waitFor(() => expect(listConfigs).toHaveBeenCalledWith("eco-workspace"));
+    expect(screen.queryByText("Couldn't resolve this workspace's own integrations.")).toBeNull();
+  });
+
+  it("reports a resolution that failed with no answer", async () => {
+    const ws = workspaceFor("individual", "Mike Fullerton");
+    defaultEcosystem.mockReturnValue({
+      canManage: true,
+      isError: true,
+      isLoadingError: true,
+      isPending: false,
+      isFetching: false,
+    });
+    render(
+      <Harness>
+        <IntegrationsFeature basePath="/home" workspace={ws} />
+      </Harness>,
+    );
+    expect(await screen.findByText("Couldn't resolve this workspace's own integrations.")).toBeTruthy();
+  });
 });
 
 describe("the pane below a destination", () => {

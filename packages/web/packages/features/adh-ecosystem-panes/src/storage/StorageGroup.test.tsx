@@ -106,4 +106,13 @@ describe("StorageGroup — Buckets and All Data mount only with a resolved ecosy
     expect(screen.getByText("Couldn't load this workspace")).toBeInTheDocument();
     expect(screen.queryByText("This workspace has no ecosystem yet.")).not.toBeInTheDocument();
   });
+
+  it("a re-read failing behind a resolved ecosystem keeps the panes on it", () => {
+    // react-query's `isError` stays true when a background refetch fails behind the answer on
+    // screen. That is not a failed resolution: the id is still known and still right.
+    const renderAllData = vi.fn((id: string | undefined) => <p>{`Host All Data for ${String(id)}`}</p>);
+    renderMember("all-data", { ...RESOLVED, isError: true }, renderAllData);
+    expect(screen.getByText("Host All Data for ecosystem.acme")).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't load this workspace")).not.toBeInTheDocument();
+  });
 });

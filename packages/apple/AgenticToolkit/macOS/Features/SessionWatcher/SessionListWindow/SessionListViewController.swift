@@ -14,14 +14,15 @@ extension SessionWatcher {
 
         public let viewModel: SessionListViewModel
 
-        /// - Parameter tracksFrontmostWindow: highlight the session whose terminal
-        ///   window is frontmost. Needs Accessibility — pass `true` only from a
+        /// - Parameter usesAccessibility: let the window use the Accessibility
+        ///   API — to highlight the session whose terminal window is frontmost
+        ///   and to find a clicked session's window. Pass `true` only from a
         ///   host that holds the grant (see `SessionListViewModel`).
-        public init(source: SessionListSource, tracksFrontmostWindow: Bool = false) {
+        public init(source: SessionListSource, usesAccessibility: Bool = false) {
             let viewModel = SessionListViewModel(
                 source: source,
                 settingsStore: UserSettings.shared,
-                tracksFrontmostWindow: tracksFrontmostWindow
+                usesAccessibility: usesAccessibility
             )
 
             self.viewModel = viewModel

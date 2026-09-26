@@ -114,3 +114,50 @@ describe("useWorkspaceDefaultEcosystemId", () => {
     expect(probe().dataset.fetching).toBe("false");
   });
 });
+
+// A failed re-read behind an answer already in hand is not a failed resolution. A gate on
+// `isError` replaced a working pane with "couldn't resolve" the moment a background refetch
+// hiccupped; `isLoadingError` is true only when the failure left NO answer.
+function ErrorProbe({ slug }: { slug: string }): ReactElement {
+  const { ecosystemId, isError, isLoadingError } = useWorkspaceDefaultEcosystemId(slug);
+  return (
+    <div data-testid="err" data-error={isError} data-loading-error={isLoadingError}>
+      {ecosystemId ?? "none"}
+    </div>
+  );
+}
+
+const mountErr = (slug: string) =>
+  render(
+    <QueryClientProvider client={qc}>
+      <ErrorProbe slug={slug} />
+    </QueryClientProvider>,
+  );
+
+describe("useWorkspaceDefaultEcosystemId failures", () => {
+  it("reports a failed FIRST read as a loading error", async () => {
+    mockedJson.mockRejectedValue(new Error("boom"));
+    mountErr("first-fails");
+    await act(async () => {});
+    const el = screen.getByTestId("err");
+    expect(el.textContent).toBe("none");
+    expect(el.dataset.error).toBe("true");
+    expect(el.dataset.loadingError).toBe("true");
+  });
+
+  it("keeps the answer, and no loading error, when a re-read fails behind it", async () => {
+    mockedJson.mockResolvedValue(ROW);
+    mountErr("refetch-fails");
+    await act(async () => {});
+    expect(screen.getByTestId("err").textContent).toBe("eco-1");
+
+    mockedJson.mockRejectedValue(new Error("boom"));
+    await act(async () => {
+      await qc.refetchQueries({ queryKey: ["workspace-default-ecosystem"] });
+    });
+    const el = screen.getByTestId("err");
+    expect(el.textContent).toBe("eco-1");
+    expect(el.dataset.error).toBe("true");
+    expect(el.dataset.loadingError).toBe("false");
+  });
+});

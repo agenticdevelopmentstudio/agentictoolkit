@@ -32,7 +32,7 @@ import { UnsavedChangesAlert } from "@agenticdevelopertoolkit/ui/components/unsa
 import { useExitGate } from "@agenticdevelopertoolkit/ui/hooks/useExitGate";
 import { useRailExitGuard } from "@agentic-toolkit/resource";
 import { schemasApi } from "@agentic-toolkit/data/markdown";
-import { bucketsCacheKey, newSchemaTable, slugifyTableName } from "./schema-model";
+import { bucketsCacheKey, newSchemaTable, slugifyTableName, tableNameInput } from "./schema-model";
 import type { SchemaDefinition, SchemaDefinitionInput, SchemaTable } from "./schema-model";
 import { ButtonBar } from "@agentic-toolkit/resource";
 import { RecordApiButton } from "@agentic-toolkit/api-explorer";
@@ -82,6 +82,17 @@ function crudMetaForType(type: string) {
 interface NewTableDraft {
   name: string;
   type: string;
+}
+
+/** The table ops `mutateTables` serializes — see there. */
+type TableOp = "add" | "edit" | "remove" | "addAll";
+
+const TABLE_OP_BUSY = "Another change to this bucket's tables is still saving. Try again in a moment.";
+
+/** Table-name validation as a save sees it: the name the field holds, slugified to its final shape
+ *  (the field keeps trailing separators while typing — `tableNameInput`). */
+function finalTableNameValidate(raw: string, others: SchemaTable[]): string | null {
+  return tableNameValidate(slugifyTableName(raw), others);
 }
 
 export function SchemasPane({
@@ -219,20 +230,57 @@ export function SchemasPane({
       setSettingsFor(null);
     });
 
-  // Removing a table is a save of its own, so it gets what a save gets: one at a time, and its
-  // failure on screen. It used to be fired and forgotten (`void`) — a refused removal was an
-  // unhandled rejection with nothing shown, and a second click could send it again.
-  const [removing, setRemoving] = useState(false);
+  // Every table op — add, edit, remove, add all — is a save of its own that sends the bucket's
+  // WHOLE table list, which the data client reconciles against the server: tables missing from it
+  // are DELETEd, unknown ids POSTed. So two ops must never overlap, and none may send a list read
+  // at render time: a second op built on the snapshot the first one started from would delete the
+  // table the first created, or resurrect the one it removed. Hence (1) ONE in-flight guard, read
+  // through a ref — the rail republishes `titleActions` only when a plain field moves, so a
+  // handler there can be a render old and a state flag in its closure stale — with the state copy
+  // disabling `+`, the pencil, the trash and Add all while it is set; and (2) every op re-reads the
+  // bucket's tables from the server and applies ITSELF to that list (`mutateTables`).
+  const [tableOp, setTableOp] = useState<TableOp | null>(null);
+  const tableOpRef = useRef<TableOp | null>(null);
+  // The bucket as of the latest render, for the same stale-closure reason (a slug save moves its id).
+  const bucketRef = useRef(bucket);
+  bucketRef.current = bucket;
+  const removing = tableOp === "remove";
   // The tables a Remove is waiting on the user to confirm. A removal drops the table's bucket_types
   // row — and with it every persona interest pointing at that id — so one stray click on the trash
-  // must not be enough (Mike, 2026-09-25). `what` names them in the question.
-  const [pendingRemove, setPendingRemove] = useState<{ tables: SchemaTable[]; what: string } | null>(
-    null,
-  );
-  // Add all's own latch and failure, as a removal's: a save of its own, never sent twice.
-  const [adding, setAdding] = useState(false);
+  // must not be enough (Mike, 2026-09-25). `what` names them in the question; `all` removes every
+  // table the bucket holds when the removal RUNS, not the ones listed when it was asked.
+  const [pendingRemove, setPendingRemove] = useState<{
+    tables: SchemaTable[];
+    what: string;
+    all?: boolean;
+  } | null>(null);
   const [addAllError, setAddAllError] = useState<string | null>(null);
-  const tablesBusy = removing || adding;
+  const tablesBusy = tableOp !== null;
+  // The (slugified) name of the table an Add table save is creating, so the dialog's `onCreated`
+  // opens that one — not "whichever name the render-time list lacked".
+  const addedNameRef = useRef<string | null>(null);
+
+  /** Run one table op: refuse while another is in flight, re-read the bucket's CURRENT tables, and
+   *  save `compute(current)`. `compute` may throw to refuse (a name taken meanwhile, a table
+   *  already gone). */
+  async function mutateTables(
+    kind: TableOp,
+    compute: (current: SchemaTable[]) => SchemaTable[],
+  ): Promise<SchemaDefinition> {
+    const target = bucketRef.current;
+    if (!target) throw new Error("No bucket is open.");
+    if (tableOpRef.current) throw new Error(TABLE_OP_BUSY);
+    tableOpRef.current = kind;
+    setTableOp(kind);
+    try {
+      const fresh = await schemasApi.get(target.id);
+      if (!fresh) throw new Error("Couldn't read the bucket's current tables. Try again.");
+      return await schemasApi.update(fresh.id, { tables: compute(fresh.tables) });
+    } finally {
+      tableOpRef.current = null;
+      setTableOp(null);
+    }
+  }
   // Why the confirmed removal was refused — shown in the confirm, which is the only place the
   // question it answered is still on screen.
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -259,8 +307,17 @@ export function SchemasPane({
         // Back/deselect is a level CLEAR, which the rail host already runs through the guard.
         onClear: () => selectSub(null),
         defaultSelectedId: bucket.tables[0]?.id,
-        onNew: () => setAddTableOpen(true),
+        // No `+` while a table op is saving: an Add started then would be built on the list that
+        // op is replacing. The ref check covers a handler the rail registered a render ago.
+        onNew: tablesBusy
+          ? undefined
+          : () => {
+              if (!tableOpRef.current) setAddTableOpen(true);
+            },
         newLabel: "Add table",
+        // The plain companion of the busy state: a moved plain field is what makes the rail
+        // re-register this level, and with it `titleActions`' disabled Add all / Remove all.
+        busy: tablesBusy,
         // The rail toolbar's own tool button, as the `+` beside it is drawn: a ghost Button here
         // stood larger and brighter than the `+`, the look the list tools had already been moved
         // off (Mike, 2026-09-24). One click, straight to a dialog — a gear opening a MENU would be
@@ -296,10 +353,11 @@ export function SchemasPane({
                 <DropdownMenuItem
                   disabled={bucket.tables.length === 0 || tablesBusy}
                   onClick={() => {
+                    if (tableOpRef.current) return;
                     // Every table goes, the open one with it, so staged rows ask first.
                     rowsGateRef.current.attemptExit(() => {
                       setRemoveError(null);
-                      setPendingRemove({ tables: bucket.tables, what: "every table" });
+                      setPendingRemove({ tables: bucket.tables, what: "every table", all: true });
                     });
                   }}
                 >
@@ -324,20 +382,21 @@ export function SchemasPane({
   const [editTableId, setEditTableId] = useState<string | null>(null);
   const editTable = bucket?.tables.find((t) => t.id === editTableId);
 
-  async function removeTables(gone: SchemaTable[]) {
-    if (!bucket || tablesBusy) return;
-    setRemoving(true);
+  async function removeTables(gone: SchemaTable[], all = false) {
+    if (!bucketRef.current || tableOpRef.current) return;
     setRemoveError(null);
     const ids = new Set(gone.map((t) => t.id));
     try {
-      await schemasApi.update(bucket.id, { tables: bucket.tables.filter((x) => !ids.has(x.id)) });
+      // Applied to the tables the server holds NOW: a table another op added since the confirm
+      // opened is kept (unless the confirm said "every table"), and one already gone stays gone.
+      await mutateTables("remove", (current) =>
+        all ? [] : current.filter((x) => !ids.has(x.id)),
+      );
     } catch (err) {
       // Shown in the confirm, which stays open on a refusal: the question it answered is still
       // the one on screen, and a retry is one click.
       setRemoveError(err instanceof Error ? err.message : "Couldn't remove the table.");
       return;
-    } finally {
-      setRemoving(false);
     }
     setPendingRemove(null);
     selectSub(null);
@@ -363,19 +422,16 @@ export function SchemasPane({
     return out;
   }
 
+  // Reached from the rail's `titleActions`, which can be a render old — so everything it reads is
+  // a ref or the server, never this render's `bucket`.
   async function addAllTables() {
-    if (!bucket || tablesBusy) return;
-    const additions = missingTypes(bucket.tables);
-    if (additions.length === 0) return;
-    setAdding(true);
+    if (!bucketRef.current || tableOpRef.current) return;
     setAddAllError(null);
     try {
-      await schemasApi.update(bucket.id, { tables: [...bucket.tables, ...additions] });
+      await mutateTables("addAll", (current) => [...current, ...missingTypes(current)]);
     } catch (err) {
       setAddAllError(err instanceof Error ? err.message : "Couldn't add the tables.");
       return;
-    } finally {
-      setAdding(false);
     }
     await refresh().catch(() => {});
   }
@@ -408,8 +464,13 @@ export function SchemasPane({
                 // dialog's Save cannot wait on a second question (a Stay would leave it saving).
                 // The staged rows go only if the save retypes the table (`rowsKey`): a rename or
                 // a cancel leaves them staged, as a refused removal does.
-                onClick={() => rowsGateRef.current.attemptExit(() => setEditTableId(openTable.id))}
-                disabled={removing}
+                onClick={() =>
+                  !tableOpRef.current &&
+                  rowsGateRef.current.attemptExit(() => setEditTableId(openTable.id))
+                }
+                // Any table op, not only a removal: an edit opened over an Add in flight would be
+                // saved against the list that Add is replacing.
+                disabled={tablesBusy}
                 title="Edit table"
                 aria-label={`Edit ${openTable.name}`}
               >
@@ -423,6 +484,7 @@ export function SchemasPane({
                 // same question leaving the table any other way asks — and then the removal itself
                 // is confirmed.
                 onClick={() =>
+                  !tableOpRef.current &&
                   rowsGateRef.current.attemptExit(() => {
                     setRemoveError(null);
                     setPendingRemove({ tables: [openTable], what: `“${openTable.name}”` });
@@ -564,7 +626,9 @@ export function SchemasPane({
           confirmLabel="Remove"
           cancelLabel="Cancel"
           busy={removing}
-          onConfirm={() => pendingRemove && void removeTables(pendingRemove.tables)}
+          onConfirm={() =>
+            pendingRemove && void removeTables(pendingRemove.tables, pendingRemove.all)
+          }
           onCancel={() => {
             setPendingRemove(null);
             setRemoveError(null);
@@ -629,13 +693,19 @@ export function SchemasPane({
             heading={`Add a table to ${bucket.name}`}
             blank={() => ({ name: "", type: "" })}
             validate={(d) =>
-              d.type ? tableNameValidate(d.name, bucket.tables) : "Pick a type (sql-table)."
+              d.type ? finalTableNameValidate(d.name, bucket.tables) : "Pick a type (sql-table)."
             }
-            create={(d) =>
-              schemasApi.update(bucket.id, {
-                tables: [...bucket.tables, newSchemaTable(d.type, d.name.trim())],
-              })
-            }
+            // Appended to the tables the server holds NOW, re-checked there: another op may have
+            // taken the name, or changed the list, since this dialog opened.
+            create={(d) => {
+              const name = slugifyTableName(d.name);
+              addedNameRef.current = name;
+              return mutateTables("add", (current) => {
+                const taken = tableNameValidate(name, current);
+                if (taken) throw new Error(taken);
+                return [...current, newSchemaTable(d.type, name)];
+              });
+            }}
             onClose={() => setAddTableOpen(false)}
             onCreated={(updated) => {
               setAddTableOpen(false);
@@ -643,9 +713,7 @@ export function SchemasPane({
               // Open the table just added — the saved row carries the backend's id for it. Opening
               // it leaves the open table, so rows staged there ask first; the ref, because this
               // runs once the create resolves, from the render that opened the dialog.
-              const added = updated.tables.find(
-                (t) => !bucket.tables.some((x) => x.name === t.name),
-              );
+              const added = updated.tables.find((t) => t.name === addedNameRef.current);
               if (added) rowsGateRef.current.attemptExit(() => selectSub(added.id));
             }}
             renderForm={(draft, onChange, error) => (
@@ -669,7 +737,7 @@ export function SchemasPane({
                   <Input
                     value={draft.name}
                     placeholder="contacts"
-                    onChange={(e) => onChange({ ...draft, name: slugifyTableName(e.target.value) })}
+                    onChange={(e) => onChange({ ...draft, name: tableNameInput(e.target.value) })}
                   />
                 </Field>
                 <ErrorText error={error} />
@@ -684,17 +752,28 @@ export function SchemasPane({
             heading={`Edit ${editTable.name}`}
             blank={() => ({ name: editTable.name, type: editTable.type })}
             validate={(d) =>
-              tableNameValidate(d.name, bucket.tables.filter((x) => x.id !== editTable.id))
+              finalTableNameValidate(d.name, bucket.tables.filter((x) => x.id !== editTable.id))
             }
             // The same id, patched in place: the data client PUTs a known table rather than
-            // re-creating it, so the table keeps its bucket_types id.
-            create={(d) =>
-              schemasApi.update(bucket.id, {
-                tables: bucket.tables.map((x) =>
-                  x.id === editTable.id ? { ...x, name: d.name.trim(), type: d.type } : x,
-                ),
-              })
-            }
+            // re-creating it, so the table keeps its bucket_types id. Patched into the tables the
+            // server holds NOW — a table removed meanwhile is refused, never re-created by the
+            // edit, and a name another op took meanwhile is refused too.
+            create={(d) => {
+              const name = slugifyTableName(d.name);
+              return mutateTables("edit", (current) => {
+                if (!current.some((x) => x.id === editTable.id)) {
+                  throw new Error(`“${editTable.name}” is no longer in this bucket.`);
+                }
+                const taken = tableNameValidate(
+                  name,
+                  current.filter((x) => x.id !== editTable.id),
+                );
+                if (taken) throw new Error(taken);
+                return current.map((x) =>
+                  x.id === editTable.id ? { ...x, name, type: d.type } : x,
+                );
+              });
+            }}
             onClose={() => setEditTableId(null)}
             onCreated={() => {
               setEditTableId(null);
@@ -724,7 +803,7 @@ export function SchemasPane({
                   <Input
                     value={draft.name}
                     placeholder="contacts"
-                    onChange={(e) => onChange({ ...draft, name: slugifyTableName(e.target.value) })}
+                    onChange={(e) => onChange({ ...draft, name: tableNameInput(e.target.value) })}
                   />
                 </Field>
                 <ErrorText error={error} />

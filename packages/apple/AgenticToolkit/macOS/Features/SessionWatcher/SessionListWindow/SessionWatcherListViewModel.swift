@@ -37,17 +37,19 @@ extension SessionWatcher {
         private let source: SessionListSource
         private var refreshTimer: Timer?
 
-        /// Whether the list highlights the session whose terminal window is
-        /// frontmost. That needs Accessibility, so it is the host's to opt into:
-        /// only a host that holds the grant should turn it on.
+        /// Whether the window may use the Accessibility API: to highlight the
+        /// session whose terminal window is frontmost, and to find a clicked
+        /// session's window. The host's to opt into — only a host that holds
+        /// the grant should turn it on.
         ///
-        /// Off, the view model never asks TCC about Accessibility. That matters
-        /// because an *untrusted* app's `AXIsProcessTrusted()` — right after a
-        /// fresh install re-signs it — wakes `universalAccessAuthWarn`, whose
+        /// Off, neither the view model nor its action handler asks TCC about
+        /// Accessibility, not even to learn the answer is no. That matters
+        /// because `AXIsProcessTrusted()` from an app that doesn't hold the
+        /// grant wakes `universalAccessAuthWarn`, whose
         /// `TCCAccessCopyInformation` sweep holds tccd's lock for ~10s. Every
         /// other TCC check queues behind it, WindowServer's included, and the
         /// whole machine stops responding for that long.
-        private let tracksFrontmostWindow: Bool
+        public let usesAccessibility: Bool
 
         /// The Accessibility trust check, injected so tests can count probes.
         private let isAccessibilityTrusted: () -> Bool
@@ -91,13 +93,17 @@ extension SessionWatcher {
         public init(
             source: SessionListSource,
             settingsStore: SettingsStore,
-            tracksFrontmostWindow: Bool = false,
-            isAccessibilityTrusted: @escaping () -> Bool = { AXIsProcessTrusted() }
+            usesAccessibility: Bool = false,
+            isAccessibilityTrusted: @escaping () -> Bool = { SystemAccessibilityPermission.isGranted }
         ) {
             self.source = source
-            self.tracksFrontmostWindow = tracksFrontmostWindow
+            self.usesAccessibility = usesAccessibility
             self.isAccessibilityTrusted = isAccessibilityTrusted
-            self.actionHandler = SessionWatcherActionHandler(settingsStore: settingsStore)
+            self.actionHandler = SessionWatcherActionHandler(
+                settingsStore: settingsStore,
+                usesAccessibility: usesAccessibility,
+                isAccessibilityTrusted: isAccessibilityTrusted
+            )
             // Observation is started by the hosting view controller on viewWillAppear,
             // not here — constructing the view model must not start timers/polling
             // for a window that may never be shown.
@@ -185,7 +191,7 @@ extension SessionWatcher {
             }
 
             // Poll the frontmost window to highlight the active session
-            guard tracksFrontmostWindow else { return }
+            guard usesAccessibility else { return }
             let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
                 self?.updateFrontmostSession()
             }
@@ -215,7 +221,11 @@ extension SessionWatcher {
             if action == .activateWindow || action == .activateWarp {
                 let projectName = session.projectName
                 log.append("Click: project=\"\(projectName)\" action=\(action.rawValue) cwd=\"\(session.cwd)\"")
-                log.append("  Before: main=\"\(Self.frontmostWindowTitle())\"")
+                // The window titles in the log are read over Accessibility,
+                // so a host that doesn't use it logs without them.
+                if usesAccessibility {
+                    log.append("  Before: main=\"\(Self.frontmostWindowTitle())\"")
+                }
 
                 let result = actionHandler.execute(action: .activateWindow, for: session)
 
@@ -225,9 +235,10 @@ extension SessionWatcher {
                     lastRequiredPermission = nil
 
                     // Verify activation actually worked after the target app has time to process
+                    let readsTitles = usesAccessibility
                     DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                         Thread.sleep(forTimeInterval: 0.5)
-                        let mainTitle = Self.frontmostWindowTitle()
+                        let mainTitle = readsTitles ? Self.frontmostWindowTitle() : ""
                         let frontBundleId = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
 
                         // Verify: either the title matches the project name, or the correct
@@ -272,7 +283,7 @@ extension SessionWatcher {
 
                 // No specific window matched — just bring the terminal app to front
                 log.append("  Falling back to bringing terminal app to front")
-                Self.activateTerminalApp(termProgram: session.termProgram)
+                SessionWatcherActionHandler.activateTerminalApp(termProgram: session.termProgram)
                 lastActionError = nil
                 lastRequiredPermission = nil
                 return
@@ -318,6 +329,14 @@ extension SessionWatcher {
             log.clear()
             log.append("=== Activation Test Started ===")
             log.append("Log file: \((ActivationTestLog.whippetShared.logPath ?? "(no path)"))")
+
+            // The test judges each activation by the frontmost window's title,
+            // which only Accessibility can read.
+            guard usesAccessibility else {
+                log.append("ABORT: this window doesn't use Accessibility")
+                lastActionError = "Test: needs Accessibility, which this app doesn't use"
+                return
+            }
 
             // Gather unique project names from live sessions
             let projects: [(name: String, session: SessionWatcherSession)] = sessions.map {
@@ -424,23 +443,6 @@ extension SessionWatcher {
             }
         }
 
-        /// Returns the title of the frontmost application's main window.
-        private static let termProgramBundleIDs: [String: String] = [
-            "iTerm.app": "com.googlecode.iterm2",
-            "Apple_Terminal": "com.apple.Terminal",
-            "WarpTerminal": "dev.warp.Warp-Stable",
-            "vscode": "com.microsoft.VSCode",
-            "tmux": "com.apple.Terminal"
-        ]
-
-        private static func activateTerminalApp(termProgram: String) {
-            guard let bundleID = termProgramBundleIDs[termProgram],
-                  let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else {
-                return
-            }
-            app.activate()
-        }
-
         private static func bundleIdMatchesTermProgram(_ bundleId: String, termProgram: String) -> Bool {
             switch termProgram {
             case "iTerm.app": return bundleId.contains("iterm")
@@ -452,6 +454,8 @@ extension SessionWatcher {
             }
         }
 
+        /// Returns the title of the frontmost application's focused window.
+        /// Accessibility — call only when `usesAccessibility` is on.
         private static func frontmostWindowTitle() -> String {
             guard let frontApp = NSWorkspace.shared.frontmostApplication else { return "" }
 

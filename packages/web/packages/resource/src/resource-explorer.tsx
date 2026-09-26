@@ -39,6 +39,9 @@ export interface ResourceTopic {
   /** What this topic is for. Carried on the row, rendered nowhere: the card grid it used to feed at
    *  an unselected frontier is gone (docs/ui/fleet-ui-audit.md §1.5). See `TopicDetailItem`. */
   description?: string;
+  /** The row's small dim second line (`TopicDetailItem.sublabel`) — a status the row's label
+   *  alone cannot say, e.g. an ecosystem feature still "Provisioning…". Omit for a plain row. */
+  sublabel?: string;
   dividerAfter?: boolean;
   /** Declare `"list"` for a topic whose pane publishes a deeper rail (a master/detail list, a
    *  grouping topic), so the cascading view treats choosing it as an INTERMEDIATE select (the
@@ -361,6 +364,7 @@ export function ResourceExplorer<T>({
     label: t.label,
     icon: t.icon,
     description: t.description,
+    sublabel: t.sublabel,
     dividerAfter: t.dividerAfter,
     leadsTo: t.leadsTo,
   }));

@@ -37,7 +37,7 @@ export function EcosystemConfigGate({
   feature: string;
   children: (ecosystemId: string | undefined) => ReactNode;
 }): ReactElement {
-  const { ecosystemId, canManage, isError, isFetching } =
+  const { ecosystemId, canManage, isLoadingError, isFetching } =
     useWorkspaceDefaultEcosystemId(workspaceSlug);
   // The spinner in front of the topic list this gate sits under. What it reports is the SCOPE
   // resolution, not the gated pane's contents: until the id lands the pane below is a shell with
@@ -47,7 +47,9 @@ export function EcosystemConfigGate({
   // own to hang it on. `isFetching`, never `isPending` — pending is false on exactly the cached
   // re-read the spinner exists for.
   useReportBusy(isFetching);
-  if (isError) return <WorkspaceResolutionError />;
+  // A failure with NO answer. `isError` is also true when a re-read fails behind a resolution
+  // still in hand, and replaced a working pane with the error for it.
+  if (isLoadingError) return <WorkspaceResolutionError />;
   if (ecosystemId && !canManage) return <WorkspaceNotManageable feature={feature} />;
   return <>{children(ecosystemId)}</>;
 }

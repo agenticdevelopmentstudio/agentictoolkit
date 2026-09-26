@@ -124,3 +124,97 @@ describe("a deep link to a feature row, while the provisioned read is in flight"
     expect(screen.queryByText("Select a topic to view.")).toBeNull();
   });
 });
+
+const INTEGRATIONS_ROW = { id: "integrations", label: "Integrations", icon: null, features: ["integrations"] };
+const integrationsPane = (id: string): ReactNode =>
+  id === "integrations" ? <p>the integrations pane</p> : null;
+
+// `isError` is also true when a REFRESH fails behind an answer already in hand. Reading it showed
+// every product topic, held or not, the moment a background refetch hiccupped.
+describe("a failed provisioned read", () => {
+  it("keeps the rows its last answer held when only a refresh failed", async () => {
+    vi.mocked(useProvisionedFeatures).mockReturnValue({
+      data: [],
+      isPending: false,
+      isError: true,
+      isLoadingError: false,
+    } as never);
+    renderFeature({ topics: [INTEGRATIONS_ROW, ...IN_PACKAGE_TOPICS], activeTopic: "settings" });
+    expect(await screen.findByRole("button", { name: "Rename to gizmos" })).toBeInTheDocument();
+    expect(screen.queryByText("Integrations")).toBeNull();
+  });
+
+  it("shows every row when the read failed with no answer at all", async () => {
+    vi.mocked(useProvisionedFeatures).mockReturnValue({
+      data: undefined,
+      isPending: false,
+      isError: true,
+      isLoadingError: true,
+    } as never);
+    renderFeature({ topics: [INTEGRATIONS_ROW, ...IN_PACKAGE_TOPICS], activeTopic: "settings" });
+    expect(await screen.findByText("Integrations")).toBeInTheDocument();
+  });
+});
+
+// A feature stuck in `provisioning` was ticked in Manage features and nowhere in this list.
+describe("a feature still provisioning", () => {
+  it("is listed, marked, and opens onto a notice instead of its pane", async () => {
+    vi.mocked(useProvisionedFeatures).mockReturnValue({
+      data: [{ featureKey: "integrations", state: "provisioning", provisionedAt: "", provisionedBy: null }],
+      isPending: false,
+      isError: false,
+      isLoadingError: false,
+    } as never);
+    renderFeature({
+      topics: [INTEGRATIONS_ROW, ...IN_PACKAGE_TOPICS],
+      activeTopic: "integrations",
+      renderTopicPane: integrationsPane,
+    });
+    expect(await screen.findByText("Integrations is still being set up")).toBeInTheDocument();
+    expect(screen.getByText("Provisioning…")).toBeInTheDocument();
+    expect(screen.queryByText("the integrations pane")).toBeNull();
+  });
+});
+
+// The default-ecosystem lookup: a refetch that fails behind a resolved id is not "didn't resolve".
+describe("a failed re-read of the workspace's default ecosystem", () => {
+  it("keeps the resolved ecosystem instead of the couldn't-load notice", async () => {
+    vi.mocked(ecosystemsApi.ecosystemIdForSlug).mockRejectedValue(new Error("boom"));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // A resolution already in hand, stale, so the mount re-reads it — and that read fails.
+    qc.setQueryData(["ecosystem-id-for-slug", "acme"], ACME.id);
+    render(
+      <QueryClientProvider client={qc}>
+        <EcosystemsFeature basePath="/ecosystems" workspaceSlug="acme" topics={IN_PACKAGE_TOPICS} activeTopic="settings" />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(ecosystemsApi.ecosystemIdForSlug).toHaveBeenCalled());
+    expect(await screen.findByRole("button", { name: "Rename to gizmos" })).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't load this workspace")).toBeNull();
+  });
+
+  it("still says so when the FIRST read fails", async () => {
+    vi.mocked(ecosystemsApi.ecosystemIdForSlug).mockRejectedValue(new Error("boom"));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <EcosystemsFeature basePath="/ecosystems" workspaceSlug="acme" topics={IN_PACKAGE_TOPICS} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("Couldn't load this workspace")).toBeInTheDocument();
+  });
+});
+
+// Manage features and the Features heading belong to a list whose rows ARE features.
+describe("the Manage features action", () => {
+  it("is offered when some row is a catalog feature", async () => {
+    renderFeature({ topics: [INTEGRATIONS_ROW, ...IN_PACKAGE_TOPICS], activeTopic: "settings" });
+    expect(await screen.findByRole("button", { name: "Manage ecosystem features" })).toBeInTheDocument();
+  });
+
+  it("is not offered when no row is (Games, Gamification)", async () => {
+    renderFeature({ topics: IN_PACKAGE_TOPICS, activeTopic: "settings" });
+    expect(await screen.findByRole("button", { name: "Rename to gizmos" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Manage ecosystem features" })).toBeNull();
+  });
+});

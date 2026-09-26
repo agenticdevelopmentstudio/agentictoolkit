@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import type { AuthUser } from '@agentic-toolkit/auth'
 import type { CrudColumn, CrudTableMeta } from '../types'
@@ -10,11 +10,13 @@ import type { CrudShellProps } from '../CrudDataBrowser'
 // one workspace, and sends every list `?workspace=<slug>`.
 
 const admin = { id: 'u1', email: 'u@example.com', capabilities: ['admin'] } as AuthUser
+// Who is signed in; a test swaps it to sign someone else in.
+let viewer: AuthUser = admin
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@agentic-toolkit/auth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@agentic-toolkit/auth')>()),
-  useOptionalAuth: () => ({ user: admin, isLoading: false }),
-  useAuth: () => ({ user: admin, isLoading: false }),
+  useOptionalAuth: () => ({ user: viewer, isLoading: false }),
+  useAuth: () => ({ user: viewer, isLoading: false }),
 }))
 // The has-rows probe: every table in EMPTY answers no rows, a table in FAIL rejects with its
 // error, and every other answers one. Records each probe URL, and the signal it was sent with, so
@@ -48,6 +50,10 @@ beforeEach(() => {
   probes.length = 0
   signals.length = 0
   localStorage.removeItem('auth_tokens')
+  viewer = admin
+})
+afterEach(() => {
+  vi.restoreAllMocks()
 })
 // Reports the list filter the view was handed — the one thing the browser decides for it — and
 // records every render, so a test can see a view that mounted and was gone again inside one act().
@@ -65,7 +71,7 @@ vi.mock('../CrudDataView', () => ({
 
 const { CrudDataBrowser } = await import('../CrudDataBrowser')
 const { AuthHttpError } = await import('@agentic-toolkit/auth/client')
-const { resetTablesWithRows } = await import('../useTablesWithRows')
+const { resetTablesWithRows, TABLES_WITH_ROWS_TTL_MS } = await import('../useTablesWithRows')
 // Answers are remembered at module scope, which outlives a render(), and most tests here share one
 // filter and one set of tables: without this they would read each other's answer.
 beforeEach(() => resetTablesWithRows())
@@ -97,9 +103,15 @@ function RailProbe({ levels, children }: CrudShellProps) {
     <div>
       {levels.map((level) => (
         <ul key={level.id} aria-label={`${level.id} rail`}>
-          {level.items.map((item) => (
-            <li key={item.id}>{item.label}</li>
-          ))}
+          {level.items.flatMap((item) => [
+            <li key={item.id}>
+              {item.label}
+              {item.sublabel ? ` (${item.sublabel})` : ''}
+            </li>,
+            ...(item.dividerAfter
+              ? [<li key={`${item.id}-divider`}>--- {item.dividerLabel}</li>]
+              : []),
+          ])}
           {level.items.length === 0 && <li>{level.emptyLabel}</li>}
         </ul>
       ))}
@@ -110,6 +122,10 @@ function RailProbe({ levels, children }: CrudShellProps) {
 
 const schemaRows = () =>
   within(screen.getByLabelText('schema rail'))
+    .getAllByRole('listitem')
+    .map((li) => li.textContent)
+const tableRows = () =>
+  within(screen.getByLabelText('table rail'))
     .getAllByRole('listitem')
     .map((li) => li.textContent)
 
@@ -134,14 +150,54 @@ describe('CrudDataBrowser scoped to a workspace', () => {
     expect(await screen.findByTestId('open')).toHaveTextContent('bucket/buckets {"workspace":"w"}')
   })
 
-  // "in All Data only show tables and schemas in the list with data in them" (Mike, 2026-09-24).
-  it('drops tables with no rows, and a schema left with none', async () => {
+  // "in All Data only show tables and schemas in the list with data in them" (Mike, 2026-09-24) —
+  // led by them, that is: a table with no rows is still where its first row gets created, so it
+  // stays reachable in a dim secondary group rather than vanishing.
+  it('sets tables with no rows, and a schema left with none, apart in an Empty group', async () => {
     EMPTY.add('/persona/personas')
     render(<CrudDataBrowser basePath="/w/all-data" tables={TABLES} shell={RailProbe} workspace="w" />)
     await screen.findByText('bucket')
-    expect(schemaRows()).toEqual(['bucket'])
+    expect(schemaRows()).toEqual(['bucket', '--- Empty', 'persona (No rows yet)'])
     // Each probe is the table's own list, under the view's filter, for one row.
     expect(probes).toContain('/api/bucket/buckets?workspace=w&limit=1')
+  })
+
+  it('opens an empty table so its first row can be created', async () => {
+    EMPTY.add('/persona/personas')
+    render(
+      <CrudDataBrowser
+        basePath="/w/all-data"
+        tables={TABLES}
+        shell={RailProbe}
+        workspace="w"
+        activeSchema="persona"
+        activeTable="personas"
+      />,
+    )
+    expect(await screen.findByTestId('open')).toHaveTextContent(
+      'persona/personas {"workspace":"w"}',
+    )
+    expect(tableRows()).toEqual(['personas (No rows yet)'])
+  })
+
+  it('puts the empty tables of a populated schema under its own Empty divider', async () => {
+    const tables = [
+      table('bucket', 'buckets', ['ecosystemId']),
+      table('bucket', 'bucket-types', ['ecosystemId']),
+    ]
+    EMPTY.add('/bucket/bucket-types')
+    render(
+      <CrudDataBrowser
+        basePath="/w/all-data"
+        tables={tables}
+        shell={RailProbe}
+        workspace="w"
+        activeSchema="bucket"
+      />,
+    )
+    await screen.findByText('buckets')
+    expect(schemaRows()).toEqual(['bucket'])
+    expect(tableRows()).toEqual(['buckets', '--- Empty', 'bucket-types (No rows yet)'])
   })
 
   // Leaving mid-sweep used to leave every worker draining the queue for an answer nobody would
@@ -192,19 +248,35 @@ describe('CrudDataBrowser scoped to a workspace', () => {
 // A failed probe is not an empty table: a 5xx or a dropped connection says nothing about the
 // rows, and counting it as "none" told a scope full of data "No data yet.".
 describe('CrudDataBrowser when a has-rows probe fails', () => {
-  it('says it couldn’t load, not "No data yet.", when the probes fail', async () => {
+  it('lists every table it couldn’t check, marked so, not "No data yet."', async () => {
     FAIL.set('/bucket/buckets', new AuthHttpError(500, 'boom'))
     FAIL.set('/persona/personas', new TypeError('Failed to fetch'))
     render(<CrudDataBrowser basePath="/w/all-data" tables={TABLES} shell={RailProbe} workspace="w" />)
-    expect(await screen.findByText("Couldn't load this data. Try again.")).toBeInTheDocument()
+    await screen.findByText("bucket (Couldn't check for rows)")
+    expect(schemaRows()).toEqual([
+      "bucket (Couldn't check for rows)",
+      "persona (Couldn't check for rows)",
+    ])
     expect(screen.queryByText('No data yet.')).not.toBeInTheDocument()
   })
 
-  it('still lists only the tables a probe confirmed, never every candidate', async () => {
+  it('lists a table it couldn’t check after the confirmed ones, never hides it', async () => {
     FAIL.set('/persona/personas', new AuthHttpError(502, 'bad gateway'))
     render(<CrudDataBrowser basePath="/w/all-data" tables={TABLES} shell={RailProbe} workspace="w" />)
     await screen.findByText('bucket')
-    expect(schemaRows()).toEqual(['bucket'])
+    expect(schemaRows()).toEqual(['bucket', "persona (Couldn't check for rows)"])
+  })
+
+  it('ranks a couldn’t-check table above the Empty group', async () => {
+    FAIL.set('/persona/personas', new AuthHttpError(502, 'bad gateway'))
+    EMPTY.add('/bucket/buckets')
+    render(<CrudDataBrowser basePath="/w/all-data" tables={TABLES} shell={RailProbe} workspace="w" />)
+    await screen.findByText("persona (Couldn't check for rows)")
+    expect(schemaRows()).toEqual([
+      "persona (Couldn't check for rows)",
+      '--- Empty',
+      'bucket (No rows yet)',
+    ])
   })
 
   it('counts a 403 or a 404 as no rows', async () => {
@@ -240,7 +312,25 @@ describe('CrudDataBrowser across remounts', () => {
     expect(schemaRows()).toEqual(['persona'])
   })
 
-  it('shows the remembered answer on a remount at once, then asks again quietly', async () => {
+  /** Move the clock past the freshness window, so the next mount revalidates. */
+  const staleClock = () => {
+    const now = Date.now() + TABLES_WITH_ROWS_TTL_MS + 1
+    vi.spyOn(Date, 'now').mockReturnValue(now)
+  }
+
+  it('serves a fresh remembered answer on a remount without probing again', async () => {
+    const first = render(browser())
+    await screen.findByText('persona')
+    first.unmount()
+    probes.length = 0
+    render(browser())
+    expect(schemaRows()).toEqual(['bucket', 'persona'])
+    // Settle every effect: a revalidation would have put its probes on the wire by now.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)))
+    expect(probes).toHaveLength(0)
+  })
+
+  it('shows a stale remembered answer on a remount at once, then asks again quietly', async () => {
     EMPTY.add('/persona/personas')
     const first = render(browser())
     await screen.findByText('bucket')
@@ -248,14 +338,29 @@ describe('CrudDataBrowser across remounts', () => {
     // The persona table gains its first row elsewhere — someone added a persona in its feature.
     EMPTY.clear()
     probes.length = 0
+    staleClock()
     render(browser())
     // From memory, in the first render: no Loading…, no blank rail.
-    expect(schemaRows()).toEqual(['bucket'])
+    expect(schemaRows()).toEqual(['bucket', '--- Empty', 'persona (No rows yet)'])
     expect(screen.queryByText('Loading…')).not.toBeInTheDocument()
-    // Then the quiet sweep lists the table that was just filled, instead of hiding it until the
-    // page reloads.
+    // Then the quiet sweep moves the table that was just filled into the main group, instead of
+    // leaving it marked empty until the page reloads.
     await screen.findByText('persona')
     expect(schemaRows()).toEqual(['bucket', 'persona'])
+    expect(probes).toHaveLength(2)
+  })
+
+  it('never serves one user’s remembered answer to another', async () => {
+    const first = render(browser())
+    await screen.findByText('persona')
+    first.unmount()
+    probes.length = 0
+    // Someone else is signed in by the next mount. The answer above is still fresh, and the
+    // session watcher has seen no token change, so only the principal in the key tells them apart.
+    viewer = { id: 'u2', email: 'v@example.com', capabilities: ['admin'] } as AuthUser
+    render(browser())
+    expect(within(screen.getByLabelText('schema rail')).getByText('Loading…')).toBeInTheDocument()
+    await screen.findByText('persona')
     expect(probes).toHaveLength(2)
   })
 
@@ -265,13 +370,14 @@ describe('CrudDataBrowser across remounts', () => {
     first.unmount()
     FAIL.set('/persona/personas', new AuthHttpError(502, 'bad gateway'))
     probes.length = 0
+    staleClock()
     render(browser())
     await waitFor(() => expect(probes).toHaveLength(2))
     // One macrotask: every settled probe's continuation, and the sweep's own, runs before it.
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)))
-    // The failed sweep's partial answer (bucket alone) is not put on screen over the good one.
+    // The failed sweep's partial answer is not put on screen over the good one.
     expect(schemaRows()).toEqual(['bucket', 'persona'])
-    expect(screen.queryByText("Couldn't load this data. Try again.")).not.toBeInTheDocument()
+    expect(screen.queryByText(/Couldn't check/)).not.toBeInTheDocument()
   })
 
   it('asks again after a sweep that failed', async () => {

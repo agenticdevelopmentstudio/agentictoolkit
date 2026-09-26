@@ -27,4 +27,14 @@ describe('ManageFeaturesButton', () => {
     fireEvent.click(screen.getByRole('button', { name: 'close' }))
     expect(screen.queryByRole('dialog', { name: 'manage ecosystem.acme.widgets' })).toBeNull()
   })
+
+  // Controlled: the host owns the dialog somewhere that outlives the button (a rail toolbar
+  // remounts across breakpoints), so the button only asks for it and draws none of its own.
+  it('with onOpen, asks the host and renders no dialog of its own', () => {
+    const onOpen = vi.fn()
+    render(<ManageFeaturesButton ecosystemId="ecosystem.acme.widgets" label="Manage" onOpen={onOpen} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Manage' }))
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
 })

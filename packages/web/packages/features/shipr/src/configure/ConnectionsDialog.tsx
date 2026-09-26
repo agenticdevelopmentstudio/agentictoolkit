@@ -238,12 +238,14 @@ function ConnectionsBody({
   client: ShiprClient;
   onChanged?: () => void;
 }): React.ReactElement {
-  const { ecosystemId, isPending, isError } = useWorkspaceDefaultEcosystemId(
+  const { ecosystemId, isPending, isLoadingError } = useWorkspaceDefaultEcosystemId(
     client.workspace,
   );
 
   if (isPending) return <Notice title="Loading…" />;
-  if (isError) {
+  // `isLoadingError`, not `isError`: a background re-read that fails behind an ecosystem already
+  // resolved is not "could not look it up", and swapped a working pane for this notice.
+  if (isLoadingError) {
     return (
       <Notice
         title="Couldn't read this workspace's integrations."

@@ -158,6 +158,20 @@ extension SessionWatcher {
                 }
                 .store(in: &cancellables)
 
+            // The highlight follows the frontmost window, which moves without
+            // the session list changing — so it redraws on its own signal.
+            // Hopping to main also lets the property settle: `@Published`
+            // publishes from `willSet`, and the rows read the property back.
+            viewModel.$frontmostSessionId
+                .removeDuplicates()
+                .dropFirst()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    guard let self else { return }
+                    self.updateContent(sessions: self.viewModel.sessions, isEmpty: self.viewModel.isEmpty)
+                }
+                .store(in: &cancellables)
+
             viewModel.$lastActionError
                 .combineLatest(viewModel.$lastRequiredPermission)
                 .receive(on: DispatchQueue.main)

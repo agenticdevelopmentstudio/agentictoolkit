@@ -108,3 +108,32 @@ describe("the topic list above the gate reports its scope resolution", () => {
     expect(spinning()).toBe(true);
   });
 });
+
+// `isError` is also true when a re-read fails behind a resolution still in hand; the gate replaced
+// a working pane with the resolution error for it. Only a failure with NO answer is one.
+describe("a failed resolution", () => {
+  it("keeps the pane when a re-read fails behind a resolved scope", () => {
+    useWorkspaceDefaultEcosystemId.mockReturnValue({
+      ecosystemId: "eco-1",
+      canManage: true,
+      isError: true,
+      isLoadingError: false,
+      isPending: false,
+      isFetching: false,
+    });
+    renderGate();
+    expect(screen.getByText("pane for eco-1")).not.toBeNull();
+  });
+
+  it("replaces the pane when the first read failed", () => {
+    useWorkspaceDefaultEcosystemId.mockReturnValue({
+      canManage: true,
+      isError: true,
+      isLoadingError: true,
+      isPending: false,
+      isFetching: false,
+    });
+    renderGate();
+    expect(screen.queryByText(/pane for/)).toBeNull();
+  });
+});

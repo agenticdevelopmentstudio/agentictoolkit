@@ -25,8 +25,8 @@ import { useTenantId } from "../tenant";
  * on their own QueryClient (two caches, double fetch, split invalidation).
  *
  * `ecosystemId` stays undefined while loading AND when there is no infrastructure ecosystem;
- * `isError` distinguishes a failed resolution (`retry: false` — one shot) so callers can show a
- * retry surface instead of a dead pane, and `isPending` separates the two undefined cases for the
+ * `isLoadingError` distinguishes a failed resolution (`retry: false` — one shot) so callers can
+ * show a retry surface instead of a dead pane, and `isPending` separates the two undefined cases for the
  * callers that must not act on "no infrastructure ecosystem" until it is actually the answer.
  */
 export function useWorkspaceDefaultEcosystemId(workspaceSlug: string | undefined): {
@@ -35,7 +35,14 @@ export function useWorkspaceDefaultEcosystemId(workspaceSlug: string | undefined
    *  — a plain org member. Defaults to true while loading / when there is no infra row, so a
    *  host only gates when the resolution definitively says the caller can't manage. */
   canManage: boolean;
+  /** The LAST read failed — including a background re-read behind an answer still on screen. For a
+   *  gate that replaces the pane with an error, read {@link isLoadingError} instead: gating on this
+   *  one threw away a perfectly good cached resolution the moment a refetch hiccupped. */
   isError: boolean;
+  /** The read failed and there is NO answer — the first read failed, so `ecosystemId` is undefined
+   *  because nobody knows it, not because there is none. The flag a "couldn't resolve" gate wants:
+   *  a failed re-read behind a cached answer keeps that answer, and this stays false. */
+  isLoadingError: boolean;
   /** No answer yet — the query is in flight. Distinct from a resolved `ecosystemId: undefined`,
    *  which is the definitive "there is no infrastructure ecosystem". A caller that PREVIEWS
    *  something derived from the id (an address prefix) must show nothing while this is true
@@ -76,6 +83,7 @@ export function useWorkspaceDefaultEcosystemId(workspaceSlug: string | undefined
     ecosystemId: query.data?.id ?? undefined,
     canManage: query.data?.canManage ?? true,
     isError: query.isError,
+    isLoadingError: query.isLoadingError,
     isPending: query.isPending,
     isFetching: query.isFetching,
   };

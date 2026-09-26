@@ -2,7 +2,7 @@ import Foundation
 
 extension SessionWatcher {
     /// Represents the supported click actions that can be triggered when a user clicks a session row.
-    public enum SessionWatcherClickAction: String, CaseIterable {
+    public enum SessionWatcherClickAction: String, CaseIterable, Sendable {
         /// Opens the default terminal app at the session's working directory.
         case openTerminal = "open_terminal"
 
@@ -23,6 +23,11 @@ extension SessionWatcher {
 
         /// Sends a macOS notification with session details.
         case sendNotification = "send_notification"
+
+        /// What a click does until the user picks otherwise: go to the session.
+        /// `UserSettings.clickAction` defaults to this one's raw value, and an
+        /// unparsable stored value falls back to it, so the two can't disagree.
+        public static let defaultAction: SessionWatcherClickAction = .activateWindow
 
         /// Human-readable display name for UI.
         public var displayName: String {

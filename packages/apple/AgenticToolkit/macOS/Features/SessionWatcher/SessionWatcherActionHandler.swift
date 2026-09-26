@@ -59,21 +59,63 @@ extension SessionWatcher {
         public static let clickActionKey = "click_action"
         public static let customCommandKey = "custom_command_template"
 
-        // MARK: - Accessibility
-
-        /// Checks whether accessibility access has been granted. Does NOT prompt.
-        public static var isAccessibilityTrusted: Bool {
-            AXIsProcessTrusted()
-        }
-
         // MARK: - Properties
 
         private let settingsStore: SettingsStore
 
+        /// Whether window activation may use the Accessibility API. The host's
+        /// to opt into, and only a host that holds the grant should.
+        ///
+        /// Off, the handler never asks TCC about Accessibility — not even to
+        /// learn the answer is no. An app without the grant calling
+        /// `AXIsProcessTrusted()` wakes `universalAccessAuthWarn`, whose
+        /// `TCCAccessCopyInformation` sweep holds tccd's lock for ~10s; every
+        /// other TCC check queues behind it, WindowServer's included, and the
+        /// whole machine stops responding. Activation then goes only as far as
+        /// the permission-free routes reach: an iTerm2 or Terminal.app tab by
+        /// Apple Event, or the session's terminal app brought forward.
+        public let usesAccessibility: Bool
+
+        /// The Accessibility trust check, consulted only when `usesAccessibility`
+        /// is on. Injected so tests can count probes.
+        private let isAccessibilityTrusted: () -> Bool
+
         // MARK: - Initialization
 
-        public init(settingsStore: SettingsStore) {
+        public init(
+            settingsStore: SettingsStore,
+            usesAccessibility: Bool = false,
+            isAccessibilityTrusted: @escaping () -> Bool = { SystemAccessibilityPermission.isGranted }
+        ) {
             self.settingsStore = settingsStore
+            self.usesAccessibility = usesAccessibility
+            self.isAccessibilityTrusted = isAccessibilityTrusted
+        }
+
+        /// The Accessibility gate every AX route passes: the host opted in AND
+        /// the grant is there. Short-circuits, so an opted-out host never probes.
+        private var canUseAccessibility: Bool {
+            usesAccessibility && isAccessibilityTrusted()
+        }
+
+        /// Bundle ids of the terminal apps a session's `TERM_PROGRAM` names.
+        static let termProgramBundleIDs: [String: String] = [
+            "iTerm.app": "com.googlecode.iterm2",
+            "Apple_Terminal": "com.apple.Terminal",
+            "WarpTerminal": "dev.warp.Warp-Stable",
+            "vscode": "com.microsoft.VSCode",
+            "tmux": "com.apple.Terminal"
+        ]
+
+        /// Brings the session's terminal app forward — no permission needed.
+        /// False when the terminal is unknown or not running.
+        @discardableResult
+        static func activateTerminalApp(termProgram: String) -> Bool {
+            guard let bundleID = termProgramBundleIDs[termProgram],
+                  let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else {
+                return false
+            }
+            return app.activate()
         }
 
         // MARK: - Configuration
@@ -83,7 +125,7 @@ extension SessionWatcher {
             let raw: String = MainActor.assumeIsolated {
                 settingsStore.get(UserSettings.clickAction)
             }
-            return SessionWatcherClickAction(rawValue: raw) ?? .activateWindow
+            return SessionWatcherClickAction(rawValue: raw) ?? .defaultAction
         }
 
         public func setAction(_ action: SessionWatcherClickAction) {
@@ -295,8 +337,17 @@ extension SessionWatcher {
                 if bestMatch != nil { break }
             }
 
+            // A host that doesn't use Accessibility gets Warp forward and no
+            // further: picking the window out is AX, and so is asking whether AX
+            // is allowed.
+            guard usesAccessibility else {
+                logger.info("activateWarp: Accessibility not in use — activating Warp only")
+                warpApp.activate()
+                return .success
+            }
+
             // Check accessibility permission upfront — don't re-prompt if already denied
-            guard Self.isAccessibilityTrusted else {
+            guard isAccessibilityTrusted() else {
                 logger.error("activateWarp: Accessibility permission not granted")
                 return .failure(.permissionDenied(
                     "Accessibility access is required to raise Warp windows. Grant it in System Settings.",
@@ -390,7 +441,7 @@ extension SessionWatcher {
                     log.append("  iTerm session-id strategy: \(session.termSessionId)")
                     let uuid = session.termSessionId.split(separator: ":").last.map(String.init)
                         ?? session.termSessionId
-                    switch activateITerm(target: .iTermSession(uuid: uuid)) {
+                    switch activateTab(target: .iTermSession(uuid: uuid)) {
                     case .activated:
                         log.append("  iTerm session-id activation succeeded")
                         return .success
@@ -403,7 +454,7 @@ extension SessionWatcher {
                 }
                 if session.pid > 0, let tty = TerminalTextInjector.ttyForPid(session.pid) {
                     log.append("  iTerm TTY strategy: pid=\(session.pid) tty=\(tty)")
-                    switch activateITerm(target: .iTermTTY(tty: tty)) {
+                    switch activateTab(target: .iTermTTY(tty: tty)) {
                     case .activated:
                         log.append("  iTerm TTY activation succeeded")
                         return .success
@@ -427,10 +478,39 @@ extension SessionWatcher {
                 }
             }
 
+            // Terminal.app: select the tab by the session's tty, over the same
+            // Apple Event route as iTerm2 — Automation, not Accessibility.
+            if session.termProgram == "Apple_Terminal",
+               session.pid > 0, let tty = TerminalTextInjector.ttyForPid(session.pid) {
+                log.append("  Terminal TTY strategy: pid=\(session.pid) tty=\(tty)")
+                switch activateTab(target: .terminalTTY(tty: tty)) {
+                case .activated:
+                    log.append("  Terminal TTY activation succeeded")
+                    return .success
+                case .permissionDenied(let error):
+                    log.append("  Terminal TTY activation denied — needs Automation permission")
+                    return .failure(error)
+                case .notFound:
+                    log.append("  Terminal TTY activation: no match")
+                }
+            }
+
+            // Everything past here reads other apps' windows through the
+            // Accessibility API. A host that doesn't use it stops at bringing the
+            // session's terminal forward — without asking TCC anything.
+            guard usesAccessibility else {
+                if Self.activateTerminalApp(termProgram: session.termProgram) {
+                    log.append("  Accessibility not in use — activated the terminal app")
+                    return .success
+                }
+                let term = session.termProgram.isEmpty ? "its terminal" : session.termProgram
+                return .failure(.commandFailed("Couldn't find the window for this session — \(term) isn't running."))
+            }
+
             // Strategy 2 onward scans windows via the Accessibility API, which needs
-            // Accessibility permission. Check it here — after the iTerm2 path — so an
-            // iTerm2 switch isn't blocked on the wrong permission.
-            guard Self.isAccessibilityTrusted else {
+            // Accessibility permission. Check it here — after the tab paths — so an
+            // iTerm2 or Terminal switch isn't blocked on the wrong permission.
+            guard isAccessibilityTrusted() else {
                 return .failure(.permissionDenied(
                     "Accessibility access is required to discover windows. Grant it in System Settings.",
                     requiredPermission: .accessibility
@@ -583,33 +663,6 @@ extension SessionWatcher {
             return .success
         }
 
-        private func raiseWindow(pid: pid_t, windowName: String) {
-            guard Self.isAccessibilityTrusted else {
-                logger.debug("raiseWindow: accessibility not trusted, skipping")
-                return
-            }
-
-            let appElement = AXUIElementCreateApplication(pid)
-            var windowsRef: CFTypeRef?
-            let result = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
-            guard result == .success, let windows = windowsRef as? [AXUIElement] else {
-                logger.debug("raiseWindow: AX query failed (\(result.rawValue)) for PID \(pid)")
-                return
-            }
-
-            for window in windows {
-                var titleRef: CFTypeRef?
-                if AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef) == .success,
-                   let title = titleRef as? String,
-                   title == windowName {
-                    let raiseResult = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-                    logger.debug("raiseWindow: raised '\(windowName, privacy: .public)' result=\(raiseResult.rawValue)")
-                    return
-                }
-            }
-            logger.debug("raiseWindow: no AX window matched '\(windowName, privacy: .public)'")
-        }
-
         // MARK: - Open Transcript
 
         private func openTranscript(for session: SessionWatcherSession) -> SessionWatcherActionResult {
@@ -707,24 +760,25 @@ extension SessionWatcher {
             return .success
         }
 
-        // MARK: - iTerm2 Pane Activation
+        // MARK: - Terminal Tab Activation
 
-        /// Outcome of attempting to activate an iTerm2 tab/pane.
-        private enum ITermActivation {
+        /// Outcome of attempting to activate an iTerm2 or Terminal.app tab/pane.
+        private enum TabActivation {
             case activated
             case notFound
             case permissionDenied(SessionWatcherActionError)
         }
 
-        /// Activates the iTerm2 tab/pane matching `target`, via the shared
-        /// `TerminalTextInjector` script builder (`text: nil` → select-and-raise only).
+        /// Activates the iTerm2 or Terminal.app tab/pane matching `target`, via
+        /// the shared `TerminalTextInjector` script builder (`text: nil` →
+        /// select-and-raise only).
         ///
-        /// Driving iTerm2 via AppleScript needs Automation permission; a denial
+        /// Driving either terminal via AppleScript needs Automation permission; a denial
         /// surfaces as `errAEEventNotPermitted` (-1743), which we map to a
         /// `.permissionDenied` error (pointing at the Automation pane) rather than
         /// swallowing it as a generic miss — that swallowing was why a missing
         /// Automation grant looked like a failed Accessibility check.
-        private func activateITerm(target: TerminalTextInjector.Target) -> ITermActivation {
+        private func activateTab(target: TerminalTextInjector.Target) -> TabActivation {
             let script = TerminalTextInjector.script(for: target, text: nil, raising: true)
             // Click actions arrive on the main actor; NSAppleScript must run there.
             let result = MainActor.assumeIsolated {

@@ -10,7 +10,10 @@ import AgenticToolkitCore
 extension UserSettings {
 
     /// Raw value of the configured `SessionWatcherClickAction` for session list clicks.
-    public static var clickAction = UserSetting<String>("click_action", default: "openTerminal")
+    public static var clickAction = UserSetting<String>(
+        "click_action",
+        default: SessionWatcher.SessionWatcherClickAction.defaultAction.rawValue
+    )
 
     /// Custom command template (shell expression) used by the custom-command click action.
     public static var customCommandTemplate = UserSetting<String>("custom_command_template", default: "")

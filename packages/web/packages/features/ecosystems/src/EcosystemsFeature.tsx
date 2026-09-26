@@ -32,6 +32,7 @@ import {
 import { heldTopics, settingsLast } from "./heldTopics";
 import { EcosystemSettingsPane } from "./EcosystemSettingsPane";
 import { ManageFeaturesButton } from "./ManageFeaturesButton";
+import { ManageFeaturesDialog } from "./ManageFeaturesDialog";
 import {
   EcosystemDetail,
   ecoBlank,
@@ -64,12 +65,13 @@ export interface EcosystemsTopicConfig {
   description?: string;
   dividerAfter?: boolean;
   /** The catalog feature keys behind this row. When set, the row is drawn only while the scoped
-   *  ecosystem holds one of them as `active` (see `heldTopics`) — a still-provisioning feature
-   *  can fail partway, so this list must not open a row onto a pane whose storage isn't there.
-   *  The Manage features dialog reads a wider set (`presentFeatureKeys`, provisioning included)
-   *  since it only needs to know a feature is already spoken for (Mike, 2026-09-25). Omit for a
-   *  row that is not a catalog feature (Settings, Child Ecosystems, a feature site's own rows) —
-   *  it is always drawn. */
+   *  ecosystem holds one of them (see `heldTopics`). One that is only still `provisioning` is
+   *  drawn MARKED — "Provisioning…" under its label, and a "still being set up" notice in place
+   *  of its pane — since a still-provisioning feature can fail partway, and the row must not open
+   *  onto a pane whose storage isn't there; hiding it instead left a feature the Manage features
+   *  dialog ticks nowhere in this list. Omit for a row that is not a catalog feature (Settings,
+   *  Child Ecosystems, a feature site's own rows) — it is always drawn. When NO row sets this, the
+   *  list is not a features list: it gets no "Features" heading and no Manage features button. */
   features?: readonly string[];
 }
 
@@ -384,7 +386,7 @@ export function EcosystemsFeature({
   // own when it does not, exactly matching which create scope each mount uses. Shared react-query
   // cache entry — this costs no extra fetch on a page that already resolves it.
   const home = useWorkspaceDefaultEcosystemId(slug);
-  const createParentRdid: EcosystemParentRdid = home.isPending || home.isError
+  const createParentRdid: EcosystemParentRdid = home.isPending || home.isLoadingError
     ? // Unresolved, not "no parent": previewing a root address for a home ecosystem that has not
       // answered (or whose one-shot lookup FAILED) would show — and probe — an identifier the
       // create is not going to use. A failed resolution is the sharper case, because collapsing it
@@ -505,6 +507,19 @@ export function EcosystemsFeature({
     </div>
   );
 
+  // The ecosystem whose Manage features dialog is open, if any. Held HERE and the dialog rendered
+  // beside the create dialog, not inside the rail: the button lives in ResourceExplorer's rail
+  // toolbar, and that rail is torn down and rebuilt across breakpoints, so a dialog it owned closed
+  // under the user mid-pick — ticks gone, and an apply in flight orphaned with no one to report it.
+  const [managingFeaturesOf, setManagingFeaturesOf] = useState<string | null>(null);
+  const manageDialog =
+    managingFeaturesOf != null ? (
+      <ManageFeaturesDialog
+        ecosystemId={managingFeaturesOf}
+        onClose={() => setManagingFeaturesOf(null)}
+      />
+    ) : null;
+
   // The topics list's Manage features button, scoped to the ecosystem those topics belong to.
   // Withheld where the pane would be the not-manageable notice: a button whose one action would
   // fail is worse than no button.
@@ -513,6 +528,7 @@ export function EcosystemsFeature({
       <ManageFeaturesButton
         ecosystemId={ecoId}
         label={`Manage ${singular.toLowerCase()} features`}
+        onOpen={() => setManagingFeaturesOf(ecoId)}
       />
     ) : null;
 
@@ -521,8 +537,26 @@ export function EcosystemsFeature({
   // `activeTopic` keeps a deep link's own row while that read is in flight (see heldTopics).
   const featureKeyed = topicsConfig.some((t) => t.features != null);
   const provisionedQuery = useProvisionedFeatures(featureKeyed ? scopedId : undefined);
+  // `isLoadingError`: only a read that failed with NO answer shows every row. A failed REFRESH keeps
+  // the rows its last answer held — reading `isError` flashed every product topic, held or not,
+  // whenever a background refetch hiccupped.
   const shownTopics = settingsLast(
-    heldTopics(topicsConfig, provisionedQuery.isError ? null : provisionedQuery.data, activeTopic),
+    heldTopics(
+      topicsConfig,
+      provisionedQuery.isLoadingError ? null : provisionedQuery.data,
+      activeTopic,
+    ),
+  );
+  // A feature still being provisioned: drawn (the Manage features dialog ticks it, and a list that
+  // hid it left it nowhere on screen), but never opened onto — it can have stopped partway, and its
+  // storage may not be there.
+  const provisioningPane = (label: string) => (
+    <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+      <EmptyState
+        title={`${label} is still being set up`}
+        description={`It opens here once provisioning finishes. If it stays like this, remove it and add it again from Manage ${singular.toLowerCase()} features.`}
+      />
+    </div>
   );
 
   const topics: ResourceTopic[] = shownTopics.map((t) => ({
@@ -530,9 +564,11 @@ export function EcosystemsFeature({
     label: t.label,
     icon: t.icon,
     description: t.description,
+    ...(t.provisioning ? { sublabel: "Provisioning…" } : {}),
     dividerAfter: t.dividerAfter,
     render: (ecoId, titleFor, leaf, subLeafFor) => {
       if (!canManageScoped(ecoId)) return notManageablePane;
+      if (t.provisioning) return provisioningPane(t.label);
       // FIRST refusal goes to the host, for EVERY topic id — including the ones this package
       // can render itself. A host mounting this feature under its own concept may legitimately
       // put its OWN pane behind a reserved-looking id: the gamification site's rail is
@@ -746,7 +782,14 @@ export function EcosystemsFeature({
   // A slugged host whose ONE default-resolution request failed (retry: false): without a
   // defined surface the promoted rail holds "Loading…" forever with dead topic clicks. A
   // reload retries the lookup; deep-linked /<ecoId> paths never hit this (slug unused).
-  if (!listFirst && workspaceSlug != null && activeEcoId == null && defaultIdQuery.isError) {
+  // `isLoadingError`, not `isError`: a failed background re-read behind a default already
+  // resolved (and in use) is not "didn't resolve", and replaced a working rail with this notice.
+  if (
+    !listFirst &&
+    workspaceSlug != null &&
+    activeEcoId == null &&
+    defaultIdQuery.isLoadingError
+  ) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
         <EmptyState
@@ -857,9 +900,11 @@ export function EcosystemsFeature({
             getSearchText: (e) => e.identifier,
           }}
           // The selected entity's topics are the features it holds, so the list is headed
-          // "Features" — the entity's own name still reads in the breadcrumb.
-          topicsTitle="Features"
-          topicsTitleActions={manageFeaturesButton}
+          // "Features" — the entity's own name still reads in the breadcrumb. Only when some row IS
+          // a feature: a host whose rows name none (Games, Gamification) lists its own topics, and
+          // a Features heading and a Manage button that changes none of them would both be wrong.
+          topicsTitle={featureKeyed ? "Features" : undefined}
+          topicsTitleActions={featureKeyed ? manageFeaturesButton : undefined}
           renderDialog={(onClose, onCreated) => (
             // The workspace New Product form: Display Name + Slug are typed; the
             // identifier is READ-ONLY, derived as <the workspace's home ecosystem>.<slug>
@@ -902,6 +947,7 @@ export function EcosystemsFeature({
         {/* The Child Ecosystems topic's "New" opens the feature-owned dialog — render it
             here too so that affordance works if a host's topic rail includes the topic. */}
         {createDialog}
+        {manageDialog}
       </>
     );
   }
@@ -924,9 +970,10 @@ export function EcosystemsFeature({
         topics={topics}
         topicAliases={GROUP_MEMBER_GROUP}
         newLabel={`New ${singular}…`}
-        topicsTitleActions={manageFeaturesButton}
+        topicsTitleActions={featureKeyed ? manageFeaturesButton : undefined}
       />
       {createDialog}
+      {manageDialog}
     </>
   );
 }

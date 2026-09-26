@@ -36,6 +36,8 @@ export interface EcosystemScopeResolution {
   /** False only when the resolution definitively says the caller may VIEW this workspace but not
    *  MANAGE its infrastructure ecosystem (a plain org member). */
   canManage: boolean;
+  /** The last lookup failed. The group shows its retry surface only when that failure left NO
+   *  `ecosystemId`: a re-read failing behind a resolution already in hand keeps the panes on it. */
   isError: boolean;
   /** True until the lookup settles. An undefined `ecosystemId` once this is false is the settled
    *  "this workspace has no infrastructure ecosystem" — and so is a failed lookup, which is why
@@ -103,7 +105,11 @@ export function StorageGroup({
   renderAllData?: (ecosystemId: string | undefined) => ReactNode;
 }): ReactElement {
   const { ecosystemId, canManage, isError, isPending } = scope;
-  if (isError) return <WorkspaceResolutionError />;
+  // `isError && no id`, not `isError`: react-query's `isError` stays true when a background re-read
+  // fails behind an answer still on screen, and gating on it alone replaced a working Storage group
+  // with "couldn't load" over a hiccup. Read off the id rather than a hook-only flag, so a host
+  // that builds its own resolution gets the same rule.
+  if (isError && ecosystemId === undefined) return <WorkspaceResolutionError />;
   // A plain org member can view the workspace but not manage its infrastructure ecosystem — its
   // reads/writes would 403 per-pane, so show the honest notice instead.
   if (ecosystemId && !canManage) return <WorkspaceNotManageable feature="Storage" />;

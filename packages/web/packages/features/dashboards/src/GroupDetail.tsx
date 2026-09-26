@@ -40,6 +40,9 @@ export function groupValidate(
 ): string | null {
   if (!draft.name.trim()) return "Group name is required.";
   const slug = draft.slug.trim();
+  // Required-ness is unconditional: `unchangedFromStored("", "")` is true, so exempting BEFORE this
+  // check would let an empty slug through whenever the stored one was empty too.
+  if (!slug) return "Slug is required.";
   if (!unchangedFromStored(slug, storedSlug)) {
     const slugError = validateSlug(slug, reserved);
     if (slugError) return slugError;

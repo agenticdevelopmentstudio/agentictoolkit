@@ -88,6 +88,43 @@ interface CrudDataBrowserCommon {
   ecosystemId?: string
 }
 
+/**
+ * What a scoped browser's has-rows sweep said about one listed table, best first: it holds rows;
+ * its probe failed, so nobody knows; it is listable and holds none. The order is the rail's order.
+ */
+type RowState = 'rows' | 'unknown' | 'empty'
+const ROW_STATE_RANK: Record<RowState, number> = { rows: 0, unknown: 1, empty: 2 }
+/** The dim second line a non-populated row carries, so "couldn't check" never reads as "empty". */
+const ROW_STATE_SUBLABEL: Record<RowState, string | undefined> = {
+  rows: undefined,
+  unknown: "Couldn't check for rows",
+  empty: 'No rows yet',
+}
+/** The caption over the secondary group of rows with nothing in them. */
+const EMPTY_GROUP_LABEL = 'Empty'
+
+/**
+ * Rail rows for `entries`, best {@link RowState} first (then by name), with the rows holding
+ * nothing set apart as a secondary "Empty" group under a divider — dim, but still clickable, since
+ * an empty table is exactly where a viewer creates its first row.
+ */
+function railItems(
+  entries: { id: string; state: RowState }[],
+  icon: ReactNode,
+): TopicDetailItem[] {
+  const sorted = [...entries].sort(
+    (a, b) => ROW_STATE_RANK[a.state] - ROW_STATE_RANK[b.state] || a.id.localeCompare(b.id),
+  )
+  const firstEmpty = sorted.findIndex((e) => e.state === 'empty')
+  return sorted.map((e, i) => ({
+    id: e.id,
+    label: e.id,
+    icon,
+    ...(ROW_STATE_SUBLABEL[e.state] ? { sublabel: ROW_STATE_SUBLABEL[e.state] } : {}),
+    ...(i === firstEmpty - 1 ? { dividerAfter: true, dividerLabel: EMPTY_GROUP_LABEL } : {}),
+  }))
+}
+
 /** Whether `meta`'s rows belong to an ecosystem — the only tables an ecosystem scope can narrow. */
 function hasEcosystemColumn(meta: CrudTableMeta): boolean {
   return meta.columns.some((c) => c.name === 'ecosystemId')
@@ -147,7 +184,7 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
   // would either flash admin tables at someone who can't open them, or make an admin's
   // deep-linked schema vanish and pop back a paint later. Empty-then-populated is the one
   // sequence that never shows a wrong answer.
-  const { isAdmin: viewerIsAdmin, ready: viewerReady } = useViewer()
+  const { isAdmin: viewerIsAdmin, ready: viewerReady, principal } = useViewer()
   const candidates = useMemo(
     () =>
       viewerReady
@@ -170,11 +207,12 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
   // controlled `selection`. An unknown schema/table falls back to "nothing open".
   const rawSchema = selection ? selection.schema : activeSchema ?? null
   const rawTable = selection ? selection.table : activeTable ?? null
-  // A SCOPED browser lists only the tables holding rows in its scope ("in All Data only show
+  // A SCOPED browser leads with the tables holding rows in its scope ("in All Data only show
   // tables and schemas in the list with data in them", Mike, 2026-09-24). The unscoped
-  // cross-tenant browser stays a catalogue of every table. Only a table a probe CONFIRMED holds
-  // rows is listed, even when other probes failed: falling back to every candidate would put
-  // back the tables with nothing in this scope, so a failed sweep says so in the rail instead.
+  // cross-tenant browser stays a catalogue of every table. A table whose probe FAILED is listed
+  // after them, marked "Couldn't check for rows": hiding it hid tables that hold rows. A table
+  // that answered with no rows is listed last, in a dim "Empty" group — hiding it left no way to
+  // create its first row. A table this viewer cannot list (403/404) is not listed at all.
   // The open table is probed first and opens on its own probe's answer, instead of waiting on the
   // whole sweep; until the sweep ends the rail holds at most that one confirmed table, marked busy.
   const openCandidate =
@@ -183,54 +221,82 @@ export function CrudDataBrowser(props: CrudDataBrowserProps) {
       : undefined
   const {
     populated,
+    empty: emptyTables,
+    unknown: uncheckedTables,
     failed: probeFailed,
     firstWithRows,
   } = useTablesWithRows(candidates, viewerReady && listFilter ? listFilter : null, {
     scopeEcosystemId: ecosystemId,
     first: openCandidate?.key ?? null,
+    principal,
   })
   // Still asking which tables hold rows (only a scoped browser asks).
   const sweeping = viewerReady && !!listFilter && populated === null
   const ready = viewerReady && !sweeping
-  const allTables = useMemo(
-    () =>
-      !listFilter
-        ? candidates
-        : candidates.filter((t) => (populated ? populated.has(t.key) : t.key === firstWithRows)),
-    [candidates, listFilter, populated, firstWithRows],
-  )
+  // Every listed table with what the sweep said about it. Unscoped, every candidate "has rows" —
+  // the catalogue is not swept, so it carries no marks.
+  const listed = useMemo(() => {
+    const out = new Map<string, { meta: CrudTableMeta; state: RowState }>()
+    for (const t of candidates) {
+      const state: RowState | null = !listFilter
+        ? 'rows'
+        : populated
+          ? populated.has(t.key)
+            ? 'rows'
+            : uncheckedTables?.has(t.key)
+              ? 'unknown'
+              : emptyTables?.has(t.key)
+                ? 'empty'
+                : null
+          : t.key === firstWithRows
+            ? 'rows'
+            : null
+      if (state) out.set(t.key, { meta: t, state })
+    }
+    return out
+  }, [candidates, listFilter, populated, uncheckedTables, emptyTables, firstWithRows])
 
-  // level 0 = distinct schemas (sorted); level 1 = the open schema's tables (sorted). Schemas
-  // are derived from the FILTERED tables, so a schema whose every table is admin-only (or an
-  // explicit `tables` prop narrowed to none) drops out of the rail entirely rather than opening
-  // onto an empty table list.
-  const schemas = useMemo(
-    () => [...new Set(allTables.map((t) => t.schema))].sort((a, b) => a.localeCompare(b)),
-    [allTables],
-  )
-  const schemaSelected = rawSchema && schemas.includes(rawSchema) ? rawSchema : null
+  // level 0 = distinct schemas; level 1 = the open schema's tables. Schemas are derived from the
+  // LISTED tables, so a schema whose every table is admin-only, refused (403/404), or cut by an
+  // explicit `tables` prop drops out of the rail entirely rather than opening onto an empty list.
+  // A schema takes the best state among its tables: one populated table puts it in the main group.
+  const schemaStates = useMemo(() => {
+    const best = new Map<string, RowState>()
+    for (const { meta, state } of listed.values()) {
+      const prev = best.get(meta.schema)
+      if (!prev || ROW_STATE_RANK[state] < ROW_STATE_RANK[prev]) best.set(meta.schema, state)
+    }
+    return best
+  }, [listed])
+  const schemaSelected = rawSchema && schemaStates.has(rawSchema) ? rawSchema : null
   const tablesInSchema = useMemo(
     () =>
       schemaSelected
-        ? allTables
-            .filter((t) => t.schema === schemaSelected)
-            .sort((a, b) => a.table.localeCompare(b.table))
+        ? [...listed.values()].filter(({ meta }) => meta.schema === schemaSelected)
         : [],
-    [allTables, schemaSelected],
+    [listed, schemaSelected],
   )
   const tableSelected =
     schemaSelected && rawTable
-      ? tablesInSchema.find((t) => t.table === rawTable) ?? null
+      ? tablesInSchema.find(({ meta }) => meta.table === rawTable)?.meta ?? null
       : null
 
   // Row icons name what a row IS (a schema = a folder of tables; a table): without them every
   // row falls back to the rail's placeholder circle, which reads as "unfinished".
   const schemaItems = useMemo<TopicDetailItem[]>(
-    () => schemas.map((s) => ({ id: s, label: s, icon: <FolderTree /> })),
-    [schemas],
+    () =>
+      railItems(
+        [...schemaStates].map(([id, state]) => ({ id, state })),
+        <FolderTree />,
+      ),
+    [schemaStates],
   )
   const tableItems = useMemo<TopicDetailItem[]>(
-    () => tablesInSchema.map((t) => ({ id: t.table, label: t.table, icon: <Table2 /> })),
+    () =>
+      railItems(
+        tablesInSchema.map(({ meta, state }) => ({ id: meta.table, state })),
+        <Table2 />,
+      ),
     [tablesInSchema],
   )
   const tableSelectedId = tableSelected?.table ?? null

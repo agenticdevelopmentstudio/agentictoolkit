@@ -25,12 +25,24 @@ describe("heldTopics", () => {
     expect(ids(heldTopics(TOPICS, [row("signin-apps")]))).toEqual(["authentication", "settings"]);
   });
 
-  // `provisioning` is in the ecosystem and the dialog ticks it too, but this list draws only what
-  // can actually be navigated into — a still-provisioning feature can fail partway and open onto
-  // storage that was never created (Mike, 2026-09-25).
-  it("withholds a provisioning row, same as a removed one", () => {
+  // `provisioning` is in the ecosystem and the dialog ticks it, so the list shows it too — hiding
+  // it left a feature stuck in provisioning nowhere on screen but a ticked box. It is MARKED, so
+  // the caller shows its status instead of opening onto storage that may not be there.
+  it("shows a provisioning row, marked, and still withholds a removed one", () => {
     const got = heldTopics(TOPICS, [row("storage", "provisioning"), row("dashboards", "removed")]);
-    expect(ids(got)).toEqual(["settings"]);
+    expect(ids(got)).toEqual(["storage", "settings"]);
+    expect(got.find((t) => t.id === "storage")?.provisioning).toBe(true);
+    expect(got.find((t) => t.id === "settings")?.provisioning).toBeUndefined();
+  });
+
+  // A group row with one feature active and another provisioning opens normally.
+  it("does not mark a row when any of its features is already active", () => {
+    const got = heldTopics(TOPICS, [
+      row("user-authentication", "provisioning"),
+      row("signin-apps", "active"),
+    ]);
+    expect(ids(got)).toEqual(["authentication", "settings"]);
+    expect(got[0]?.provisioning).toBeUndefined();
   });
 
   it("an ecosystem holding nothing shows only the unkeyed rows", () => {
@@ -56,7 +68,9 @@ describe("heldTopics", () => {
 
   // A failed read must not make a product look empty.
   it("shows every row when the read failed", () => {
-    expect(ids(heldTopics(TOPICS, null))).toEqual(ids(TOPICS));
+    const got = heldTopics(TOPICS, null);
+    expect(ids(got)).toEqual(ids(TOPICS));
+    expect(got.some((t) => t.provisioning)).toBe(false);
   });
 });
 

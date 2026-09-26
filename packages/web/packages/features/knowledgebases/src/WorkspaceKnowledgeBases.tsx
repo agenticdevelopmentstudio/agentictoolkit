@@ -17,7 +17,9 @@ import { WorkspaceNotManageable, WorkspaceResolutionError } from "@agentic-toolk
  * (StorageGroup): a failed resolution, a workspace the caller can view but not manage, and "still
  * asking" vs "there is none" each get their honest answer instead of a pane that reads an undefined
  * scope as the caller's token ecosystem. The error gate stays first: a failed lookup settles with no
- * id and no pending flag, exactly like "none".
+ * id and no pending flag, exactly like "none". It gates on `isLoadingError` — a failure with NO
+ * answer — not `isError`, which is also true when a background re-read fails behind a resolution
+ * still in hand, and replaced a working pane with an error for it.
  */
 export function WorkspaceKnowledgeBases({
   workspaceSlug,
@@ -26,9 +28,9 @@ export function WorkspaceKnowledgeBases({
   workspaceSlug: string | undefined;
   children: (ecosystemId: string) => ReactElement;
 }): ReactElement {
-  const { ecosystemId, canManage, isError, isPending } =
+  const { ecosystemId, canManage, isLoadingError, isPending } =
     useWorkspaceDefaultEcosystemId(workspaceSlug);
-  if (isError) return <WorkspaceResolutionError />;
+  if (isLoadingError) return <WorkspaceResolutionError />;
   if (!ecosystemId) {
     return <EmptyState title={isPending ? "Loading…" : "This workspace has no ecosystem yet."} />;
   }

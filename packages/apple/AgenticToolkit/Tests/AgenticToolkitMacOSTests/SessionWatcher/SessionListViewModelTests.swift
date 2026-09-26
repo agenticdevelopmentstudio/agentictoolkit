@@ -36,6 +36,15 @@ private final class FakeSessionListSource: SessionWatcher.SessionListSource, @un
     }
 }
 
+/// Counts Accessibility trust checks in place of `AXIsProcessTrusted()`.
+final class TrustProbe {
+    private(set) var calls = 0
+    func check() -> Bool {
+        calls += 1
+        return false
+    }
+}
+
 @MainActor
 final class SessionListViewModelTests: XCTestCase {
 
@@ -199,23 +208,14 @@ final class SessionListViewModelTests: XCTestCase {
 
     // MARK: - Accessibility probing
 
-    /// Counts Accessibility trust checks in place of `AXIsProcessTrusted()`.
-    private final class TrustProbe {
-        private(set) var calls = 0
-        func check() -> Bool {
-            calls += 1
-            return false
-        }
-    }
-
     private func makeProbedViewModel(
-        tracksFrontmostWindow: Bool,
+        usesAccessibility: Bool,
         probe: TrustProbe
     ) -> SessionWatcher.SessionListViewModel {
         let viewModel = SessionWatcher.SessionListViewModel(
             source: FakeSessionListSource([]),
             settingsStore: UserSettings.shared,
-            tracksFrontmostWindow: tracksFrontmostWindow,
+            usesAccessibility: usesAccessibility,
             isAccessibilityTrusted: { probe.check() }
         )
         self.viewModel = viewModel
@@ -228,7 +228,7 @@ final class SessionListViewModelTests: XCTestCase {
         // so a host without the grant must never trigger one — not at init, not
         // on show, not on a timer.
         let probe = TrustProbe()
-        let viewModel = makeProbedViewModel(tracksFrontmostWindow: false, probe: probe)
+        let viewModel = makeProbedViewModel(usesAccessibility: false, probe: probe)
         viewModel.startListening()
         RunLoop.main.run(until: Date().addingTimeInterval(1.2))
 
@@ -236,9 +236,24 @@ final class SessionListViewModelTests: XCTestCase {
         XCTAssertEqual(probe.calls, 0)
     }
 
+    func testTheViewControllerUsesNoAccessibilityUnlessTheHostOptsIn() {
+        // Stenographer builds its Sessions window with the bare init, so this
+        // default is what keeps its launch from probing TCC. Pinned here so
+        // flipping it fails a test instead of freezing a machine.
+        let controller = SessionWatcher.SessionListViewController(source: FakeSessionListSource([]))
+        XCTAssertFalse(controller.viewModel.usesAccessibility)
+        XCTAssertFalse(controller.viewModel.actionHandler.usesAccessibility)
+    }
+
+    func testTheOptInReachesTheActionHandler() {
+        let probe = TrustProbe()
+        let viewModel = makeProbedViewModel(usesAccessibility: true, probe: probe)
+        XCTAssertTrue(viewModel.actionHandler.usesAccessibility)
+    }
+
     func testOptedInHostTracksTheFrontmostWindow() {
         let probe = TrustProbe()
-        let viewModel = makeProbedViewModel(tracksFrontmostWindow: true, probe: probe)
+        let viewModel = makeProbedViewModel(usesAccessibility: true, probe: probe)
         XCTAssertEqual(probe.calls, 0, "constructing the view model must not probe")
 
         viewModel.startListening()
