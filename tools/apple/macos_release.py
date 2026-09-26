@@ -181,22 +181,76 @@ def _is_macho(path: Path) -> bool:
     return head.hex() in _MACHO_MAGICS
 
 
-def _is_within(path: Path, container: Path) -> bool:
-    return path != container and container in path.parents
+def _main_executable_path(bundle: Path) -> Path | None:
+    """Resolved path to `bundle`'s own main executable, per `CFBundleExecutable`
+    in its Info.plist — `Contents/Info.plist` for .app/.xpc/.appex,
+    `Resources/Info.plist` (falling back to `Versions/Current/Resources/Info.plist`)
+    for a .framework. Returns None if the plist or the key is missing, e.g. for
+    a bundle that carries no executable of its own.
+    """
+    if bundle.suffix == ".framework":
+        plist_candidates = [
+            bundle / "Resources/Info.plist",
+            bundle / "Versions/Current/Resources/Info.plist",
+        ]
+        executable_dir = bundle / "Versions/Current"
+    else:
+        plist_candidates = [bundle / "Contents/Info.plist"]
+        executable_dir = bundle / "Contents/MacOS"
+
+    for plist_path in plist_candidates:
+        try:
+            with plist_path.open("rb") as f:
+                info = plistlib.load(f)
+        except (OSError, plistlib.InvalidFileException):
+            continue
+        name = info.get("CFBundleExecutable")
+        if not name:
+            continue
+        try:
+            return (executable_dir / name).resolve()
+        except OSError:
+            return None
+    return None
 
 
 def signing_order(bundle: Path) -> list[Path]:
-    """Nested code deepest-first, the outer bundle last."""
+    """Nested code deepest-first, the outer bundle last.
+
+    Every nested bundle (.app/.xpc/.appex/.framework/…) is included, and so
+    is every Mach-O file reachable inside `bundle` that is not some nested
+    bundle's own main executable — including a bare helper executable that
+    lives inside a nested bundle but isn't what that bundle's Info.plist
+    names as `CFBundleExecutable` (e.g. Sparkle.framework's `Autoupdate`,
+    which sits beside the framework's real main executable and otherwise
+    keeps its ad-hoc signature). Paths are deduplicated by their resolved,
+    symlink-free location, and a symlink itself (e.g. a framework's
+    `Versions/Current` alias) is never yielded.
+    """
     contents = bundle / "Contents"
     bundle_paths: list[Path] = []
     macho_paths: list[Path] = []
     if contents.exists():
         for path in contents.rglob("*"):
-            if _is_bundle_dir(path):
+            if not path.is_symlink() and _is_bundle_dir(path):
                 bundle_paths.append(path)
+
+        main_executables = {
+            exe for b in bundle_paths if (exe := _main_executable_path(b)) is not None
+        }
+
+        seen: set[Path] = set()
         for path in contents.rglob("*"):
-            if path.is_file() and not any(_is_within(path, b) for b in bundle_paths) and _is_macho(path):
-                macho_paths.append(path)
+            if path.is_symlink() or not path.is_file() or not _is_macho(path):
+                continue
+            try:
+                real = path.resolve()
+            except OSError:
+                continue
+            if real in seen or real in main_executables:
+                continue
+            seen.add(real)
+            macho_paths.append(path)
 
     nested = bundle_paths + macho_paths
     nested.sort(key=lambda p: len(p.relative_to(bundle).parts), reverse=True)
@@ -213,6 +267,14 @@ def sign_bundle(
     timestamp: bool,
     run: Runner,
 ) -> None:
+    """Sign `bundle` and every path `signing_order` yields for it, deepest
+    first. A path the caller maps in `entitlements` is signed with
+    `--entitlements <that file>`. Every other *nested* path (never the
+    top-level `bundle` itself) is signed with `--preserve-metadata=entitlements`
+    instead, so a nested bundle that already carries entitlements it needs
+    (e.g. Sparkle's `Downloader.xpc`, sandboxed and unmapped) keeps them —
+    matching Sparkle's documented Developer ID re-signing order.
+    """
     for path in signing_order(bundle):
         argv = ["codesign", "--force", "--sign", identity]
         if runtime:
@@ -222,6 +284,8 @@ def sign_bundle(
         entitlements_path = entitlements.get(path)
         if entitlements_path is not None:
             argv += ["--entitlements", str(entitlements_path)]
+        elif path != bundle:
+            argv.append("--preserve-metadata=entitlements")
         argv.append(str(path))
         result = run(argv)
         if result.returncode != 0:

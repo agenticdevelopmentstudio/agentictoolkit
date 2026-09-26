@@ -344,6 +344,125 @@ def test_signing_order_is_deepest_first_bundle_last(tmp_path):
         order.index(app / "Contents/PlugIns/W.appex")
 
 
+def _write_plist(path: Path, executable: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as f:
+        plistlib.dump({"CFBundleExecutable": executable}, f)
+
+
+def _write_macho(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\xcf\xfa\xed\xfe")  # Mach-O magic `signing_order` detects
+
+
+def _build_fake_sparkle_app(tmp_path: Path) -> Path:
+    """A.app embedding a Sparkle.framework laid out like the real thing: a
+    versioned `Autoupdate` helper that is a bare Mach-O (not the framework's
+    own main executable), an `Installer.xpc` and `Downloader.xpc` under
+    `XPCServices`, a nested `Updater.app`, and a `Versions/Current` symlink
+    pointing at the real version directory (`B`)."""
+    app = tmp_path / "A.app"
+    _write_macho(app / "Contents/MacOS/A")
+    _write_plist(app / "Contents/Info.plist", "A")
+
+    framework = app / "Contents/Frameworks/Sparkle.framework"
+    versions_b = framework / "Versions/B"
+
+    _write_macho(versions_b / "Sparkle")  # the framework's own main executable
+    _write_plist(versions_b / "Resources/Info.plist", "Sparkle")
+
+    _write_macho(versions_b / "Autoupdate")  # bare helper, NOT the main executable
+
+    _write_macho(versions_b / "XPCServices/Installer.xpc/Contents/MacOS/Installer")
+    _write_plist(versions_b / "XPCServices/Installer.xpc/Contents/Info.plist", "Installer")
+
+    _write_macho(versions_b / "XPCServices/Downloader.xpc/Contents/MacOS/Downloader")
+    _write_plist(versions_b / "XPCServices/Downloader.xpc/Contents/Info.plist", "Downloader")
+
+    _write_macho(versions_b / "Updater.app/Contents/MacOS/Updater")
+    _write_plist(versions_b / "Updater.app/Contents/Info.plist", "Updater")
+
+    (framework / "Versions/Current").symlink_to("B")
+    return app
+
+
+def test_signing_order_signs_bare_helper_executable_inside_nested_framework(tmp_path):
+    # Sparkle's Autoupdate is a bare Mach-O helper inside Sparkle.framework
+    # that is not the framework's own main executable (CFBundleExecutable is
+    # "Sparkle", not "Autoupdate"). The old within-any-nested-bundle check
+    # excluded it entirely, so it kept its ad-hoc signature and notarization
+    # rejected the app. It — and every nested bundle — must now be signed,
+    # ordered before the framework, which is ordered before the app.
+    app = _build_fake_sparkle_app(tmp_path)
+    framework = app / "Contents/Frameworks/Sparkle.framework"
+    order = mr.signing_order(app)
+
+    autoupdate = framework / "Versions/B/Autoupdate"
+    installer_xpc = framework / "Versions/B/XPCServices/Installer.xpc"
+    downloader_xpc = framework / "Versions/B/XPCServices/Downloader.xpc"
+    updater_app = framework / "Versions/B/Updater.app"
+
+    assert autoupdate in order
+    for item in (autoupdate, installer_xpc, downloader_xpc, updater_app):
+        assert order.index(item) < order.index(framework)
+    assert order.index(framework) < order.index(app)
+    assert order[-1] == app
+
+    # The framework's own main executable must not be signed a second time
+    # as a loose Mach-O — only the framework bundle itself signs it.
+    assert framework / "Versions/B/Sparkle" not in order
+
+
+def test_signing_order_resolves_versions_current_symlink_without_duplicates(tmp_path):
+    app = _build_fake_sparkle_app(tmp_path)
+    framework = app / "Contents/Frameworks/Sparkle.framework"
+    order = mr.signing_order(app)
+
+    # No path appears twice, and no symlink — nor anything reached only by
+    # walking through one, such as Versions/Current — is ever signed.
+    assert len(order) == len(set(order))
+    assert all(not p.is_symlink() for p in order)
+    assert framework / "Versions/Current" not in order
+    assert sum(1 for p in order if p.name == "Autoupdate") == 1
+
+
+def test_sign_bundle_preserves_entitlements_on_unmapped_nested_items(tmp_path):
+    app = _build_fake_sparkle_app(tmp_path)
+    framework = app / "Contents/Frameworks/Sparkle.framework"
+    downloader_xpc = framework / "Versions/B/XPCServices/Downloader.xpc"
+    downloader_ent = tmp_path / "downloader.entitlements"
+    downloader_ent.write_text("<plist/>")
+
+    calls, run = recorder()
+    mr.sign_bundle(
+        app, identity="Developer ID Application: X (T)",
+        entitlements={downloader_xpc: downloader_ent},
+        runtime=True, timestamp=True, run=run,
+    )
+
+    sign_calls = {c[-1]: c for c in calls if c[0] == "codesign" and "--force" in c}
+
+    # Downloader.xpc is explicitly mapped: it gets --entitlements, not
+    # --preserve-metadata=entitlements.
+    downloader_call = sign_calls[str(downloader_xpc)]
+    assert "--entitlements" in downloader_call and str(downloader_ent) in downloader_call
+    assert "--preserve-metadata=entitlements" not in downloader_call
+
+    # Every other nested item (no explicit entitlements mapping) gets
+    # --preserve-metadata=entitlements instead.
+    autoupdate = framework / "Versions/B/Autoupdate"
+    installer_xpc = framework / "Versions/B/XPCServices/Installer.xpc"
+    for nested in (autoupdate, installer_xpc, framework):
+        call = sign_calls[str(nested)]
+        assert "--preserve-metadata=entitlements" in call
+
+    # The top-level app keeps plain --entitlements semantics: with no
+    # mapping given for it, it gets neither flag.
+    app_call = sign_calls[str(app)]
+    assert "--preserve-metadata=entitlements" not in app_call
+    assert "--entitlements" not in app_call
+
+
 def test_sign_bundle_passes_runtime_timestamp_and_entitlements(tmp_path):
     app = tmp_path / "A.app"
     (app / "Contents/MacOS").mkdir(parents=True)
