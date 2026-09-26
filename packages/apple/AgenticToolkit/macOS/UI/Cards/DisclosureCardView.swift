@@ -192,7 +192,7 @@ public final class DisclosureCardView: NSView, Themeable {
         }
     }
 
-    private let titleField = NSTextField(labelWithString: "")
+    private let titleField = WholePointLabel(labelWithString: "")
     /// The host's mark and the name as one piece, so the pair yields together
     /// when the line is too narrow for them.
     private let titleLine = NSStackView()
@@ -717,5 +717,22 @@ public final class DisclosureCardView: NSView, Themeable {
             ))
         }
         return line
+    }
+}
+
+/// A label that asks for a whole number of points.
+///
+/// Text measures in fractions, and layout places views on whole pixels: a name
+/// that measures 293.5 wide is laid out 293 wide at 1x, and a label a fraction
+/// narrower than its text truncates it. For a middle-truncating address that
+/// fraction costs three letters, not half a point, and nothing stretches the
+/// label back — the window was exactly as wide as the card asked for. Asking
+/// for the whole point the text will be drawn in is what makes the card's
+/// width floor and the name agree.
+private final class WholePointLabel: NSTextField {
+    override var intrinsicContentSize: NSSize {
+        let size = super.intrinsicContentSize
+        guard size.width != NSView.noIntrinsicMetric else { return size }
+        return NSSize(width: ceil(size.width), height: size.height)
     }
 }

@@ -511,6 +511,49 @@ final class DisclosureCardTests: XCTestCase {
                                     "the address was squeezed by a card that could have grown")
     }
 
+    func testAStackOfCardsIsAsWideAsItsLongestTitle() {
+        // The Usage window's shape: marked cards with summaries and content
+        // narrower than their names, in a `.width` stack that the window sizes
+        // to its fitting width. The longest name must come out whole.
+        let long = "mike@agenticdevelopmentstudio.com"
+        func account(_ title: String) -> DisclosureCardView {
+            let logo = NSButton(title: "", target: nil, action: nil)
+            logo.image = NSImage(systemSymbolName: "sparkle", accessibilityDescription: nil)
+            logo.isBordered = false
+            logo.imagePosition = .imageOnly
+            let card = DisclosureCardView(
+                title: title, titleIsAccent: true, titleAccessory: logo,
+                summary: Self.readings, isCollapsed: false, scaledSize: 16
+            )
+            let gauges = NSView()
+            gauges.translatesAutoresizingMaskIntoConstraints = false
+            gauges.widthAnchor.constraint(equalToConstant: 280).isActive = true
+            gauges.heightAnchor.constraint(equalToConstant: 100).isActive = true
+            card.addContent(gauges)
+            return card
+        }
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .width
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 16)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let cards = [account("mike@example.com"), account(long)]
+        for card in cards { stack.addArrangedSubview(card) }
+
+        let width = stack.fittingSize.width
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 800))
+        host.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: host.topAnchor)
+        ])
+        host.layoutSubtreeIfNeeded()
+        guard let label = field(long, in: cards[1]) else { return XCTFail("no title") }
+        XCTAssertGreaterThanOrEqual(label.frame.width, label.fittingSize.width - 0.5,
+                                    "stack \(width) cut the name short")
+    }
+
     // MARK: - The summary is a row of its own
 
     /// A folded card carrying the long address and the two readings.
