@@ -51,7 +51,7 @@ import { formatDate } from "../lib/timestamps";
 
 const ROLE_ITEMS = [
   { value: "user", label: "User" },
-  { value: "admin", label: "Admin" },
+  { value: "admin", label: "Operator" },
 ];
 
 /** Module-level so the runs below aren't handed a new key on every render. */
@@ -71,6 +71,8 @@ export function UsersPane() {
     null,
   );
   const [removeError, setRemoveError] = useState<string | null>(null);
+  /** The backend's refusal (409 `last_operator`) to revoke the last operator on the platform. */
+  const [roleError, setRoleError] = useState<string | null>(null);
 
   const { data: users, truncated, isLoading, error } = useAdminUsers();
   const { data: hubRdid } = useHubEcosystemRdid();
@@ -139,7 +141,11 @@ export function UsersPane() {
                   const current = user.capabilities.includes("admin") ? "admin" : "user";
                   if (next === current) return;
                   if (next === "admin") grantRole.mutate({ userId: user.id, capability: "admin" });
-                  else revokeRole.mutate({ userId: user.id, role: "admin" });
+                  else
+                    revokeRole.mutate(
+                      { userId: user.id, role: "admin" },
+                      { onError: (e) => setRoleError(errorMessage(e)) },
+                    );
                 }}
               />
             </span>
@@ -491,6 +497,17 @@ export function UsersPane() {
           description={removeError}
           confirmLabel="OK"
           onConfirm={() => setRemoveError(null)}
+        />
+      )}
+
+      {roleError && (
+        <AlertModal
+          open
+          tone="error"
+          title="Couldn't change the role"
+          description={roleError}
+          confirmLabel="OK"
+          onConfirm={() => setRoleError(null)}
         />
       )}
     </div>
