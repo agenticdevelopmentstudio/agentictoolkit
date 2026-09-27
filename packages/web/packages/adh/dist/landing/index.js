@@ -52,7 +52,7 @@ function renderBlock(block, key) {
         {
           title: block.title,
           caption: block.caption,
-          pendingLabel: "Screenshot pending",
+          pendingLabel: "Screenshot coming soon",
           ...block.src === void 0 ? {} : { media: /* @__PURE__ */ jsx("img", { src: `/screenshots/${block.src}.png`, alt: block.caption }) }
         },
         key
