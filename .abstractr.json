@@ -209,6 +209,32 @@
       "holds": "AgenticToolkitHubUI. The hub's shells (AppKit and UIKit), sign-in, feature registry, and on macOS HubFeature and the hub script commands. Hosts assemble it; it builds no menu and no app delegate."
     },
     {
+      "name": "apple-systemmonitor",
+      "paths": [
+        "packages/apple/AgenticToolkit/SystemMonitor/"
+      ],
+      "depends_on": [
+        "apple-core"
+      ],
+      "shared": true,
+      "holds": "AgenticToolkitSystemMonitor. Daemon-safe machine health: disk, memory, CPU and named process groups (Docker, Ollama), sampled on a timer. No AppKit."
+    },
+    {
+      "name": "apple-systemmonitorui",
+      "paths": [
+        "packages/apple/AgenticToolkit/SystemMonitorUI/"
+      ],
+      "depends_on": [
+        "apple-systemmonitor",
+        "apple-core",
+        "apple-coreui",
+        "apple-coremacos",
+        "apple-macos"
+      ],
+      "shared": true,
+      "holds": "AgenticToolkitSystemMonitorUI. The themed System Status window and its reading cards and gauges."
+    },
+    {
       "name": "apple-tests",
       "paths": [
         "packages/apple/AgenticToolkit/Tests/"
@@ -230,7 +256,9 @@
         "apple-hub",
         "apple-hubservice",
         "apple-hubui",
-        "apple-displays"
+        "apple-displays",
+        "apple-systemmonitor",
+        "apple-systemmonitorui"
       ],
       "shared": false,
       "holds": "Test bundles. Nothing depends on these."

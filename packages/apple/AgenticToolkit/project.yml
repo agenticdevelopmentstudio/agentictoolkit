@@ -274,6 +274,34 @@ targets:
     # AppKit settings panel (toolkit convention: AppKit, not SwiftUI). No
     # ComposableSettings dependency — hosts wrap PermissionsPanelView themselves.
 
+  AgenticToolkitSystemMonitor:
+    type: framework
+    platform: macOS
+    templates:
+      - SwiftLint
+    sources:
+      - SystemMonitor
+    dependencies:
+      - target: AgenticToolkitCore
+    # Daemon-safe: what the machine is doing — disk, memory, CPU, and named
+    # process groups (Docker, Ollama) — read through Foundation, libproc and
+    # Mach. No AppKit; the window that shows it is AgenticToolkitSystemMonitorUI.
+
+  AgenticToolkitSystemMonitorUI:
+    type: framework
+    platform: macOS
+    templates:
+      - SwiftLint
+    sources:
+      - SystemMonitorUI
+    dependencies:
+      - target: AgenticToolkitSystemMonitor
+      - target: AgenticToolkitCore
+      - target: AgenticToolkitMacOS
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-macOS
+    # The themed System Status window. AgenticToolkitMacOS for the window
+    # controllers and the settings scroll host it reuses.
+
   AgenticToolkitScripting:
     type: framework
     platform: macOS
@@ -619,6 +647,95 @@ targets:
       - target: AgenticToolkitPermissions
         embed: true
         codeSign: true
+
+  AgenticToolkitSystemMonitorTests:
+    type: bundle.unit-test
+    platform: macOS
+    templates:
+      - SwiftLint
+    sources:
+      - Tests/AgenticToolkitSystemMonitorTests
+    dependencies:
+      - target: AgenticToolkitSystemMonitor
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitCore
+        embed: true
+        codeSign: true
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkit-macOS
+        embed: true
+        codeSign: true
+
+  AgenticToolkitSystemMonitorUITests:
+    type: bundle.unit-test
+    platform: macOS
+    templates:
+      - SwiftLint
+    sources:
+      - Tests/AgenticToolkitSystemMonitorUITests
+    dependencies:
+      - target: AgenticToolkitSystemMonitorUI
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitSystemMonitor
+        embed: true
+        codeSign: true
+      # Closure completion -- see the note in AgenticToolkitLanguageTests.
+      - target: AgenticToolkitMacOS
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitScripting
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitCoreMacOS
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitCoreUI
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitCore
+        embed: true
+        codeSign: true
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkit-macOS
+        embed: true
+        codeSign: true
+      - target: AgenticDeveloperToolkit/AgenticDeveloperToolkitUI-macOS
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitMarkdown-macOS
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitPermissions
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitPermissionsUI
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitDisplays
+        embed: true
+        codeSign: true
+      - target: AIPluginKit
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitLanguage
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitDatabase
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitSync
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitSyncGRDB
+        embed: true
+        codeSign: true
+      - package: GRDB
+        product: GRDB
+      # AgenticToolkitMacOS links Sparkle (AppUpdater); the test bundle loads
+      # its frameworks out of its own Frameworks directory, so Sparkle has to
+      # be there too — same "closure completion" reason as GRDB above.
+      - package: Sparkle
+        product: Sparkle
 
   AgenticToolkitMacOSTests:
     type: bundle.unit-test
@@ -1014,6 +1131,8 @@ aggregateTargets:
       - AgenticToolkitDisplays
       - AgenticToolkitScripting
       - AgenticToolkitMacOS
+      - AgenticToolkitSystemMonitor
+      - AgenticToolkitSystemMonitorUI
       - AgenticToolkitDatabase
       - AgenticToolkitLanguage
       - AgenticToolkitSync
@@ -1061,6 +1180,10 @@ aggregateTargets:
       - AgenticToolkitPermissionsUITests
       - AgenticToolkitDisplaysTests
       - AgenticToolkitMacOSTests
+      - AgenticToolkitSystemMonitor
+      - AgenticToolkitSystemMonitorTests
+      - AgenticToolkitSystemMonitorUI
+      - AgenticToolkitSystemMonitorUITests
       - AgenticToolkitDatabase
       - AgenticToolkitDatabaseTests
       - AgenticToolkitLanguage
@@ -1240,6 +1363,40 @@ schemes:
       config: Debug
       targets:
         - AgenticToolkitPermissionsUITests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  AgenticToolkitSystemMonitor:
+    build:
+      targets:
+        AgenticToolkitSystemMonitor: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AgenticToolkitSystemMonitorTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  AgenticToolkitSystemMonitorUI:
+    build:
+      targets:
+        AgenticToolkitSystemMonitorUI: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AgenticToolkitSystemMonitorUITests
     profile:
       config: Release
     analyze:

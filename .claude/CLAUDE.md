@@ -146,6 +146,14 @@ vendoring stops reading adh's copy, not before.
 | `AgenticToolkitCoreMacOS`    | `CoreMacOS/` | `AgenticToolkitCore`, `AgenticToolkitCoreUI`                     |
 | `AgenticToolkitMacOS`        | `macOS/`     | `AgenticToolkitCore`, `AgenticToolkitCoreUI`, `AgenticToolkitCoreMacOS`, SwiftTerm, CodeEditSourceEditor, CodeEditLanguages |
 
+| `AgenticToolkitSystemMonitor`   | `SystemMonitor/`   | `AgenticToolkitCore`                                     |
+| `AgenticToolkitSystemMonitorUI` | `SystemMonitorUI/` | `AgenticToolkitSystemMonitor`, `AgenticToolkitCore`, `AgenticToolkitMacOS`, `AgenticDeveloperToolkitUI` |
+
+`AgenticToolkitSystemMonitor` samples the machine's health: disk, memory, CPU and
+process groups such as Docker and Ollama, through `SystemMonitorEngine`. It has no
+UI, so a CLI or daemon can link it. `AgenticToolkitSystemMonitorUI` is the themed
+System Status window over an engine.
+
 `AgenticToolkitCore` is Foundation-only; `AgenticToolkitCoreUI` holds cross-cutting AppKit utilities; `AgenticToolkitCoreMacOS` adds macOS-only foundations; `AgenticToolkitMacOS` is the feature-rich macOS framework consumed by the host app, plugins, Whippet, and Stenographer.
 
 #### The theme model is not here any more
