@@ -3,11 +3,11 @@ id: d5aba939-471d-48cd-9a9c-888ac92adf38
 title: DisclosureCardView
 domain: agentictoolkit://recipes/disclosure-card-view
 type: ingredient
-version: 1.1.1
+version: 1.2.0
 status: review
 language: en
 created: '2026-09-23'
-modified: '2026-09-24'
+modified: '2026-09-26'
 author: Mike Fullerton
 copyright: 2026 Mike Fullerton
 license: MIT
@@ -38,8 +38,9 @@ approved-date: ''
 `packages/apple/AgenticToolkit/macOS/UI/Cards/DisclosureCardView.swift`, is an
 `@MainActor`, `NSView`-subclassed, `Themeable` card that folds: a rounded,
 bordered surface with an elevated titlebar strip naming it (a title, an
-optional leading accessory, an optional trailing accessory, and a native
-disclosure triangle), and whatever host content is added beneath that. Folding
+optional leading accessory, an optional status symbol right after the title,
+an optional trailing accessory, and a native disclosure triangle), and
+whatever host content is added beneath that. Folding
 the card hides its content and, if the card carries `summary` readings, shows
 a single right-aligned line of them under the title instead; a folded card
 with no summary is exactly its titlebar and nothing else. The card can also
@@ -99,6 +100,31 @@ the folded set and rebuilds on toggle).
   title row, separated by the icon gap (`iconGap`, 6pt unscaled), and MUST
   give the accessory required horizontal compression resistance so only the
   title text — never the accessory — yields width.
+- **places-title-status-after-title**: When `titleTrailingStatus` is
+  non-nil, Component MUST draw it immediately after the title text inside
+  the title row, separated by the icon gap, as the SF Symbol
+  `titleTrailingStatus.symbolName` with a symbol configuration of
+  `.semibold` weight at a point size of `scaledSize` (the title's own
+  size), and MUST give it required horizontal compression resistance and
+  content hugging, so only the title text — never the symbol — yields
+  width. Component MUST NOT add anything after the title when
+  `titleTrailingStatus` is `nil`.
+- **exposes-title-status-like-badge**: For a `titleTrailingStatus` that is
+  not a placeholder, Component MUST expose the symbol as its own
+  accessibility element with role `.image` and accessibility label
+  `titleTrailingStatus.accessibilityLabel`, and MUST set that same string
+  as its tooltip.
+- **reserves-placeholder-room-silently**: For a `titleTrailingStatus` made
+  by `StatusSymbol.placeholder(sizedLike:)`, Component MUST keep exactly
+  the room the named symbol would take in the title row — drawn fully
+  transparent (`alphaValue == 0`), never hidden, since a stack gives a
+  hidden view no room — and MUST NOT expose it as an accessibility element
+  or give it a tooltip.
+- **asks-for-whole-point-title-width**: Component MUST report the title
+  text's intrinsic width rounded up to a whole point (`ceil`), so the width
+  the card's floor measures for the title and the width the title is laid
+  out at agree, and a title never truncates in a card given exactly its
+  own fitting width.
 - **places-titlebar-accessory-before-disclosure**: When `titlebarAccessory`
   is non-nil, Component MUST place it immediately before the disclosure
   control inside the trailing row, separated by the icon gap.
@@ -107,9 +133,10 @@ the folded set and rebuilds on toggle).
   horizontal compression-resistance and content-hugging priority, so it
   never yields width to the title row.
 - **maintains-minimum-header-gap**: Component MUST keep at least the
-  masthead gap (`mastheadGap`, 8pt) between the title row's trailing edge
-  and the trailing row's leading edge, and MUST vertically center-align the
-  two rows on the header row.
+  masthead gap (`mastheadGap`, `ceil(24 × scaledSize /
+  NSFont.systemFontSize)`, see Appearance) between the title row's trailing
+  edge and the trailing row's leading edge, and MUST vertically
+  center-align the two rows on the header row.
 - **renders-native-disclosure-control**: Component MUST render the fold
   control as an `NSButton` with `bezelStyle = .disclosure` and
   `buttonType = .onOff`, rather than a custom-drawn chevron.
@@ -170,18 +197,21 @@ the folded set and rebuilds on toggle).
 - **hides-status-badge-when-absent**: Component MUST hide the status badge
   when `status == nil`.
 - **renders-status-as-sf-symbol**: Component MUST render a non-nil `status`
-  as `NSImage(systemSymbolName: status.symbolName, accessibilityDescription:
-  status.accessibilityLabel)`, with a symbol configuration of `.semibold`
-  weight at a point size equal to the status badge's diameter for the
-  current `scaledSize` (see `sizes-badge-diameter`).
+  as `NSImage.symbol(named: status.symbolName, accessibilityDescription:
+  status.accessibilityLabel)` (AgenticToolkitCoreUI's never-nil symbol
+  lookup), with a symbol configuration of `.semibold` weight at a point
+  size equal to the status badge's diameter for the current `scaledSize`
+  (see `sizes-badge-diameter`).
 - **exposes-status-as-own-accessibility-element**: Component MUST expose
   the status badge as its own accessibility element with role `.image` and
   accessibility label `status.accessibilityLabel`, and MUST set that same
   string as its tooltip.
 - **colors-status-badge**: Component MUST tint the status badge with
-  `palette.color(named: status?.colorName)`, falling back to
-  `secondaryTextColor` whenever that lookup returns `nil` (including when
-  `status` itself is `nil` or its `colorName` is `nil`).
+  `status.color(palette)` and the title status symbol with
+  `titleTrailingStatus.color(palette)`, each asked of the live palette on
+  every theme application and each falling back to `secondaryTextColor`
+  whenever it returns `nil` (including when the `StatusSymbol` itself is
+  `nil`, or was built with a `nil` `colorName`).
 - **positions-badge-on-visible-corner**: Component MUST center the status
   badge, on both axes, `cornerPeakInset` (`cornerRadius − cornerRadius/√2`,
   ≈2.93pt at the fixed 10pt radius) inside the card's top-right corner —
@@ -195,16 +225,18 @@ the folded set and rebuilds on toggle).
   `1.0` otherwise, rather than substituting a separate set of dimmed
   colors.
 - **scales-insets-with-text-size**: Component MUST scale
-  `horizontalInset` (14), `mastheadInset` (7), `verticalInset` (12), and
-  `titlebarInset` (6) linearly by `scaledSize ÷ NSFont.systemFontSize`,
-  rounding each result up (`ceil`), rather than using fixed point values.
+  `horizontalInset` (14), `mastheadInset` (7), `verticalInset` (12),
+  `titlebarInset` (6), and the masthead gap (`mastheadGapAtSystemSize`, 24)
+  linearly by `scaledSize ÷ NSFont.systemFontSize`, rounding each result up
+  (`ceil`), rather than using fixed point values.
 - **floors-width-to-wider-of-open-or-folded-content**: Component MUST
   constrain its own width to be greater than or equal to the wider of (a)
   the content area's fitting width and (b) the masthead's folded-state
   width (the title-row-plus-trailing-row line, or the summary line,
   whichever is wider) — plus the masthead's leading gutter (`padMastheadX`)
   and trailing gutter (`padX`) — regardless of whether the card is
-  currently open or folded.
+  currently open or folded, and whether or not it has a `summary`: a card
+  with no summary still asks for the room to write its title whole.
 - **keeps-width-floor-just-under-required**: Component MUST set the width-
   floor constraint's priority to `999` (just under `.required`), so a
   container too narrow for the content scrolls rather than making the
@@ -238,9 +270,10 @@ the folded set and rebuilds on toggle).
   bottom inset when the body section is present; `padTitleY` =
   `ceil(6 × scaledSize / NSFont.systemFontSize)` as the titlebar's own
   top/bottom inset, and as the card's bottom inset when the body section is
-  hidden; `iconGap` = 6pt fixed between an accessory and the text/control
-  beside it; `mastheadGap` = 8pt minimum between the title row and the
-  trailing row. The masthead's own width floor (below) reserves
+  hidden; `iconGap` = 6pt fixed between an accessory or the title status
+  symbol and the text/control beside it; `mastheadGap` =
+  `ceil(24 × scaledSize / NSFont.systemFontSize)` minimum between the title
+  row and the trailing row. The masthead's own width floor (below) reserves
   `padMastheadX` on its leading side and `padX` on its trailing side — the
   same two gutters the card itself is pinned at.
 - **Corner peak inset**: `cornerPeakInset` = `cornerRadius − cornerRadius/√2`
@@ -249,11 +282,15 @@ the folded set and rebuilds on toggle).
   corner's arc actually turns; what the status badge is centered on.
 - **Badge diameter**: `min(ceil(scaledSize × 1.3), padX × 1.5)` — the status
   badge's width and height at a given `scaledSize`.
-- **Masthead width floor**: when `summary` is non-empty, the wider of (a)
-  the title row's fitting width plus `mastheadGap` plus the trailing row's
-  fitting width, and (b) the summary line's rendered text width; `0` when
-  `summary` is empty. Feeds `floors-width-to-wider-of-open-or-folded-
-  content`.
+- **Title status symbol**: drawn at a point size of `scaledSize`, `.semibold`
+  weight — the title's own size, since it reads as part of the name — at
+  its intrinsic size, with no fixed frame of its own.
+- **Masthead width floor**: for every card, the wider of (a) the title
+  row's fitting width (leading accessory, whole-point title width, and
+  title status symbol or placeholder included) plus `mastheadGap` plus the
+  trailing row's fitting width, and (b) the summary line's rendered text
+  width when `summary` is non-empty, `0` when it is empty. Feeds
+  `floors-width-to-wider-of-open-or-folded-content`.
 - **Font**: title — palette `.body` style, weight forced to `.semibold`, at
   `scaledSize`; subtitle and summary names — palette `.caption` style at
   `scaledSize × 0.85`; summary values — palette `.code` style at
@@ -264,8 +301,10 @@ the folded set and rebuilds on toggle).
   otherwise `primaryTextColor`; subtitle, summary names, and the summary
   separator — `tertiaryTextColor`; summary values — each `SummaryPart`'s
   own resolved color, falling back to `secondaryTextColor`; disclosure
-  control tint — `secondaryTextColor`; status badge tint — the palette
-  color named by `status.colorName`, falling back to `secondaryTextColor`.
+  control tint — `secondaryTextColor`; status badge tint —
+  `status.color(palette)`, and title status symbol tint —
+  `titleTrailingStatus.color(palette)`, each falling back to
+  `secondaryTextColor`.
 - **Border**: card surface — 1pt, palette `outlineColor`; titlebar rule —
   1pt, palette `dividerColor` (a filled strip along the titlebar's bottom
   edge, not a stroked `CALayer` border).
@@ -294,14 +333,22 @@ the folded set and rebuilds on toggle).
   control is a standard `NSButton` with `bezelStyle = .disclosure`, which
   AppKit exposes with its own native disclosure-triangle accessibility
   role and behavior. `statusIcon` is explicitly given role `.image`
-  (`exposes-status-as-own-accessibility-element`). `titleField`,
-  `subtitleField`, and `summaryField` are plain
-  `NSTextField(labelWithString:)` instances with no role override, so
-  AppKit's default static-text exposure applies to each.
+  (`exposes-status-as-own-accessibility-element`), and so is
+  `titleStatusIcon` unless it holds a placeholder, which is no
+  accessibility element at all (`exposes-title-status-like-badge`,
+  `reserves-placeholder-room-silently`). `titleField` is a
+  `WholePointLabel` — AgenticToolkitCoreUI's `NSTextField` subclass that
+  rounds its intrinsic width up to a whole point
+  (`asks-for-whole-point-title-width`) — built with `labelWithString:`;
+  `subtitleField` and `summaryField` are plain
+  `NSTextField(labelWithString:)` instances. None of the three has a role
+  override, so AppKit's default static-text exposure applies to each.
 - **Label requirements**: The disclosure control's accessibility label is
   set to `"Show details"`/`"Hide details"` at construction
   (`labels-disclosure-control`). `statusIcon`'s accessibility label is
-  `status.accessibilityLabel`, doubling as its tooltip. `titleField`,
+  `status.accessibilityLabel`, doubling as its tooltip, and
+  `titleStatusIcon`'s is `titleTrailingStatus.accessibilityLabel`, likewise
+  doubling as its tooltip; a placeholder has neither. `titleField`,
   `subtitleField`, and `summaryField` carry no separate accessibility
   label; their `stringValue`/`attributedStringValue` is what VoiceOver
   reads, per AppKit's default label exposure.
@@ -342,7 +389,7 @@ the folded set and rebuilds on toggle).
 | disclosure-card-013 | places-title-accessory-leading | `init(..., titleAccessory: someView, ...)` | The title row's arranged subviews equal `[someView, <title text>]`; spacing `== 6`; `someView`'s horizontal compression resistance is `.required` |
 | disclosure-card-014 | places-titlebar-accessory-before-disclosure | `init(..., titlebarAccessory: someView, ...)` | The trailing row's arranged subviews equal `[someView, <disclosure control>]`; spacing `== 6` |
 | disclosure-card-015 | never-shrinks-trailing-line | Any instance | The trailing row's horizontal compression-resistance and hugging priorities both equal `.required` |
-| disclosure-card-016 | maintains-minimum-header-gap | Card narrowed until the title and trailing rows compete for space | The gap between the title row's trailing edge and the trailing row's leading edge is never less than 8pt; the two rows share a common center-Y |
+| disclosure-card-016 | maintains-minimum-header-gap | Card at `scaledSize == 16` narrowed until the title and trailing rows compete for space, assuming `NSFont.systemFontSize == 13` | The gap between the title row's trailing edge and the trailing row's leading edge is never less than `ceil(24 × 16 / 13) == 30`pt; the two rows share a common center-Y (per `testAStackOfCardsIsAsWideAsItsLongestTitle`) |
 | disclosure-card-017 | renders-native-disclosure-control | Any instance | The disclosure control is an `NSButton` with `bezelStyle == .disclosure` and `buttonType == .onOff` |
 | disclosure-card-018 | sets-disclosure-initial-state | `init(..., isCollapsed: true, ...)` vs. `false` | The disclosure control's `state == .off` when `true`; `== .on` when `false` |
 | disclosure-card-019 | labels-disclosure-control | `init(..., isCollapsed: true, ...)` vs. `false` | The disclosure control's `toolTip` and accessibility label equal `"Show details"` when `true`; `"Hide details"` when `false` |
@@ -365,7 +412,7 @@ the folded set and rebuilds on toggle).
 | disclosure-card-036 | positions-badge-on-visible-corner | Any instance with a non-nil `status` | The status badge's center-X `== trailingAnchor - cornerPeakInset`; its center-Y `== topAnchor + cornerPeakInset`, where `cornerPeakInset ≈ 2.93` |
 | disclosure-card-037 | sizes-badge-diameter | `scaledSize == 13` | The status badge's width and height both equal `min(ceil(13 × 1.3), padX × 1.5)`, with `padX` evaluated at `scaledSize == 13` |
 | disclosure-card-038 | dims-whole-card-uniformly | `init(..., isDimmed: true, ...)` vs. `false` | `view.alphaValue == 0.55` when `true`; `== 1.0` when `false` |
-| disclosure-card-039 | scales-insets-with-text-size | `scaledSize == 26` (2× the 13pt baseline), assuming `NSFont.systemFontSize == 13` on the host system | `padX == ceil(14 × 26 / 13) == 28`; `padMastheadX == ceil(7 × 26 / 13) == 14`; `padY == ceil(12 × 26 / 13) == 24`; `padTitleY == ceil(6 × 26 / 13) == 12` |
+| disclosure-card-039 | scales-insets-with-text-size | `scaledSize == 26` (2× the 13pt baseline), assuming `NSFont.systemFontSize == 13` on the host system | `padX == ceil(14 × 26 / 13) == 28`; `padMastheadX == ceil(7 × 26 / 13) == 14`; `padY == ceil(12 × 26 / 13) == 24`; `padTitleY == ceil(6 × 26 / 13) == 12`; `mastheadGap == ceil(24 × 26 / 13) == 48` |
 | disclosure-card-040 | floors-width-to-wider-of-open-or-folded-content | Card with a wide content area and a non-empty `summary`, both open and folded | The width-floor constraint's constant is identical whether `isCollapsed` is `true` or `false`, and equals the wider of the two rows plus the masthead's leading gutter (`padMastheadX`) and trailing gutter (`padX`) |
 | disclosure-card-041 | keeps-width-floor-just-under-required | Any instance | The width-floor constraint's `priority.rawValue == 999` |
 | disclosure-card-042 | remeasures-width-floor-on-layout | Font/theme change that widens the hidden content area after initial layout, followed by a layout pass | The width-floor constraint's constant updates to the new wider value; a follow-up layout pass with no further change does not reassign the constant (change is `<= 0.5pt`) |
@@ -373,6 +420,10 @@ the folded set and rebuilds on toggle).
 | disclosure-card-044 | rejects-storyboard-instantiation | `DisclosureCardView(coder:)` invoked (e.g. via nib/storyboard unarchiving) | Process traps with a fatal error |
 | disclosure-card-045 | confines-mutation-to-main-actor | Attempt to call `DisclosureCardView.init`/`addContent`/`contentSpacing` from a non-main-actor context | Code does not compile (Swift concurrency checker rejects the call) |
 | disclosure-card-046 | exposes-content-spacing | `card.contentSpacing = 20` | The content area's stack spacing `== 20`; the width-floor constraint is re-measured against the new spacing |
+| disclosure-card-047 | places-title-status-after-title | `init(..., titleTrailingStatus: StatusSymbol(symbolName: "checkmark.seal.fill", colorName: "green", accessibilityLabel: "Best"), ...)` | The title row holds an image view after the title text; its leading edge is at or after the title's trailing edge and less than 12pt from it (per `testTheSymbolAfterTheNameStandsRightAgainstIt`) |
+| disclosure-card-048 | exposes-title-status-like-badge, colors-status-badge | `titleTrailingStatus: StatusSymbol(symbolName: "xmark.seal.fill", accessibilityLabel: "Out of quota", color: { _ in .systemPurple })` | The symbol's `alphaValue == 1`; `isAccessibilityElement() == true`; `accessibilityLabel() == "Out of quota"`; `toolTip == "Out of quota"`; `contentTintColor == .systemPurple` (per `testTheSymbolAfterTheNameIsSpokenAndTintedFromTheLivePalette`) |
+| disclosure-card-049 | reserves-placeholder-room-silently | Two cards with a long title and 40pt content, one given the seal of vector 047 and one `.placeholder(sizedLike: "checkmark.seal.fill")` | Both cards' `fittingSize.width` are equal (±0.5); the placeholder's frame is as wide as the seal's; it is not hidden, its `alphaValue == 0`, it is no accessibility element, and its `toolTip == nil` (per `testAPlaceholderHoldsTheSymbolsRoomAndSaysNothing`) |
+| disclosure-card-050 | asks-for-whole-point-title-width, floors-width-to-wider-of-open-or-folded-content | A card with a long title, no `summary`, and 40pt content, hosted at exactly its own `fittingSize.width` | The title text's laid-out width is at least its own `fittingSize.width − 0.5` — it is not truncated (per `testACardWithNoSummaryStillAsksForItsTitleWhole`) |
 
 `color(named:)`'s name→role map (`"red"` → `dangerColor`, `"blue"` →
 `accentColor`, and so on) is defined outside this file — see the AppKit
@@ -402,13 +453,15 @@ Platform Notes bullet below.
   exactly its titlebar, with the body section fully detached and the
   bottom inset switched to `padTitleY` (MUST, per `detaches-empty-body`
   and `matches-bottom-inset-to-empty-body`).
-- **`status.symbolName` does not resolve to a valid SF Symbol**: Documented
-  limitation — `renders-status-as-sf-symbol` requires rendering `status` as
-  an SF Symbol image, and the source performs no validation of
-  `symbolName`: `NSImage(systemSymbolName:accessibilityDescription:)`
-  returns `nil` and is assigned to the status badge's image with no
-  fallback or guard, so the badge's frame, position, and accessibility
-  label/tooltip are still fully configured, but no image paints.
+- **A `StatusSymbol.symbolName` does not resolve to a valid SF Symbol**:
+  Documented limitation — `renders-status-as-sf-symbol` and
+  `places-title-status-after-title` require an SF Symbol image, and the
+  source performs no validation of `symbolName`:
+  `NSImage.symbol(named:accessibilityDescription:)` substitutes a blank
+  16×16 template image, so the badge (or the symbol after the title) keeps
+  its frame, position, and accessibility label/tooltip, but no glyph
+  paints. A placeholder sized like an unresolved name holds that blank
+  image's 16pt of room.
 - **Extreme `scaledSize` values** (very small, e.g. approaching 0, or very
   large, e.g. an accessibility "larger text" size well above the 13pt
   baseline): every inset and font scales linearly and is rounded up via
@@ -428,9 +481,11 @@ Platform Notes bullet below.
 - **Offline/disconnected state**: Not applicable — `DisclosureCardView`
   has no networking dependency of its own.
 - **Boundary values**: `cornerRadius`, `borderWidth`, `horizontalInset`,
-  `verticalInset`, `titlebarInset`, `mastheadInset`, `iconGap`,
-  `dimmedAlpha`, and `mastheadGap` are fixed literals, not caller-
-  configurable ranges with a boundary to test. `scaledSize` is the one
+  `verticalInset`, `titlebarInset`, `mastheadInset`,
+  `mastheadGapAtSystemSize`, `iconGap`, and `dimmedAlpha` are fixed
+  literals, not caller-configurable ranges with a boundary to test (the
+  gap itself scales with `scaledSize`, per `scales-insets-with-text-size`).
+  `scaledSize` is the one
   caller-configurable numeric input; its boundary behavior is covered
   above under "Extreme `scaledSize` values."
 
@@ -443,6 +498,7 @@ Platform Notes bullet below.
 | `title` | `String` | — (required) | Text shown in the titlebar |
 | `titleIsAccent` | `Bool` | — (required) | Colors `title` with `accentColor` when `true`, `primaryTextColor` when `false` |
 | `titleAccessory` | `NSView?` | `nil` | View placed before the title, e.g. a host's logo mark |
+| `titleTrailingStatus` | `StatusSymbol?` | `nil` | Symbol drawn right after the title, at the title's size, e.g. a seal on the one card in a stack worth acting on; a stack that marks only some cards hands the rest `StatusSymbol.placeholder(sizedLike:)` so every card asks for the same width |
 | `titlebarAccessory` | `NSView?` | `nil` | View placed before the disclosure control, e.g. a per-card menu |
 | `subtitle` | `String?` | `nil` | One quiet line under the masthead; hidden whenever the card is collapsed |
 | `summary` | `[SummaryPart]` | `[]` | Readings shown on their own right-aligned line only while the card is collapsed |
@@ -474,9 +530,11 @@ own.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `symbolName` | `String` | — (required) | SF Symbol name rendered in the corner badge |
-| `colorName` | `String?` | — (required) | Looked up via `palette.color(named:)`; falls back to `secondaryTextColor` when `nil` or unresolved |
-| `accessibilityLabel` | `String` | — (required) | Used as both the badge's accessibility label and its tooltip |
+| `symbolName` | `String` | — (required) | SF Symbol name rendered in the corner badge or after the title |
+| `color` | `(SemanticPalette) -> NSColor?` | — (required, or derived from `colorName`) | Resolves the symbol's tint against the live palette on every theme application; `nil` falls back to `secondaryTextColor` |
+| `colorName` (convenience `init`) | `String?` | — | Looked up via `palette.color(named:)` in place of a custom `color` closure |
+| `accessibilityLabel` | `String` | — (required) | Used as both the symbol's accessibility label and its tooltip |
+| `isPlaceholder` | `Bool` | `false` (read-only) | `true` only for `StatusSymbol.placeholder(sizedLike:)`, which holds the named symbol's room with nothing drawn, spoken, or explained |
 
 Public API beyond `init`:
 
@@ -499,8 +557,9 @@ source.
 | (none — hardcoded literal) | `Show details` | Disclosure control's `toolTip` and accessibility label when constructed `isCollapsed: true` |
 | (none — hardcoded literal) | `Hide details` | Disclosure control's `toolTip` and accessibility label when constructed `isCollapsed: false` |
 
-`title`, `subtitle`, `summary`'s `name`/`value` strings, and
-`status.accessibilityLabel` are all caller-supplied at the call site — the
+`title`, `subtitle`, `summary`'s `name`/`value` strings,
+`status.accessibilityLabel`, and `titleTrailingStatus.accessibilityLabel`
+are all caller-supplied at the call site — the
 component defines no string literals of its own for them. The two disclosure
 strings above ARE component-owned literals, and the source assigns them
 directly (`"Show details"`/`"Hide details"`) with no `NSLocalizedString` or
@@ -513,7 +572,7 @@ ship in a localized app, documented here rather than smoothed over.
 |--------|----------|
 | Reduce Motion | Not applicable: the source performs no animation, transition, or `NSAnimationContext`/`CATransaction` call anywhere — every state change (theme colors, fonts, the width floor) is an instantaneous property or constraint-constant assignment. |
 | Increase Contrast | Not applicable to this component directly: the source reads no system contrast setting; every color it draws comes from the active `SemanticPalette`, and whether the resulting contrast is sufficient is tracked once under Accessibility above, not duplicated here. |
-| Differentiate Without Color | Satisfied: the disclosure state is communicated by the triangle's own orientation plus its tooltip/label text, not color; the status badge pairs its tint with a distinct SF Symbol shape and an `accessibilityLabel`; and every summary value is always paired with its `name` text label (`formats-summary-parts`) rather than color alone. |
+| Differentiate Without Color | Satisfied: the disclosure state is communicated by the triangle's own orientation plus its tooltip/label text, not color; the status badge and the title status symbol each pair their tint with an SF Symbol shape and an `accessibilityLabel`; and every summary value is always paired with its `name` text label (`formats-summary-parts`) rather than color alone. |
 
 ## Feature Flags
 
@@ -528,8 +587,8 @@ call.
 ## Privacy
 
 - **Data collected**: None — the component holds only the `title`,
-  `subtitle`, `summary`, `status`, and accessory values passed to it by the
-  caller; it originates no data of its own.
+  `subtitle`, `summary`, `status`, `titleTrailingStatus`, and accessory
+  values passed to it by the caller; it originates no data of its own.
 - **Storage**: Not applicable — `DisclosureCardView` performs no
   persistence of any kind. (The companion `CardFoldMemory` type persists
   which cards are folded, but that is a separate file the host wires in;
@@ -598,8 +657,10 @@ or `print`).
   remains measurable via `intrinsicContentSize` when asked directly.
   The recipe's descriptive terms above map to these source private members:
   the card surface is `surface`; the titlebar strip is `titlebar`; the
-  titlebar's bottom rule is `titlebarRule`; the title text is `titleField`;
-  the title row is `titleLine`; the trailing row is `trailingLine`; the
+  titlebar's bottom rule is `titlebarRule`; the title text is `titleField`
+  (a `WholePointLabel`, from `CoreUI/WholePointLabel.swift` in
+  AgenticToolkitCoreUI); the title status symbol is `titleStatusIcon`; the
+  title row is `titleLine`; the trailing row is `trailingLine`; the
   disclosure control is `disclosure`; the content area is `content`; the
   body section is `body`; the subtitle text is `subtitleField`; the summary
   line is `summaryField`; the status badge is `statusIcon`; and the
@@ -685,6 +746,27 @@ or `print`).
   opinionating on it would fight a caller that, for example, hands in a
   logo that is also a button.
   **Approved**: pending
+- **Decision**: The symbol after the title is described by a `StatusSymbol`
+  value, not handed in as a view, and `StatusSymbol.placeholder(sizedLike:)`
+  holds the named symbol's room with nothing drawn, spoken, or explained.
+  **Rationale**: Unlike `titleAccessory`, this mark is the card's own
+  vocabulary: it must be sized to the title, tinted from the live palette
+  on every theme change, and spoken exactly like the corner badge, so the
+  card owns its rendering rather than trusting each host to repeat it. The
+  placeholder exists because a stack of cards that marks only one of them
+  would otherwise make that card — and so a content-hugging window — jump a
+  symbol's width wider whenever the mark moved to another card or went
+  away; handing every unmarked card the placeholder keeps each card's
+  requested width independent of which card is marked.
+  **Approved**: pending
+- **Decision**: The masthead width floor (`asks-for-whole-point-title-width`
+  and the title-plus-gap floor) applies to every card, with or without a
+  summary.
+  **Rationale**: A card with no summary still has a title that the
+  content-hugging window must fit whole; limiting the floor to summarized
+  cards let a long title truncate in the one card with nothing else to
+  widen it.
+  **Approved**: pending
 - **Decision**: The disclosure control's `toolTip`/accessibility label
   strings (`"Show details"`, `"Hide details"`) are English literals with no
   localization key.
@@ -722,3 +804,4 @@ localization key (see Localization).
 | 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe — extracted from the Apple `DisclosureCardView` (AppKit, macOS) source. |
 | 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: shortened the frontmatter summary and moved the platform-design-languages reference from `references` to `related`; restated Behavioral Requirements, States, Edge Cases, and Conformance Test Vectors in observable terms instead of private Swift member names, with the member-name mapping relocated to AppKit Platform Notes; defined `cornerPeakInset`, badge diameter, and the masthead width floor in Appearance; documented the `color(named:)` name-to-role map; added a precondition to vector 039; moved `prefers-dynamic-summary-colors` into a Configuration usage note; reworded the two no-guard Edge Cases as documented limitations; fixed the UIKit, React/Web, WinUI 3, and Compose Platform Notes bullets; reformatted Design Decisions' `Approved` line; and updated Compliance (`contrast-ratio` and `screen-reader-support` to `partial`, added a failing `no-hardcoded-strings` row, Title Case categories, and a rationale sentence).; removed Compliance rows for checks absent from the cookbook catalog |
 | 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
+| 1.2.0 | 2026-09-26 | Mike Fullerton | Documented the title status symbol: `titleTrailingStatus` (a `StatusSymbol` drawn right after the title at its size), `StatusSymbol.placeholder(sizedLike:)` and its silent reserved room, the palette-resolving `color` closure with the `colorName` convenience init, the CoreUI `WholePointLabel` title, the text-size-scaled masthead gap, and the width floor for every card; added requirements, vectors 047–050, configuration rows, edge cases, and two design decisions. |

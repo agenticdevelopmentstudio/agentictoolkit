@@ -1,5 +1,6 @@
 import AgenticToolkitCore
 import AgenticToolkitCoreMacOS
+import AgenticToolkitCoreUI
 import AppKit
 
 /// A titled card that folds: a rounded surface, a titlebar naming it, and
@@ -74,11 +75,23 @@ import AppKit
 /// every card — one mark, different colours — needs no such column, and a host
 /// that marks only some can hand the unmarked ones a spacer of its own.
 ///
-/// `titleTrailingAccessory` hangs one mark of the host's immediately AFTER the
-/// name — a flag on this one card in a stack, say. It sits against the name
-/// rather than out at the right end, so it reads as something said about the
-/// name, and like the leading accessory it never gives up a point: the name is
-/// what goes short.
+/// `titleTrailingStatus` hangs one symbol immediately AFTER the name — a flag
+/// on this one card in a stack, say. It sits against the name rather than out
+/// at the right end, so it reads as something said about the name, and like the
+/// leading accessory it never gives up a point: the name is what goes short.
+///
+/// Unlike the leading accessory it arrives as a `StatusSymbol`, not a view. A
+/// mark after the name is a statement, never a control, so there is nothing a
+/// host needs to own: the card draws it exactly the way it draws its corner
+/// badge — one renderer, one weight, one fallback, recoloured with the theme —
+/// at the name's own size, and it is spoken, since a reader who cannot see the
+/// colour still has to be told what it says.
+///
+/// A stack that marks only SOME of its cards there hands the rest a
+/// `StatusSymbol.placeholder(sizedLike:)`: the same room with nothing drawn in
+/// it and nothing said. The mark counts toward the width the card asks for, so
+/// without the room a mark coming or going on the widest card would move a
+/// window that hugs its content sideways under the reader.
 ///
 /// `titlebarAccessory` hangs one control of the host's off the masthead's right
 /// end, immediately in front of the disclosure triangle — a menu for the thing
@@ -177,25 +190,71 @@ public final class DisclosureCardView: NSView, Themeable {
     }
 
     /// What a card says about its own standing, drawn on the card's top-right
-    /// corner. `accessibilityLabel` is also the tooltip: a symbol is compact,
-    /// not self-explaining, and the word it replaced has to stay reachable
+    /// corner (`status`) or right after its name (`titleTrailingStatus`).
+    /// `accessibilityLabel` is also the tooltip: a symbol is compact, not
+    /// self-explaining, and the word it replaced has to stay reachable
     /// somewhere.
     public struct StatusSymbol {
         public let symbolName: String
-        public let colorName: String?
+        /// How the symbol is tinted, asked of the live palette for the same
+        /// reason `SummaryPart.color` is: a card already on screen recolours
+        /// with everything else when the theme changes. Nil is the secondary
+        /// text colour.
+        public let color: (SemanticPalette) -> NSColor?
         public let accessibilityLabel: String
+        /// True for a `placeholder(sizedLike:)`: the symbol's room, with
+        /// nothing drawn in it and nothing said about it.
+        public let isPlaceholder: Bool
 
+        public init(
+            symbolName: String,
+            accessibilityLabel: String,
+            color: @escaping (SemanticPalette) -> NSColor?
+        ) {
+            self.init(
+                symbolName: symbolName, accessibilityLabel: accessibilityLabel,
+                color: color, isPlaceholder: false
+            )
+        }
+
+        /// The common case: a colour the palette already knows by name.
         public init(symbolName: String, colorName: String?, accessibilityLabel: String) {
+            self.init(
+                symbolName: symbolName, accessibilityLabel: accessibilityLabel,
+                color: { $0.color(named: colorName) }
+            )
+        }
+
+        /// The room `symbolName` takes, with nothing drawn in it: invisible,
+        /// silent and without a tooltip. For a stack that marks only some of
+        /// its cards — the rest are handed one of these, so every card asks
+        /// for the same width whichever of them happens to be marked.
+        public static func placeholder(sizedLike symbolName: String) -> StatusSymbol {
+            StatusSymbol(
+                symbolName: symbolName, accessibilityLabel: "",
+                color: { _ in nil }, isPlaceholder: true
+            )
+        }
+
+        private init(
+            symbolName: String,
+            accessibilityLabel: String,
+            color: @escaping (SemanticPalette) -> NSColor?,
+            isPlaceholder: Bool
+        ) {
             self.symbolName = symbolName
-            self.colorName = colorName
+            self.color = color
             self.accessibilityLabel = accessibilityLabel
+            self.isPlaceholder = isPlaceholder
         }
     }
 
     private let titleField = WholePointLabel(labelWithString: "")
-    /// The host's mark and the name as one piece, so the pair yields together
-    /// when the line is too narrow for them.
+    /// The host's mark, the name and the symbol after it as one piece, so they
+    /// yield together when the line is too narrow for them.
     private let titleLine = NSStackView()
+    /// The symbol after the name (`titleTrailingStatus`), when there is one.
+    private let titleStatusIcon = NSImageView()
     /// The strip the title and its toggle are drawn on, and the hairline that
     /// rules it off from the body. Subviews of `surface`, so the card's rounded
     /// corners clip the bar and the card's border draws over it.
@@ -227,6 +286,7 @@ public final class DisclosureCardView: NSView, Themeable {
     private let titleIsAccent: Bool
     private let summary: [SummaryPart]
     private let status: StatusSymbol?
+    private let titleStatus: StatusSymbol?
     private let scaledSize: CGFloat
     private let onToggle: ((Bool) -> Void)?
 
@@ -263,7 +323,7 @@ public final class DisclosureCardView: NSView, Themeable {
     /// size — scaled like the card's insets (`mastheadGapFor`). Wide enough
     /// that the longest name still reads as a name and the toggle as a control
     /// of its own; at 8 points a long address ran right up to the triangle.
-    static let mastheadGapAtSystemSize: CGFloat = 24
+    private static let mastheadGapAtSystemSize: CGFloat = 24
 
     private let padX: CGFloat
     /// The masthead's leading gutter at this text size — tighter than `padX`,
@@ -280,7 +340,7 @@ public final class DisclosureCardView: NSView, Themeable {
         title: String,
         titleIsAccent: Bool,
         titleAccessory: NSView? = nil,
-        titleTrailingAccessory: NSView? = nil,
+        titleTrailingStatus: StatusSymbol? = nil,
         titlebarAccessory: NSView? = nil,
         subtitle: String? = nil,
         summary: [SummaryPart] = [],
@@ -293,6 +353,7 @@ public final class DisclosureCardView: NSView, Themeable {
         self.titleIsAccent = titleIsAccent
         self.summary = summary
         self.status = status
+        self.titleStatus = titleTrailingStatus
         self.scaledSize = scaledSize
         self.onToggle = onToggle
         self.padX = Self.padXFor(scaledSize: scaledSize)
@@ -333,7 +394,7 @@ public final class DisclosureCardView: NSView, Themeable {
         configureSummary(isCollapsed: isCollapsed)
         configureStatusBadge()
         configureDisclosure(isCollapsed: isCollapsed)
-        configureTitleLine(accessory: titleAccessory, trailing: titleTrailingAccessory)
+        configureTitleLine(accessory: titleAccessory)
         configureTrailingLine(accessory: titlebarAccessory)
         configureTitlebar()
 
@@ -466,8 +527,11 @@ public final class DisclosureCardView: NSView, Themeable {
     ///
     /// Nothing is done to the accessory but place it and refuse to let it
     /// shrink — see the type's own documentation for why the card has no
-    /// opinion about how the host's mark looks.
-    private func configureTitleLine(accessory: NSView?, trailing: NSView?) {
+    /// opinion about how the host's mark looks. The symbol after the name is
+    /// the card's own, drawn the way the corner badge is drawn but at the
+    /// name's size, and it too keeps its width while the letters give theirs
+    /// up — a placeholder included, since the room it holds is its only job.
+    private func configureTitleLine(accessory: NSView?) {
         titleLine.orientation = .horizontal
         titleLine.alignment = .centerY
         titleLine.spacing = Self.iconGap
@@ -478,11 +542,11 @@ public final class DisclosureCardView: NSView, Themeable {
             titleLine.addArrangedSubview(accessory)
         }
         titleLine.addArrangedSubview(titleField)
-        if let trailing {
-            trailing.translatesAutoresizingMaskIntoConstraints = false
-            trailing.setContentCompressionResistancePriority(.required, for: .horizontal)
-            trailing.setContentHuggingPriority(.required, for: .horizontal)
-            titleLine.addArrangedSubview(trailing)
+        if let titleStatus {
+            Self.configureSymbol(titleStatusIcon, titleStatus, pointSize: scaledSize)
+            titleStatusIcon.setContentCompressionResistancePriority(.required, for: .horizontal)
+            titleStatusIcon.setContentHuggingPriority(.required, for: .horizontal)
+            titleLine.addArrangedSubview(titleStatusIcon)
         }
         titleLine.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLine.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -534,17 +598,35 @@ public final class DisclosureCardView: NSView, Themeable {
         statusIcon.imageScaling = .scaleProportionallyDown
         statusIcon.isHidden = status == nil
         guard let status else { return }
-        statusIcon.image = NSImage(
-            systemSymbolName: status.symbolName,
-            accessibilityDescription: status.accessibilityLabel
+        Self.configureSymbol(
+            statusIcon, status, pointSize: Self.cornerBadgeDiameter(scaledSize: scaledSize)
         )
-        statusIcon.symbolConfiguration = Self.statusSymbolConfiguration(scaledSize: scaledSize)
-        statusIcon.toolTip = status.accessibilityLabel
-        // Its own element, because it is no longer inside a line a reader is
-        // handed anyway: unspoken, a corner mark is invisible rather than terse.
-        statusIcon.setAccessibilityElement(true)
-        statusIcon.setAccessibilityRole(.image)
-        statusIcon.setAccessibilityLabel(status.accessibilityLabel)
+    }
+
+    /// One `StatusSymbol` drawn into one image view — the corner badge and the
+    /// symbol after the name alike, so the two can differ in size and place and
+    /// in nothing else. The tint is the theme's to set (`applyTheme`).
+    ///
+    /// Each is its own accessibility element, because neither sits inside a
+    /// line a reader is handed anyway: unspoken, a mark is invisible rather
+    /// than terse. A placeholder is the exception, and says nothing at all —
+    /// it is room, not a statement.
+    private static func configureSymbol(
+        _ view: NSImageView, _ symbol: StatusSymbol, pointSize: CGFloat
+    ) {
+        view.translatesAutoresizingMaskIntoConstraints = false
+        let label = symbol.isPlaceholder ? nil : symbol.accessibilityLabel
+        view.image = NSImage.symbol(named: symbol.symbolName, accessibilityDescription: label)
+        view.symbolConfiguration = NSImage.SymbolConfiguration(
+            pointSize: pointSize, weight: .semibold
+        )
+        // Transparent rather than hidden: an `NSStackView` detaches a hidden
+        // arranged view, and the room is the whole point of a placeholder.
+        view.alphaValue = symbol.isPlaceholder ? 0 : 1
+        view.toolTip = label
+        view.setAccessibilityElement(!symbol.isPlaceholder)
+        view.setAccessibilityRole(.image)
+        view.setAccessibilityLabel(label)
     }
 
     /// How big the corner badge is drawn. Bigger than the text beside it: it is
@@ -577,14 +659,6 @@ public final class DisclosureCardView: NSView, Themeable {
     /// The gap between the name and the toggle, scaled the same way `padX` is.
     static func mastheadGapFor(scaledSize: CGFloat) -> CGFloat {
         ceil(Self.mastheadGapAtSystemSize * scaledSize / CGFloat(NSFont.systemFontSize))
-    }
-
-    private static func statusSymbolConfiguration(
-        scaledSize: CGFloat
-    ) -> NSImage.SymbolConfiguration {
-        NSImage.SymbolConfiguration(
-            pointSize: Self.cornerBadgeDiameter(scaledSize: scaledSize), weight: .semibold
-        )
     }
 
     /// The system disclosure triangle rather than a drawn chevron: it is the
@@ -675,8 +749,8 @@ public final class DisclosureCardView: NSView, Themeable {
             .nsFont(scaledSize: scaledSize * 0.85)
         subtitleField.textColor = palette.tertiaryTextColor
 
-        statusIcon.contentTintColor = palette.color(named: status?.colorName)
-            ?? palette.secondaryTextColor
+        statusIcon.contentTintColor = status?.color(palette) ?? palette.secondaryTextColor
+        titleStatusIcon.contentTintColor = titleStatus?.color(palette) ?? palette.secondaryTextColor
         disclosure.contentTintColor = palette.secondaryTextColor
 
         let line = Self.summaryString(summary, palette: palette, scaledSize: scaledSize)
@@ -728,22 +802,5 @@ public final class DisclosureCardView: NSView, Themeable {
             ))
         }
         return line
-    }
-}
-
-/// A label that asks for a whole number of points.
-///
-/// Text measures in fractions, and layout places views on whole pixels: a name
-/// that measures 293.5 wide is laid out 293 wide at 1x, and a label a fraction
-/// narrower than its text truncates it. For a middle-truncating address that
-/// fraction costs three letters, not half a point, and nothing stretches the
-/// label back — the window was exactly as wide as the card asked for. Asking
-/// for the whole point the text will be drawn in is what makes the card's
-/// width floor and the name agree.
-private final class WholePointLabel: NSTextField {
-    override var intrinsicContentSize: NSSize {
-        let size = super.intrinsicContentSize
-        guard size.width != NSView.noIntrinsicMetric else { return size }
-        return NSSize(width: ceil(size.width), height: size.height)
     }
 }

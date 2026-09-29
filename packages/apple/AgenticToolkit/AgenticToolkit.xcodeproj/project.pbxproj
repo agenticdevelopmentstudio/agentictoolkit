@@ -429,6 +429,7 @@
 		35DAB12BC1CDD45D98EC4672 /* AgenticToolkitHub-macOS.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 29F78337D841C951F8CE9EAB /* AgenticToolkitHub-macOS.framework */; };
 		36011BD68A054397C2E87F77 /* CheckboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B80E4CA204954CD2D5B64C67 /* CheckboxView.swift */; };
 		366555F133FE867774FC5792 /* HubTransportSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 259F392F2636BEA211FB0E36 /* HubTransportSource.swift */; };
+		3669B9114F6F6ACAFC603559 /* WholePointLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8091F9F7D720B0E742601CD1 /* WholePointLabel.swift */; };
 		36B4CAE61BAEEDEC3BEB7006 /* ExtensionResourcePathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0A43642654D5C6C54D847ED /* ExtensionResourcePathTests.swift */; };
 		371CA289D649C85620E0EA06 /* AppearanceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 449C339E5C58DC7C8A39A14D /* AppearanceManager.swift */; };
 		372772BA868BF69AAF80A57A /* SettingsSearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00E87647C267D0756FF646CD /* SettingsSearchIndex.swift */; };
@@ -4036,6 +4037,7 @@
 		8018A3762727060A9F378AC2 /* ConditionalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConditionalView.swift; sourceTree = "<group>"; };
 		803E3D65F67D0ECE850B2970 /* AgenticToolkitLanguageTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AgenticToolkitLanguageTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8054428AF77347642C6C54EA /* RailPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RailPath.swift; sourceTree = "<group>"; };
+		8091F9F7D720B0E742601CD1 /* WholePointLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WholePointLabel.swift; sourceTree = "<group>"; };
 		80B2A3D33F2CD7481690F696 /* FontViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontViewModel.swift; sourceTree = "<group>"; };
 		80F57FD1E7E2D5E107DBD6D5 /* PaneViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneViewController.swift; sourceTree = "<group>"; };
 		80F6AEF2C35429822C9FB844 /* RangeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RangeViewModel.swift; sourceTree = "<group>"; };
@@ -5403,6 +5405,7 @@
 				F6F1577CDCB5AAF25B24F230 /* NSWindow+FitWidth.swift */,
 				5F83BBD3D83F2AB14DFF0FD2 /* Placeholder.swift */,
 				3D809C1520F567F4623E404C /* PointingHandButton.swift */,
+				8091F9F7D720B0E742601CD1 /* WholePointLabel.swift */,
 			);
 			path = CoreUI;
 			sourceTree = "<group>";
@@ -11756,6 +11759,7 @@
 				E8635919F9DA6D002BF4EB80 /* NSWindow+FitWidth.swift in Sources */,
 				1074B44470516E280C4288D6 /* Placeholder.swift in Sources */,
 				5B9E7C964C34BB86034C3214 /* PointingHandButton.swift in Sources */,
+				3669B9114F6F6ACAFC603559 /* WholePointLabel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

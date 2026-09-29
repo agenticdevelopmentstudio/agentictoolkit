@@ -172,13 +172,13 @@ final class DisclosureCardTests: XCTestCase {
         isCollapsed: Bool,
         summary: [DisclosureCardView.SummaryPart] = [],
         titleAccessory: NSView? = nil,
-        titleTrailingAccessory: NSView? = nil
+        titleTrailingStatus: DisclosureCardView.StatusSymbol? = nil
     ) -> DisclosureCardView {
         let card = DisclosureCardView(
             title: "mike@example.com",
             titleIsAccent: true,
             titleAccessory: titleAccessory,
-            titleTrailingAccessory: titleTrailingAccessory,
+            titleTrailingStatus: titleTrailingStatus,
             summary: summary,
             status: .init(
                 symbolName: "octagon.fill", colorName: "red", accessibilityLabel: "Spent"
@@ -281,19 +281,84 @@ final class DisclosureCardTests: XCTestCase {
         XCTAssertFalse(given.isAccessibilityElement())
     }
 
-    func testTheHostsMarkAfterTheNameStandsRightAgainstIt() {
+    /// A symbol a host puts after the name: the seal a stack of accounts
+    /// awards the one to spend next.
+    private static let seal = DisclosureCardView.StatusSymbol(
+        symbolName: "checkmark.seal.fill", colorName: "green", accessibilityLabel: "Best"
+    )
+
+    /// The image the card draws after the name, found on the name's own line —
+    /// the corner badge is the card's own subview, never on that line, so the
+    /// two cannot be mistaken for each other.
+    private func titleStatus(
+        of card: DisclosureCardView, title: String = "mike@example.com"
+    ) -> NSImageView? {
+        field(title, in: card)?.superview?.subviews.compactMap { $0 as? NSImageView }.first
+    }
+
+    func testTheSymbolAfterTheNameStandsRightAgainstIt() {
         // Against the name, not out at the line's far end by the toggle: it is
         // something said about the name, so it has to read as part of it.
-        let given = mark()
-        let card = bare(isCollapsed: false, titleTrailingAccessory: given)
-        guard let name = field("mike@example.com", in: card), let line = name.superview else {
-            return XCTFail("a card sets its name on a line of its own")
+        let card = bare(isCollapsed: false, titleTrailingStatus: Self.seal)
+        guard let name = field("mike@example.com", in: card), let seal = titleStatus(of: card)
+        else { return XCTFail("a symbol after the name goes on the name's own line") }
+
+        XCTAssertGreaterThanOrEqual(seal.frame.minX, name.frame.maxX - 0.5)
+        XCTAssertLessThan(seal.frame.minX - name.frame.maxX, 12,
+                          "the symbol drifted away from the name it is about")
+    }
+
+    func testTheSymbolAfterTheNameIsSpokenAndTintedFromTheLivePalette() {
+        // Drawn the way the corner badge is: its own accessibility element, its
+        // label as the tooltip, and its colour asked of the palette rather than
+        // fixed when the card was built.
+        let symbol = DisclosureCardView.StatusSymbol(
+            symbolName: "xmark.seal.fill", accessibilityLabel: "Out of quota",
+            color: { _ in .systemPurple }
+        )
+        let card = bare(isCollapsed: false, titleTrailingStatus: symbol)
+        guard let seal = titleStatus(of: card) else { return XCTFail("no symbol after the name") }
+
+        XCTAssertEqual(seal.alphaValue, 1)
+        XCTAssertTrue(seal.isAccessibilityElement())
+        XCTAssertEqual(seal.accessibilityLabel(), "Out of quota")
+        XCTAssertEqual(seal.toolTip, "Out of quota",
+                       "a symbol is not self-explaining, so its word stays reachable")
+        XCTAssertEqual(seal.contentTintColor, .systemPurple)
+    }
+
+    func testAPlaceholderHoldsTheSymbolsRoomAndSaysNothing() {
+        // A stack that marks only some of its cards hands the rest a
+        // placeholder. The room is identical, so a mark moving from one card to
+        // another cannot widen or narrow a window that hugs its content — and
+        // with nothing drawn, there is nothing to say or to explain.
+        func card(_ symbol: DisclosureCardView.StatusSymbol) -> DisclosureCardView {
+            let card = DisclosureCardView(
+                title: Self.longAddress, titleIsAccent: true, titleTrailingStatus: symbol,
+                isCollapsed: false, scaledSize: 13
+            )
+            let tiny = NSView()
+            tiny.translatesAutoresizingMaskIntoConstraints = false
+            tiny.widthAnchor.constraint(equalToConstant: 40).isActive = true
+            tiny.heightAnchor.constraint(equalToConstant: 20).isActive = true
+            card.addContent(tiny)
+            host(card, width: card.fittingSize.width)
+            return card
+        }
+        let marked = card(Self.seal)
+        let unmarked = card(.placeholder(sizedLike: Self.seal.symbolName))
+        guard let seal = titleStatus(of: marked, title: Self.longAddress),
+              let room = titleStatus(of: unmarked, title: Self.longAddress) else {
+            return XCTFail("both cards keep the symbol's place after the name")
         }
 
-        XCTAssertTrue(line.subviews.contains(given), "the mark goes on the title's own line")
-        XCTAssertGreaterThanOrEqual(given.frame.minX, name.frame.maxX - 0.5)
-        XCTAssertLessThan(given.frame.minX - name.frame.maxX, 12,
-                          "the mark drifted away from the name it is about")
+        XCTAssertEqual(unmarked.fittingSize.width, marked.fittingSize.width, accuracy: 0.5,
+                       "a card without the mark asks for the width of one with it")
+        XCTAssertEqual(room.frame.width, seal.frame.width, accuracy: 0.5)
+        XCTAssertFalse(room.isHidden, "a stack gives a hidden view no room at all")
+        XCTAssertEqual(room.alphaValue, 0)
+        XCTAssertFalse(room.isAccessibilityElement(), "room is not a statement")
+        XCTAssertNil(room.toolTip)
     }
 
     func testACardWithNoMarkLeavesNoGapWhereOneWouldHaveStood() {
@@ -496,7 +561,7 @@ final class DisclosureCardTests: XCTestCase {
         // handle: the window grows for it rather than cutting it short.
         let title = "a-very-long-address@some-organisation.example.com"
         let card = DisclosureCardView(
-            title: title, titleIsAccent: true, titleTrailingAccessory: mark(),
+            title: title, titleIsAccent: true, titleTrailingStatus: Self.seal,
             isCollapsed: false, scaledSize: 13
         )
         let tiny = NSView()
