@@ -37,6 +37,7 @@ import { ConfirmSourceDialog } from "../users/TransferDialog";
 import { transferUser, useTransferPreview } from "../users/transfer";
 import { NO_ROLE, roleLabel, roleValues } from "../users/roles";
 import { formatDate } from "../lib/timestamps";
+import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * Users — every customer of the hub ecosystem, and the four things an admin does to a set of them.
@@ -258,10 +259,14 @@ export function UsersPane() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-apt-text">Users</h1>
-        <ApiButton endpoint={{ method: "GET", path: "/customer/customers" }} title="Customers API" />
-      </div>
+      <SectionHeader
+        paneTitle
+        title="Users"
+        className="mb-6"
+        actions={
+          <ApiButton endpoint={{ method: "GET", path: "/customer/customers" }} title="Customers API" />
+        }
+      />
 
       <EditableList
         list={list}

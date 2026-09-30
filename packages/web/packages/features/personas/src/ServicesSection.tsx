@@ -626,14 +626,19 @@ function ServiceEditor({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex items-center justify-between gap-2 px-6 pt-4 pb-2">
-        <SectionHeader paneTitle title={draft.name || "Service"} />
-        {renderRecordAffordance?.({
+      {/* The affordance rides SectionHeader's own `actions`, not a sibling in a justify-between row:
+          once the title hoists into the stack strip that row had one child and the API button
+          jumped to the left edge (and with no affordance it was an empty padded band). */}
+      <SectionHeader
+        paneTitle
+        title={draft.name || "Service"}
+        className="items-center px-6 pt-4 pb-2"
+        actions={renderRecordAffordance?.({
           path: "/persona/services/{id}",
           pathValues: { id: service.id },
           title: "Service API",
         })}
-      </div>
+      />
       <ToolbarPortal>
         <ButtonBar
           actions={{

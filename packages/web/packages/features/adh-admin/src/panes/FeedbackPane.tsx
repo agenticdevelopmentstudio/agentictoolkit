@@ -33,6 +33,7 @@ import {
   type EditableListFacet,
 } from "../components/editable-list";
 import { formatDate, formatDateTime } from "../lib/timestamps";
+import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * Feedback — every submission, and the two things an admin does to them: read one, and move a
@@ -189,10 +190,14 @@ export function FeedbackPane() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-apt-text">Feedback</h1>
-        <ApiButton endpoint={{ method: "GET", path: "/content/feedback" }} title="Feedback API" />
-      </div>
+      <SectionHeader
+        paneTitle
+        title="Feedback"
+        className="mb-6"
+        actions={
+          <ApiButton endpoint={{ method: "GET", path: "/content/feedback" }} title="Feedback API" />
+        }
+      />
 
       {/* No New and no Delete: submissions arrive from the apps, and deleting one takes the only
           record of a report with it. Archiving is the disposal this page offers. */}

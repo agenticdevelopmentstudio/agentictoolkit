@@ -25,6 +25,7 @@ import {
 import { ProviderTemplateDialog } from "../llm-providers/ProviderTemplateDialog";
 import { VerifyDialog } from "../llm-providers/VerifyDialog";
 import { SyncPanel } from "../llm-providers/SyncPanel";
+import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * The provider-template catalog a persona connects to — kind, base URL, models, and how the
@@ -155,13 +156,17 @@ export function LlmProvidersPane() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-apt-text">LLM Providers</h1>
-        <ApiButton
-          endpoint={{ method: "GET", path: "/persona/provider-templates" }}
-          title="Provider templates API"
-        />
-      </div>
+      <SectionHeader
+        paneTitle
+        title="LLM Providers"
+        className="mb-4"
+        actions={
+          <ApiButton
+            endpoint={{ method: "GET", path: "/persona/provider-templates" }}
+            title="Provider templates API"
+          />
+        }
+      />
 
       <p className="mb-6 max-w-2xl text-sm text-apt-text-muted">
         The provider-template catalog a persona connects to — kind, base URL, its available models,

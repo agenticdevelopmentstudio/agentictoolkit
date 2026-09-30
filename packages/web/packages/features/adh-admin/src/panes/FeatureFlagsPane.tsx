@@ -42,6 +42,7 @@ import {
   useEditableList,
   type EditableListColumn,
 } from "../components/editable-list";
+import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * Feature flags — the site-wide on/off toggles, and the five things an admin does to a set of them.
@@ -155,13 +156,17 @@ export function FeatureFlagsPane() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-apt-text">Feature Flags</h1>
-        <ApiButton
-          endpoint={{ method: "GET", path: "/system/feature-flags" }}
-          title="Feature flags API"
-        />
-      </div>
+      <SectionHeader
+        paneTitle
+        title="Feature Flags"
+        className="mb-6"
+        actions={
+          <ApiButton
+            endpoint={{ method: "GET", path: "/system/feature-flags" }}
+            title="Feature flags API"
+          />
+        }
+      />
 
       <p className="mb-6 max-w-2xl text-sm text-apt-text-muted">
         Site-wide toggles — every app reads the same value. A product&apos;s own per-ecosystem

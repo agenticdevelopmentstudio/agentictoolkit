@@ -21,6 +21,7 @@ import {
   type EditableListColumn,
   type EditableListFacet,
 } from "../components/editable-list";
+import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * Per-ecosystem offline-sync table enrollment — the admin console's window onto the backend's
@@ -146,9 +147,7 @@ export function SyncPane() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-apt-text">Sync Tables</h1>
-      </div>
+      <SectionHeader paneTitle title="Sync Tables" className="mb-6" />
 
       <p className="mb-6 max-w-2xl text-sm text-apt-text-muted">
         Choose which catalog tables each ecosystem syncs to offline clients. Syncing a table

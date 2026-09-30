@@ -6,6 +6,7 @@ import { railLinkVariants } from "@agenticdevelopertoolkit/ui/lib/nav-rail";
 import { RequestsPane } from "../invitations/RequestsPane";
 import { PendingUsersPane } from "../invitations/PendingUsersPane";
 import { InvitesPane } from "../invitations/InvitesPane";
+import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 const TOPICS = [
   { id: "requests", label: "Requests" },
@@ -35,7 +36,7 @@ export function InvitationsPane(): ReactElement {
 
   return (
     <div className="flex h-[calc(100vh-7rem)] flex-col">
-      <h1 className="mb-4 text-2xl font-bold text-foreground">Invitations</h1>
+      <SectionHeader paneTitle title="Invitations" className="mb-4" />
       <div className="grid min-h-0 flex-1 grid-cols-[200px_1fr] gap-0">
         <aside className="border-r border-border pr-4 pt-1">
           <nav>

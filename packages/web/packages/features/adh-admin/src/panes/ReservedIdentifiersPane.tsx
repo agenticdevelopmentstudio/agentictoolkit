@@ -26,6 +26,7 @@ import {
   type EditableListColumn,
 } from "../components/editable-list";
 import { formatDate } from "../lib/timestamps";
+import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * Reserved Identifiers — names that are TAKEN with nothing using them, and the bar that gives them
@@ -188,13 +189,17 @@ export function ReservedIdentifiersPane() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-apt-text">Reserved Identifiers</h1>
-        <ApiButton
-          endpoint={{ method: "GET", path: "/system/reserved-identifiers" }}
-          title="Reserved Identifiers API"
-        />
-      </div>
+      <SectionHeader
+        paneTitle
+        title="Reserved Identifiers"
+        className="mb-6"
+        actions={
+          <ApiButton
+            endpoint={{ method: "GET", path: "/system/reserved-identifiers" }}
+            title="Reserved Identifiers API"
+          />
+        }
+      />
 
       <p className="mb-4 max-w-3xl text-sm text-apt-text-muted">
         Names nothing is using but that can&apos;t be taken again — left over from a rename, pointing

@@ -535,7 +535,7 @@ export function AuthenticationPane(): ReactElement {
   return (
     <div>
       <div className="mb-8">
-        <h1 className="text-2xl font-bold mb-2">Authentication</h1>
+        <SectionHeader paneTitle title="Authentication" className="mb-2" />
         <p className="text-sm text-muted-foreground">
           Configure entry points (apps that sign users in here) and identity
           providers.

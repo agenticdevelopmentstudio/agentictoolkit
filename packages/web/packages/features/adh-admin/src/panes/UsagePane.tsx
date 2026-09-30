@@ -53,6 +53,7 @@ import {
   type EditableListColumn,
   type EditableListFacet,
 } from "../components/editable-list";
+import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 // The metering console. A metered cap refuses a request only when TWO switches agree — the tier's
 // own `Enforced` box and the one global switch above all of them — so both live on this page, and
@@ -250,13 +251,17 @@ export function UsagePane() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-apt-text">Usage Limits</h1>
-        <ApiButton
-          endpoint={{ method: "GET", path: "/usage/enforcement" }}
-          title="Usage enforcement API"
-        />
-      </div>
+      <SectionHeader
+        paneTitle
+        title="Usage Limits"
+        className="mb-6"
+        actions={
+          <ApiButton
+            endpoint={{ method: "GET", path: "/usage/enforcement" }}
+            title="Usage enforcement API"
+          />
+        }
+      />
 
       <p className="mb-6 max-w-3xl px-2 text-sm text-apt-text-muted">
         Every authenticated request and every LLM turn is metered regardless of what is set here.

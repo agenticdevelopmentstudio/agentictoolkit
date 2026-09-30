@@ -9,6 +9,7 @@ import {
   type EditableListColumn,
 } from "../components/editable-list";
 import { formatDateTime } from "../lib/timestamps";
+import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 // Raw action enums → plain language: a reader shouldn't need to know the backend's
 // enum values (labels must never be internal jargon).
@@ -128,7 +129,7 @@ export function AuditPane() {
 
   return (
     <div>
-      <h1 className="mb-4 text-2xl font-bold text-apt-text">Audit</h1>
+      <SectionHeader paneTitle title="Audit" className="mb-4" />
 
       <p className="mb-6 max-w-2xl text-sm text-apt-text-muted">
         The authorization audit trail — every role and access-assignment change across all

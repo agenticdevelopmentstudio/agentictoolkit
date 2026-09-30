@@ -42,6 +42,7 @@ import {
   useEditableList,
   type EditableListColumn,
 } from "../components/editable-list";
+import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * Has the stored bag changed under an open dialog? Compared on what a save would OVERWRITE — the
@@ -172,13 +173,17 @@ export function ServerBagsPane() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-bold text-apt-text">Server Bags</h1>
-        <ApiButton
-          endpoint={{ method: "GET", path: "/system/server-bag" }}
-          title="Server bag API"
-        />
-      </div>
+      <SectionHeader
+        paneTitle
+        title="Server Bags"
+        className="mb-4"
+        actions={
+          <ApiButton
+            endpoint={{ method: "GET", path: "/system/server-bag" }}
+            title="Server bag API"
+          />
+        }
+      />
 
       <p className="mb-6 max-w-2xl text-sm text-apt-text-muted">
         Global key → JSON configuration values read by the backend at runtime. Every site reads

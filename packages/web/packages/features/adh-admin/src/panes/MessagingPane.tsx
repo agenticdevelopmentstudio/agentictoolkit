@@ -10,6 +10,7 @@ import {
   useMessagingStatus,
   useMessagingTemplates,
 } from "../api/admin";
+import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * The platform-wide Messaging tool: send email/SMS to any user via the hub's own
@@ -37,7 +38,7 @@ export function MessagingPane() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-2xl font-bold">Messaging</h1>
+      <SectionHeader paneTitle title="Messaging" />
       <UnsavedChangesGuard when={dirty} onNavigate={(href) => router.push(href)} />
       <MessagingSurface
         onDirtyChange={setDirty}
