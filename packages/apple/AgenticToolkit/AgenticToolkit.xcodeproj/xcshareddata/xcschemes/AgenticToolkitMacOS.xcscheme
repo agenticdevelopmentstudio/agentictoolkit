@@ -110,6 +110,17 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
+               BlueprintIdentifier = "26037914B568926B46004788"
+               BuildableName = "AgenticToolkitDisplaysTests.xctest"
+               BlueprintName = "AgenticToolkitDisplaysTests"
+               ReferencedContainer = "container:AgenticToolkit.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
                BlueprintIdentifier = "FB6FD55DBA606361A9BEEB56"
                BuildableName = "AgenticToolkitMacOSTests.xctest"
                BlueprintName = "AgenticToolkitMacOSTests"

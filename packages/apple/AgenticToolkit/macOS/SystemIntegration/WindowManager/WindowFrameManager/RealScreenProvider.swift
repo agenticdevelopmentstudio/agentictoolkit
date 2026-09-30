@@ -1,6 +1,7 @@
 import AppKit
 
 /// Wraps NSScreen to conform to ScreenInfo.
+/// Identity comes from AgenticToolkitDisplays (see ScreenFingerprint.from).
 public struct RealScreenInfo: ScreenInfo {
     public let screen: NSScreen
 

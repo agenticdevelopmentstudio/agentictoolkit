@@ -82,6 +82,11 @@ targets:
       - target: AgenticToolkit/AgenticToolkitMacOS
         embed: true
         codeSign: true
+      # AgenticToolkitMacOS links it (WindowManager's screen identity,
+      # matching and change detection), so the host must embed it.
+      - target: AgenticToolkit/AgenticToolkitDisplays
+        embed: true
+        codeSign: true
       # Embedded so the framework loads into the host process; each .aiplugin
       # links it without embedding and resolves to this one loaded image at dlopen.
       - target: AgenticToolkit/AIPluginKit

@@ -71,6 +71,15 @@
       "holds": "AgenticToolkitPermissions. TCC/entitlement state, no UI."
     },
     {
+      "name": "apple-displays",
+      "paths": [
+        "packages/apple/AgenticToolkit/Displays/"
+      ],
+      "depends_on": [],
+      "shared": true,
+      "holds": "AgenticToolkitDisplays. Display inventory, modes, anchor layouts, monitoring, thumbnails, Universal Control placement. System frameworks only - the displayr CLI links it alone."
+    },
+    {
       "name": "apple-permissionsui",
       "paths": [
         "packages/apple/AgenticToolkit/PermissionsUI/"
@@ -141,7 +150,8 @@
         "apple-pluginkit",
         "apple-database",
         "apple-language",
-        "apple-markdown"
+        "apple-markdown",
+        "apple-displays"
       ],
       "shared": true,
       "holds": "AgenticToolkitMacOS. The feature-rich framework the host app, plugins, Whippet and Stenographer all consume."
@@ -219,7 +229,8 @@
         "apple-htdv",
         "apple-hub",
         "apple-hubservice",
-        "apple-hubui"
+        "apple-hubui",
+        "apple-displays"
       ],
       "shared": false,
       "holds": "Test bundles. Nothing depends on these."

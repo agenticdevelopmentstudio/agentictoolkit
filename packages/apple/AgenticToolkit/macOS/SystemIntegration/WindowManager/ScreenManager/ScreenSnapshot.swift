@@ -1,4 +1,5 @@
 import AppKit
+internal import AgenticToolkitDisplays
 
 /// A full record of one attached screen at a moment in time: its
 /// `ScreenFingerprint` (the single source of truth for screen identity,
@@ -52,5 +53,11 @@ public struct ScreenSnapshot: Codable, Equatable, Sendable {
     public var identityComponent: String {
         if let displayUUID { return displayUUID }
         return localizedName ?? "unnamed-display"
+    }
+}
+
+extension ScreenSnapshot {
+    var geometry: DisplayGeometry {
+        DisplayGeometry(identityComponent: identityComponent, frame: frame, visibleFrame: visibleFrame)
     }
 }

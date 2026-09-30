@@ -1,4 +1,5 @@
 import AppKit
+internal import AgenticToolkitDisplays
 
 /// Identifies a screen across app relaunches using layered matching.
 public struct ScreenFingerprint: Codable, Equatable, Sendable {
@@ -24,14 +25,9 @@ public struct ScreenFingerprint: Codable, Equatable, Sendable {
 
     /// Creates a fingerprint for a real NSScreen.
     public static func from(_ screen: NSScreen) -> ScreenFingerprint {
-        var uuidString: String?
-        if let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID {
-            if let uuid = CGDisplayCreateUUIDFromDisplayID(screenNumber) {
-                uuidString = CFUUIDCreateString(nil, uuid.takeUnretainedValue()) as String?
-            }
-        }
+        let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
         return ScreenFingerprint(
-            displayUUID: uuidString,
+            displayUUID: displayID.flatMap(DisplayIdentity.uuidString(for:)),
             localizedName: screen.localizedName,
             resolutionWidth: screen.frame.width,
             resolutionHeight: screen.frame.height,

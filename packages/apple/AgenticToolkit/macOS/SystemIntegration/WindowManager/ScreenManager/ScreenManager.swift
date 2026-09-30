@@ -1,6 +1,7 @@
 import AppKit
 import os
 import AgenticToolkitCore
+internal import AgenticToolkitDisplays
 
 /// Owns everything screen-related: the current screen set, the persisted
 /// list of every screen set the machine has been attached to (with
@@ -11,7 +12,7 @@ import AgenticToolkitCore
 /// `WindowFrameManager` keys window placements by `currentSetID` so each
 /// window remembers a position per location.
 ///
-/// Listens for `NSApplication.didChangeScreenParametersNotification`,
+/// Listens through `DisplayMonitor` (screen parameters, CG reconfiguration, wake),
 /// classifies the change (`ScreenChange`), updates + persists the set list,
 /// and notifies observers. Sets not seen for `maxSetAge` (default six
 /// months) are aged out on load and on every update.
@@ -44,6 +45,13 @@ public final class ScreenManager {
     private var lastNotifiedSnapshots: [ScreenSnapshot]
 
     private var observers: [UUID: @MainActor (ScreenChange) -> Void] = [:]
+    /// Zero debounce: screen-parameters and wake events arrive synchronously,
+    /// exactly as the old notification did; CG reconfiguration events arrive
+    /// on a later main-actor turn.
+    private let displayMonitor: DisplayMonitor
+    /// Token of this manager's one monitor handler. Registered only once so
+    /// re-arming via `startObservingScreenChanges()` can never double-fire.
+    private var monitorHandler: UUID?
     /// Injected clock so tests can control `savedAt`/aging.
     let now: () -> Date
     /// Throttles persistence from high-frequency touch callers (a window
@@ -51,16 +59,33 @@ public final class ScreenManager {
     private var lastPersistedTouch: Date?
     private static let touchPersistInterval: TimeInterval = 60
 
-    public init(
+    public convenience init(
         screenProvider: ScreenProvider = RealScreenProvider(),
         storage: ScreenSetStorage = SettingsStoreScreenSetStorage(settings: UserSettings.shared),
         maxSetAge: TimeInterval = 180 * 24 * 60 * 60,
         now: @escaping () -> Date = { Date() }
     ) {
+        self.init(
+            screenProvider: screenProvider, storage: storage, maxSetAge: maxSetAge, now: now,
+            displaySystem: CoreGraphicsDisplaySystem()
+        )
+    }
+
+    /// Designated init. `displaySystem` feeds the `DisplayMonitor`; tests pass a
+    /// `FakeDisplaySystem`. It has no default so calls that omit it resolve,
+    /// unambiguously, to the public init above, which supplies the real one.
+    init(
+        screenProvider: ScreenProvider = RealScreenProvider(),
+        storage: ScreenSetStorage = SettingsStoreScreenSetStorage(settings: UserSettings.shared),
+        maxSetAge: TimeInterval = 180 * 24 * 60 * 60,
+        now: @escaping () -> Date = { Date() },
+        displaySystem: DisplaySystem
+    ) {
         self.screenProvider = screenProvider
         self.storage = storage
         self.maxSetAge = maxSetAge
         self.now = now
+        self.displayMonitor = DisplayMonitor(system: displaySystem, debounce: .zero)
 
         let snapshots = screenProvider.screens.map(ScreenSnapshot.init)
         self.currentSnapshots = snapshots
@@ -94,27 +119,16 @@ public final class ScreenManager {
 
     // MARK: - Change handling
 
-    /// Starts observing screen change notifications. Called automatically by
-    /// `init`; safe to call again to re-arm. Genuinely idempotent: selector-
-    /// based `addObserver` does NOT replace a prior registration (it adds a
-    /// second one that would double-fire), so we remove any existing
-    /// registration for this notification first.
+    /// Starts observing screen changes through a `DisplayMonitor`. Called
+    /// automatically by `init`; safe to call again to re-arm. Genuinely
+    /// idempotent: `DisplayMonitor.start()` restarts (never duplicates) its
+    /// sources, and the handler is registered only once, so a single event
+    /// never double-fires.
     public func startObservingScreenChanges() {
-        NotificationCenter.default.removeObserver(
-            self,
-            name: NSApplication.didChangeScreenParametersNotification,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(screensDidChangeNotification),
-            name: NSApplication.didChangeScreenParametersNotification,
-            object: nil
-        )
-    }
-
-    @objc private func screensDidChangeNotification() {
-        processScreenChange()
+        if monitorHandler == nil {
+            monitorHandler = displayMonitor.addHandler { [weak self] _ in self?.processScreenChange() }
+        }
+        displayMonitor.start()
     }
 
     /// Diffs the live screens against the last snapshot; on a real change,
@@ -145,34 +159,13 @@ public final class ScreenManager {
         from old: [ScreenSnapshot],
         to new: [ScreenSnapshot]
     ) -> ScreenChange? {
-        let oldID = ScreenSet.identity(of: old)
-        let newID = ScreenSet.identity(of: new)
-        guard oldID == newID else {
-            return .screenSetChanged(previousSetID: oldID, currentSetID: newID)
+        switch DisplayChange.classify(from: old.map(\.geometry), to: new.map(\.geometry)) {
+        case nil: return nil
+        case .resolutionChanged: return .resolutionChanged
+        case .arrangementChanged: return .arrangementChanged
+        case let .displaySetChanged(previous, current):
+            return .screenSetChanged(previousSetID: previous, currentSetID: current)
         }
-
-        // Same membership. Compare geometry as unordered *multisets* rather
-        // than pairing screens by identity — two indistinguishable displays
-        // (identical UUID-less monitors) would collide on an identity key and
-        // mis-pair, producing spurious classifications. Multisets sidestep
-        // pairing entirely: a change in the collection of sizes is a
-        // resolution change; sizes unchanged but the collection of origins
-        // differs is an arrangement change.
-        let oldSizes = multiset(old.map { sizeKey($0.frame.size) } + old.map { sizeKey($0.visibleFrame.size) })
-        let newSizes = multiset(new.map { sizeKey($0.frame.size) } + new.map { sizeKey($0.visibleFrame.size) })
-        if oldSizes != newSizes { return .resolutionChanged }
-
-        let oldOrigins = multiset(old.map { pointKey($0.frame.origin) } + old.map { pointKey($0.visibleFrame.origin) })
-        let newOrigins = multiset(new.map { pointKey($0.frame.origin) } + new.map { pointKey($0.visibleFrame.origin) })
-        if oldOrigins != newOrigins { return .arrangementChanged }
-
-        return nil
-    }
-
-    private static func sizeKey(_ size: CGSize) -> String { "\(size.width)x\(size.height)" }
-    private static func pointKey(_ point: CGPoint) -> String { "\(point.x),\(point.y)" }
-    private static func multiset(_ keys: [String]) -> [String: Int] {
-        Dictionary(keys.map { ($0, 1) }, uniquingKeysWith: +)
     }
 
     // MARK: - Set bookkeeping

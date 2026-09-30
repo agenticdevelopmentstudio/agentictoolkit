@@ -222,6 +222,7 @@ targets:
       - target: AgenticToolkitCoreMacOS
       - target: AgenticToolkitPermissions
       - target: AgenticToolkitPermissionsUI
+      - target: AgenticToolkitDisplays
       - target: AgenticToolkitScripting
       - target: AIPluginKit
       - target: AgenticToolkitLanguage
@@ -242,6 +243,18 @@ targets:
       - Permissions
     # Daemon-safe: Foundation + ApplicationServices (AX) + CoreServices (Apple
     # Events) + UserNotifications, all auto-linked via import. No AppKit.
+
+  AgenticToolkitDisplays:
+    type: framework
+    platform: macOS
+    templates:
+      - SwiftLint
+    sources:
+      - Displays
+    dependencies:
+      - sdk: ScreenCaptureKit.framework
+      - sdk: ColorSync.framework
+      - sdk: IOKit.framework
 
   AgenticToolkitPermissionsUI:
     type: framework
@@ -573,6 +586,21 @@ targets:
         embed: true
         codeSign: true
 
+  AgenticToolkitDisplaysTests:
+    type: bundle.unit-test
+    platform: macOS
+    templates:
+      - SwiftLint
+    sources:
+      - path: Tests/AgenticToolkitDisplaysTests
+        excludes: ["Fixtures/**"]
+      - path: Tests/AgenticToolkitDisplaysTests/Fixtures
+        buildPhase: resources
+    dependencies:
+      - target: AgenticToolkitDisplays
+        embed: true
+        codeSign: true
+
   AgenticToolkitPermissionsUITests:
     type: bundle.unit-test
     platform: macOS
@@ -645,6 +673,9 @@ targets:
         embed: true
         codeSign: true
       - target: AgenticToolkitPermissionsUI
+        embed: true
+        codeSign: true
+      - target: AgenticToolkitDisplays
         embed: true
         codeSign: true
       - target: AIPluginKit
@@ -971,6 +1002,7 @@ aggregateTargets:
       - AgenticToolkitCoreMacOS
       - AgenticToolkitPermissions
       - AgenticToolkitPermissionsUI
+      - AgenticToolkitDisplays
       - AgenticToolkitScripting
       - AgenticToolkitMacOS
       - AgenticToolkitDatabase
@@ -1009,6 +1041,7 @@ aggregateTargets:
       - AgenticToolkitCoreUI
       - AgenticToolkitPermissions
       - AgenticToolkitPermissionsUI
+      - AgenticToolkitDisplays
       - AgenticToolkitScripting
       - AgenticToolkitMacOS
       - AIPluginKitTests
@@ -1017,6 +1050,7 @@ aggregateTargets:
       - AgenticToolkitCoreUITests
       - AgenticToolkitPermissionsTests
       - AgenticToolkitPermissionsUITests
+      - AgenticToolkitDisplaysTests
       - AgenticToolkitMacOSTests
       - AgenticToolkitDatabase
       - AgenticToolkitDatabaseTests
@@ -1170,6 +1204,23 @@ schemes:
     archive:
       config: Release
 
+  AgenticToolkitDisplays:
+    build:
+      targets:
+        AgenticToolkitDisplays: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - AgenticToolkitDisplaysTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
   AgenticToolkitPermissionsUI:
     build:
       targets:
@@ -1202,6 +1253,7 @@ schemes:
         - AIPluginKitTests
         - AgenticToolkitPermissionsTests
         - AgenticToolkitPermissionsUITests
+        - AgenticToolkitDisplaysTests
         - AgenticToolkitMacOSTests
         - AgenticToolkitDatabaseTests
     profile:

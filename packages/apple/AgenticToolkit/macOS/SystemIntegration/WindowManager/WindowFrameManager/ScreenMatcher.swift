@@ -1,6 +1,8 @@
 import AppKit
+internal import AgenticToolkitDisplays
 
 /// Finds the best matching current screen for a saved screen fingerprint.
+/// Matching rules live in `DisplayMatcher`; this keeps WindowManager's API.
 public enum ScreenMatcher {
 
     public enum MatchQuality: Int, Comparable, Sendable {
@@ -24,37 +26,25 @@ public enum ScreenMatcher {
         for fingerprint: ScreenFingerprint,
         among screens: [ScreenInfo]
     ) -> ScreenMatch? {
-        var candidates: [(ScreenInfo, MatchQuality)] = []
+        DisplayMatcher.bestMatch(for: fingerprint.matchKey, among: screens, key: { $0.fingerprint.matchKey })
+            .map { ScreenMatch(screen: $0.candidate, quality: MatchQuality($0.quality)) }
+    }
+}
 
-        for screen in screens {
-            let current = screen.fingerprint
-
-            // Tier 1: UUID match
-            if let savedUUID = fingerprint.displayUUID,
-               let currentUUID = current.displayUUID,
-               savedUUID == currentUUID {
-                let resMatch = abs(current.resolutionWidth - fingerprint.resolutionWidth) < 1
-                    && abs(current.resolutionHeight - fingerprint.resolutionHeight) < 1
-                candidates.append((screen, resMatch ? .exact : .uuidResChanged))
-                continue
-            }
-
-            // Tier 2: Name match
-            if let savedName = fingerprint.localizedName,
-               let currentName = current.localizedName,
-               savedName == currentName {
-                candidates.append((screen, .nameOnly))
-                continue
-            }
-
-            // Tier 3: Position match (was main, is main)
-            if fingerprint.isMain && current.isMain {
-                candidates.append((screen, .positionOnly))
-            }
+extension ScreenMatcher.MatchQuality {
+    init(_ quality: DisplayMatchQuality) {
+        switch quality {
+        case .positionOnly: self = .positionOnly
+        case .nameOnly: self = .nameOnly
+        case .uuidSizeChanged: self = .uuidResChanged
+        case .exact: self = .exact
         }
+    }
+}
 
-        return candidates
-            .max(by: { $0.1 < $1.1 })
-            .map { ScreenMatch(screen: $0.0, quality: $0.1) }
+extension ScreenFingerprint {
+    var matchKey: DisplayMatchKey {
+        DisplayMatchKey(uuid: displayUUID, name: localizedName,
+                        size: CGSize(width: resolutionWidth, height: resolutionHeight), isMain: isMain)
     }
 }
