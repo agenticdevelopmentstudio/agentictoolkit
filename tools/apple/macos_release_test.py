@@ -200,6 +200,8 @@ def test_preflight_require_clean_main_respects_main_branch_param(tmp_path):
             return subprocess.CompletedProcess(argv, 0, "", "")
         if argv[:2] == ["git", "-C"] and "rev-parse" in argv:
             return subprocess.CompletedProcess(argv, 0, "release\n", "")
+        if argv[:2] == ["git", "-C"] and "rev-list" in argv:
+            return subprocess.CompletedProcess(argv, 0, "0\n", "")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     # Would fail against the "main" default; passing main_branch="release"
@@ -320,6 +322,12 @@ def test_preflight_passes_when_everything_succeeds(tmp_path):
             return subprocess.CompletedProcess(argv, 0, "", "")
         if argv[:2] == ["git", "-C"] and "rev-parse" in argv:
             return subprocess.CompletedProcess(argv, 0, "main\n", "")
+        if argv[:2] == ["git", "-C"] and "rev-list" in argv:
+            return subprocess.CompletedProcess(argv, 0, "0\n", "")
+        if argv[:2] == ["git", "-C"] and "submodule" in argv:
+            return subprocess.CompletedProcess(argv, 0, " abc123 external/lib (heads/main)\n", "")
+        if argv[:2] == ["git", "-C"] and "--contains" in argv:
+            return subprocess.CompletedProcess(argv, 0, "  origin/main\n", "")
         if argv[0] == str(generate_keys):
             return subprocess.CompletedProcess(argv, 0, "", "")
         if argv[:2] == ["gh", "auth"]:
@@ -333,9 +341,64 @@ def test_preflight_passes_when_everything_succeeds(tmp_path):
     mr.preflight(
         identities=["Developer ID Application", "Developer ID Installer"],
         notary_profile="p", releases_json={"schema": 1, "releases": []}, version="1.0",
-        run=run, require_clean_main=repo, sparkle_account="acct1",
+        run=run, build=2, require_clean_main=repo, sparkle_account="acct1",
         generate_keys=generate_keys, github_repo="me/repo",
     )  # no raise
+
+
+def _git_runner(*, ahead="0\n", ahead_rc=0, submodules="", contains="  origin/main\n"):
+    def run(argv):
+        if argv[:2] == ["git", "-C"] and "rev-parse" in argv:
+            return subprocess.CompletedProcess(argv, 0, "main\n", "")
+        if argv[:2] == ["git", "-C"] and "rev-list" in argv:
+            return subprocess.CompletedProcess(argv, ahead_rc, ahead, "no upstream configured")
+        if argv[:2] == ["git", "-C"] and "submodule" in argv:
+            return subprocess.CompletedProcess(argv, 0, submodules, "")
+        if argv[:2] == ["git", "-C"] and "--contains" in argv:
+            return subprocess.CompletedProcess(argv, 0, contains, "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    return run
+
+
+def _preflight_git(tmp_path, run, **kw):
+    mr.preflight(identities=[], notary_profile=None, releases_json={"releases": []},
+                 version="1.0", run=run, require_clean_main=tmp_path, **kw)
+
+
+def test_preflight_refuses_unpushed_head(tmp_path):
+    with pytest.raises(mr.PreflightError, match=r"2 commit\(s\) not on its upstream"):
+        _preflight_git(tmp_path, _git_runner(ahead="2\n"))
+
+
+def test_preflight_refuses_a_branch_with_no_upstream(tmp_path):
+    with pytest.raises(mr.PreflightError, match="no upstream"):
+        _preflight_git(tmp_path, _git_runner(ahead="", ahead_rc=128))
+
+
+def test_preflight_refuses_a_submodule_commit_on_no_remote_branch(tmp_path):
+    run = _git_runner(submodules="+deadbeef0123456 external/lib (heads/x)\n", contains="")
+    with pytest.raises(mr.PreflightError, match="external/lib pins deadbeef0123"):
+        _preflight_git(tmp_path, run)
+
+
+def test_preflight_refuses_an_uninitialised_submodule(tmp_path):
+    run = _git_runner(submodules="-deadbeef0123456 external/lib\n")
+    with pytest.raises(mr.PreflightError, match="not checked out"):
+        _preflight_git(tmp_path, run)
+
+
+def test_preflight_require_pushed_false_skips_the_push_checks(tmp_path):
+    _preflight_git(tmp_path, _git_runner(ahead="3\n"), require_pushed=False)  # no raise
+
+
+def test_preflight_refuses_a_build_number_not_above_the_published_ones(tmp_path):
+    published = {"releases": [{"version": "1.0", "build": 7}, {"version": "0.9", "build": 5}]}
+    for build in (7, 6):
+        with pytest.raises(mr.PreflightError, match=f"build number {build} .* build 7"):
+            mr.preflight(identities=[], notary_profile=None, releases_json=published,
+                         version="1.1", run=_git_runner(), build=build)
+    mr.preflight(identities=[], notary_profile=None, releases_json=published,
+                 version="1.1", run=_git_runner(), build=8)  # no raise
 
 
 # ---------------------------------------------------------------------------
@@ -749,6 +812,21 @@ def test_render_distribution_wraps_check_js_in_cdata_and_parses(tmp_path):
     assert 'if (a < b && c > 1) { return true; }' in xml
     # And the whole document must still be well-formed XML once CDATA-wrapped.
     ET.fromstring(xml)
+
+
+def test_render_distribution_gates_the_os_on_the_minimum_version():
+    xml = mr.render_distribution(
+        title="S", identifier="com.x", version="1.0", pkg_ref="S.pkg",
+        optional_choices=[], installation_check_js=None, minimum_os_version="26.0",
+    )
+    gate = ET.fromstring(xml).find("allowed-os-versions/os-version")
+    assert gate is not None and gate.get("min") == "26.0"
+
+    ungated = mr.render_distribution(
+        title="S", identifier="com.x", version="1.0", pkg_ref="S.pkg",
+        optional_choices=[], installation_check_js=None,
+    )
+    assert "allowed-os-versions" not in ungated
 
 
 def test_render_distribution_raises_when_check_js_contains_cdata_terminator():

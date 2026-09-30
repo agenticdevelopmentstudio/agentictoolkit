@@ -65,14 +65,26 @@ def preflight(
     releases_json: dict,
     version: str,
     run: Runner,
+    build: int | None = None,
     require_clean_main: Path | None = None,
     main_branch: str = "main",
+    require_pushed: bool = True,
     sparkle_account: str | None = None,
     generate_keys: Path | None = None,
     github_repo: str | None = None,
 ) -> None:
     """Check every release precondition and raise once, listing every
-    failure (not just the first), each with the fix that clears it."""
+    failure (not just the first), each with the fix that clears it.
+
+    `build` is the bundle's CFBundleVersion: it must exceed every published
+    `build` in `releases_json`, because Sparkle compares CFBundleVersion and
+    never offers an update whose build is not newer.
+
+    With `require_clean_main`, the checkout must also be on `main_branch`
+    and, unless `require_pushed` is False, have HEAD on its upstream and
+    every submodule's pinned commit on one of that submodule's remote
+    branches, so a release is only ever built from published source.
+    """
     failures: list[str] = []
 
     found = run(["security", "find-identity", "-v", "-p", "basic"])
@@ -96,6 +108,16 @@ def preflight(
     existing_versions = {r.get("version") for r in releases_json.get("releases", [])}
     if version in existing_versions:
         failures.append(f"{version} is already released — bump the version before releasing")
+
+    if build is not None:
+        published = [r.get("build") for r in releases_json.get("releases", [])]
+        newest = max((b for b in published if isinstance(b, int)), default=None)
+        if newest is not None and build <= newest:
+            failures.append(
+                f"build number {build} is not greater than the newest published build "
+                f"{newest} — Sparkle would never offer this update; raise "
+                "CURRENT_PROJECT_VERSION above it"
+            )
 
     if require_clean_main is not None:
         repo = require_clean_main
@@ -121,6 +143,9 @@ def preflight(
                     f"{repo} is on branch '{current}', not {main_branch} — "
                     f"checkout {main_branch} before releasing"
                 )
+
+        if require_pushed:
+            failures.extend(_unpushed_failures(repo, run))
 
     if sparkle_account is not None:
         if generate_keys is None:
@@ -167,6 +192,53 @@ def preflight(
 
     if failures:
         raise PreflightError("\n".join(failures))
+
+
+def _unpushed_failures(repo: Path, run: Runner) -> list[str]:
+    """HEAD must be on its upstream, and each submodule's pinned commit on one
+    of that submodule's remote-tracking branches. A remote-tracking ref only
+    ever holds commits that were on the remote, so no fetch is needed: a stale
+    ref can under-report a push, never invent one."""
+    failures: list[str] = []
+    ahead = run(["git", "-C", str(repo), "rev-list", "--count", "@{u}..HEAD"])
+    count = (ahead.stdout or "").strip()
+    if ahead.returncode != 0:
+        failures.append(
+            f"{repo}'s branch has no upstream "
+            f"({(ahead.stderr or '').strip() or 'git rev-list failed'}) — "
+            "push it with `git push -u origin HEAD` before releasing"
+        )
+    elif not count.isdigit():
+        failures.append(f"could not tell whether {repo} is pushed (git rev-list printed {count!r})")
+    elif int(count) > 0:
+        failures.append(
+            f"{repo} has {count} commit(s) not on its upstream — push them before releasing"
+        )
+
+    status = run(["git", "-C", str(repo), "submodule", "status", "--recursive"])
+    if status.returncode != 0:
+        failures.append(
+            f"git submodule status failed in {repo} — {(status.stderr or '').strip()}"
+        )
+        return failures
+    for line in (status.stdout or "").splitlines():
+        fields = line[1:].split()
+        if len(fields) < 2:
+            continue
+        sha, path = fields[0], fields[1]
+        if line[0] == "-":
+            failures.append(
+                f"submodule {path} in {repo} is not checked out — "
+                "`git submodule update --init --recursive`"
+            )
+            continue
+        contains = run(["git", "-C", str(repo / path), "branch", "-r", "--contains", sha])
+        if contains.returncode != 0 or not (contains.stdout or "").strip():
+            failures.append(
+                f"submodule {path} pins {sha[:12]}, which is on none of its remote branches — "
+                f"push it (`git -C {repo / path} push`), or fetch if it already is"
+            )
+    return failures
 
 
 def _is_bundle_dir(path: Path) -> bool:
@@ -445,6 +517,7 @@ def render_distribution(
     optional_choices: list[tuple[str, str, str, str]],
     installation_check_js: str | None,
     allow_external_scripts: bool = False,
+    minimum_os_version: str | None = None,
 ) -> str:
     """Render a productbuild Distribution.xml.
 
@@ -458,6 +531,10 @@ def render_distribution(
     the CDATA terminator `]]>`. `allow_external_scripts=True` emits
     `allow-external-scripts="yes"` on `<options>`, required for check/postinstall
     JS that calls `system.run` (e.g. to probe `/usr/bin/python3`).
+
+    `minimum_os_version` (the app's LSMinimumSystemVersion) emits
+    `<allowed-os-versions>`, so Installer refuses the package up front on an
+    older macOS instead of installing an app that cannot launch there.
     """
     if installation_check_js and "]]>" in installation_check_js:
         raise ValueError("installation_check_js must not contain the CDATA terminator ']]>'")
@@ -476,6 +553,11 @@ def render_distribution(
         f"    <options {options_attrs}/>",
         '    <domains enable_localSystem="true"/>',
     ]
+
+    if minimum_os_version:
+        lines.append("    <allowed-os-versions>")
+        lines.append(f'        <os-version min="{esc(minimum_os_version)}"/>')
+        lines.append("    </allowed-os-versions>")
 
     if installation_check_js:
         lines.append('    <installation-check script="pm_install_check();"/>')

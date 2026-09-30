@@ -575,7 +575,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "mkdir -p \"$HOME/.agenticplugins\"\n/usr/bin/rsync -a --delete \"$BUILT_PRODUCTS_DIR/$FULL_PRODUCT_NAME/\" \"$HOME/.agenticplugins/$FULL_PRODUCT_NAME/\"\n";
+			shellScript = "/usr/bin/python3 \"$PROJECT_DIR/tools/self_install_plugin.py\"\n";
 		};
 		572192510E5E1A967BEACACE /* SwiftLint */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -689,7 +689,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "mkdir -p \"$HOME/.agenticplugins\"\n/usr/bin/rsync -a --delete \"$BUILT_PRODUCTS_DIR/$FULL_PRODUCT_NAME/\" \"$HOME/.agenticplugins/$FULL_PRODUCT_NAME/\"\n";
+			shellScript = "/usr/bin/python3 \"$PROJECT_DIR/tools/self_install_plugin.py\"\n";
 		};
 		C026AF4D53BCF5BB6973B99F /* SwiftLint */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -727,7 +727,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "mkdir -p \"$HOME/.agenticplugins\"\n/usr/bin/rsync -a --delete \"$BUILT_PRODUCTS_DIR/$FULL_PRODUCT_NAME/\" \"$HOME/.agenticplugins/$FULL_PRODUCT_NAME/\"\n";
+			shellScript = "/usr/bin/python3 \"$PROJECT_DIR/tools/self_install_plugin.py\"\n";
 		};
 		C3CD6AB1A4A00D10F140CCA6 /* Install to ~/.agenticplugins */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -746,7 +746,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "mkdir -p \"$HOME/.agenticplugins\"\n/usr/bin/rsync -a --delete \"$BUILT_PRODUCTS_DIR/$FULL_PRODUCT_NAME/\" \"$HOME/.agenticplugins/$FULL_PRODUCT_NAME/\"\n";
+			shellScript = "/usr/bin/python3 \"$PROJECT_DIR/tools/self_install_plugin.py\"\n";
 		};
 		CB41CFE654A0F740A09F9DEA /* Install to ~/.agenticplugins */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -765,7 +765,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "mkdir -p \"$HOME/.agenticplugins\"\n/usr/bin/rsync -a --delete \"$BUILT_PRODUCTS_DIR/$FULL_PRODUCT_NAME/\" \"$HOME/.agenticplugins/$FULL_PRODUCT_NAME/\"\n";
+			shellScript = "/usr/bin/python3 \"$PROJECT_DIR/tools/self_install_plugin.py\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

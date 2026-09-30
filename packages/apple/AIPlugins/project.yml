@@ -75,8 +75,7 @@ targets:
       - name: Install to ~/.agenticplugins
         basedOnDependencyAnalysis: false
         script: |
-          mkdir -p "$HOME/.agenticplugins"
-          /usr/bin/rsync -a --delete "$BUILT_PRODUCTS_DIR/$FULL_PRODUCT_NAME/" "$HOME/.agenticplugins/$FULL_PRODUCT_NAME/"
+          /usr/bin/python3 "$PROJECT_DIR/tools/self_install_plugin.py"
 
   ClaudeLocal:
     type: bundle
@@ -103,8 +102,7 @@ targets:
       - name: Install to ~/.agenticplugins
         basedOnDependencyAnalysis: false
         script: |
-          mkdir -p "$HOME/.agenticplugins"
-          /usr/bin/rsync -a --delete "$BUILT_PRODUCTS_DIR/$FULL_PRODUCT_NAME/" "$HOME/.agenticplugins/$FULL_PRODUCT_NAME/"
+          /usr/bin/python3 "$PROJECT_DIR/tools/self_install_plugin.py"
 
   Google:
     type: bundle
@@ -131,8 +129,7 @@ targets:
       - name: Install to ~/.agenticplugins
         basedOnDependencyAnalysis: false
         script: |
-          mkdir -p "$HOME/.agenticplugins"
-          /usr/bin/rsync -a --delete "$BUILT_PRODUCTS_DIR/$FULL_PRODUCT_NAME/" "$HOME/.agenticplugins/$FULL_PRODUCT_NAME/"
+          /usr/bin/python3 "$PROJECT_DIR/tools/self_install_plugin.py"
 
   OpenAI:
     type: bundle
@@ -159,8 +156,7 @@ targets:
       - name: Install to ~/.agenticplugins
         basedOnDependencyAnalysis: false
         script: |
-          mkdir -p "$HOME/.agenticplugins"
-          /usr/bin/rsync -a --delete "$BUILT_PRODUCTS_DIR/$FULL_PRODUCT_NAME/" "$HOME/.agenticplugins/$FULL_PRODUCT_NAME/"
+          /usr/bin/python3 "$PROJECT_DIR/tools/self_install_plugin.py"
 
   OpenAICompatible:
     type: bundle
@@ -187,8 +183,7 @@ targets:
       - name: Install to ~/.agenticplugins
         basedOnDependencyAnalysis: false
         script: |
-          mkdir -p "$HOME/.agenticplugins"
-          /usr/bin/rsync -a --delete "$BUILT_PRODUCTS_DIR/$FULL_PRODUCT_NAME/" "$HOME/.agenticplugins/$FULL_PRODUCT_NAME/"
+          /usr/bin/python3 "$PROJECT_DIR/tools/self_install_plugin.py"
 
   # Unit tests for the plugins' request-building and stream-decoding logic.
   # The plugin sources are compiled directly into this bundle (rather than
