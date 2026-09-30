@@ -65,15 +65,6 @@ export interface RailHostRegistry {
    *  report can never light the wrong list. Required, for the same reason {@link reportMissing} is:
    *  a host that quietly dropped these would show no spinner anywhere, and nothing would say so. */
   reportBusy: (id: string, levelId: string, busy: boolean) => void;
-  /** Publish (`title`) or withdraw (`null`) the text shown in the DETAIL pane's top strip,
-   *  keyed by the publishing pane — the open document's name, the open record's summary. The
-   *  HOST owns where it lands (HTDV's `detailTitle`), so a pane names what it is showing
-   *  without reaching the stack that renders it.
-   *
-   *  OPTIONAL, unlike its neighbours: a host that does not implement it shows no title, which
-   *  is exactly what those hosts do today, and every hand-built registry in the test suites
-   *  keeps compiling. A string rather than a node — see {@link useDetailTitle}. */
-  setDetailTitle?: (id: string, title: string | null) => void;
   /** The DOM node of the shell's full-width button-bar slot; feature editors portal their action
    *  bar here so it spans the top instead of sitting inside the detail. Null with no host.
    *  It belongs to whichever EDITOR is open (its save/cancel bar); a list's own controls ride
@@ -342,38 +333,6 @@ export function useReportBusy(busy: boolean): void {
     report(id, levelId, true);
     return () => report(id, levelId, false);
   }, [report, id, levelId, busy]);
-}
-
-/**
- * Name what THIS pane is showing, for the detail header. Pass `null` when nothing is open;
- * the title is withdrawn on unmount too, so a closed pane never leaves its name over an
- * empty one.
- *
- * A `string`, deliberately: a `ReactNode` is a new object on every render, and an effect
- * that depends on one would re-publish forever. A host that does not implement
- * {@link RailHostRegistry.setDetailTitle} — and a pane with no host at all — makes this a
- * no-op.
- */
-export function useDetailTitle(title: string | null): void {
-  const host = useRailHost();
-  const setDetailTitle = host?.setDetailTitle;
-  const id = useId();
-  // TWO effects, and the split is the point. The host's tie-break is "the LAST to register
-  // wins" (`host-stack.tsx`), read off the title Map's INSERTION order — and a Map preserves
-  // an existing key's position on `set` but re-appends it after a `delete`. One effect with
-  // `title` in its deps would run its own cleanup on every title CHANGE, so re-titling a
-  // background pane would delete-and-re-append its key and steal the header from the pane
-  // actually on screen. So publishing tracks `title`, and the withdrawal is its own effect
-  // that runs only on unmount or an id change — the two events that really mean "this
-  // publisher is gone".
-  useEffect(() => {
-    if (!setDetailTitle) return;
-    setDetailTitle(id, title);
-  }, [setDetailTitle, id, title]);
-  useEffect(() => {
-    if (!setDetailTitle) return;
-    return () => setDetailTitle(id, null);
-  }, [setDetailTitle, id]);
 }
 
 /** The DOM node a feature editor should portal its action bar into, or null when there is no

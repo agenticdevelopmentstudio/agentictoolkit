@@ -23,6 +23,7 @@ import {
   LayoutTemplate,
   Store,
 } from "lucide-react";
+import { useDetailTitle } from "@agenticdevelopertoolkit/ui/blocks/detail-title";
 import type { TopicLeaf } from "@agentic-toolkit/resource";
 import {
   EcosystemsFeature,
@@ -112,9 +113,12 @@ const PLACEHOLDERS: ReadonlySet<string> = new Set<string>(PLACEHOLDER_TOPIC_IDS)
  *  these rows moved from the workspace rail to a PRODUCT, so "for this product" is the part of the
  *  move a reader can otherwise only infer from the URL. */
 function ComingSoonPane({ title }: { title?: ReactNode }): ReactElement {
+  // Inside a detail stack the topic's name rides the stack's detail strip (see FeatureTitle).
+  const { hoisted, portal } = useDetailTitle(title);
   return (
     <section className="flex flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
-      <h2 className="text-lg font-medium text-apt-text">{title}</h2>
+      {portal}
+      {!hoisted && <h2 className="text-lg font-medium text-apt-text">{title}</h2>}
       <p className="font-mono text-sm uppercase tracking-widest text-apt-text-dim">Coming soon</p>
       <p className="max-w-prose text-sm text-apt-text-muted">
         {title} for this product will be configured here.

@@ -2,6 +2,7 @@
 
 import type { ReactElement } from "react";
 import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
+import { useDetailTitle } from "@agenticdevelopertoolkit/ui/blocks/detail-title";
 
 // The shared surfaces a workspace-scoped feature shows INSTEAD of its pane: two for an ecosystem
 // gate that did not open, one for a feature that isn't built yet. They live here rather than in
@@ -70,9 +71,12 @@ export function ComingSoon({
    */
   blurb?: string;
 }): ReactElement {
+  // Inside a detail stack the name rides the stack's detail strip (see FeatureTitle).
+  const { hoisted, portal } = useDetailTitle(title);
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-2 p-8 text-center">
-      <h1 className="font-mono text-lg tracking-wide text-apt-text">{title}</h1>
+      {portal}
+      {!hoisted && <h1 className="font-mono text-lg tracking-wide text-apt-text">{title}</h1>}
       <p className="font-mono text-sm uppercase tracking-widest text-apt-text-dim">
         Coming soon
       </p>

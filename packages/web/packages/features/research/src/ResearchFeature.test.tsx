@@ -28,10 +28,14 @@ import { act, render, screen, fireEvent, waitFor, within, cleanup } from "@testi
 import { useMemo, useState, type ReactNode } from "react";
 import {
   RailHostContext,
-  useHostDetailTitle,
   type RailHostRegistry,
   type RegisteredLevels,
 } from "@agentic-toolkit/resource";
+import {
+  DetailTitleProvider,
+  detailStripTitle,
+  useDetailTitleHost,
+} from "@agenticdevelopertoolkit/ui/blocks/detail-title";
 // The rail stand-in itself (G68, Mike, 2026-09-25) — this suite used to hand-roll its own
 // near-copy of the four other feature packages' harnesses, and the copies had drifted (one of
 // them called `l.search.onQueryChange` unguarded, though `TopicListSearch.onQueryChange` is
@@ -181,17 +185,15 @@ afterEach(cleanup);
  *  drivable. No `HomeBarHost` any more: the controls ride the documents level's own
  *  `search`/`onNew`/`titleActions` now, so `RailStandIn` below is the whole story.
  *
- *  `setDetailTitle`/`detailTitle` are wired through the package's own {@link useHostDetailTitle} —
- *  the REAL host-side hook every production host (StandaloneRailHost, the hub's
- *  WorkspaceChromeProvider) uses to turn `useDetailTitle` publishes into the string HTDV's
- *  `detailTitle` prop receives — rather than a hand-rolled stand-in, so what this test exercises
- *  is the actual merge logic, not a re-implementation of it. The rendered `detail-title` node
- *  stands in for HTDV's own title strip (`hierarchical-topic-detail.tsx`'s `detailTitle` slot),
- *  which lives in `@agenticdevelopertoolkit/ui` and is not something this harness renders — this package
- *  has no test coverage of HTDV itself, only of what reaches its host-side boundary. */
+ *  The detail title rides the REAL stack-side slot (`@agenticdevelopertoolkit/ui`'s
+ *  detail-title: `useDetailTitleHost` + `DetailTitleProvider` + the `detailStripTitle` cell) —
+ *  the same three pieces HTDV and HMDV use to draw a pane's title in their detail strip — rather
+ *  than a hand-rolled stand-in, so what this test exercises is the actual portal and its
+ *  last-to-register rule. Only the strip around the cell is left out: this package has no test
+ *  coverage of HTDV itself. */
 function Harness({ children }: { children: ReactNode }) {
   const [entries, setEntries] = useState<Map<string, RegisteredLevels>>(new Map());
-  const { setDetailTitle, detailTitle } = useHostDetailTitle();
+  const titleHost = useDetailTitleHost();
   const registry: RailHostRegistry = useMemo(
     () => ({
       registerLevels: (id, entry) =>
@@ -210,23 +212,21 @@ function Harness({ children }: { children: ReactNode }) {
       popStack: () => {},
       reportMissing: () => {},
       reportBusy: () => {},
-      setDetailTitle,
       toolbarSlot: null,
     }),
-    [setDetailTitle],
+    [],
   );
   const mergedLevels = [...entries.values()]
     .sort((a, b) => a.depth - b.depth)
     .flatMap((e) => e.levels);
   return (
     <RailHostContext.Provider value={registry}>
-      {/* Stand-in for HTDV's title strip: same string {@link useHostDetailTitle} would hand
-          the real detail header, rendered here so a test can read it back. Empty (not
-          missing) when no pane is publishing, so "cleared" and "never rendered" both read as
-          the same empty string rather than a testid that disappears from the DOM. */}
-      <div data-testid="detail-title">{detailTitle ?? ""}</div>
+      {/* The strip's title cell, rendered here so a test can read it back. Empty (not missing)
+          when no pane is publishing, so "cleared" and "never rendered" both read as the same
+          empty string rather than a testid that disappears from the DOM. */}
+      <div data-testid="detail-title">{detailStripTitle(titleHost, undefined).cell}</div>
       <RailStandIn levels={mergedLevels} />
-      {children}
+      <DetailTitleProvider host={titleHost}>{children}</DetailTitleProvider>
     </RailHostContext.Provider>
   );
 }
@@ -304,8 +304,8 @@ describe("ResearchFeature", () => {
   // learning notes") used elsewhere in this file for the list row / rail button name. A
   // mutation to `useDetailTitle(null)` (publishing nothing, ever) left `resource`'s 95/95 and
   // this package's own 20/20 both green, because nothing here asserted on the PUBLISH side of
-  // that call. `resource/src/__tests__/detailTitle.test.tsx` covers the plumbing (a synthetic
-  // pane through `useHostDetailTitle`); these two cover the integration point this task
+  // that call. The ui package's `detailTitle.test.tsx` covers the plumbing (synthetic panes
+  // in a real HTDV); these two cover the integration point this task
   // actually delivers — that ResearchPane itself is the caller, and that it clears what it
   // published.
   it("publishes the open document's title into the detail header", async () => {
@@ -329,8 +329,8 @@ describe("ResearchFeature", () => {
   // drives the transition through `rerender` with `docId` dropped, the same way "leaves a failed
   // save's message behind when another document is opened" (below) rerenders onto a new `docId` —
   // that changes `selectedDoc` from the SAME mounted `ResearchPane`, which is what exercises
-  // `useDetailTitle`'s own cleanup path (its effect depends on `title`, so a title→null change
-  // runs the previous effect's cleanup before the new, no-op-null one).
+  // `useDetailTitle`'s own cleanup path (its registration is keyed on whether there IS a title, so
+  // a title→null change runs the previous registration's cleanup and the slot empties).
   it("leaves no stale title once the open document is deselected", async () => {
     const { rerender } = render(
       <Harness>

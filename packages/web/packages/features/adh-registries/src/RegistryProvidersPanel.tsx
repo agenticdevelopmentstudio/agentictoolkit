@@ -311,7 +311,7 @@ export function RegistryProvidersPanel({
       {/* The platform's own content header — the same one every /home pane is titled by —
           rather than a bare heading. `FieldGroup` is the wrong wrapper here: it is a bordered
           card, and `EditableList` already draws its own bar and table border inside one. */}
-      <SectionHeader title={title} />
+      <SectionHeader paneTitle title={title} />
 
       {/* The bulk remove's own failure, NOT `EditableList`'s `error` — that one is the LOAD's,
           and it renders "showing the last rows that loaded", which says the wrong thing about

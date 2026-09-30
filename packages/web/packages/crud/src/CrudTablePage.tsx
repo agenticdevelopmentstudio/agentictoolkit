@@ -85,7 +85,7 @@ export function CrudTablePage({ title, tables, activeTable, baseHref }: CrudTabl
         </ul>
       </nav>
       <div className="flex min-w-0 flex-1 flex-col gap-4">
-        <SectionHeader title={title} eyebrow={meta?.key} />
+        <SectionHeader paneTitle title={title} eyebrow={meta?.key} />
         {meta ? (
           // Keyed per table so a rail switch is a fresh mount (first-load
           // spinner, dialog/edit state reset) instead of a stale carry-over.

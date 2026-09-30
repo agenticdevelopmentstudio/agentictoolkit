@@ -627,7 +627,7 @@ function ServiceEditor({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-2 px-6 pt-4 pb-2">
-        <SectionHeader title={draft.name || "Service"} />
+        <SectionHeader paneTitle title={draft.name || "Service"} />
         {renderRecordAffordance?.({
           path: "/persona/services/{id}",
           pathValues: { id: service.id },

@@ -22,7 +22,6 @@ import {
   useHostBusyReports,
   useHostMissingAlert,
   useHostPopStack,
-  useHostDetailTitle,
 } from "./host-stack";
 
 /**
@@ -137,7 +136,6 @@ export function StandaloneRailHost({
   const { reportBusy, levels: mergedLevels } = useHostBusyReports(registered);
   const popStack = useHostPopStack(mergedLevels);
   const { reportMissing, missingAlert } = useHostMissingAlert(popStack, guards.size > 0);
-  const { setDetailTitle, detailTitle } = useHostDetailTitle();
 
   // The editor toolbar slot: a real DOM node this host mounts in the HTD's top strip, so a pane's
   // action bar spans the full width above the rails instead of sitting inside its own detail. It
@@ -155,7 +153,6 @@ export function StandaloneRailHost({
       popStack,
       reportMissing,
       reportBusy,
-      setDetailTitle,
       toolbarSlot,
     }),
     [
@@ -165,7 +162,6 @@ export function StandaloneRailHost({
       popStack,
       reportMissing,
       reportBusy,
-      setDetailTitle,
       toolbarSlot,
     ],
   );
@@ -197,7 +193,6 @@ export function StandaloneRailHost({
       <HierarchicalDetailView
         levels={mergedLevels}
         rootLabel={mergedLevels[0]?.title || undefined}
-        detailTitle={detailTitle}
         exitGuard={exitGuard}
         toolbar={
           <div

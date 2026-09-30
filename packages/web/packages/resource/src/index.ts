@@ -51,7 +51,6 @@ export {
   useStackPop,
   useReportMissing,
   useReportBusy,
-  useDetailTitle,
   useRailExitGuard,
   ToolbarPortal,
   useToolbarPortal,
@@ -66,8 +65,8 @@ export { useResourceItem, type ResourceItem } from "./use-resource-item";
 // The HOST side of that contract. Only a rail host calls these — the hub's WorkspaceChromeProvider
 // is the one outside this package — and they exist so its copy and StandaloneRailHost's cannot
 // drift, alert copy included.
-export { useHostPopStack, useHostMissingAlert, useHostBusyReports, useHostDetailTitle } from "./host-stack";
-export type { HostMissingAlert, HostBusyReports, HostDetailTitle } from "./host-stack";
+export { useHostPopStack, useHostMissingAlert, useHostBusyReports } from "./host-stack";
+export type { HostMissingAlert, HostBusyReports } from "./host-stack";
 
 // The record-affordance seam: a host-injected per-record renderer (null standalone).
 export { RecordAffordanceContext, useRecordAffordance } from "./record-affordance";

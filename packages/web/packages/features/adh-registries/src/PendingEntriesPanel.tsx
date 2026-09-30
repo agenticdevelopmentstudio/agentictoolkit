@@ -147,7 +147,7 @@ export function PendingEntriesPanel({ title, registryId, client }: PendingEntrie
       {/* The topic's own title, on BOTH branches. It used to be drawn by the empty state's own
           `FieldGroup`, so a queue with submissions in it — the state this pane exists for — had
           no heading at all, and each row's card was the first thing under the breadcrumb. */}
-      <SectionHeader title={title} />
+      <SectionHeader paneTitle title={title} />
       <ErrorText error={loadError} />
       {items.length === 0 ? (
         /* This list asks for `status=pending` only, so an empty answer says nothing about

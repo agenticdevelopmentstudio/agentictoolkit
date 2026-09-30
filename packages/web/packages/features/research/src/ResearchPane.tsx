@@ -16,10 +16,10 @@ import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { useDualModeSelection } from "@agenticdevelopertoolkit/ui/hooks/useDualModeSelection";
 import { slugify } from "@agenticdevelopertoolkit/ui/lib/slug";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
+import { useDetailTitle } from "@agenticdevelopertoolkit/ui/blocks/detail-title";
 import {
   StackLevels,
   useRailExitGuard as useWorkspaceExitGuard,
-  useDetailTitle,
   MasterDetailLeaf,
   useRecordAffordance,
   CreateResourceDialog,
@@ -782,7 +782,8 @@ export function ResearchPane({
   // the saved document's name — Task 11's docblock gave this to `selectedDoc.title` for the
   // reason stated above; that reason still holds, only the conclusion changes with the title
   // now derived live from the draft.
-  useDetailTitle(draft ? derivedTitle : null);
+  // The stack's detail strip draws it; `titlePortal` below is what carries it there.
+  const { portal: titlePortal } = useDetailTitle(draft ? derivedTitle : null);
   // Registered only while DIRTY (see useMasterDetailLevel) so the host's guard count is a
   // render-value dirty signal. `editing` is implied: a draft cannot be dirty with no editor open.
   useWorkspaceExitGuard(dirty ? { isDirty: () => dirty } : null);
@@ -810,6 +811,7 @@ export function ResearchPane({
 
   return (
     <>
+      {titlePortal}
       {/* Every level in one publication: the category chain, then the documents. StackLevels
           (not useStackLevel) because the count VARIES with the depth walked into, and it
           advances the depth for the leaf below by exactly that many. Nothing precedes the

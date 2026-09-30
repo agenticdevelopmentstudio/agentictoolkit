@@ -7,6 +7,7 @@ import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import { cn } from "@agenticdevelopertoolkit/ui/lib/utils";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { Separator } from "@agenticdevelopertoolkit/ui/components/separator";
+import { useDetailTitle } from "@agenticdevelopertoolkit/ui/blocks/detail-title";
 import { SaveCancelButtons } from "./SaveCancelButtons";
 import { HelpPopover } from "../HelpPopover";
 import { ToolbarPortal } from "../rail-host";
@@ -94,7 +95,11 @@ function ItemList({
 }
 
 /** Feature title row that sits above the button bar: the feature name in the
- * accent color on the left, the "?" help on the far right. */
+ * accent color on the left, the "?" help on the far right.
+ *
+ * Inside a detail stack the NAME moves up into the stack's detail strip, beside `<<< | >>>`
+ * (Mike: "the title should not be in the details pane") — only the trailing slot and the help
+ * stay here, and a row with neither is not drawn at all. Outside a stack it draws as before. */
 export function FeatureTitle({
   title,
   trailing,
@@ -105,11 +110,21 @@ export function FeatureTitle({
   trailing?: ReactNode;
   help?: ReactNode;
 }) {
+  const { hoisted, portal } = useDetailTitle(title);
+  if (hoisted && !trailing && !help) return portal;
   return (
-    <div className="flex items-center justify-between gap-4 px-6 pt-8 pb-2">
-      <h2 className="font-mono text-sm font-medium tracking-wide text-apt-gold">
-        {title}
-      </h2>
+    <div
+      className={cn(
+        "flex items-center gap-4 px-6 pb-2",
+        hoisted ? "justify-end pt-4" : "justify-between pt-8",
+      )}
+    >
+      {portal}
+      {!hoisted && (
+        <h2 className="font-mono text-sm font-medium tracking-wide text-apt-gold">
+          {title}
+        </h2>
+      )}
       <div className="flex items-center gap-2">
         {trailing}
         {help && (
@@ -187,6 +202,10 @@ export function ButtonBar({
   // (even to `null`, meaning "nothing's wrong right now") keeps the row mounted so the caption can
   // change without the row itself mounting/unmounting under it — see the caption comment below.
   const hasBlockedReasonChannel = actions.blockedReason !== undefined;
+  // Inside a detail stack the title rides the stack's detail strip instead of the bar (see
+  // FeatureTitle). `titlePortal` renders beside the bar, never inside it: the bar may itself be
+  // portalled into the host's toolbar slot, and the title must not follow it there.
+  const { hoisted: titleHoisted, portal: titlePortal } = useDetailTitle(title);
   // [New]  ⟷  [Delete] │ [Cancel] [Save] — all borderless "[icon] title".
   // A recessed (darker) strip with top + bottom borders reads as a distinct bar,
   // set off from the tab row above (via the FeatureTabs gap) and the topic|details
@@ -224,7 +243,7 @@ export function ButtonBar({
       )}
       {/* Centered title naming the pane's contents — absolutely centred so it stays put
           regardless of the left/right buttons; pointer-events-none so it never blocks them. */}
-      {title && (
+      {title && !titleHoisted && (
         <h2 className="pointer-events-none absolute left-1/2 max-w-[60%] -translate-x-1/2 truncate font-mono text-sm font-medium tracking-wide text-apt-gold">
           {title}
         </h2>
@@ -286,6 +305,7 @@ export function ButtonBar({
   // deliberately — see the prop.
   return (
     <>
+      {titlePortal}
       {hoist ? <ToolbarPortal>{strip}</ToolbarPortal> : strip}
       {/* Shared confirm modal for delete — replaces the old native confirm(). */}
       <AlertModal

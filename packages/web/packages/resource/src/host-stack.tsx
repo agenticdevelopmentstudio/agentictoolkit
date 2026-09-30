@@ -162,39 +162,3 @@ export function useHostMissingAlert(
   return { reportMissing, missingAlert };
 }
 
-/** What {@link useHostDetailTitle} hands back: the registry member to publish, and the
- *  title to render. */
-export interface HostDetailTitle {
-  setDetailTitle: (id: string, title: string | null) => void;
-  /** Undefined when no pane is publishing one — which is what HTDV's `detailTitle`
-   *  wants for "draw no title strip". */
-  detailTitle: string | undefined;
-}
-
-/**
- * The detail header's title, published by whichever pane is open.
- *
- * Keyed by publisher id like {@link useHostMissingAlert}'s reports, for the same reason:
- * two panes must not be able to cancel each other's title on unmount. When more than one
- * is publishing, the LAST to register wins — in practice exactly one editor is open at a
- * time, and there is no depth to rank them by on this side of the contract.
- */
-export function useHostDetailTitle(): HostDetailTitle {
-  const [titles, setTitles] = useState<ReadonlyMap<string, string>>(new Map());
-  const setDetailTitle = useCallback((id: string, title: string | null) => {
-    setTitles((prev) => {
-      if (title === null) {
-        if (!prev.has(id)) return prev;
-        const next = new Map(prev);
-        next.delete(id);
-        return next;
-      }
-      if (prev.get(id) === title) return prev;
-      const next = new Map(prev);
-      next.set(id, title);
-      return next;
-    });
-  }, []);
-  const detailTitle = useMemo(() => [...titles.values()].at(-1), [titles]);
-  return { setDetailTitle, detailTitle };
-}
