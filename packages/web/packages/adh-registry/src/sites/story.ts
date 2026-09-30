@@ -157,8 +157,8 @@ export const SITE_STORIES: Record<SiteId, SiteStory> = {
  *  ring through every site until the marketing sites moved to their own repo,
  *  and then the placeholder sites to theirs. It is now three rings, and each
  *  repo's `content/landing/` owns exactly its own — so there are three managed
- *  regions here rather than one, each spliced by `buildr update` from that
- *  repo's manifest and diffed by `buildr check`. To change a walk, edit that
+ *  regions here rather than one, each spliced by `content-buildr update` from that
+ *  repo's manifest and diffed by `content-buildr check`. To change a walk, edit that
  *  repo's markdown, not this file. The declarations, this comment, and the
  *  merge below are hand-written and sit outside all three regions.
  *
@@ -166,10 +166,10 @@ export const SITE_STORIES: Record<SiteId, SiteStory> = {
  *  admin and status on 2026-08-30 and owns no ring at all. Its manifest names a
  *  one-entry `tour_map` — a walk with nowhere to walk to — so it emits nothing
  *  here, and the `hub: 'research'` edge that used to head the main ring is gone
- *  from this file for good. That is not an omission to repair: `buildr` reads
+ *  from this file for good. That is not an omission to repair: `content-buildr` reads
  *  every edge off ADJACENT entries in one manifest's `tour_map`, and the two
  *  ends of that edge are now in different repos, so no generator anywhere can
- *  state it. Restoring it means teaching `buildr` that a ring can span repos,
+ *  state it. Restoring it means teaching `content-buildr` that a ring can span repos,
  *  or hand-writing the edge here and accepting that nothing checks it.
  *
  *  One region per owner is the whole point, and the split is not cosmetic.

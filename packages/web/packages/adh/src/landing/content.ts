@@ -14,7 +14,7 @@ import type {
  * A family site's landing deck, as DATA.
  *
  * Every site in the family writes one of these — `src/landing.json`, generated from that
- * site's markdown by `buildr update` and loaded by the `src/landing.tsx` beside it through
+ * site's markdown by `content-buildr update` and loaded by the `src/landing.tsx` beside it through
  * `landingFromData` — and mounts it through `<LandingDeck>` and
  * `<LandingTour>`. Which is to say: the deck's STRUCTURE lives here, in shared code, and
  * a site carries only its own copy.
