@@ -39,6 +39,7 @@ vi.mock("@agentic-toolkit/crud", async () => {
   return {
     CRUD_TABLES: { "content/contacts": { key: "content/contacts" } },
     useExitGuardChannel,
+    ApiAffordanceScope: ({ children }: { children: ReactNode }) => children,
     CrudDataView: function CrudDataView({
       meta,
       filter,

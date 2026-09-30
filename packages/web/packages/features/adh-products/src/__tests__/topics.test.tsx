@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { PRODUCT_TOPICS, HOST_RENDERED_TOPIC_IDS, PLACEHOLDER_TOPIC_IDS } from "../topics";
+import {
+  PRODUCT_TOPICS,
+  HOST_RENDERED_TOPIC_IDS,
+  PLACEHOLDER_TOPIC_IDS,
+  PRODUCT_MEMBER_MOVES,
+  PRODUCT_TOPIC_ALIASES,
+} from "../topics";
 import { PRODUCT_TOPIC_CONFIGS, productTopicPaneRenderer } from "../ProductsFeature";
 
 // Two invariants that hold the rail together and that nothing else can see: a topic renders a
@@ -27,7 +33,7 @@ describe("the product topic rail", () => {
 describe("the host-rendered seam", () => {
   // A POSITIVE assertion about the SETTLED list, not a spot-check of four names: every id a host
   // is told to expect is either a real topic or a GROUP MEMBER — All Data under Storage, Email
-  // Signup under Authentication. An id that is neither would be a seam contract for a pane that
+  // Signup under Users. An id that is neither would be a seam contract for a pane that
   // can never be asked for.
   it("names only real topics (plus the group members that are not ones)", () => {
     const topicIds = new Set<string>(PRODUCT_TOPICS.map((t) => t.id));
@@ -49,11 +55,11 @@ describe("the host-rendered seam", () => {
     const claims = (id: string) => render(id, { ecosystemId: "eco_1", title: id }) != null;
     const PACKAGE_PANES = PRODUCT_TOPICS.map((t) => t.id).filter(claims);
 
-    // Rendered by EcosystemsFeature itself, asked of NEITHER seam: the three GROUP topics, whose
-    // nested sub-rails it owns (their members come back through the seams — Buckets/Access/Users
-    // and User Auth/Sign-in apps/Storage Access Tokens to the switch above, All Data and Email
-    // Signup to the host), and the product's own entity pane.
-    const FEATURE_OWNED = ["storage", "invitations", "authentication", "settings"];
+    // Rendered by EcosystemsFeature itself, asked of NEITHER seam: the two GROUP topics, whose
+    // nested sub-rails it owns (their members come back through the seams — Buckets/Access/Storage
+    // Access Tokens and Users/Authentication to the switch above, All Data and Email Signup to the host),
+    // and the product's own entity pane.
+    const FEATURE_OWNED = ["storage", "invitations", "settings"];
     const owned = new Set<string>([...PACKAGE_PANES, ...FEATURE_OWNED, ...HOST_RENDERED_TOPIC_IDS]);
     const unowned = PRODUCT_TOPICS.map((t) => t.id).filter((id) => !owned.has(id));
     expect(unowned).toEqual([]);
@@ -101,5 +107,40 @@ describe("the placeholder topics", () => {
     for (const id of PLACEHOLDER_TOPIC_IDS) {
       expect(render(id, { ecosystemId: "eco_1", title: id }), id).not.toBeNull();
     }
+  });
+});
+
+// Every row a product draws stands on ONE feature the Manage features dialog lists (Mike,
+// 2026-09-29): Storage, Users, Applications — never one that comes with another (Storage Access
+// Tokens, User Authentication, Email Signup, Client Auth), which has no row in the dialog to tick.
+describe("the rows' features", () => {
+  const INCLUDED = ["storage-access-tokens", "user-authentication", "email-signup", "signin-apps"];
+
+  it("names no feature that comes with another", () => {
+    const named = PRODUCT_TOPICS.flatMap((t) => ("features" in t ? [...(t.features ?? [])] : []));
+    expect(named.filter((k) => INCLUDED.includes(k))).toEqual([]);
+  });
+
+  it("gives every row but Settings exactly one", () => {
+    const wrong = PRODUCT_TOPICS.filter(
+      (t) => t.id !== "settings" && (!("features" in t) || t.features?.length !== 1),
+    ).map((t) => t.id);
+    expect(wrong).toEqual([]);
+  });
+});
+
+describe("the old addresses", () => {
+  it("send a retired row or member to the group that holds it now", () => {
+    const topicIds = new Set<string>(PRODUCT_TOPICS.map((t) => t.id));
+    for (const group of Object.values(PRODUCT_TOPIC_ALIASES)) expect(topicIds.has(group), group).toBe(true);
+    for (const moves of Object.values(PRODUCT_MEMBER_MOVES)) {
+      for (const to of Object.values(moves)) if (to) expect(topicIds.has(to), to).toBe(true);
+    }
+    expect(PRODUCT_TOPIC_ALIASES["signin-apps"]).toBe("applications");
+    // Users ▸ Authentication is an in-package member now: EcosystemsFeature places `auth` itself.
+    expect(PRODUCT_TOPIC_ALIASES.auth).toBeUndefined();
+    expect(PRODUCT_MEMBER_MOVES.invitations).toBeUndefined();
+    expect(PRODUCT_MEMBER_MOVES.authentication?.auth).toBeUndefined();
+    expect(PRODUCT_MEMBER_MOVES.gaming?.levels).toBe("gamification");
   });
 });

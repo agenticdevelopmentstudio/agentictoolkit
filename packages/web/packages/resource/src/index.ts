@@ -55,7 +55,11 @@ export {
   ToolbarPortal,
   useToolbarPortal,
 } from "./rail-host";
-export type { RailHostRegistry, RegisteredLevels, PaneExitGuard } from "./rail-host";
+export type {
+  RailHostRegistry,
+  RegisteredLevels,
+  PaneExitGuard,
+} from "./rail-host";
 
 // One cached item, wired to the stack's missing-item report. The query layer itself
 // (`useResourceItemQuery`) lives in `@agentic-toolkit/data`; this is the composition that talks to
@@ -75,6 +79,8 @@ export type { RecordAffordanceProps, RecordAffordanceRenderer } from "./record-a
 // A grouping rail level whose members render as the deeper content of the ONE
 // merged stack (navigation groups and tabbed editors alike).
 export { StackGroupDetail } from "./group-topic-detail";
+// Every topic list closes on Settings, alone under a divider — one rule for every list.
+export { settingsLast, isSettingsTopic } from "./settings-last";
 export type { GroupTopicItem } from "./group-topic-detail";
 
 // URL push helpers for a feature mounted at an explicit basePath (the port of
@@ -111,6 +117,25 @@ export { unchangedFromStored } from "./master-detail/unchangedFromStored";
 // were hub-local until a feature package needed them; the hub keeps its old import paths
 // through shims.
 export { EditActionBar } from "./edit-action-bar";
+// The shared details pane every details view starts from: one header bar (title, Save / Cancel,
+// API, "?"), a body that scrolls in place, and the edit scope its sections register with.
+export { DetailsPane, useDetailsSection, useInDetailsPane } from "./details-pane";
+export type { DetailsSection } from "./details-pane";
+// The header's API slot: the host's live button for an endpoint, else a disabled "API".
+export { HeaderApiButton } from "./header-api-button";
+// The detail header's slots and disabled fallbacks belong to the stack (ui); re-exported so a
+// feature reaches the whole header vocabulary through this package.
+export {
+  DetailHeaderPortal,
+  useHasDetailHeader,
+  DisabledApiButton,
+  DisabledHelpButton,
+  NO_API_ENDPOINT,
+  NO_HELP,
+  type DetailHeaderHost,
+  type DetailHeaderKind,
+} from "@agenticdevelopertoolkit/ui/blocks";
+export { DetailHeaderActions } from "./detail-header-actions";
 export {
   SettingsDirtyProvider,
   useSettingsDirty,
@@ -120,7 +145,7 @@ export {
 // background refetch, and what a PARTIAL save has to diff against. Hand-rolled once per pane
 // until four copies had produced three distinct bugs.
 export { useSettingsDraft } from "./use-settings-draft";
-export type { SettingsDraft } from "./use-settings-draft";
+export type { SettingsDraft, SettingsDraftSection } from "./use-settings-draft";
 
 // The shared "gate didn't open" surfaces for a workspace-scoped feature (see workspace-gate).
 export { WorkspaceResolutionError, WorkspaceNotManageable, ComingSoon } from "./workspace-gate";

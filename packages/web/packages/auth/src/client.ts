@@ -53,6 +53,12 @@ export class AuthHttpError extends Error {
      *  top-level `code`), when present — so callers can branch on a stable code
      *  instead of matching the human message. */
     readonly code?: string,
+    /** The full parsed JSON body, when the response had one — the message and code
+     *  above are extracted from it, but a caller may need a structured field
+     *  neither covers (e.g. `{ error: { neededBy: [...] } }`). The body is already
+     *  consumed building this error, so this is the only way to reach it; a caller
+     *  reads it defensively (`unknown`), since the shape is endpoint-specific. */
+    readonly body?: unknown,
   ) {
     super(message)
     this.name = 'AuthHttpError'
@@ -98,7 +104,7 @@ export async function exchangeSsoCode(
   if (!res.ok) {
     // Read the body once for both the message and the machine code (see authedFetch).
     const body = await res.json().catch(() => null)
-    throw new AuthHttpError(res.status, extractErrorMessage(body, 'Sign-in failed'), extractErrorCode(body))
+    throw new AuthHttpError(res.status, extractErrorMessage(body, 'Sign-in failed'), extractErrorCode(body), body)
   }
   const data = (await res.json()) as BackendTokenFields & { user: AuthUser }
   return { tokens: tokensFromResponse(data), user: data.user }
@@ -211,6 +217,7 @@ export async function authedFetch(url: string, init: RequestInit = {}): Promise<
       res.status,
       extractErrorMessage(body, `HTTP ${res.status}`),
       extractErrorCode(body),
+      body,
     )
   }
   return res

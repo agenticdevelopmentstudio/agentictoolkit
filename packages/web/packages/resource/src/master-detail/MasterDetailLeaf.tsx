@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { TopicSelectHint } from "@agenticdevelopertoolkit/ui/blocks";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { ButtonBar, type MasterDetailActions } from "./MasterDetailLayout";
+import type { RecordAffordanceProps } from "../record-affordance";
 
 /**
  * The editor half of a DISMANTLED master/detail pane: a {@link ButtonBar} (Save / Cancel / Delete —
@@ -18,6 +19,7 @@ export function MasterDetailLeaf<TInput>({
   form,
   help,
   trailing,
+  api,
   error,
   emptyTitle,
   renderDetail,
@@ -27,8 +29,10 @@ export function MasterDetailLeaf<TInput>({
   form: { actions: MasterDetailActions; editing: boolean; draft: TInput | null };
   /** Optional help affordance on the button bar. */
   help?: ReactNode;
-  /** Optional trailing affordance on the button bar (e.g. an <ApiButton> for the open row). */
+  /** Optional non-API affordance on the button bar, left of the API button. */
   trailing?: ReactNode;
+  /** The open row's endpoint, for the bar's API button (see {@link ButtonBar}'s `api`). */
+  api?: RecordAffordanceProps | null;
   /** Optional load error, shown above the bar. */
   error?: string | null;
   /** Placeholder shown when no row is open. */
@@ -55,7 +59,7 @@ export function MasterDetailLeaf<TInput>({
           advertises actions and then refuses them, with nothing on screen explaining why. So the
           bar renders only while a row is open, and the placeholder below stands alone. */}
       {open && (
-        <ButtonBar actions={form.actions} showCreate={false} trailing={trailing} help={help} />
+        <ButtonBar actions={form.actions} showCreate={false} trailing={trailing} api={api} help={help} />
       )}
       {/* The pane's SCROLLER, and the only one — the `footer` sits outside it, which is what
           keeps it pinned while the editor scrolls.

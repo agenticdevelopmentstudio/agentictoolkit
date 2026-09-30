@@ -79,12 +79,12 @@ export function AdminFeature({
               // know this rail never nests.
               leadsTo: "detail",
               render: () => (
-                // The section pages were built for the old `<main className="p-8">` / admin site's
-                // detail pane, neither of which has padding of its own — restore it here so a pane
-                // looks identical whether it renders under the admin site's own AdminShell or under
-                // a host's rail (mirrors admin-shell.tsx's own wrapper div exactly).
-                <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto p-8">
-                  <Pane />
+                // Each pane owns its own fixed FeatureTitle header and scrolling body (padding
+                // included), so this wrapper only has to keep the flex/min-h-0 chain intact — it
+                // must NOT add overflow or padding of its own, or the pane would get two scroll
+                // regions nested inside each other.
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                  <Pane help={topic.description} />
                 </div>
               ),
             };

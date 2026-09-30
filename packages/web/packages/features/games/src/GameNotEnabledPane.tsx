@@ -22,7 +22,7 @@ export function GameNotEnabledPane({ isSettled }: { isSettled: boolean }): React
       selectable={false}
     >
       {isSettled
-        ? "Turn on Enable Gaming under Settings to mint this product's game, then come back here."
+        ? "Add the Gaming feature to this product to mint its game, then come back here."
         : null}
     </TopicSelectHint>
   );

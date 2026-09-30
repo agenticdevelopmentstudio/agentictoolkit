@@ -375,6 +375,16 @@ describe("AbilitiesPanel", () => {
     await waitFor(() => expect(box("toolA").getAttribute("aria-checked")).toBe("false"));
   });
 
+  // The panel used to draw its own API affordance beside the "Abilities" title (FieldGroup
+  // `trailing`); that button now lives once, in PersonaEditor's leafHeader (its ButtonBar `api`),
+  // so this body must never render one of its own — two API buttons for one persona would say
+  // nothing about which is live.
+  it("renders no API affordance of its own — that lives in the persona editor's header", async () => {
+    render(<AbilitiesPanel personaId="p1" />);
+    await screen.findByRole("checkbox", { name: "searchThreads" });
+    expect(screen.queryByRole("button", { name: /API/ })).toBeNull();
+  });
+
   // #14 — a genuinely null source is the only "Built-in"; a non-null (esp. delisted third-
   // party / integration) grant renders a distinct, clearly-not-native heading.
   it("labels non-null sources as their own groups, never Built-in (#14)", async () => {

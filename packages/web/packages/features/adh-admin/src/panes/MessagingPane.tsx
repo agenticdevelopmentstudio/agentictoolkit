@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { MessagingSurface, type SendMessageDraft } from "@agentic-toolkit/adh/messaging";
+import { FeatureTitle } from "@agentic-toolkit/resource";
 import { UnsavedChangesGuard } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-guard";
 import {
   useMessageLog,
@@ -10,7 +11,6 @@ import {
   useMessagingStatus,
   useMessagingTemplates,
 } from "../api/admin";
-import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * The platform-wide Messaging tool: send email/SMS to any user via the hub's own
@@ -22,7 +22,7 @@ import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header
  * name that scope. The two used to be forked copies of one screen, and had drifted
  * (docs/ui/fleet-ui-audit.md, Tier 6).
  */
-export function MessagingPane() {
+export function MessagingPane({ help }: { help?: ReactNode } = {}) {
   const [page, setPage] = useState(1);
   const status = useMessagingStatus();
   const { data: templates } = useMessagingTemplates();
@@ -37,27 +37,29 @@ export function MessagingPane() {
   const [dirty, setDirty] = useState(false);
 
   return (
-    <div className="space-y-8">
-      <SectionHeader paneTitle title="Messaging" />
-      <UnsavedChangesGuard when={dirty} onNavigate={(href) => router.push(href)} />
-      <MessagingSurface
-        onDirtyChange={setDirty}
-        status={{ data: status.data, isLoading: status.isLoading, isError: status.isError }}
-        templates={templates}
-        send={{
-          mutate: (draft: SendMessageDraft, options) => send.mutate(draft, options),
-          isPending: send.isPending,
-          isSuccess: send.isSuccess,
-          isError: send.isError,
-        }}
-        log={{ data: log.data, isLoading: log.isLoading }}
-        page={page}
-        onPageChange={setPage}
-        userIdLabel="User ID"
-        providerSetupHint={() => (
-          <>Configure Postmark/Twilio as integrations on the hub ecosystem (Hub → Settings → Integrations).</>
-        )}
-      />
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FeatureTitle title="Messaging" help={help} />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col space-y-8 overflow-y-auto px-6 pb-8 pt-2">
+        <UnsavedChangesGuard when={dirty} onNavigate={(href) => router.push(href)} />
+        <MessagingSurface
+          onDirtyChange={setDirty}
+          status={{ data: status.data, isLoading: status.isLoading, isError: status.isError }}
+          templates={templates}
+          send={{
+            mutate: (draft: SendMessageDraft, options) => send.mutate(draft, options),
+            isPending: send.isPending,
+            isSuccess: send.isSuccess,
+            isError: send.isError,
+          }}
+          log={{ data: log.data, isLoading: log.isLoading }}
+          page={page}
+          onPageChange={setPage}
+          userIdLabel="User ID"
+          providerSetupHint={() => (
+            <>Configure Postmark/Twilio as integrations on the hub ecosystem (Hub → Settings → Integrations).</>
+          )}
+        />
+      </div>
     </div>
   );
 }

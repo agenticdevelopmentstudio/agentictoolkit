@@ -5,6 +5,7 @@ import { TopicSelectHint, type TopicLevel } from "@agenticdevelopertoolkit/ui/bl
 import { useDualModeSelection } from "@agenticdevelopertoolkit/ui/hooks/useDualModeSelection";
 import type { TopicLeaf } from "./resource-explorer";
 import { StackLevels } from "./rail-host";
+import { settingsLast } from "./settings-last";
 
 /** A TopicLeaf that selects nothing and routes nowhere — the sub-leaf handed to a member when the
  *  caller doesn't cede a deeper URL segment (so a member's inner selection stays local).
@@ -60,6 +61,12 @@ export interface GroupTopicItem {
    *  `data-blocked="true"`. For a caller whose leaf blocks some action (e.g. Save) on a field that
    *  lives in a DIFFERENT member's pane, so the user can find which topic to open. */
   blocked?: boolean;
+  /** Draw a separator under this member's row — forwarded to {@link TopicDetailItem}'s own
+   *  `dividerAfter`, which the rail renders as a rule. The group places the one above Settings
+   *  itself (see {@link settingsLast}); set this only for any other break the list needs. */
+  dividerAfter?: boolean;
+  /** With `dividerAfter`: a caption under the separator naming the section it opens. */
+  dividerLabel?: string;
 }
 
 /**
@@ -133,13 +140,17 @@ export function StackGroupDetail({
   const { selectedId: selected, select: setSelected } = useDualModeSelection(urlSelection);
   // Selected item if present; else (nothing selected, or a stale id no longer in `items`) nothing.
   const active = selected != null ? items.find((i) => i.id === selected) ?? null : null;
-  const memberItems = items.map((i) => ({
+  // Every topic list closes on Settings, alone under a divider — a group's sub-rail included, so a
+  // member named Settings is moved last here rather than trusted to be authored there.
+  const memberItems = settingsLast(items).map((i) => ({
     id: i.id,
     label: i.label,
     icon: i.icon,
     description: i.description,
     leadsTo: i.leadsTo,
     blocked: i.blocked,
+    dividerAfter: i.dividerAfter,
+    dividerLabel: i.dividerLabel,
   }));
   const level: TopicLevel = {
     id: levelId,

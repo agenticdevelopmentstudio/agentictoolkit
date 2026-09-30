@@ -14,7 +14,7 @@ const as = <F extends (arg: never) => unknown>(o: Record<string, unknown>): Row<
   o as unknown as Row<F>;
 
 describe("toApp", () => {
-  it("maps id→id+identifier, displayName→name, and a valid consumerKind", () => {
+  it("maps id→id+identifier and displayName→name", () => {
     const a = toApp(
       as<typeof toApp>({
         id: "com.acme.app",
@@ -27,12 +27,10 @@ describe("toApp", () => {
     );
     expect(a.identifier).toBe("com.acme.app");
     expect(a.name).toBe("App");
-    expect(a.kind).toBe("staff");
   });
-  it("narrows an unknown consumerKind to the 'developer' default", () => {
-    const a = toApp(
-      as<typeof toApp>({ id: "i", displayName: "n", consumerKind: "wat", ecosystemId: "e", createdAt: "c", updatedAt: "u" }),
-    );
-    expect(a.kind).toBe("developer");
+  it("maps the platform, defaulting a missing or unknown one to web", () => {
+    const row = { id: "i", displayName: "n", consumerKind: "staff", ecosystemId: "e", createdAt: "c", updatedAt: "u" };
+    expect(toApp(as<typeof toApp>({ ...row, platform: "native" })).platform).toBe("native");
+    expect(toApp(as<typeof toApp>({ ...row, platform: "tv" })).platform).toBe("web");
   });
 });

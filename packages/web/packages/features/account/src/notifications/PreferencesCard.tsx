@@ -10,12 +10,7 @@ import {
 } from "@agenticdevelopertoolkit/ui/blocks";
 // No RecordApiButton here: the settings registry's FeatureTitle carries the topic's API link
 // (`/notifications/preferences`) above every panel, and a second one inside it was a duplicate.
-import {
-  DetailSection,
-  EditActionBar,
-  SettingsBody,
-  useReportSettingsDirty,
-} from "@agentic-toolkit/resource";
+import { DetailSection, DetailsPane, type DetailsSection } from "@agentic-toolkit/resource";
 import {
   listPreferences,
   savePreferences,
@@ -117,11 +112,7 @@ export function PreferencesCard({ children }: PreferencesCardProps = {}): ReactE
   // can be unsaved.
   const dirty = data?.some((p) => valueOf(p, "email") !== p.email || valueOf(p, "sms") !== p.sms);
 
-  // NotificationsWorkspace renders this card bare — there is no enclosing form whose dirty state
-  // covers these toggles, so without this report every exit silently drops them.
-  useReportSettingsDirty("notification-preferences", dirty === true);
-
-  function onSave() {
+  async function onSave() {
     if (!data) return;
     // The loaded row, with the two fields this card edits replaced — not a literal rebuilt from
     // the fields it happens to know about. A save has to carry every field the request requires,
@@ -129,9 +120,13 @@ export function PreferencesCard({ children }: PreferencesCardProps = {}): ReactE
     // at, which is what "I did not touch that" means over a whole-row PUT. Spelling them out
     // instead made the arrival of `inApp` a compile error here, in a card that has no opinion
     // about in-app delivery and no honest value to supply for it.
-    save.mutate(
-      data.map((p) => ({ ...p, email: valueOf(p, "email"), sms: valueOf(p, "sms") })),
-    );
+    try {
+      await save.mutateAsync(
+        data.map((p) => ({ ...p, email: valueOf(p, "email"), sms: valueOf(p, "sms") })),
+      );
+    } catch {
+      throw new Error("Couldn’t save — try again.");
+    }
   }
 
   /** Cancel drops every unsaved toggle — the grid goes back to what the server served. */
@@ -139,6 +134,15 @@ export function PreferencesCard({ children }: PreferencesCardProps = {}): ReactE
     if (save.isSuccess || save.isError) save.reset();
     setOverrides({});
   }
+
+  // The grid is the pane's one section. NotificationsWorkspace renders this card bare — the pane
+  // is what reports these toggles dirty to the settings rail, so an exit cannot silently drop them.
+  const section: DetailsSection = {
+    dirty: dirty === true,
+    canSave: true,
+    save: onSave,
+    reset: onCancel,
+  };
 
   const rows: PrefRow[] | undefined = useMemo(
     () =>
@@ -151,7 +155,7 @@ export function PreferencesCard({ children }: PreferencesCardProps = {}): ReactE
 
   // One row per notification kind, one Switch column per channel — the same table admin draws,
   // not a bespoke grid. A channel toggle means nothing across a selection, so the table is not
-  // selectable and carries no bar verbs: Cancel/Save on the EditActionBar commit the whole grid.
+  // selectable and carries no bar verbs: Cancel/Save on the pane's bar commit the whole grid.
   const channelColumn = (ch: Channel, header: string, spoken: string): EditableListColumn<PrefRow> => ({
     key: ch,
     header,
@@ -193,44 +197,29 @@ export function PreferencesCard({ children }: PreferencesCardProps = {}): ReactE
   });
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* At the top of the panel, like every other single-record settings form: the grid is ONE
-          record (a whole-row PUT), so it gets the one Cancel/Save strip, not an inline button
-          at the bottom of a list that can scroll it out of sight. */}
-      <EditActionBar
-        dirty={dirty === true}
-        canSave={dirty === true}
-        saving={save.isPending}
-        onCancel={onCancel}
-        onSave={onSave}
-        status={
-          save.isError ? (
-            <span className="text-apt-error">Couldn’t save — try again.</span>
-          ) : save.isSuccess && !dirty ? (
-            <span className="text-apt-text-muted">Saved.</span>
-          ) : null
-        }
-      />
-      <SettingsBody width="full">
-        <DetailSection title="Preferences">
-          <p className="text-sm text-apt-text-muted">
-            Choose how you hear from us. SMS needs a verified phone number.
-          </p>
-          <EditableList
-            list={list}
-            ariaLabel="Notification preferences"
-            selectable={false}
-            loading={isLoading}
-            error={error}
-            errorTitle="Couldn’t load your preferences"
-            columnWidthsKey="settings-notification-preferences"
-            searchPlaceholder="Notification"
-            emptyLabel="No notification categories."
-            emptyFilteredLabel="No notifications match this search."
-          />
-        </DetailSection>
-        {children}
-      </SettingsBody>
-    </div>
+    // At the top of the panel, like every other single-record settings form: the grid is ONE
+    // record (a whole-row PUT), so it gets the one Cancel/Save strip, not an inline button at the
+    // bottom of a list that can scroll it out of sight. The settings rail's header carries the
+    // title, API button and help, so this bar is just Save / Cancel, in place.
+    <DetailsPane section={section} hoist={false} showApi={false} bodyClassName="gap-8 px-6 py-6">
+      <DetailSection title="Preferences">
+        <p className="text-sm text-apt-text-muted">
+          Choose how you hear from us. SMS needs a verified phone number.
+        </p>
+        <EditableList
+          list={list}
+          ariaLabel="Notification preferences"
+          selectable={false}
+          loading={isLoading}
+          error={error}
+          errorTitle="Couldn’t load your preferences"
+          columnWidthsKey="settings-notification-preferences"
+          searchPlaceholder="Notification"
+          emptyLabel="No notification categories."
+          emptyFilteredLabel="No notifications match this search."
+        />
+      </DetailSection>
+      {children}
+    </DetailsPane>
   );
 }

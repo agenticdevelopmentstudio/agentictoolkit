@@ -4,15 +4,22 @@
  * section (see FTD spec §4–§5). Creating products happens on the Products landing / the
  * selector popup's "New Product…" dialog (rendered above these).
  *
- * Storage / Users / Authentication are GROUP topics: each renders a nested topic→detail
- * sub-rail of its members (defined in the toolkit's EcosystemsFeature), not a single pane —
- * Storage = Buckets / Access / All Data, Users (topic id "invitations", for deep-link
- * stability) = Users / Requests / Pending users / Invites, Authentication = User Auth /
- * Sign-in apps / Storage Access Tokens / Email Signup.
+ * Storage and Users are GROUP topics: each renders a nested topic→detail sub-rail of its members
+ * (defined in the toolkit's EcosystemsFeature), not a single pane — Storage = Buckets / Access /
+ * All Data / Storage Access Tokens, Users (topic id "invitations", for deep-link stability) =
+ * Users / Requests / Pending users / Invites / Email Signup. Gaming and Gamification are groups
+ * too, host-owned (ProductsFeature). Applications is not a group: it is ONE list — the
+ * applications, a divider, then Settings, the ecosystem's client auth (ApplicationsGroup). A part
+ * that is a feature of its own in the catalog — Storage Access Tokens, Email Signup, Client Auth —
+ * is one that COMES WITH its row's feature (`includedWith`): the Manage features dialog does not
+ * list it, and holding the row's feature is holding it (Mike, 2026-09-29).
  *
- * `features` names the catalog feature(s) behind each row: the rail draws a row only while the
- * product holds one of them, so the list and its Manage features dialog always agree. "Users" and
- * "Customers" both answer to `users` — the catalog's own copy says they are the same thing.
+ * `features` names the catalog feature behind each row, and every row but Settings MUST name
+ * one — a feature the Manage features dialog lists, never one that comes with another: the
+ * feature manager (`featureRowState` in @agentic-toolkit/data/ecosystems) draws a row only while
+ * the product holds it, so every row drawn is a ticked row in the dialog, and a new product —
+ * which holds nothing — shows Settings alone. A row with one feature is drawn with the catalog's
+ * label for it, never a copy of its own.
  *
  * These rows are all scoped to the OPEN PRODUCT's ecosystem. Several of them name a surface
  * that ALSO exists at workspace level, scoped to the workspace's default ecosystem instead —
@@ -30,47 +37,32 @@ export const PRODUCT_TOPICS = [
   // "Features"), and adding or removing them is the list's own title-row tool menu.
   { id: "storage", label: "Storage", dividerAfter: false, features: ["storage"] },
   { id: "integrations", label: "Integrations", dividerAfter: false, features: ["integrations"] },
-  // Messaging: send email/SMS to this product's customers via its OWN connected
-  // Postmark/Twilio integration (the promoted admin Messaging tool) — MessagingPane, not the
-  // DM/chat catalog feature (which the catalog lists `comingSoon` and no ecosystem can ever
-  // hold). No `features`: always shown, like Applications and Dashboards, each channel
-  // disabled until its provider is connected on Integrations (Mike, 2026-09-25).
-  { id: "messaging", label: "Messaging", dividerAfter: false },
+  // Messaging and Dashboards stand on their catalog features like every other row. They were
+  // drawn unconditionally (2026-09-25), which put both on every new product — one that holds
+  // nothing must show nothing but Settings (Mike, 2026-09-29). Both are `comingSoon` in the
+  // catalog today, so neither row shows until the catalog ships it and the owner adds it.
+  { id: "messaging", label: "Messaging", dividerAfter: false, features: ["messaging"] },
+  // Applications: the product's applications, then — behind a divider — Settings, the ecosystem's
+  // client auth (sign-in, sign-up, OAuth providers, login registration), which each application
+  // may override in its own detail. Client Auth was a row of its own, then a feature of its own;
+  // it is neither now, it comes in with Applications (Mike, 2026-09-29). PRODUCT_TOPIC_ALIASES and
+  // PRODUCT_MEMBER_MOVES send its old addresses here.
   { id: "applications", label: "Applications", dividerAfter: false, features: ["applications"] },
-  // Dashboards: always shown, no catalog feature behind it — DashboardsPanel/DashboardsFeature
-  // render unconditionally, and gating on the `dashboards` catalog key (itself `comingSoon`)
-  // would have hidden the row from every product forever (Mike, 2026-09-25).
-  { id: "dashboards", label: "Dashboards", dividerAfter: true },
-  // Users: the product's own auth-provisioned roster, not the `users` catalog key — that key is
-  // `comingSoon` and no ecosystem can ever hold it, which made this row (and Customers below)
-  // impossible to draw. `user-authentication` is the feature a product actually provisions to
-  // get a customer realm, and Users is that realm's roster (Mike, 2026-09-25).
-  { id: "invitations", label: "Users", dividerAfter: false, features: ["user-authentication"] },
-  // Everything about HOW someone gets in, as one GROUP rather than four rows spread down the
-  // rail: the product's own auth policy (User Auth), the sign-in clients it vends
-  // (oauth.clients — the apps a developer registers so their site can sign its own customers in
-  // via GitHub-through-ADH), the storage tokens its machines authenticate with, and the waitlist
-  // people join before any of it applies (Email Signup). They were `auth`, `signin-apps` and
-  // `tokens` as top-level rows. The ids are unchanged, and the OLD ADDRESSES redirect: keeping an
-  // id is only half of it, because ResourceExplorer matches the URL's topic segment against THIS
-  // top-level list, so `…/<product>/tokens` would match nothing and render "Select a topic to
-  // view." — an apparently empty product, no 404, nothing in the console. EcosystemsFeature's
-  // `GROUP_MEMBER_GROUP` (derived from `groupMembers`) is what closes it, via the explorer's
-  // `topicAliases`. Members themselves live in EcosystemsFeature's `groupMembers`.
-  {
-    id: "authentication",
-    label: "Authentication",
-    dividerAfter: false,
-    features: ["user-authentication", "signin-apps", "storage-access-tokens", "email-signup"],
-  },
+  { id: "dashboards", label: "Dashboards", dividerAfter: true, features: ["dashboards"] },
+  // Users: the product's people — the roster and its requests/invites, and Email Signup's
+  // waitlists, which come with Users. How they sign in and sign up is Users ▸ Authentication; the
+  // Authentication group all of this sat in is gone (Mike, 2026-09-29).
+  { id: "invitations", label: "Users", dividerAfter: false, features: ["users"] },
   // (Communities sat here, was removed for having no surface on any host, and came back below
   // with the rest of the hub's Products group — parked deliberately this time, because the
   // workspace rail offered it and moving that rail down whole is what dropping it would undo.)
-  // The product's gaming shape — a host-owned GROUP (see ProductsFeature's
-  // productTopicPaneRenderer) whose member list depends on the realm's mode ('none' /
-  // 'gamification' / 'game'): badges/levels/streaks engagement on a regular product, or a
-  // full dedicated game (engine/content/connections/effects) with gamification tuned for it.
-  { id: "gaming", label: "Gaming", dividerAfter: false, features: ["gaming", "gamification"] },
+  // Gaming and Gamification — two features, so two rows (Mike, 2026-09-29), each a host-owned
+  // GROUP (see ProductsFeature's GamingGroup). Gamification is badges/levels/streaks engagement on
+  // any product; Gaming is a full dedicated game (engine/content/connections/effects) built on it,
+  // which is why adding Gaming adds Gamification. PRODUCT_MEMBER_MOVES sends the gamification
+  // members' old addresses under Gaming to their new row.
+  { id: "gaming", label: "Gaming", dividerAfter: false, features: ["gaming"] },
+  { id: "gamification", label: "Gamification", dividerAfter: false, features: ["gamification"] },
   // Per-product feature flags + server bags — named on/off toggles and arbitrary
   // key → JSON config values this product's apps / backend read at runtime.
   { id: "feature-flags", label: "Feature flags", dividerAfter: false, features: ["feature-flags"] },
@@ -81,10 +73,10 @@ export const PRODUCT_TOPICS = [
   // a workspace does not — so the hub stopped offering them workspace-wide and they are topics
   // here, applied to the product the rail's parent level picked. They arrive together and they
   // arrive without panes: every one is a fleet site whose own workspace implementation is still
-  // the shared placeholder, so {@link PLACEHOLDER_TOPIC_IDS} answers all eight in-package rather
-  // than making both hosts write the same "coming soon" eight times.
+  // the shared placeholder, so {@link PLACEHOLDER_TOPIC_IDS} answers all of them in-package rather
+  // than making both hosts write the same "coming soon" for each. (Customers came down with them
+  // and is gone: it stood on `users`, which is the Users row above — not a feature of its own.)
   { id: "communities", label: "Communities", dividerAfter: false, features: ["communities"] },
-  { id: "customers", label: "Customers", dividerAfter: false, features: ["users"] },
   { id: "devices", label: "Devices", dividerAfter: false, features: ["devices"] },
   { id: "domains", label: "Domains", dividerAfter: false, features: ["domains"] },
   { id: "education", label: "Education", dividerAfter: false, features: ["education"] },
@@ -99,6 +91,30 @@ export const PRODUCT_TOPICS = [
 export type ProductTopicId = (typeof PRODUCT_TOPICS)[number]["id"];
 
 /**
+ * Old top-level topic ids → the host-owned group that holds that pane now. `signin-apps` (Client
+ * Auth) was a top-level row before it was a group member; its sign-in clients are each
+ * application's own login registration now, so it goes to Applications, whose ApplicationsGroup
+ * sends the old member id on to the list. ResourceExplorer matches a URL's topic segment against
+ * the top-level list — without this, `…/<product>/signin-apps` matches nothing and renders an
+ * apparently empty product. (`auth`, the realm's sign-in settings, needs nothing here: it is
+ * Users ▸ Authentication, an in-package member EcosystemsFeature already aliases.)
+ */
+export const PRODUCT_TOPIC_ALIASES: Record<string, string> = {
+  "signin-apps": "applications",
+};
+
+/**
+ * Members that moved out of a group (ResourceExplorer's `memberMoves`): old group → member → the
+ * group that holds it now. The Authentication group is retired — its members went to Storage,
+ * Users and Applications (EcosystemsFeature knows the first two; Applications is this package's).
+ * Gamification's members left Gaming for a row of their own.
+ */
+export const PRODUCT_MEMBER_MOVES: Record<string, Record<string, string | null>> = {
+  authentication: { "signin-apps": "applications" },
+  gaming: { catalog: "gamification", levels: "gamification", "custom-events": "gamification" },
+};
+
+/**
  * The product topics whose pane this package does NOT own, so every host must render them
  * itself through {@link ProductsFeatureProps.renderFeaturePanel}.
  *
@@ -107,15 +123,14 @@ export type ProductTopicId = (typeof PRODUCT_TOPICS)[number]["id"];
  * package's own test asserts it against PRODUCT_TOPICS, so a topic added above without a pane
  * here fails loudly instead of rendering blank.
  *
- * "all-data" and "email-signup" are not topics — they are GROUP members (Storage's third,
- * Authentication's fourth), reached through the same seam, which is why they are listed here
- * with the two that are rows.
+ * "all-data" and "email-signup" are not topics — they are GROUP members (of Storage and of Users),
+ * reached through the same seam, which is why they are listed here with the two that are rows.
  */
 export const HOST_RENDERED_TOPIC_IDS = [
   "dashboards",
   "billing",
   "all-data",
-  // The Authentication group's fourth member, and the only one whose pane the two hosts cannot
+  // A member of the Users group, and the only one whose pane the two hosts cannot
   // share: the hub's EmailSignupPanel reads its own workspace context and lives in the hub app
   // (18 files, ~5.5k lines, over hub-local API clients), so it is not importable from here. The
   // seam is how the hub renders the real thing while the products site says where it is managed
@@ -124,7 +139,7 @@ export const HOST_RENDERED_TOPIC_IDS = [
 ] as const;
 
 /**
- * The topics whose surface does not exist yet — the eight that came down from the hub's workspace
+ * The topics whose surface does not exist yet — the ones that came down from the hub's workspace
  * rail with the shared site placeholder behind them. The package renders one "coming soon" pane
  * for all of them (see ProductsFeature's productTopicPaneRenderer), which is why they are NOT in
  * {@link HOST_RENDERED_TOPIC_IDS}: neither host owns a pane, so asking both for one would be two
@@ -136,7 +151,6 @@ export const HOST_RENDERED_TOPIC_IDS = [
  */
 export const PLACEHOLDER_TOPIC_IDS = [
   "communities",
-  "customers",
   "devices",
   "domains",
   "education",

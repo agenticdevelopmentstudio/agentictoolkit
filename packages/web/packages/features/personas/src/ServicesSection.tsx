@@ -11,18 +11,16 @@ import {
   type TopicLevel,
   FieldGroup,
   Field,
-  ButtonBar,
   SectionHeader,
 } from "@agenticdevelopertoolkit/ui/blocks";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Select } from "@agenticdevelopertoolkit/ui/components/select";
 import {
+  ButtonBar,
   StackLevels,
-  ToolbarPortal,
   useRailExitGuard,
   useRailHost,
-  useRecordAffordance,
   CreateResourceDialog,
 } from "@agentic-toolkit/resource";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
@@ -534,7 +532,6 @@ function ServiceEditor({
   onDeleted: () => void;
   onCancel: () => void;
 }) {
-  const renderRecordAffordance = useRecordAffordance();
 
   // Derive the initial draft from the service prop; keyed remount per id in the
   // parent gives each service a fresh editor, so seeding state here is safe.
@@ -626,43 +623,35 @@ function ServiceEditor({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {/* The affordance rides SectionHeader's own `actions`, not a sibling in a justify-between row:
-          once the title hoists into the stack strip that row had one child and the API button
-          jumped to the left edge (and with no affordance it was an empty padded band). */}
-      <SectionHeader
-        paneTitle
-        title={draft.name || "Service"}
-        className="items-center px-6 pt-4 pb-2"
-        actions={renderRecordAffordance?.({
+      {/* The title hoists into the stack strip; the API rides the ButtonBar into the detail header. */}
+      <SectionHeader paneTitle title={draft.name || "Service"} className="items-center px-6 pt-4 pb-2" />
+      <ButtonBar
+        actions={{
+          onCreate: () => {},
+          onCancel,
+          canCancel: true,
+          onSave: () => void handleSave(),
+          canSave: dirty && valid,
+          saving,
+          onDelete: () => void handleDelete(),
+          canDelete: true,
+        }}
+        showCreate={false}
+        api={{
           path: "/persona/services/{id}",
           pathValues: { id: service.id },
           title: "Service API",
-        })}
+        }}
+        leading={
+          // Say WHY Save is grey when a required field is the blocker; silent when the only
+          // reason is "nothing changed yet", which the grey button already communicates.
+          block && dirty ? (
+            <span className="text-xs text-apt-text-muted" role="status">
+              {block}
+            </span>
+          ) : undefined
+        }
       />
-      <ToolbarPortal>
-        <ButtonBar
-          actions={{
-            onCreate: () => {},
-            onCancel,
-            canCancel: true,
-            onSave: () => void handleSave(),
-            canSave: dirty && valid,
-            saving,
-            onDelete: () => void handleDelete(),
-            canDelete: true,
-          }}
-          showCreate={false}
-          leading={
-            // Say WHY Save is grey when a required field is the blocker; silent when the only
-            // reason is "nothing changed yet", which the grey button already communicates.
-            block && dirty ? (
-              <span className="text-xs text-apt-text-muted" role="status">
-                {block}
-              </span>
-            ) : undefined
-          }
-        />
-      </ToolbarPortal>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-4">
         <ErrorText error={formError} />
 

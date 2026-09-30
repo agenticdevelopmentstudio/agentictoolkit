@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Trash2, UserPlus } from "lucide-react";
 import {
   useAdminUsers,
@@ -25,7 +25,7 @@ import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import { errorMessage } from "@agenticdevelopertoolkit/ui/lib/errors";
 import { RdidPicker, type RdidOption } from "@agentic-toolkit/adh-ui/blocks";
 import { ProgressModal } from "@agenticdevelopertoolkit/ui/blocks";
-import { ApiButton } from "@agentic-toolkit/api-explorer";
+import { FeatureTitle } from "@agentic-toolkit/resource";
 import {
   EditableList,
   TypeToConfirmDialog,
@@ -37,7 +37,6 @@ import { ConfirmSourceDialog } from "../users/TransferDialog";
 import { transferUser, useTransferPreview } from "../users/transfer";
 import { NO_ROLE, roleLabel, roleValues } from "../users/roles";
 import { formatDate } from "../lib/timestamps";
-import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * Users — every customer of the hub ecosystem, and the four things an admin does to a set of them.
@@ -61,7 +60,7 @@ const USERS_KEY = ["admin", "users"];
 /** The word an operator has to type to delete users. Deliberately not the count and not a name. */
 const DELETE_WORD = "delete";
 
-export function UsersPane() {
+export function UsersPane({ help }: { help?: ReactNode } = {}) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [target, setTarget] = useState<RdidOption | null>(null);
   const [addPickerOpen, setAddPickerOpen] = useState(false);
@@ -258,16 +257,13 @@ export function UsersPane() {
   };
 
   return (
-    <div>
-      <SectionHeader
-        paneTitle
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FeatureTitle
         title="Users"
-        className="mb-6"
-        actions={
-          <ApiButton endpoint={{ method: "GET", path: "/customer/customers" }} title="Customers API" />
-        }
+        api={{ method: "GET", path: "/customer/customers", pathValues: {}, title: "Customers API" }}
+        help={help}
       />
-
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 pb-8 pt-2">
       <EditableList
         list={list}
         ariaLabel="Users"
@@ -515,6 +511,7 @@ export function UsersPane() {
           onConfirm={() => setRoleError(null)}
         />
       )}
+      </div>
     </div>
   );
 }

@@ -17,7 +17,7 @@ import {
   type ProjectArtifact,
   type TargetDescriptor,
 } from "@agentic-toolkit/data/projects";
-import { FeatureTitle, useRecordAffordance } from "@agentic-toolkit/resource";
+import { FeatureTitle } from "@agentic-toolkit/resource";
 
 /**
  * WHAT THE PROJECT HOLDS — the Contents topic.
@@ -135,10 +135,6 @@ export function ProjectContentsPane({
   projectId: string;
   title: string;
 }): ReactElement {
-  // The host-injected per-record affordance (the hub's api-explorer button); null on a
-  // standalone feature site → the trailing slot renders nothing.
-  const renderRecordAffordance = useRecordAffordance();
-
   const [direction, setDirection] = useState<ArtifactDirection>("ingested");
   const [pick, setPick] = useState<string | null>(null);
   const [attaching, setAttaching] = useState(false);
@@ -233,11 +229,11 @@ export function ProjectContentsPane({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <FeatureTitle
         title={title}
-        trailing={renderRecordAffordance?.({
+        api={{
           path: "/project/projects/{id}/artifacts",
           pathValues: { id: projectId },
           title: "Project contents API",
-        })}
+        }}
       />
       <section className="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-6 py-4">
         {/* ── Attach ───────────────────────────────────────────────────── */}

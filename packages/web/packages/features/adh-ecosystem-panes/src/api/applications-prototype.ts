@@ -14,7 +14,10 @@
 //
 // Field mapping (UI <-> backend row):
 //   identifier / id  <->  id (rdid)            name  <->  displayName
-//   kind             <->  consumerKind         ecosystemId <-> ecosystemId
+//   ecosystemId      <->  ecosystemId
+//
+// The row's `consumerKind` is not modelled: nothing reads it. A create sends the fixed
+// CONSUMER_KIND the backend's NOT NULL column needs; an update never sends it.
 //
 // schemaGrants are PERSISTED (no longer session-only): an application's schema permissions ARE its
 // per-app bucket access-groups (the model `canBucketAccess` enforces), managed via the hand-written
@@ -26,6 +29,10 @@ import type { RequestBody, SuccessBody } from "@agentic-toolkit/adh-api-types";
 import { authedJson, authedRequest } from "@agentic-toolkit/auth/client";
 import { rethrowConflict } from "@agentic-toolkit/data";
 import { identifiersApi } from "@agentic-toolkit/data/ecosystems";
+import {
+  APPLICATION_PLATFORMS,
+  type ApplicationPlatform,
+} from "@agentic-toolkit/data/ecosystem-config";
 import { compact, enc, narrow, scopeByOwner, sortByText } from "@agentic-toolkit/data";
 import {
   CRUD_KEYS,
@@ -33,10 +40,9 @@ import {
   type SchemaGrant,
 } from "../applications/permission-model";
 
-// Matches the backend `consumer_kind` CHECK ('staff' | 'developer' | 'customer').
-export type ApplicationKind = "staff" | "developer" | "customer";
-
-export const APPLICATION_KINDS: ApplicationKind[] = ["staff", "developer", "customer"];
+// What a create writes to the backend's required `consumer_kind` column (CHECK 'staff' |
+// 'developer' | 'customer'). Nothing reads the column, so it is not a field.
+const CONSUMER_KIND = "developer";
 
 export interface AccessToken {
   id: string;
@@ -52,7 +58,8 @@ export interface PrototypeApplication {
   /** Reverse-domain identifier, e.g. com.acme.myapp. User-facing key. */
   identifier: string;
   name: string;
-  kind: ApplicationKind;
+  /** Web or native: what its login registration accepts. */
+  platform: ApplicationPlatform;
   /** STUB (session-only): schemas this app granted itself, each with perms. */
   schemaGrants: SchemaGrant[];
   /** STUB (session-only): access tokens. */
@@ -65,14 +72,11 @@ export interface PrototypeApplication {
 export interface ApplicationInput {
   identifier: string;
   name: string;
-  kind: ApplicationKind;
+  platform: ApplicationPlatform;
   schemaGrants: SchemaGrant[];
 }
 
 const BASE = "/api/ecosystem/applications";
-
-const asKind = (v: string): ApplicationKind =>
-  narrow(v, APPLICATION_KINDS, "developer");
 
 // The backend `ecosystems.applications` row, sourced from the OpenAPI spec.
 // (`id` is the rdid — the backend swaps the uuid for the rdid on the way out.)
@@ -83,7 +87,7 @@ export function toApp(r: ApplicationRow, schemaGrants: SchemaGrant[] = []): Prot
     id: r.id,
     identifier: r.id,
     name: r.displayName,
-    kind: asKind(r.consumerKind),
+    platform: narrow(r.platform, APPLICATION_PLATFORMS, "web"),
     schemaGrants,
     // Tokens are fetched on demand by the detail's AccessTokensSection (real backend),
     // not carried on the list row — avoids an N+1 token fetch across the list.
@@ -200,7 +204,8 @@ export const applicationsPrototypeApi = {
         id: input.identifier,
         slug: leaf.slice(0, 64),
         displayName: input.name,
-        consumerKind: input.kind,
+        consumerKind: CONSUMER_KIND,
+        platform: input.platform,
         ecosystemId: ecosystemId || undefined, // absent → caller's ecosystem
       };
       const row = await authedJson<ApplicationRow>(BASE, {
@@ -234,7 +239,7 @@ export const applicationsPrototypeApi = {
     const effectiveId = nextId ?? id;
     const fields: Partial<RequestBody<"/ecosystem/applications/{id}", "put">> = {
       displayName: input.name,
-      consumerKind: input.kind,
+      platform: input.platform,
     };
     const row = await authedJson<ApplicationRow>(`${BASE}/${enc(effectiveId)}`, {
       method: "PUT",

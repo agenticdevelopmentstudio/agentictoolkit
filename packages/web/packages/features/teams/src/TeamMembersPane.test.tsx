@@ -179,6 +179,31 @@ function TestHarness() {
 }
 
 describe("TeamMembersPane", () => {
+  // The pane used to draw its API affordance in a body row above the scrolling section
+  // (`useRecordAffordance`); it now lives in the pane's own FeatureTitle header, alongside the
+  // "Members" title — never in the scrollable `<section>` (the roster itself is a rail-published
+  // level rendered by the host, not this section; the section holds only the selected member's
+  // card, the loading state, or the "select a member" hint).
+  it("renders the API affordance in the header — never inside the scrollable body", async () => {
+    list.mockResolvedValue([structuredClone(CUSTOMER)]);
+    render(<TestHarness />);
+    await screen.findByText("ada@example.com"); // the rail row for the loaded member
+
+    expect(screen.getByRole("heading", { name: "Members" })).not.toBeNull();
+    // No RecordAffordanceContext provider in this harness, so the header's API slot renders the
+    // shared disabled fallback — still present (never omitted), just inert.
+    const apiBtn = screen.getByRole("button", { name: /API/ });
+    expect(apiBtn.hasAttribute("disabled")).toBe(true);
+    expect(apiBtn.closest("section")).toBeNull();
+
+    // Selecting the member swaps the section's content to the member's card — the API button
+    // stays put in the header, outside the section, and is never duplicated.
+    fireEvent.click(screen.getByRole("button", { name: "ada@example.com" }));
+    await screen.findByRole("button", { name: "Remove from team" });
+    expect(apiBtn.closest("section")).toBeNull();
+    expect(screen.getAllByRole("button", { name: /API/ })).toHaveLength(1);
+  });
+
   it("renders a customer member and a persona member distinctly", async () => {
     list.mockResolvedValue([structuredClone(CUSTOMER), structuredClone(PERSONA_MEMBER)]);
     render(<TestHarness />);

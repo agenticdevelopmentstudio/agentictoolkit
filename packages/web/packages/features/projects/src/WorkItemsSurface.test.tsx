@@ -8,7 +8,7 @@
 // The api-client boundaries are mocked, so the load-once + switch + editor + move
 // wiring is exercised, not the transport. A stateful `leaf` harness makes the
 // switcher deep-link the active view the way ResourceExplorer's URL leaf would.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import { useState } from "react";
 import { render, screen, fireEvent, waitFor, cleanup, within, act } from "@testing-library/react";
 
@@ -34,6 +34,9 @@ vi.mock("@agentic-toolkit/data/projects", async (importOriginal) => ({
     get: vi.fn(),
     savedViews: { list: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
   },
+  // The pickers' template options (participants/iterations/milestones' sibling axis). Stubbed for
+  // the same reason those are: unstubbed it reaches the network from every mount here.
+  projectTemplatesApi: { list: vi.fn() },
   // The workspace's time-boxes, which the editor's iteration picker offers.
   projectIterationsApi: { list: vi.fn() },
   // The BOARD's plan, which the milestone picker, column and filter axis offer. Stubbed for the
@@ -62,6 +65,7 @@ import { projectWorkItemsApi, type WorkItem } from "@agentic-toolkit/data/projec
 import {
   projectIterationsApi,
   projectMilestonesApi,
+  projectTemplatesApi,
   projectsApi,
   type Iteration,
   type Milestone,
@@ -70,7 +74,7 @@ import {
   type ProjectParticipant,
   type SavedView,
 } from "@agentic-toolkit/data/projects";
-import { RailHostBoundary, type TopicLeaf } from "@agentic-toolkit/resource";
+import { RailHostBoundary, RecordAffordanceContext, type TopicLeaf } from "@agentic-toolkit/resource";
 
 const listForProject = vi.mocked(projectWorkItemsApi.listForProject);
 const create = vi.mocked(projectWorkItemsApi.create);
@@ -82,6 +86,7 @@ const labelsList = vi.mocked(projectsApi.labels);
 const projectGet = vi.mocked(projectsApi.get);
 const iterationsList = vi.mocked(projectIterationsApi.list);
 const milestonesList = vi.mocked(projectMilestonesApi.list);
+const templatesList = vi.mocked(projectTemplatesApi.list);
 const savedViewsList = vi.mocked(projectsApi.savedViews.list);
 const savedViewsCreate = vi.mocked(projectsApi.savedViews.create);
 const savedViewsUpdate = vi.mocked(projectsApi.savedViews.update);
@@ -217,6 +222,7 @@ beforeEach(() => {
   projectGet.mockResolvedValue(structuredClone(PROJECT));
   iterationsList.mockResolvedValue([]);
   milestonesList.mockResolvedValue([]);
+  templatesList.mockResolvedValue([]);
   create.mockImplementation((_projectId, input) =>
     Promise.resolve({ ...structuredClone(W1), ...input, id: "w3" } as WorkItem),
   );
@@ -282,6 +288,15 @@ function Harness({
 
 describe("WorkItemsSurface", () => {
   it("publishes the five views as a topic list and lands on List", async () => {
+    // The stack applies a level's default only once it KNOWS it is wide — a measured container
+    // width. jsdom measures every element at 0, which reads as "not yet laid out", so the default
+    // would never fire. State a desktop width for this test (as ServicesSection.test.tsx does).
+    const realWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 1400 });
+    onTestFinished(() => {
+      if (realWidth) Object.defineProperty(HTMLElement.prototype, "clientWidth", realWidth);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientWidth;
+    });
     const onSelectSpy = vi.fn();
     render(<Harness view={null} onSelectSpy={onSelectSpy} />);
 
@@ -991,6 +1006,52 @@ describe("WorkItemsSurface", () => {
       fireEvent.click(await screen.findByRole("option", { name: /Save this view as/ }));
 
       expect(await screen.findByText("A view named that already exists.")).not.toBeNull();
+    });
+  });
+
+  // ── The header's API slot ──────────────────────────────────────────────────
+  // The editor used to draw its own API button in the body, beside ItemKey (`useRecordAffordance`);
+  // it now lives once, in this surface's FeatureTitle header — disabled while browsing (no single
+  // record is in view) and pointed at the OPEN item once the editor is showing.
+  describe("the header's API affordance", () => {
+    /** Wraps Harness with a host renderer so the live/disabled distinction is observable: with no
+     *  provider, HeaderApiButton always falls back to the disabled button regardless of `api`. */
+    function HarnessWithHost(props: Parameters<typeof Harness>[0]) {
+      const render = (p: { path: string; pathValues: Record<string, string | null | undefined> }) => (
+        <button type="button" aria-label={`Live API ${p.path}`}>
+          API
+        </button>
+      );
+      return (
+        <RecordAffordanceContext.Provider value={render}>
+          <Harness {...props} />
+        </RecordAffordanceContext.Provider>
+      );
+    }
+
+    it("shows the disabled API button while browsing the list — no single record is open", async () => {
+      render(<HarnessWithHost />);
+      await listLoaded();
+
+      expect(
+        screen.getByRole("button", { name: "API — This view has no API endpoint" }),
+      ).not.toBeNull();
+      expect(screen.queryByRole("button", { name: /^Live API/ })).toBeNull();
+    });
+
+    it("points the header's API button at the open item once the editor is showing", async () => {
+      render(<HarnessWithHost view="table" />);
+      fireEvent.doubleClick(await screen.findByText("Design the landing page"));
+      await screen.findByRole("button", { name: "Save changes" });
+
+      // The header now carries a LIVE button for w1's own endpoint…
+      expect(
+        screen.getByRole("button", { name: "Live API /project/work-items/{id}" }),
+      ).not.toBeNull();
+      // …the disabled fallback is gone…
+      expect(screen.queryByRole("button", { name: "API — This view has no API endpoint" })).toBeNull();
+      // …and it is the ONLY API affordance on screen — the editor body draws none of its own.
+      expect(screen.getAllByRole("button", { name: /API/ })).toHaveLength(1);
     });
   });
 });

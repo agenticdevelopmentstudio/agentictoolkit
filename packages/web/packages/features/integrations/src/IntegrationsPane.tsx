@@ -39,7 +39,7 @@ import {
   type ProviderCatalogEntry,
 } from "@agentic-toolkit/data/integrations";
 import { isForbidden, useResourceItemQuery, useResourceList } from "@agentic-toolkit/data";
-import { useRecordAffordance } from "@agentic-toolkit/resource";
+import { DetailHeaderActions } from "@agentic-toolkit/resource";
 import { useMasterDetailForm } from "@agentic-toolkit/resource";
 import { useMasterDetailLevel } from "@agentic-toolkit/resource";
 import { ToolbarPortal } from "@agentic-toolkit/resource";
@@ -144,6 +144,7 @@ export function IntegrationsPane({
   dialogSurfaceClassName,
   leaf,
   onChanged,
+  help,
 }: {
   ecosystemId?: string;
   /**
@@ -182,7 +183,7 @@ export function IntegrationsPane({
   dialogSurfaceClassName?: string;
   /** Accepted for the ScopedPane prop shape; the breadcrumb + level title name the pane now. */
   title?: ReactNode;
-  /** Accepted for the ScopedPane prop shape; the bar has no "?" popover. */
+  /** The "?" help, on the far right of the detail header. */
   help?: ReactNode;
   /** Deep-linkable instance selection (`…/integrations/<rdid-or-uuid>`). */
   leaf?: TopicLeaf;
@@ -418,10 +419,6 @@ export function IntegrationsPane({
     createLabel: "Add integration",
   });
 
-  // The host-injected per-record affordance (the hub supplies its api-explorer button); null on
-  // a standalone feature site → the detail's trailing row renders nothing at all.
-  const renderRecordAffordance = useRecordAffordance();
-
   // The row's leading icon: the provider's first service type → a glyph (generic plug otherwise).
   const iconForRow = (r: MaskedProviderConfig): ReactNode => {
     const first = providerById.get(r.providerId)?.serviceTypes?.[0];
@@ -645,6 +642,25 @@ export function IntegrationsPane({
             {editor.submit.busy ? editor.submit.busyLabel : editor.submit.label}
           </Button>
         )}
+        {/* The detail header's API button (the open integration's config, else the ecosystem's
+            list) and help. */}
+        <DetailHeaderActions
+          help={help}
+          helpClassName="ml-1"
+          api={
+              cfg
+                ? {
+                    path: "/integrations/ecosystems/{ecosystemId}/provider-configs/{configId}",
+                    pathValues: { ecosystemId, configId: cfg.id },
+                    title: "Integration config API",
+                  }
+                : {
+                    path: "/integrations/ecosystems/{ecosystemId}/provider-configs",
+                    pathValues: { ecosystemId },
+                    title: "Integrations API",
+                  }
+          }
+        />
       </ButtonBar>
     </ToolbarPortal>
   );
@@ -791,17 +807,6 @@ export function IntegrationsPane({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 py-4">
         {cfg && provider && form.draft ? (
           <div className="flex flex-col gap-6">
-            {/* The row exists only when a host actually supplies an affordance — an empty
-                flex row would otherwise open a gap above the detail on every standalone site. */}
-            {renderRecordAffordance && (
-              <div className="flex items-center justify-end">
-                {renderRecordAffordance({
-                  path: "/integrations/ecosystems/{ecosystemId}/provider-configs/{configId}",
-                  pathValues: { ecosystemId, configId: cfg.id },
-                  title: "Integration config API",
-                })}
-              </div>
-            )}
             <SelectedIntegration
               // Per ROW, because `useIntegrationSubmit` captures its baseline once per mount:
               // without this, switching rows would compare the new row's draft against the old

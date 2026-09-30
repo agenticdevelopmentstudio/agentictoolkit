@@ -5,6 +5,11 @@ import type { ReactNode } from "react";
 import { SaveCancelButtons } from "./master-detail/SaveCancelButtons";
 
 /**
+ * @deprecated Build the pane on {@link DetailsPane} instead: its one header bar carries Save /
+ * Cancel together with the title, the API button and the help, and its sections register with
+ * `useDetailsSection` (or a `useSettingsDraft` given a `section`). Kept exported only for the
+ * panes not yet moved onto it.
+ *
  * The recessed action bar for single-record settings panes (Profile, Account, a realm's
  * gamification config) — same look as the master/detail toolbar (it shares the
  * SaveCancelButtons pair), just Cancel + Save right-aligned. `status` shows an inline

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil } from "lucide-react";
 import {
@@ -24,7 +24,7 @@ import { DialogActions } from "@agenticdevelopertoolkit/ui/components/dialog-act
 import { UnsavedChangesGuard } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-guard";
 import { useAction } from "@agenticdevelopertoolkit/ui/hooks/useAction";
 import { Field, ProgressModal } from "@agenticdevelopertoolkit/ui/blocks";
-import { ApiButton } from "@agentic-toolkit/api-explorer";
+import { FeatureTitle } from "@agentic-toolkit/resource";
 import {
   EditableList,
   useBatchRun,
@@ -33,7 +33,6 @@ import {
   type EditableListFacet,
 } from "../components/editable-list";
 import { formatDate, formatDateTime } from "../lib/timestamps";
-import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * Feedback — every submission, and the two things an admin does to them: read one, and move a
@@ -66,7 +65,7 @@ const STATUS_VARIANT: Record<string, "orange" | "blue" | "success" | "neutral"> 
 
 const senderOf = (fb: FeedbackSubmission): string => fb.userEmail || "—";
 
-export function FeedbackPane() {
+export function FeedbackPane({ help }: { help?: ReactNode } = {}) {
   const { data, isLoading, error } = useFeedback();
   const updateFeedback = useUpdateFeedback();
   const router = useRouter();
@@ -189,90 +188,88 @@ export function FeedbackPane() {
   };
 
   return (
-    <div>
-      <SectionHeader
-        paneTitle
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FeatureTitle
         title="Feedback"
-        className="mb-6"
-        actions={
-          <ApiButton endpoint={{ method: "GET", path: "/content/feedback" }} title="Feedback API" />
-        }
+        api={{ method: "GET", path: "/content/feedback", pathValues: {}, title: "Feedback API" }}
+        help={help}
       />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 pb-8 pt-2">
+        {/* No New and no Delete: submissions arrive from the apps, and deleting one takes the only
+            record of a report with it. Archiving is the disposal this page offers. */}
+        <EditableList<FeedbackSubmission>
+          list={list}
+          ariaLabel="Feedback submissions"
+          loading={isLoading}
+          error={error}
+          errorTitle="Couldn't load feedback"
+          columnWidthsKey="admin-feedback"
+          // Subject first, sender when a submission arrived without one — the same pair the batch
+          // runner labels its rows with, so the progress modal and the checkboxes agree.
+          describeRow={(fb) => fb.subject || senderOf(fb)}
+          searchPlaceholder="Subject, sender or category"
+          emptyLabel="No feedback."
+          emptyFilteredLabel="No feedback matches these filters."
+          actions={
+            <>
+              {/* One row, or nothing: the dialog reads ONE submission's body. */}
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={selected.length !== 1}
+                onClick={() => {
+                  setEditingId(selected[0]!.id);
+                  setDialogOpen(true);
+                }}
+              >
+                <Pencil data-icon="inline-start" />
+                Open
+              </Button>
+              {/* A menu whose committed value is never kept: picking a status IS the action, so the
+                  trigger goes on reading "Set status" instead of claiming the selection shares one. */}
+              <OptionMenu
+                ariaLabel="Set status for the selection"
+                placeholder="Set status"
+                items={STATUSES.map((s) => ({ value: s, label: titleCase(s) }))}
+                value={null}
+                disabled={selected.length === 0}
+                onChange={(value) => applyStatus(value)}
+                className="h-8 w-40"
+              />
+            </>
+          }
+        />
 
-      {/* No New and no Delete: submissions arrive from the apps, and deleting one takes the only
-          record of a report with it. Archiving is the disposal this page offers. */}
-      <EditableList<FeedbackSubmission>
-        list={list}
-        ariaLabel="Feedback submissions"
-        loading={isLoading}
-        error={error}
-        errorTitle="Couldn't load feedback"
-        columnWidthsKey="admin-feedback"
-        // Subject first, sender when a submission arrived without one — the same pair the batch
-        // runner labels its rows with, so the progress modal and the checkboxes agree.
-        describeRow={(fb) => fb.subject || senderOf(fb)}
-        searchPlaceholder="Subject, sender or category"
-        emptyLabel="No feedback."
-        emptyFilteredLabel="No feedback matches these filters."
-        actions={
-          <>
-            {/* One row, or nothing: the dialog reads ONE submission's body. */}
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={selected.length !== 1}
-              onClick={() => {
-                setEditingId(selected[0]!.id);
-                setDialogOpen(true);
-              }}
-            >
-              <Pencil data-icon="inline-start" />
-              Open
-            </Button>
-            {/* A menu whose committed value is never kept: picking a status IS the action, so the
-                trigger goes on reading "Set status" instead of claiming the selection shares one. */}
-            <OptionMenu
-              ariaLabel="Set status for the selection"
-              placeholder="Set status"
-              items={STATUSES.map((s) => ({ value: s, label: titleCase(s) }))}
-              value={null}
-              disabled={selected.length === 0}
-              onChange={(value) => applyStatus(value)}
-              className="h-8 w-40"
-            />
-          </>
-        }
-      />
+        <UnsavedChangesGuard when={dialogDirty} onNavigate={(href) => router.push(href)} />
 
-      <UnsavedChangesGuard when={dialogDirty} onNavigate={(href) => router.push(href)} />
+        <FeedbackDialog
+          // Keyed by the TARGET, not by openness: reopening the same submission restores the note
+          // that was being typed, while pointing the dialog at another one remounts it.
+          key={editingId ?? "none"}
+          open={dialogOpen && editing !== null}
+          feedback={editing}
+          onClose={() => setDialogOpen(false)}
+          onDirtyChange={setDialogDirty}
+        />
 
-      <FeedbackDialog
-        // Keyed by the TARGET, not by openness: reopening the same submission restores the note
-        // that was being typed, while pointing the dialog at another one remounts it.
-        key={editingId ?? "none"}
-        open={dialogOpen && editing !== null}
-        feedback={editing}
-        onClose={() => setDialogOpen(false)}
-        onDirtyChange={setDialogDirty}
-      />
-
-      <ProgressModal
-        open={statusRun.state.running || statusRun.state.finished}
-        title="Updating feedback"
-        description="Each submission is saved on its own; a failure leaves the earlier saves in place."
-        total={statusRun.state.total}
-        done={statusRun.state.done}
-        currentLabel={statusRun.state.currentLabel}
-        error={statusRun.state.error}
-        results={statusRun.state.results}
-        finished={statusRun.state.finished}
-        onContinue={statusRun.continueRun}
-        onStop={statusRun.stop}
-        onClose={() => {
-          statusRun.reset();
-          list.clearSelection();
-        }}
-      />
+        <ProgressModal
+          open={statusRun.state.running || statusRun.state.finished}
+          title="Updating feedback"
+          description="Each submission is saved on its own; a failure leaves the earlier saves in place."
+          total={statusRun.state.total}
+          done={statusRun.state.done}
+          currentLabel={statusRun.state.currentLabel}
+          error={statusRun.state.error}
+          results={statusRun.state.results}
+          finished={statusRun.state.finished}
+          onContinue={statusRun.continueRun}
+          onStop={statusRun.stop}
+          onClose={() => {
+            statusRun.reset();
+            list.clearSelection();
+          }}
+        />
+      </div>
     </div>
   );
 }

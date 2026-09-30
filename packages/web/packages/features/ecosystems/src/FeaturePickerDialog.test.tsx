@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import type { CatalogFeature } from '@agentic-toolkit/data/ecosystems'
 import { FeaturePickerDialog } from './FeaturePickerDialog'
@@ -269,5 +269,193 @@ describe('FeaturePickerDialog — loading', () => {
     expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled()
     fireEvent.keyDown(screen.getByRole('searchbox', { name: 'Filter features' }), { key: 'Enter' })
     expect(screen.queryByText('Add 1 feature?')).toBeNull()
+  })
+})
+
+// `signin-apps` (labelled "Client Auth") requires `users`: ticking one has to tick the
+// other, and `users` can't come off while `signin-apps` is still on.
+describe('FeaturePickerDialog — feature requirements', () => {
+  const REQ_CATALOG = [
+    feature('users', 'Users'),
+    { ...feature('signin-apps', 'Client Auth'), requiresFeatures: ['users'] },
+  ]
+
+  function renderReq(onApply = vi.fn()) {
+    render(<FeaturePickerDialog open catalog={REQ_CATALOG} onApply={onApply} onCancel={vi.fn()} />)
+  }
+
+  it('ticking a feature also ticks what it requires', () => {
+    renderReq()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Client Auth' }))
+    expect(screen.getByRole('checkbox', { name: 'Client Auth' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Users' })).toBeChecked()
+  })
+
+  it("refuses to untick a feature still needed by an on feature, with an alert, and leaves it ticked", () => {
+    renderReq()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Client Auth' })) // ticks Users too
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Users' })) // attempt to untick
+    expect(
+      screen.getByText('this feature is needed by Client Auth features'),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'OK' })) // dismiss the alert
+    expect(screen.getByRole('checkbox', { name: 'Users' })).toBeChecked()
+  })
+
+  it('shows "Needed by 1" on the row a currently-on feature requires', () => {
+    renderReq()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Client Auth' }))
+    expect(screen.getByText('Needed by 1')).toBeInTheDocument()
+  })
+
+  it('shows no "Needed by" marker while nothing on requires the feature', () => {
+    renderReq()
+    expect(screen.queryByText(/^Needed by/)).toBeNull()
+  })
+
+  // A cyclic catalog: A requires B and B requires A. `requiredClosure` terminates the walk on
+  // a `seen` set rather than hanging, but that walk can put a feature's OWN key in its own
+  // closure that way — `neededByKey` must exclude that self-entry, the same guard `neededBy`
+  // in feature-requirements.ts (data/ecosystems) already has (`f.key !== key`), or a feature would be shown as
+  // needed by itself.
+  it('never lists a feature as needed by itself, even in a cyclic catalog', () => {
+    const CYCLIC = [
+      { ...feature('feat-a', 'Feature A'), requiresFeatures: ['feat-b'] },
+      { ...feature('feat-b', 'Feature B'), requiresFeatures: ['feat-a'] },
+    ]
+    render(<FeaturePickerDialog open catalog={CYCLIC} onApply={vi.fn()} onCancel={vi.fn()} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Feature A' })) // cascades both on
+    // Anchored: each row's OWN label starts its accessible name (concatenated with no space
+    // before the needed-by text, e.g. "Feature ANeeded by Feature B"), so `/^Feature A/` picks
+    // Row A even though Row B's needed-by text legitimately also contains "Feature A"
+    // somewhere in its name (it is genuinely needed by A — that part is correct).
+    const rowA = screen.getByRole('button', { name: /^Feature A/ })
+    const rowB = screen.getByRole('button', { name: /^Feature B/ })
+    expect(rowA.textContent).not.toContain('Needed by Feature A')
+    expect(rowB.textContent).not.toContain('Needed by Feature B')
+    expect(rowA.textContent).toContain('Needed by Feature B')
+    expect(rowB.textContent).toContain('Needed by Feature A')
+    // The visible count must also exclude the self-entry: 1, not 2.
+    expect(within(rowA).getByText('Needed by 1')).toBeInTheDocument()
+    expect(within(rowB).getByText('Needed by 1')).toBeInTheDocument()
+  })
+
+  // The marker must NOT be a second focusable element inside the row's own button (a keyboard
+  // user tabbing through the list would never reach it there). Instead, what it needs to say is
+  // folded into the ROW's own accessible name — the same technique the shared rail already uses
+  // for `item.blocked`'s ", needs attention" text — so a screen reader announces it the moment
+  // the row itself (already focusable, already reachable) gets focus. No second control, nothing
+  // new to tab to.
+  it("folds what needs it into the row's own accessible name, not a second focusable element", () => {
+    renderReq()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Client Auth' }))
+    const row = screen.getByRole('button', { name: /Needed by Client Auth/ })
+    expect(row).toHaveAccessibleName(expect.stringContaining('Needed by Client Auth'))
+    // Nothing focusable/interactive nested inside the row's own button — the marker rides along
+    // as plain (non-interactive) content only.
+    expect(within(row).queryAllByRole('button')).toHaveLength(0)
+    expect(within(row).queryAllByRole('link')).toHaveLength(0)
+    expect(within(row).queryAllByRole('tooltip')).toHaveLength(0)
+  })
+
+  // The floating hint bubble is driven by REAL focus of the row itself (the thing a keyboard
+  // user actually tabs to), not a synthetic event fired at the badge — which is what the
+  // previous version of this test did, proving nothing about real reachability.
+  it('shows a floating hint on the row when the row itself is focused, hides it on blur', () => {
+    renderReq()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Client Auth' }))
+    const row = screen.getByRole('button', { name: /Needed by Client Auth/ })
+    expect(screen.queryByText('Client Auth', { selector: '[data-slot="tooltip-content"]' })).toBeNull()
+    fireEvent.focus(row)
+    expect(screen.getByText('Client Auth', { selector: '[data-slot="tooltip-content"]' })).toBeInTheDocument()
+    fireEvent.blur(row, { relatedTarget: document.body })
+    expect(screen.queryByText('Client Auth', { selector: '[data-slot="tooltip-content"]' })).toBeNull()
+  })
+
+  // Same hint, driven by a real hover of the row (not the badge).
+  it('shows the same floating hint on real hover of the row, hides it when the pointer leaves', () => {
+    renderReq()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Client Auth' }))
+    const row = screen.getByRole('button', { name: /Needed by Client Auth/ })
+    expect(screen.queryByText('Client Auth', { selector: '[data-slot="tooltip-content"]' })).toBeNull()
+    fireEvent.mouseOver(row)
+    expect(screen.getByText('Client Auth', { selector: '[data-slot="tooltip-content"]' })).toBeInTheDocument()
+    fireEvent.mouseOut(row, { relatedTarget: document.body })
+    expect(screen.queryByText('Client Auth', { selector: '[data-slot="tooltip-content"]' })).toBeNull()
+  })
+
+  it('ticking the requiring feature applies both, in catalog order', () => {
+    const onApply = vi.fn()
+    renderReq(onApply)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Client Auth' })) // add both
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect(onApply).toHaveBeenCalledWith({ add: ['users', 'signin-apps'], remove: [] })
+  })
+
+  it('once the requiring feature is off, the requirement can be unticked too', () => {
+    renderReq()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Client Auth' })) // ticks both
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Client Auth' })) // back off
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Users' })) // now unblocked
+    expect(screen.getByRole('checkbox', { name: 'Users' })).not.toBeChecked()
+    expect(screen.queryByText('this feature is needed by Client Auth features')).toBeNull()
+  })
+
+  it('never ticks a comingSoon requirement it cannot provision', () => {
+    const catalog = [
+      { ...feature('coming', 'Coming Feature'), comingSoon: true },
+      { ...feature('needs-coming', 'Needs Coming'), requiresFeatures: ['coming'] },
+    ]
+    render(<FeaturePickerDialog open catalog={catalog} onApply={vi.fn()} onCancel={vi.fn()} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Needs Coming' }))
+    expect(screen.getByRole('checkbox', { name: 'Needs Coming' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Coming Feature' })).not.toBeChecked()
+  })
+})
+
+// A feature this ecosystem may not add (a client ecosystem and Organizations), as the feature
+// manager reports it: disabled like a coming-soon row, never brought in as a requirement.
+describe('FeaturePickerDialog — unavailable to this ecosystem', () => {
+  const REASON = "Only a user's or an organization's own ecosystem can have Organizations."
+  const unavailable = new Map([['organizations', REASON]])
+  const catalog = [feature('organizations', 'Organizations'), feature('personas', 'Personas')]
+
+  it('disables the tick, refuses a click, and says why in the details', () => {
+    const onApply = vi.fn()
+    render(<FeaturePickerDialog open catalog={catalog} unavailable={unavailable} onApply={onApply} onCancel={vi.fn()} />)
+    const box = screen.getByRole('checkbox', { name: 'Organizations' })
+    expect(box).toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(box)
+    expect(box).not.toBeChecked()
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: /Organizations/ }))
+    expect(screen.getByText(REASON)).toBeInTheDocument()
+  })
+
+  it('never ticks one as another feature\'s requirement', () => {
+    const withTeams = [...catalog, { ...feature('teams', 'Teams'), requiresFeatures: ['organizations'] }]
+    render(<FeaturePickerDialog open catalog={withTeams} unavailable={unavailable} onApply={vi.fn()} onCancel={vi.fn()} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Teams' }))
+    expect(screen.getByRole('checkbox', { name: 'Teams' })).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: 'Organizations' })).not.toBeChecked()
+  })
+
+  it('keeps a held one live for unticking, with no reason shown', () => {
+    render(
+      <FeaturePickerDialog
+        open
+        catalog={catalog}
+        alreadyProvisioned={new Set(['organizations'])}
+        unavailable={unavailable}
+        onApply={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    const box = screen.getByRole('checkbox', { name: 'Organizations' })
+    expect(box).not.toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(box)
+    expect(box).not.toBeChecked()
+    expect(screen.queryByText(REASON)).toBeNull()
   })
 })

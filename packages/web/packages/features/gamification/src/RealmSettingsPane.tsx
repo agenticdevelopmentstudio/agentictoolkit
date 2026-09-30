@@ -5,18 +5,15 @@ import type { ReactNode } from "react";
 
 import { reportUnexpectedAuthError } from "@agentic-toolkit/auth";
 import { isForbidden, useResourceItemQuery, useResourceItemWriter } from "@agentic-toolkit/data";
+import { gamificationApi, type RealmConfig, type RealmConfigInput } from "@agentic-toolkit/data/gamification";
 import {
-  gamificationApi,
-  type GamingMode,
-  type RealmConfig,
-  type RealmConfigInput,
-} from "@agentic-toolkit/data/gamification";
-import {
-  EditActionBar,
+  DetailsPane,
   SettingsDirtyProvider,
-  useReportSettingsDirty,
+  useDetailsSection,
+  useInDetailsPane,
   useSettingsDraft,
 } from "@agentic-toolkit/resource";
+import { FeatureSwitch } from "@agentic-toolkit/ecosystems";
 import { Field } from "@agenticdevelopertoolkit/ui/blocks";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Label } from "@agenticdevelopertoolkit/ui/components/label";
@@ -26,27 +23,24 @@ import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 
 /**
  * The product's GAMIFICATION REALM config (each product IS an ecosystem = a "realm"). A
- * single-record config pane — local edit state + the shared EditActionBar, the same shape
- * as the hub's AuthPane, NOT a list-based master/detail. Reads/writes
- * /gamification/realms/:eco/config: an `enabled` toggle, a `skin` select (rpg / plain), a
- * reference `timezone`, four per-surface toggles (badges / leaderboards / streaks / recaps),
- * and the optional seasons window. Enabling a realm (false → true) triggers a retroactive
- * replay server-side, whose result is surfaced inline ("Backfilled N members, M badges").
+ * single-record config section over /gamification/realms/:eco/config: a `skin` select
+ * (rpg / plain), a reference `timezone`, four per-surface toggles (badges / leaderboards /
+ * streaks / recaps), and the optional seasons window.
  *
- * The `enabled` toggle used to be a boolean; it now reads/writes `mode` (`none` |
- * `gamification` | `game`), the three-valued generalization the same column now stores.
- * Gamification is a SUBSET of game, not an alternative to it — when `mode === 'game'` the
- * switch renders checked-and-disabled, because turning gamification off underneath an active
- * game would silently strand its awards/leaderboards machinery. There is no `mode: 'game'`
- * write path from this pane; that transition only happens from the games site's own switch.
+ * The realm's `mode` follows the ecosystem's features — Gaming held means `game`, Gamification
+ * alone means `gamification`, neither means `none` — and the backend sets it when a feature is
+ * added or removed. So the Gamification on/off switch at the top is a {@link FeatureSwitch}: it
+ * adds or removes the Gamification FEATURE (the same write as Manage features), never the mode
+ * directly, and is held on while the product has Gaming. A mode change can still backfill
+ * members server-side; a save that reports one says so under the bar.
  *
- * `children` is what makes this serve BOTH hosts from one file. This pane owns the save bar
- * and the scroll container, so the hub's single combined pane cannot be "this plus three
- * siblings" laid out beside it — the siblings have to render INSIDE this scroller, under this
- * bar. So the hub passes them as children ({@link GamificationPane}) and the gamification
- * site, where each is its own topic, passes none. A `variant` flag would have said the same
- * thing less honestly: the difference between the two hosts genuinely is "what else is in the
- * scroller", not a mode this component switches on.
+ * It registers with the enclosing {@link DetailsPane}'s one bar. Standing alone (the
+ * gamification site's Settings topic, the hub's combined pane) it draws that pane itself; inside
+ * a bigger one (the product's Gaming ▸ Settings) it is one section of it.
+ *
+ * `children` render at the end of the same scroller, under the same bar — the hub passes the
+ * catalog, ladder, backfill and event types ({@link GamificationPane}); the gamification site,
+ * where each is its own topic, passes none.
  */
 
 const SKINS: { value: "rpg" | "plain"; label: string; help: string }[] = [
@@ -109,7 +103,6 @@ const SURFACES: { key: SurfaceKey; label: string; help: string }[] = [
 type SurfaceKey = "badges" | "leaderboards" | "streaks" | "recaps";
 
 interface Draft {
-  mode: GamingMode;
   skin: "rpg" | "plain";
   timezone: string;
   surfaces: Record<SurfaceKey, boolean>;
@@ -122,7 +115,6 @@ interface Draft {
 
 function toDraft(cfg: RealmConfig): Draft {
   return {
-    mode: cfg.mode,
     skin: cfg.skin,
     // Defensive default: keeps the Select controlled even if a caller's config predates
     // `timezone` (unset realms still get 'UTC' server-side).
@@ -164,6 +156,16 @@ async function loadRealmConfig(ecosystemId: string): Promise<RealmConfig> {
   }
 }
 
+/** The realm config endpoint, for the pane's API button. */
+export function realmConfigApi(ecosystemId: string | undefined) {
+  return {
+    method: "PUT",
+    path: "/gamification/realms/{ecosystemId}/config",
+    pathValues: { ecosystemId },
+    title: "Realm config API",
+  };
+}
+
 export function RealmSettingsPane({
   ecosystemId,
   help,
@@ -172,10 +174,24 @@ export function RealmSettingsPane({
   ecosystemId?: string;
   /** Unused: the breadcrumb names the pane (kept for the ScopedPane prop shape). */
   title?: ReactNode;
+  /** The pane's "?" help, when this draws its own pane. Inside a bigger pane, that pane's help
+   *  speaks for it. */
   help?: ReactNode;
   /** Rendered at the END of this pane's scroller, under its save bar — see the file doc. */
   children?: ReactNode;
 }) {
+  const inPane = useInDetailsPane();
+  const body = <RealmSettingsSection ecosystemId={ecosystemId}>{children}</RealmSettingsSection>;
+  if (inPane) return body;
+  return (
+    <DetailsPane help={help} api={realmConfigApi(ecosystemId)}>
+      {body}
+    </DetailsPane>
+  );
+}
+
+/** The realm config's fields, registered as one section of the enclosing DetailsPane. */
+function RealmSettingsSection({ ecosystemId, children }: { ecosystemId?: string; children?: ReactNode }) {
   // Cached per realm, so coming back to this topic paints the saved settings on the first frame
   // and revalidates behind them, instead of blanking to "Loading…" on every visit.
   const { item: config, error: loadError } = useResourceItemQuery<RealmConfig>(
@@ -186,9 +202,9 @@ export function RealmSettingsPane({
   );
   const writeConfig = useResourceItemWriter<RealmConfig>("realm-config");
 
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [savedNote, setSavedNote] = useState<string | null>(null);
+  // A backfill the last save triggered. "Saved." is the pane's; this is the part only this
+  // section knows.
+  const [replayedNote, setReplayedNote] = useState<string | null>(null);
 
   // Seeding, dirty-tracking and the base a partial save diffs against all live in the hook —
   // see `useSettingsDraft` for why each of those is subtler than it looks under caching.
@@ -205,15 +221,11 @@ export function RealmSettingsPane({
   // never blocked by a stale anchor/lengthDays left over from a prior edit.
   const seasonsAnchorError = draft?.seasonsOn ? seasonAnchorError(draft.seasonsAnchor) : null;
   const seasonsLengthError = draft?.seasonsOn ? seasonLengthError(draft.seasonsLengthDays) : null;
-  const canSave = dirty && !seasonsAnchorError && !seasonsLengthError;
-
-  // Report unsaved edits to the registry so an exit can warn before discarding them
-  // — the same wiring as Auth/Account/Profile.
-  useReportSettingsDirty("gamification-realm", dirty);
+  const blockedReason = seasonsAnchorError ?? seasonsLengthError;
 
   const patch = useCallback(
     (next: Partial<Draft>) => {
-      setSavedNote(null);
+      setReplayedNote(null);
       patchDraft(next);
     },
     [patchDraft],
@@ -222,35 +234,29 @@ export function RealmSettingsPane({
   const setSurface = useCallback(
     (key: SurfaceKey, on: boolean) => {
       if (!draft) return;
-      setSavedNote(null);
+      setReplayedNote(null);
       patchDraft({ surfaces: { ...draft.surfaces, [key]: on } });
     },
     [draft, patchDraft],
   );
 
   const save = useCallback(async () => {
-    if (!ecosystemId || !draft || !seed || !canSave) return;
-    setSaving(true);
-    setSaveError(null);
-    setSavedNote(null);
+    if (!ecosystemId || !draft || !seed || blockedReason) return;
 
     // Send only the changed fields — diffed against `seed`, the snapshot this draft was seeded
     // from, NOT against the server's current copy. A field the user never touched must not be
-    // sent just because somebody else changed it meanwhile: `mode` is the field that makes that
-    // concrete, since another admin (or the games site's own switch) moving the realm to `game`
-    // would otherwise read as this pane's edit and be written back as `gamification`.
+    // sent just because somebody else changed it meanwhile.
     //
     // When any surface changed, send the FULL 4-key map so the persisted state matches the UI
     // regardless of the backend's merge-vs-replace semantics (a surface is ON unless explicitly
     // false, so an explicit `true` is always harmless).
     const body: RealmConfigInput = {};
-    if (draft.mode !== seed.mode) body.mode = draft.mode;
     if (draft.skin !== seed.skin) body.skin = draft.skin;
     if (draft.timezone !== seed.timezone) body.timezone = draft.timezone;
     const surfacesChanged = SURFACES.some((s) => draft.surfaces[s.key] !== seed.surfaces[s.key]);
     if (surfacesChanged) body.surfaces = { ...draft.surfaces };
     // seasons: undefined (omitted) = leave unchanged; null = clear; an object sets the window.
-    // Already blocked from reaching here while invalid (`canSave` above).
+    // Already blocked from reaching here while invalid (`blockedReason` above).
     const seasonsChanged =
       draft.seasonsOn !== seed.seasonsOn ||
       (draft.seasonsOn &&
@@ -268,210 +274,184 @@ export function RealmSettingsPane({
       // already in hand, so a re-read would spend a request to arrive back at these bytes.
       writeConfig(ecosystemId, res.config);
       commit(res.config);
-      setSavedNote(
+      setReplayedNote(
         res.replayed
-          ? `Realm enabled — backfilled ${res.replayed.subjects} members, ${res.replayed.badges} badges.`
-          : "Saved.",
+          ? `Backfilled ${res.replayed.subjects} members, ${res.replayed.badges} badges.`
+          : null,
       );
     } catch (err) {
       if (!isForbidden(err)) {
         reportUnexpectedAuthError(err, { feature: "gamification-realm", step: "save" });
       }
-      setSaveError(
+      // The pane shows what this throws, and stops its save here.
+      throw new Error(
         isForbidden(err)
           ? "You don't have access to change this realm's gamification settings."
           : err instanceof Error
             ? err.message
             : "Failed to save gamification settings.",
       );
-    } finally {
-      setSaving(false);
     }
-  }, [ecosystemId, draft, seed, canSave, commit, writeConfig]);
+  }, [ecosystemId, draft, seed, blockedReason, commit, writeConfig]);
 
   const cancel = useCallback(() => {
     reset();
-    setSaveError(null);
-    setSavedNote(null);
+    setReplayedNote(null);
   }, [reset]);
 
+  useDetailsSection({ dirty, canSave: !blockedReason, blockedReason, save, reset: cancel });
+
+  // The feature switch changes the realm's mode server-side; re-read the config so every reader
+  // of it (this section, the Gaming rail, the Gaming ▸ Settings pane) follows on the same tick.
+  const rereadConfig = useCallback(async () => {
+    if (!ecosystemId) return;
+    writeConfig(ecosystemId, await gamificationApi.getRealmConfig(ecosystemId));
+  }, [ecosystemId, writeConfig]);
+
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <EditActionBar
-        dirty={dirty}
-        canSave={canSave}
-        saving={saving}
-        onCancel={cancel}
-        onSave={save}
-        status={
-          saveError ? (
-            <span className="text-apt-red">{saveError}</span>
-          ) : savedNote && !dirty ? (
-            <span className="text-apt-text-muted">{savedNote}</span>
-          ) : null
-        }
+    <div className="max-w-3xl space-y-7">
+      <FeatureSwitch
+        ecosystemId={ecosystemId}
+        featureKey="gamification"
+        label="Gamification"
+        description="When off, telemetry keeps flowing but awards and gamification UI are suppressed. Turning it on backfills existing members."
+        lockedBy="gaming"
+        lockedDescription="On, because this product has Gaming — gamification comes with it."
+        onApplied={rereadConfig}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-        <div className="max-w-3xl space-y-7">
-          {help && <p className="text-sm text-apt-text-muted">{help}</p>}
-          <ErrorText error={loadError} />
-          {!draft && !loadError && <p className="text-sm text-apt-text-muted">Loading…</p>}
+      <ErrorText error={loadError} />
+      {!draft && !loadError && <p className="text-sm text-apt-text-muted">Loading…</p>}
+      {replayedNote && !dirty && <p className="text-sm text-apt-text-muted">{replayedNote}</p>}
 
-          {draft && (
-            <>
-              {/* Mode — this switch only ever writes 'none' or 'gamification'. It cannot turn
-                  gamification off out from under an active game: gamification is a SUBSET of
-                  game, so while mode is 'game' the switch reads checked-and-disabled and the
-                  copy explains why, matching the games site's own "Enable Gaming" switch,
-                  which is the only writer of 'game'. */}
-              <div className="flex items-start justify-between gap-6">
-                <div className="min-w-0">
-                  <Label htmlFor="gamification-enabled" className="text-sm font-medium text-apt-text">
-                    Enable gamification
-                  </Label>
-                  <p className="mt-0.5 text-xs text-apt-text-muted">
-                    {draft.mode === "game"
-                      ? "On, because this product is a dedicated game — gamification comes with game mode."
-                      : "When off, telemetry keeps flowing but awards and gamification UI are suppressed. Enabling backfills existing members."}
-                  </p>
-                </div>
-                <Switch
-                  id="gamification-enabled"
-                  checked={draft.mode !== "none"}
-                  disabled={draft.mode === "game"}
-                  onCheckedChange={(on) => patch({ mode: on ? "gamification" : "none" })}
-                />
-              </div>
+      {draft && (
+        <>
+          {/* Skin */}
+          <div className="flex flex-col gap-2 border-t border-apt-border pt-6 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+            <div className="min-w-0">
+              <Label htmlFor="gamification-skin" className="text-sm font-medium text-apt-text">
+                Skin
+              </Label>
+              <p className="mt-0.5 text-xs text-apt-text-muted">
+                {SKINS.find((s) => s.value === draft.skin)?.help}
+              </p>
+            </div>
+            <Select
+              id="gamification-skin"
+              value={draft.skin}
+              onChange={(e) => patch({ skin: e.target.value as "rpg" | "plain" })}
+            >
+              {SKINS.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </Select>
+          </div>
 
-              {/* Skin */}
-              <div className="flex flex-col gap-2 border-t border-apt-border pt-6 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-                <div className="min-w-0">
-                  <Label htmlFor="gamification-skin" className="text-sm font-medium text-apt-text">
-                    Skin
-                  </Label>
-                  <p className="mt-0.5 text-xs text-apt-text-muted">
-                    {SKINS.find((s) => s.value === draft.skin)?.help}
-                  </p>
-                </div>
-                <Select
-                  id="gamification-skin"
-                  value={draft.skin}
-                  onChange={(e) => patch({ skin: e.target.value as "rpg" | "plain" })}
-                >
-                  {SKINS.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+          {/* Timezone */}
+          <div className="flex flex-col gap-2 border-t border-apt-border pt-6 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+            <div className="min-w-0">
+              <Label htmlFor="gamification-timezone" className="text-sm font-medium text-apt-text">
+                Timezone
+              </Label>
+              <p className="mt-0.5 text-xs text-apt-text-muted">
+                Reference zone for the realm&apos;s late-night (Night Owl) window. Day and
+                streak rollups stay UTC.
+              </p>
+            </div>
+            <Select
+              id="gamification-timezone"
+              value={draft.timezone}
+              onChange={(e) => patch({ timezone: e.target.value })}
+            >
+              {/* A realm's stored zone can be any IANA name (set via the API), not just one of
+                  the curated 16 — surface it as its own option so the Select never silently
+                  misrepresents (or, on save, overwrites) a zone outside the shortlist. */}
+              {((TIMEZONES as readonly string[]).includes(draft.timezone)
+                ? TIMEZONES
+                : [draft.timezone, ...TIMEZONES]
+              ).map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </Select>
+          </div>
 
-              {/* Timezone */}
-              <div className="flex flex-col gap-2 border-t border-apt-border pt-6 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-                <div className="min-w-0">
-                  <Label htmlFor="gamification-timezone" className="text-sm font-medium text-apt-text">
-                    Timezone
-                  </Label>
-                  <p className="mt-0.5 text-xs text-apt-text-muted">
-                    Reference zone for the realm&apos;s late-night (Night Owl) window. Day and
-                    streak rollups stay UTC.
-                  </p>
-                </div>
-                <Select
-                  id="gamification-timezone"
-                  value={draft.timezone}
-                  onChange={(e) => patch({ timezone: e.target.value })}
-                >
-                  {/* A realm's stored zone can be any IANA name (set via the API), not just one of
-                      the curated 16 — surface it as its own option so the Select never silently
-                      misrepresents (or, on save, overwrites) a zone outside the shortlist. */}
-                  {((TIMEZONES as readonly string[]).includes(draft.timezone)
-                    ? TIMEZONES
-                    : [draft.timezone, ...TIMEZONES]
-                  ).map((tz) => (
-                    <option key={tz} value={tz}>
-                      {tz}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              {/* Surfaces */}
-              <div className="border-t border-apt-border pt-6">
-                <p className="text-sm font-medium text-apt-text">Surfaces</p>
-                <p className="mt-0.5 text-xs text-apt-text-muted">
-                  Which gamification surfaces are shown to members. Each is on unless turned off.
-                </p>
-                <div className="mt-4 flex flex-col gap-5">
-                  {SURFACES.map((s) => (
-                    <div key={s.key} className="flex items-start justify-between gap-6">
-                      <div className="min-w-0">
-                        <Label
-                          htmlFor={`gamification-surface-${s.key}`}
-                          className="text-sm font-medium text-apt-text"
-                        >
-                          {s.label}
-                        </Label>
-                        <p className="mt-0.5 text-xs text-apt-text-muted">{s.help}</p>
-                      </div>
-                      <Switch
-                        id={`gamification-surface-${s.key}`}
-                        checked={draft.surfaces[s.key]}
-                        onCheckedChange={(on) => setSurface(s.key, on)}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Seasons — a read-model window over existing stats; off (null) leaves the
-                  season board absent. Wired into THIS pane's draft/save bar, not a second one. */}
-              <div className="border-t border-apt-border pt-6">
-                <div className="flex items-start justify-between gap-6">
+          {/* Surfaces */}
+          <div className="border-t border-apt-border pt-6">
+            <p className="text-sm font-medium text-apt-text">Surfaces</p>
+            <p className="mt-0.5 text-xs text-apt-text-muted">
+              Which gamification surfaces are shown to members. Each is on unless turned off.
+            </p>
+            <div className="mt-4 flex flex-col gap-5">
+              {SURFACES.map((s) => (
+                <div key={s.key} className="flex items-start justify-between gap-6">
                   <div className="min-w-0">
-                    <Label htmlFor="gamification-seasons-on" className="text-sm font-medium text-apt-text">
-                      Seasons
+                    <Label
+                      htmlFor={`gamification-surface-${s.key}`}
+                      className="text-sm font-medium text-apt-text"
+                    >
+                      {s.label}
                     </Label>
-                    <p className="mt-0.5 text-xs text-apt-text-muted">
-                      Opt into a recurring season board, resetting every N days from an anchor
-                      date.
-                    </p>
+                    <p className="mt-0.5 text-xs text-apt-text-muted">{s.help}</p>
                   </div>
                   <Switch
-                    id="gamification-seasons-on"
-                    checked={draft.seasonsOn}
-                    onCheckedChange={(on) => patch({ seasonsOn: on })}
+                    id={`gamification-surface-${s.key}`}
+                    checked={draft.surfaces[s.key]}
+                    onCheckedChange={(on) => setSurface(s.key, on)}
                   />
                 </div>
-                {draft.seasonsOn && (
-                  <div className="mt-4 flex flex-col gap-4 sm:flex-row">
-                    <Field label="Season 0 anchor" error={seasonsAnchorError ?? undefined} className="flex-1">
-                      <Input
-                        type="date"
-                        value={draft.seasonsAnchor}
-                        aria-invalid={!!seasonsAnchorError}
-                        onChange={(e) => patch({ seasonsAnchor: e.target.value })}
-                      />
-                    </Field>
-                    <Field label="Length (days)" error={seasonsLengthError ?? undefined} className="w-36">
-                      <Input
-                        type="number"
-                        min={1}
-                        max={366}
-                        value={draft.seasonsLengthDays}
-                        aria-invalid={!!seasonsLengthError}
-                        onChange={(e) => patch({ seasonsLengthDays: e.target.value })}
-                      />
-                    </Field>
-                  </div>
-                )}
-              </div>
+              ))}
+            </div>
+          </div>
 
-              {children}
-            </>
-          )}
-        </div>
-      </div>
+          {/* Seasons — a read-model window over existing stats; off (null) leaves the
+              season board absent. Wired into THIS pane's draft/save bar, not a second one. */}
+          <div className="border-t border-apt-border pt-6">
+            <div className="flex items-start justify-between gap-6">
+              <div className="min-w-0">
+                <Label htmlFor="gamification-seasons-on" className="text-sm font-medium text-apt-text">
+                  Seasons
+                </Label>
+                <p className="mt-0.5 text-xs text-apt-text-muted">
+                  Opt into a recurring season board, resetting every N days from an anchor
+                  date.
+                </p>
+              </div>
+              <Switch
+                id="gamification-seasons-on"
+                checked={draft.seasonsOn}
+                onCheckedChange={(on) => patch({ seasonsOn: on })}
+              />
+            </div>
+            {draft.seasonsOn && (
+              <div className="mt-4 flex flex-col gap-4 sm:flex-row">
+                <Field label="Season 0 anchor" error={seasonsAnchorError ?? undefined} className="flex-1">
+                  <Input
+                    type="date"
+                    value={draft.seasonsAnchor}
+                    aria-invalid={!!seasonsAnchorError}
+                    onChange={(e) => patch({ seasonsAnchor: e.target.value })}
+                  />
+                </Field>
+                <Field label="Length (days)" error={seasonsLengthError ?? undefined} className="w-36">
+                  <Input
+                    type="number"
+                    min={1}
+                    max={366}
+                    value={draft.seasonsLengthDays}
+                    aria-invalid={!!seasonsLengthError}
+                    onChange={(e) => patch({ seasonsLengthDays: e.target.value })}
+                  />
+                </Field>
+              </div>
+            )}
+          </div>
+
+          {children}
+        </>
+      )}
     </div>
   );
 }

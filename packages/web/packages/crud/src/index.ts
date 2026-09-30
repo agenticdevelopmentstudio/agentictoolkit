@@ -13,6 +13,7 @@ export type {
 } from './CrudDataBrowser'
 export { useExitGuardChannel } from './useExitGuardChannel'
 export { CrudDataView } from './CrudDataView'
+export { ApiAffordanceScope } from './ApiAffordanceScope'
 export type { CrudDataViewProps } from './CrudDataView'
 export { CrudFieldInput, isJsonColumn } from './CrudFieldInput'
 export type { CrudFieldInputProps } from './CrudFieldInput'

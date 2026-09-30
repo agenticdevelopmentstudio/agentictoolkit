@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
+import { useDetailsSection } from "./details-pane";
 
 /**
  * The draft half of a hand-rolled settings pane: a local copy of a loaded record that a
@@ -61,10 +62,26 @@ export interface SettingsDraft<L, D> {
   reset: () => void;
 }
 
+/**
+ * How a draft saves, for the enclosing {@link DetailsPane}'s one bar. Given to
+ * {@link useSettingsDraft}, the draft registers ITSELF as a section of that pane — `dirty` and
+ * `reset` are the draft's own — so a pane built from drafts needs no wiring of its own.
+ */
+export interface SettingsDraftSection {
+  /** Persist the draft; throw to stop the pane's save and report the failure. */
+  save: () => Promise<void>;
+  /** The draft may be saved as it stands. Defaults to true. */
+  canSave?: boolean;
+  /** Why it cannot, shown under the pane's bar while the draft is dirty. */
+  blockedReason?: string | null;
+}
+
 export function useSettingsDraft<L, D>(
   loaded: L | null | undefined,
   toDraft: (loaded: L) => D,
   isEqual: (a: D, b: D) => boolean = (a, b) => JSON.stringify(a) === JSON.stringify(b),
+  /** Register this draft with the enclosing DetailsPane (a no-op outside one). */
+  section?: SettingsDraftSection,
 ): SettingsDraft<L, D> {
   const [draft, setDraft] = useState<D | null>(null);
   const [seed, setSeed] = useState<D | null>(null);
@@ -126,6 +143,18 @@ export function useSettingsDraft<L, D>(
     setDraft(baseline);
     setSeed(baseline);
   }, [baseline]);
+
+  useDetailsSection(
+    section
+      ? {
+          dirty,
+          canSave: section.canSave ?? true,
+          blockedReason: section.blockedReason,
+          save: section.save,
+          reset,
+        }
+      : null,
+  );
 
   return { draft, patch, replace, seed, baseline, dirty, commit, reset };
 }

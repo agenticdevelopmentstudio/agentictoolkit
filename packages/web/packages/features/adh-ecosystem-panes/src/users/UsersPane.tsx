@@ -15,7 +15,7 @@ import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { CreateResourceDialog } from "@agentic-toolkit/resource";
 import { ButtonBar } from "@agentic-toolkit/resource";
-import { RecordApiButton } from "@agentic-toolkit/api-explorer";
+import { ApiAffordanceScope } from "@agentic-toolkit/crud";
 import { useMasterDetailForm } from "@agentic-toolkit/resource";
 import { useMasterDetailLevel } from "@agentic-toolkit/resource";
 import type { TopicLeaf } from "@agentic-toolkit/resource";
@@ -119,18 +119,18 @@ export function UsersPane({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <ButtonBar
-        actions={form.actions}
-        showCreate={false}
-        trailing={
-          <RecordApiButton
-            path="/customer/customers/{id}"
-            pathValues={{ id: form.selectedId }}
-            title="User API"
-          />
-        }
-        help={help}
-      />
+      <ApiAffordanceScope>
+        <ButtonBar
+          actions={form.actions}
+          showCreate={false}
+          api={{
+            path: "/customer/customers/{id}",
+            pathValues: { id: form.selectedId },
+            title: "User API",
+          }}
+          help={help}
+        />
+      </ApiAffordanceScope>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 py-4">
         {form.editing && form.draft ? (
           <UserDetail

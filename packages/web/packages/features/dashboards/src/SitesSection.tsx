@@ -9,7 +9,6 @@ import {
   MasterDetailLeaf,
   useMasterDetailForm,
   useMasterDetailLevel,
-  useRecordAffordance,
   type TopicLeaf,
 } from "@agentic-toolkit/resource";
 import {
@@ -63,7 +62,6 @@ export function SitesSection({
   workspaceSlug?: string;
 }) {
   const ws = { workspace: workspaceSlug };
-  const renderRecordAffordance = useRecordAffordance();
   const urlSelection = leaf ? { selectedId: leaf.leafId, onSelect: leaf.onSelect } : undefined;
   // "New site" is a POPUP (like New Ecosystem), not an inline blank form: the dialog enables Save on
   // any input and surfaces the precise validation reason on click — so a missing group reads as
@@ -123,11 +121,11 @@ export function SitesSection({
     <>
       <MasterDetailLeaf
         form={form}
-        trailing={renderRecordAffordance?.({
+        api={{
           path: "/monitoring/sites/{id}",
           pathValues: { id: form.selectedId },
           title: "Monitored site API",
-        })}
+        }}
         emptyTitle={sites === null ? "Loading…" : "Select a site to edit, or create a new one."}
         renderDetail={(draft) => (
           <SiteDetail

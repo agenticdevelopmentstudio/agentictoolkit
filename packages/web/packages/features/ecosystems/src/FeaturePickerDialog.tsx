@@ -7,7 +7,14 @@ import { DialogActions } from "@agenticdevelopertoolkit/ui/components/dialog-act
 import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { Badge } from "@agenticdevelopertoolkit/ui/components/badge";
-import type { CatalogFeature, FeatureChange } from "@agentic-toolkit/data/ecosystems";
+import {
+  featuresAddedWith,
+  neededBy,
+  neededByMessage,
+  requiredClosure,
+  type CatalogFeature,
+  type FeatureChange,
+} from "@agentic-toolkit/data/ecosystems";
 
 /**
  * The FEATURE PICKER ("Manage features"): what an ecosystem has.
@@ -49,6 +56,14 @@ export interface FeaturePickerDialogProps {
    * ticked box indistinguishable from one that works.
    */
   provisioning?: ReadonlySet<string>;
+  /**
+   * Features THIS ecosystem may not add, keyed to the sentence that says why — from the feature
+   * manager (`useEcosystemFeatures().unavailable`), which reads it from the server: a client
+   * ecosystem cannot hold Organizations. Each row's tick is disabled and its details give the
+   * reason; like a coming-soon row, one the ecosystem already holds can still be unticked.
+   * Nothing brings one in as another feature's requirement either.
+   */
+  unavailable?: ReadonlyMap<string, string>;
   /** The change is in flight — the footer shows a spinner and the dialog cannot be dismissed. */
   busy?: boolean;
   /**
@@ -99,6 +114,7 @@ export function FeaturePickerDialog({
   catalog,
   alreadyProvisioned,
   provisioning: provisioningKeys,
+  unavailable: unavailableKeys,
   busy = false,
   loading = false,
   error = null,
@@ -109,6 +125,7 @@ export function FeaturePickerDialog({
 }: FeaturePickerDialogProps): ReactElement {
   const provisioned = alreadyProvisioned ?? EMPTY;
   const stillProvisioning = provisioningKeys ?? EMPTY;
+  const unavailable = unavailableKeys ?? EMPTY_REASONS;
 
   const [query, setQuery] = useState("");
   // The TARGET state per row the user has touched this visit: key -> desired on/off. A row not
@@ -124,6 +141,18 @@ export function FeaturePickerDialog({
   // second highlight on the same list meaning something else.
   const [activeId, setActiveId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // A blocked tick-off: the feature just clicked, and the features (from `catalog`) still on
+  // that need it. Non-null opens the refusal alert; `toggle` never mutates `desired` while it
+  // does, so the row stays checked with nothing else to undo.
+  const [blockedBy, setBlockedBy] = useState<{ feature: CatalogFeature; blockers: CatalogFeature[] } | null>(null);
+  // The row currently hovered / currently focused, tracked separately since either alone must
+  // show the "Needed by" row's floating hint (a mouse leaving a still-focused row must not hide
+  // it). Driven by delegated `focus`/`blur`/`mouseover`/`mouseout` on the box below rather than a
+  // handler on the marker itself: the marker is deliberately NOT a focusable element (see the
+  // `items` memo), so it has nothing of its own to attach a listener to — the row's own button
+  // is the only thing a keyboard user ever reaches, so that is what has to open the hint.
+  const [hoveredRowKey, setHoveredRowKey] = useState<string | null>(null);
+  const [focusedRowKey, setFocusedRowKey] = useState<string | null>(null);
 
   // A fresh open is a fresh pick — nothing carries over from the last time the dialog ran.
   useEffect(() => {
@@ -132,10 +161,17 @@ export function FeaturePickerDialog({
     setDesired(EMPTY_MAP);
     setActiveId(null);
     setConfirming(false);
+    setBlockedBy(null);
   }, [open]);
 
   const visible = useMemo(() => visibleFeatures(catalog, query), [catalog, query]);
   const byKey = useMemo(() => new Map(catalog.map((f) => [f.key, f])), [catalog]);
+  // A key that may not be ticked ON: not built, or not for this ecosystem. One already held is
+  // never refused — this picker is the only way to take a feature off, so its tick stays live.
+  const cannotAdd = useCallback(
+    (key: string) => !provisioned.has(key) && (!!byKey.get(key)?.comingSoon || unavailable.has(key)),
+    [provisioned, byKey, unavailable],
+  );
 
   /** What the row shows RIGHT NOW: the user's touched target, else the ecosystem's own state. */
   const desiredOn = useCallback((key: string) => desired.get(key) ?? provisioned.has(key), [desired, provisioned]);
@@ -148,33 +184,52 @@ export function FeaturePickerDialog({
     const add: string[] = [];
     const remove: string[] = [];
     for (const f of catalog) {
-      if (f.comingSoon && !provisioned.has(f.key)) continue; // a held one may still come OFF
+      if (cannotAdd(f.key)) continue; // a held one may still come OFF
       const on = desiredOn(f.key);
       if (on === provisioned.has(f.key)) continue;
       (on ? add : remove).push(f.key);
     }
     return { add, remove };
-  }, [catalog, desiredOn, provisioned]);
+  }, [catalog, desiredOn, provisioned, cannotAdd]);
   const changeCount = change.add.length + change.remove.length;
 
+  // Turning a feature ON also turns on everything its `requiresFeatures` closure needs —
+  // skipping any comingSoon step of that closure, which cannot be provisioned and so can
+  // never legitimately be a requirement in a real catalog, but a defensive skip here means a
+  // catalog bug does not throw. Turning one OFF is refused, with nothing touched, while some
+  // ON feature still needs it (`neededBy`); the caller finds out via `blockedBy`.
   const toggle = useCallback(
     (key: string) => {
       if (loading) return; // a tick against a list still loading would be read against the wrong baseline
-      // Not built — nothing to provision. One the ecosystem already holds is the exception: it can
-      // be unticked (and ticked back, which only cancels that removal).
-      if (byKey.get(key)?.comingSoon && !provisioned.has(key)) return;
+      // Not built, or not for this ecosystem — nothing to provision. One the ecosystem already
+      // holds is the exception: it can be unticked (and ticked back, which only cancels that removal).
+      if (cannotAdd(key)) return;
+
+      const turningOn = !desiredOn(key);
+
+      if (!turningOn) {
+        const blockers = neededBy(key, catalog, desiredOn);
+        if (blockers.length > 0) {
+          const feature = byKey.get(key);
+          if (feature) setBlockedBy({ feature, blockers });
+          return;
+        }
+      }
+
+      const keys = turningOn ? featuresAddedWith(key, catalog, cannotAdd) : [key];
+
       setDesired((prev) => {
-        const current = prev.get(key) ?? provisioned.has(key);
-        const flippedTo = !current;
         const next = new Map(prev);
-        // Back to the ecosystem's own state: drop it rather than storing a no-op target, so a
-        // click-then-click-back leaves no residue and the map only ever holds real changes.
-        if (flippedTo === provisioned.has(key)) next.delete(key);
-        else next.set(key, flippedTo);
+        for (const k of keys) {
+          // Back to the ecosystem's own state: drop it rather than storing a no-op target, so a
+          // click-then-click-back leaves no residue and the map only ever holds real changes.
+          if (turningOn === provisioned.has(k)) next.delete(k);
+          else next.set(k, turningOn);
+        }
         return next;
       });
     },
-    [loading, byKey, provisioned],
+    [loading, byKey, provisioned, desiredOn, catalog, cannotAdd],
   );
 
   const checkedIds = useMemo(() => {
@@ -183,25 +238,92 @@ export function FeaturePickerDialog({
     return s;
   }, [catalog, desiredOn]);
 
+  // Every catalog key's currently-ON blockers, keyed once for the whole catalog rather than
+  // recomputed per row: `neededBy` walks the whole requirement graph (`requiredClosure` for
+  // every ON feature), so calling it once per VISIBLE row inside the `items` memo below would
+  // redo that walk up to once per row per render. Fine at today's catalog size (a few dozen
+  // features, re-walked only on a catalog/tick change, not on every keystroke — filtering
+  // narrows `visible`, not this), so this is a one-time-per-change map rather than a hot loop
+  // guard: build it if the catalog ever grows enough for that to matter.
+  const neededByKey = useMemo(() => {
+    const map = new Map<string, CatalogFeature[]>();
+    for (const f of catalog) {
+      if (!desiredOn(f.key)) continue;
+      for (const dep of requiredClosure(f.key, catalog)) {
+        // Same self-exclusion as `neededBy` in feature-requirements.ts (data/ecosystems): a cyclic catalog's
+        // `requiredClosure` can include the feature's own key, and a feature is never "needed
+        // by" itself.
+        if (dep === f.key) continue;
+        const blockers = map.get(dep);
+        if (blockers) blockers.push(f);
+        else map.set(dep, [f]);
+      }
+    }
+    return map;
+  }, [catalog, desiredOn]);
+
   const items: TopicDetailItem[] = useMemo(
     () =>
       visible.map((f, i) => {
         const next = visible[i + 1];
+        // Currently-ON features (per the user's own touches this visit) that need this row —
+        // empty for one nothing depends on, and for one that is itself off (nothing needs an
+        // off feature).
+        const blockers = neededByKey.get(f.key) ?? [];
+        const trailing: ReactElement[] = [];
+        if (stillProvisioning.has(f.key)) {
+          trailing.push(
+            <Badge key="provisioning" variant="orange">
+              Provisioning
+            </Badge>,
+          );
+        }
+        if (blockers.length > 0) {
+          const labels = blockers.map((b) => b.label).join(", ");
+          // NOT a `Tooltip`/`TooltipTrigger`: that would put a second focusable element inside
+          // the row's own button (topic-detail.tsx renders `trailing` there), which a keyboard
+          // user tabbing through the list could never reach. Instead:
+          //  - the count badge is `aria-hidden` and purely visual;
+          //  - a plain (non-focusable) sr-only span carries the real words, folded into the
+          //    ROW's own accessible name (this file doesn't render — and so can't attach
+          //    `aria-describedby` to — the row's `<button>` itself; this is the same technique
+          //    the shared rail already uses for `item.blocked`'s ", needs attention" text, and
+          //    it reaches the same outcome: a screen reader announces "Needed by X" the moment
+          //    the row, which is already focusable and already reachable, gets focus);
+          //  - the floating hint bubble is plain, `aria-hidden`, decorative text, shown only
+          //    while THIS row is hovered or focused (`hoveredRowKey/focusedRowKey`, set from
+          //    delegated events on the box below) — a sighted mouse or keyboard user gets the
+          //    same visual affordance a tooltip would have given, without a second control.
+          trailing.push(
+            <span key="needed-by" className="relative inline-flex items-center">
+              <Badge variant="neutral" aria-hidden="true">{`Needed by ${blockers.length}`}</Badge>
+              <span className="sr-only">{`Needed by ${labels}`}</span>
+              {(f.key === hoveredRowKey || f.key === focusedRowKey) && (
+                <span
+                  aria-hidden="true"
+                  data-slot="tooltip-content"
+                  className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 w-max max-w-56 -translate-x-1/2 rounded-md border border-apt-border bg-apt-surface-2 px-2.5 py-1.5 text-xs text-apt-text shadow-md"
+                >
+                  {labels}
+                </span>
+              )}
+            </span>,
+          );
+        }
         return {
           id: f.key,
           label: f.label,
-          // Not built yet: the tick is DISABLED, while the row stays selectable so its details
-          // can still be read. Unless the ecosystem already holds it: this picker is the only way
-          // to take a feature off, so a held one keeps its tick live for unticking.
-          checkDisabled: !!f.comingSoon && !provisioned.has(f.key),
-          ...(stillProvisioning.has(f.key)
-            ? { trailing: <Badge variant="orange">Provisioning</Badge> }
-            : {}),
+          // Not built yet, or not for this ecosystem: the tick is DISABLED, while the row stays
+          // selectable so its details (and why) can still be read. Unless the ecosystem already
+          // holds it: this picker is the only way to take a feature off, so a held one keeps its
+          // tick live for unticking.
+          checkDisabled: cannotAdd(f.key),
+          ...(trailing.length > 0 ? { trailing: <>{trailing}</> } : {}),
           // The last available row carries the divider that opens the coming-soon group.
           ...(!f.comingSoon && next?.comingSoon ? { dividerAfter: true, dividerLabel: "Coming soon" } : {}),
         };
       }),
-    [visible, provisioned, stillProvisioning],
+    [visible, cannotAdd, stillProvisioning, neededByKey, hoveredRowKey, focusedRowKey],
   );
 
   // Keep the cursor on a row that still exists: filtering the active row away would otherwise
@@ -331,6 +453,24 @@ export function FeaturePickerDialog({
     setBoxHeight((prev) => (prev != null && Math.abs(prev - needed) < 1 ? prev : needed));
   }, [open, query, catalog.length, items, box]);
 
+  // Which VISIBLE row (by catalog key) an event target — the thing itself, or a `relatedTarget`
+  // gaining focus / the pointer's next element — landed in, via the row's own `data-htd-row`
+  // marker (every real row carries exactly one, in the same order as `visible`; the coming-soon
+  // divider does not). `null` for anything outside a row, which is exactly what the box's own
+  // `focus`/`blur`/`mouseover`/`mouseout` handlers below want: focus or the pointer having left
+  // every row clears the hint.
+  const rowKeyFromTarget = useCallback(
+    (target: EventTarget | null): string | null => {
+      if (!box || !(target instanceof Element)) return null;
+      const row = target.closest<HTMLElement>("[data-htd-row]");
+      if (!row || !box.contains(row)) return null;
+      const rows = box.querySelectorAll<HTMLElement>("[data-htd-row]");
+      const index = Array.prototype.indexOf.call(rows, row);
+      return index === -1 ? null : (visible[index]?.key ?? null);
+    },
+    [box, visible],
+  );
+
   return (
     <>
       <Dialog
@@ -356,6 +496,14 @@ export function FeaturePickerDialog({
             ref={setBox}
             className="flex min-h-0 shrink flex-col overflow-hidden rounded-lg border border-apt-border"
             style={{ height: boxHeight ?? "26rem" }}
+            // Delegated rather than attached to the marker itself (which is deliberately not
+            // focusable — see the `items` memo): a native `focus`/`blur` does not bubble, but
+            // React's `onFocus`/`onBlur` map to `focusin`/`focusout`, which do, so a single pair
+            // of listeners here sees every row's focus without the rail exposing a per-row hook.
+            onFocus={(e) => setFocusedRowKey(rowKeyFromTarget(e.target))}
+            onBlur={(e) => setFocusedRowKey(rowKeyFromTarget(e.relatedTarget))}
+            onMouseOver={(e) => setHoveredRowKey(rowKeyFromTarget(e.target))}
+            onMouseOut={(e) => setHoveredRowKey(rowKeyFromTarget(e.relatedTarget))}
           >
             {catalogError ? (
               // The catalog never arrived — `catalog` is `[]` exactly as it is while still
@@ -375,6 +523,9 @@ export function FeaturePickerDialog({
                 <FeatureDetail
                   feature={active}
                   provisioning={active != null && stillProvisioning.has(active.key)}
+                  unavailableReason={
+                    active != null && !provisioned.has(active.key) ? unavailable.get(active.key) : undefined
+                  }
                 />
               </HierarchicalDetailView>
             )}
@@ -412,6 +563,14 @@ export function FeaturePickerDialog({
         }}
         onCancel={() => setConfirming(false)}
       />
+
+      <AlertModal
+        open={blockedBy != null}
+        title={`Can't remove ${blockedBy?.feature.label ?? "this feature"}`}
+        description={neededByMessage((blockedBy?.blockers ?? []).map((f) => f.label))}
+        confirmLabel="OK"
+        onConfirm={() => setBlockedBy(null)}
+      />
     </>
   );
 }
@@ -429,6 +588,7 @@ function findScroller(root: HTMLElement): HTMLElement | null {
 const EMPTY: ReadonlySet<string> = new Set<string>();
 /** One shared empty map, for the same reason — the initial and post-open-reset `desired`. */
 const EMPTY_MAP: ReadonlyMap<string, boolean> = new Map<string, boolean>();
+const EMPTY_REASONS: ReadonlyMap<string, string> = new Map<string, string>();
 
 function plural(n: number): string {
   return `${n} ${n === 1 ? "feature" : "features"}`;
@@ -482,10 +642,13 @@ function ComingSoonMark(): ReactElement {
 function FeatureDetail({
   feature,
   provisioning,
+  unavailableReason,
 }: {
   feature: CatalogFeature | undefined;
   /** Held, but its provisioning has not finished. */
   provisioning: boolean;
+  /** Why this ecosystem may not add it — set only for a feature it does not already hold. */
+  unavailableReason?: string;
 }): ReactElement | null {
   if (!feature) return null;
   return (
@@ -496,6 +659,7 @@ function FeatureDetail({
         {provisioning && <Badge variant="orange">Provisioning</Badge>}
       </div>
       <p className="text-sm text-apt-text-dim">{feature.description}</p>
+      {unavailableReason && <p className="text-sm text-apt-text">{unavailableReason}</p>}
       {provisioning && (
         <p className="text-sm text-apt-text-dim">
           Still being set up for this ecosystem — it opens once provisioning finishes. Untick it to

@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { FeatureTitle } from "@agentic-toolkit/resource";
 import { cn } from "../lib/utils";
 import { railLinkVariants } from "@agenticdevelopertoolkit/ui/lib/nav-rail";
 import { RequestsPane } from "../invitations/RequestsPane";
 import { PendingUsersPane } from "../invitations/PendingUsersPane";
 import { InvitesPane } from "../invitations/InvitesPane";
-import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 const TOPICS = [
   { id: "requests", label: "Requests" },
@@ -15,7 +15,7 @@ const TOPICS = [
 ] as const;
 type TopicId = (typeof TOPICS)[number]["id"];
 
-export function InvitationsPane(): ReactElement {
+export function InvitationsPane({ help }: { help?: ReactNode } = {}): ReactElement {
   const [topic, setTopic] = useState<TopicId>("requests");
 
   // Deep-link the active sub-tab: seed from ?tab= on mount (so a shared link / reload
@@ -35,10 +35,10 @@ export function InvitationsPane(): ReactElement {
   }
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] flex-col">
-      <SectionHeader paneTitle title="Invitations" className="mb-4" />
-      <div className="grid min-h-0 flex-1 grid-cols-[200px_1fr] gap-0">
-        <aside className="border-r border-border pr-4 pt-1">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FeatureTitle title="Invitations" help={help} />
+      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[200px_1fr] gap-0 px-6 pb-8 pt-2">
+        <aside className="overflow-y-auto border-r border-border pr-4 pt-1">
           <nav>
             <ul className="space-y-1">
               {TOPICS.map((t) => (
@@ -58,7 +58,7 @@ export function InvitationsPane(): ReactElement {
             </ul>
           </nav>
         </aside>
-        <div className="flex min-h-0 min-w-0 flex-col pl-6">
+        <div className="flex min-h-0 min-w-0 flex-col overflow-y-auto pl-6">
           {topic === "requests" && <RequestsPane />}
           {topic === "pending" && <PendingUsersPane />}
           {topic === "invites" && <InvitesPane />}

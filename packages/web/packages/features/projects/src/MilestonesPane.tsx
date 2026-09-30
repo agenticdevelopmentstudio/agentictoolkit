@@ -24,7 +24,6 @@ import {
   MasterDetailLeaf,
   useMasterDetailForm,
   useMasterDetailLevel,
-  useRecordAffordance,
   type TopicLeaf,
 } from "@agentic-toolkit/resource";
 import { ItemKey } from "./ItemKey";
@@ -213,7 +212,6 @@ export function MilestonesPane({
   /** What this board calls the cards that count toward a point. */
   words?: ItemWords;
 }): ReactElement {
-  const renderRecordAffordance = useRecordAffordance();
   const [newOpen, setNewOpen] = useState(false);
 
   const load = useCallback(() => projectMilestonesApi.list(projectId), [projectId]);
@@ -296,15 +294,16 @@ export function MilestonesPane({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <FeatureTitle title={title} />
+      {/* The leaf's own bar draws the API button; one per pane. */}
+      <FeatureTitle title={title} showApi={false} />
       <MasterDetailLeaf
         form={form}
         error={loadError}
-        trailing={renderRecordAffordance?.({
+        api={{
           path: "/project/projects/{id}/milestones",
           pathValues: { id: projectId },
           title: "Milestones API",
-        })}
+        }}
         emptyTitle={
           milestones === null ? "Loading…" : "Select a milestone to edit, or create a new one."
         }

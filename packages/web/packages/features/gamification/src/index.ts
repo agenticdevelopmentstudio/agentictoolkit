@@ -17,7 +17,7 @@ export { GamificationPane } from "./GamificationPane";
 
 export { GAMIFICATION_TOPICS } from "./topics";
 
-export { RealmSettingsPane, GamificationSettingsTopicPane } from "./RealmSettingsPane";
+export { RealmSettingsPane, GamificationSettingsTopicPane, realmConfigApi } from "./RealmSettingsPane";
 export { CatalogSection } from "./CatalogSection";
 export { LevelsSection } from "./LevelsSection";
 export { BackfillSection } from "./BackfillSection";

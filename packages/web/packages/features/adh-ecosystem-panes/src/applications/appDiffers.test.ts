@@ -83,4 +83,7 @@ describe("appDiffers", () => {
     expect(appDiffers(app([a]), app([b]))).toBe(true);
     expect(appDiffers(app([a, b]), app([newSchemaGrant("c"), a]))).toBe(true);
   });
+  it("sees a platform change", () => {
+    expect(appDiffers(appBlank(), { ...appBlank(), platform: "native" })).toBe(true);
+  });
 });

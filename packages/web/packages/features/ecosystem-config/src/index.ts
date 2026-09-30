@@ -13,12 +13,16 @@
 // which resolves the workspace's default ecosystem and explains itself when it can't.
 export { EcosystemConfigGate } from "./EcosystemConfigGate";
 
-export { AuthPane } from "./AuthPane";
 export { BillingPane } from "./BillingPane";
+export { ClientAuthSettingsPane, ECOSYSTEM_CLIENT_AUTH_KEY } from "./ClientAuthSettingsPane";
+export {
+  ApplicationClientAuthSection,
+  useApplicationClientAuth,
+  type ApplicationClientAuthState,
+} from "./ApplicationClientAuthSection";
+export { ClientAuthPolicyFields, LoginRegistrationFields } from "./ClientAuthFields";
 export { FeatureFlagsPane, FlagDialog } from "./FeatureFlagsPane";
 export { ServerBagsPane, BagDialog } from "./ServerBagsPane";
-export { SigninAppsPane } from "./SigninAppsPane";
-export { SigninAppDetail } from "./SigninAppDetail";
 export { StorageTokensPanel } from "./StorageTokensPanel";
 
 // No help-text export. The sentences these panes show live in adh's site-config content package —

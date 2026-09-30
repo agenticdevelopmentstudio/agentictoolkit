@@ -6,7 +6,6 @@ import { ecosystemsApi, type Ecosystem, type EcosystemInput } from "@agentic-too
 import {
   useMasterDetailForm,
   RecordSettingsPane,
-  useRecordAffordance,
   unchangedFromStored,
 } from "@agentic-toolkit/resource";
 import { DeleteEntitySection } from "@agentic-toolkit/adh-ui/blocks";
@@ -67,10 +66,6 @@ export function EcosystemSettingsPane({
    *  standalone feature site — the hub owns the workspace list and the mutation. */
   renderTransferOwnership?: (ecosystem: { id: string; identifier: string }) => ReactNode;
 }): ReactElement {
-  // The host-injected per-record affordance (the hub's api-explorer button); null on
-  // a standalone feature site → the trailing slot renders nothing.
-  const renderRecordAffordance = useRecordAffordance();
-
   const active = items?.find((e) => e.id === ecosystemId);
 
   // The fixed identifier prefix: an rdid's own type+scope (so an owner-scoped product keeps
@@ -201,11 +196,11 @@ export function EcosystemSettingsPane({
       getId={(e) => e.id}
       title={title}
       help={help}
-      trailing={renderRecordAffordance?.({
+      api={{
         path: "/ecosystem/ecosystems/{id}",
         pathValues: { id: ecosystemId },
         title: `${noun} API`,
-      })}
+      }}
       loadError={loadError}
       emptyLabel={
         items === null

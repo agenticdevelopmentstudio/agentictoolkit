@@ -15,7 +15,6 @@ import {
   MasterDetailLeaf,
   useMasterDetailForm,
   useMasterDetailLevel,
-  useRecordAffordance,
   type TopicLeaf,
 } from "@agentic-toolkit/resource";
 import {
@@ -76,7 +75,6 @@ export function TemplatesPane({
    *  exactly as the project, iteration and program lists do. */
   workspaceSlug?: string;
 }): ReactElement {
-  const renderRecordAffordance = useRecordAffordance();
   const [newOpen, setNewOpen] = useState(false);
 
   // The SAME cache key the create dialogs read their pickers from, so a template saved here is
@@ -146,15 +144,16 @@ export function TemplatesPane({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <FeatureTitle title={title} />
+      {/* The leaf's own bar draws the API button; one per pane. */}
+      <FeatureTitle title={title} showApi={false} />
       <MasterDetailLeaf
         form={form}
         error={loadError}
-        trailing={renderRecordAffordance?.({
+        api={{
           path: "/project/templates/{id}",
           pathValues: { id: form.selectedId },
           title: "Template API",
-        })}
+        }}
         emptyTitle={
           templates === null ? "Loading…" : "Select a template to edit, or create a new one."
         }

@@ -50,11 +50,31 @@ public struct SigninApp: Codable, Hashable, Sendable, Identifiable {
     public var allowedReturnOrigins: [String]
     public var defaultEcosystemId: String
     public var githubEnabled: Bool
+    /// OAuth redirect URIs registered on the app's Hydra PKCE client. Decoded with a default of
+    /// `[]` rather than via the synthesized `Codable`, so a server response — or an older
+    /// fixture/cache — that omits the key entirely still decodes instead of throwing.
+    public var redirectUris: [String]
 
     public init(id: String, slug: String, name: String, allowedReturnOrigins: [String] = [],
-                defaultEcosystemId: String, githubEnabled: Bool = false) {
+                defaultEcosystemId: String, githubEnabled: Bool = false, redirectUris: [String] = []) {
         self.id = id; self.slug = slug; self.name = name; self.allowedReturnOrigins = allowedReturnOrigins
         self.defaultEcosystemId = defaultEcosystemId; self.githubEnabled = githubEnabled
+        self.redirectUris = redirectUris
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, slug, name, allowedReturnOrigins, defaultEcosystemId, githubEnabled, redirectUris
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        slug = try c.decode(String.self, forKey: .slug)
+        name = try c.decode(String.self, forKey: .name)
+        allowedReturnOrigins = try c.decode([String].self, forKey: .allowedReturnOrigins)
+        defaultEcosystemId = try c.decode(String.self, forKey: .defaultEcosystemId)
+        githubEnabled = try c.decode(Bool.self, forKey: .githubEnabled)
+        redirectUris = try c.decodeIfPresent([String].self, forKey: .redirectUris) ?? []
     }
 
     /// The part of the client id after the ecosystem prefix (`myeco.whatsnow` → `whatsnow`).

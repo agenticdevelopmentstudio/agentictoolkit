@@ -11,7 +11,6 @@ import { Label } from "@agenticdevelopertoolkit/ui/components/label";
 import { List, ListItem } from "@agenticdevelopertoolkit/ui/components/list";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { applicationsPrototypeApi, type AccessToken } from "../api/applications-prototype";
-import { RecordApiButton } from "@agentic-toolkit/api-explorer";
 import { reportUnexpectedAuthError } from "@agentic-toolkit/auth";
 
 /**
@@ -91,17 +90,12 @@ export function AccessTokensSection({ appId }: { appId: string }) {
       title="Access tokens"
       subtitle={`${tokens.length} token${tokens.length === 1 ? "" : "s"}`}
       actions={
-        <div className="flex items-center gap-2">
-          <RecordApiButton
-            path="/ecosystem/applications/{appId}/tokens"
-            pathValues={{ appId }}
-            title="Access tokens API"
-          />
-          <Button type="button" variant="outline" size="sm" onClick={() => setCreating((v) => !v)}>
-            <Plus data-icon="inline-start" />
-            New token
-          </Button>
-        </div>
+        // No API button here: the application's detail header carries the one API button, left of
+        // its Help — a second one inside the body could not say which endpoint was whose.
+        <Button type="button" variant="outline" size="sm" onClick={() => setCreating((v) => !v)}>
+          <Plus data-icon="inline-start" />
+          New token
+        </Button>
       }
     >
       <div className="flex flex-col gap-3">

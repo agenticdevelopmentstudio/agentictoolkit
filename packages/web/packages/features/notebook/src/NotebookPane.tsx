@@ -10,7 +10,6 @@ import {
   StackLevels,
   useRailExitGuard,
   MasterDetailLeaf,
-  useRecordAffordance,
   CreateResourceDialog,
   useResourceItem,
   type MasterDetailActions,
@@ -574,10 +573,6 @@ export function NotebookPane({
   // Registered only while DIRTY so the host's guard count is a render-value dirty signal.
   useRailExitGuard(dirty ? { isDirty: () => dirty } : null);
 
-  // The host-injected per-record affordance (the hub's api-explorer button); null on a
-  // standalone feature site → the trailing slot renders nothing.
-  const renderRecordAffordance = useRecordAffordance();
-
   const editing = selectedId !== null;
   // Deliberately NOT gated on `dirty`. Save is disabled the moment the draft is invalid, and
   // a note written before the body became required opens invalid and untouched — under a
@@ -640,11 +635,11 @@ export function NotebookPane({
       <StackLevels levels={[...categoryLevels, notesLevel]}>
         <MasterDetailLeaf
           form={{ actions, editing, draft }}
-          trailing={renderRecordAffordance?.({
+          api={{
             path: "/content/markdown/{id}",
             pathValues: { id: selectedId },
             title: `${noun.One} API`,
-          })}
+          }}
           error={listError ?? formError ?? noteError}
           emptyTitle={
             // Reached only with nothing cached for this id — otherwise `draft` is already the

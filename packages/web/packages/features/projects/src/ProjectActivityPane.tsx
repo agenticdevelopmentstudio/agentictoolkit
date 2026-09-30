@@ -2,7 +2,7 @@
 
 import { useCallback, type ReactElement } from "react";
 import { projectActivityApi } from "@agentic-toolkit/data/projects";
-import { FeatureTitle, useRecordAffordance } from "@agentic-toolkit/resource";
+import { FeatureTitle } from "@agentic-toolkit/resource";
 import { ActivityFeed, ACTIVITY_PAGE_SIZE } from "./ActivityFeed";
 import { DEFAULT_ITEM_WORDS, type ItemWords } from "./vocabulary";
 
@@ -23,9 +23,6 @@ export function ProjectActivityPane({
   /** What this board calls its cards — the trail's verbs name them ("created a story"). */
   words?: ItemWords;
 }): ReactElement {
-  // The host-injected per-record affordance (the hub's api-explorer button); null on
-  // a standalone feature site → the trailing slot renders nothing.
-  const renderRecordAffordance = useRecordAffordance();
   const load = useCallback(
     (before?: string) =>
       projectActivityApi.projectActivity(projectId, {
@@ -39,11 +36,11 @@ export function ProjectActivityPane({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <FeatureTitle
         title={title}
-        trailing={renderRecordAffordance?.({
+        api={{
           path: "/project/projects/{id}/activity",
           pathValues: { id: projectId },
           title: "Project activity API",
-        })}
+        }}
       />
       <section className="flex min-w-0 flex-1 flex-col overflow-y-auto px-6 py-4">
         <ActivityFeed load={load} words={words} />

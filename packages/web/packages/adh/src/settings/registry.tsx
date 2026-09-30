@@ -31,8 +31,18 @@ import {
 import { UsagePanel, SocialLinksPanel, AddressesPanel } from "@agentic-toolkit/profile";
 import { TokensPanel } from "@agentic-toolkit/authentication";
 import { AssistantsPanel } from "@agentic-toolkit/personas";
-import { FeatureTitle, SettingsDirtyProvider } from "@agentic-toolkit/resource";
+import {
+  FeatureTitle,
+  RecordAffordanceContext,
+  SettingsDirtyProvider,
+  type RecordAffordanceProps,
+} from "@agentic-toolkit/resource";
 import { RecordApiButton } from "@agentic-toolkit/api-explorer";
+
+// The settings sections supply their own API affordance rather than trusting a host to: the
+// overlay mounts on every site, most of which have no workspace shell (and so no
+// RecordAffordanceContext) above it. The header's API slot draws whatever this renders.
+const renderSettingsApi = (props: RecordAffordanceProps) => <RecordApiButton {...props} />;
 
 // Relative, and deliberately NOT the "@agentic-toolkit/adh/site" package path the topics
 // import below uses — the two rules point opposite ways here, so record which applies.
@@ -136,7 +146,7 @@ const PANELS: Record<SettingsTopicId, ReactNode> = {
 // Backend endpoint each settings section maps to — drives the FeatureTitle "API"
 // button. Self endpoints (/auth/me) and collections take no path params. Sections
 // with no backing endpoint (appearance = local theme, preferences = this browser only,
-// subscription = placeholder) are omitted, so no button shows.
+// subscription = placeholder) are omitted, so their API button draws disabled.
 //
 // EVERY section gets its title and API button from here. Security and Notifications used to
 // draw their own (a SectionHeader plus a RecordApiButton inside the panel, relocated whole from
@@ -173,18 +183,16 @@ export function buildSettingsTopics(): Topic[] {
       // overlay's actual URL; there isn't one.
       href: `/settings/${t.id}`,
       content: (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <FeatureTitle
-            title={t.label}
-            help={HELP[t.id]}
-            trailing={
-              apiPath ? (
-                <RecordApiButton path={apiPath} pathValues={{}} title={`${t.label} API`} />
-              ) : undefined
-            }
-          />
-          {PANELS[t.id]}
-        </div>
+        <RecordAffordanceContext.Provider value={renderSettingsApi}>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <FeatureTitle
+              title={t.label}
+              help={HELP[t.id]}
+              api={apiPath ? { path: apiPath, pathValues: {}, title: `${t.label} API` } : null}
+            />
+            {PANELS[t.id]}
+          </div>
+        </RecordAffordanceContext.Provider>
       ),
     };
   });

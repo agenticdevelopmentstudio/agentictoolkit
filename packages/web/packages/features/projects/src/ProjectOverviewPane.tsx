@@ -48,7 +48,7 @@ import {
   type ProjectStatus,
   type WorkItem,
 } from "@agentic-toolkit/data/projects";
-import { FeatureTitle, useRecordAffordance } from "@agentic-toolkit/resource";
+import { FeatureTitle } from "@agentic-toolkit/resource";
 import { AssigneePicker, fromOptionValue, toOptionValue } from "./AssigneePicker";
 import { ProjectStatusUpdates } from "./ProjectStatusUpdates";
 import {
@@ -263,10 +263,6 @@ export function ProjectOverviewPane({
    */
   renderTransferOwnership?: (project: { id: string; name: string }) => ReactNode;
 }): ReactElement {
-  // The host-injected per-record affordance (the hub's api-explorer button); null on
-  // a standalone feature site → the trailing slot renders nothing.
-  const renderRecordAffordance = useRecordAffordance();
-
   // THE project record, on ONE cache entry shared with the board and the triage queue — the two
   // other panes that read it for the same board's vocabulary and scales. Opening Settings after
   // the board costs no read at all: the record paints from the cache and the re-read settles
@@ -682,11 +678,11 @@ export function ProjectOverviewPane({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <FeatureTitle
         title={title}
-        trailing={renderRecordAffordance?.({
+        api={{
           path: "/project/projects/{id}",
           pathValues: { id: projectId },
           title: "Project API",
-        })}
+        }}
       />
       <section className="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-6 py-4">
         {/* Not-found is a SETTLED answer of nothing. Before the read settles there is either a

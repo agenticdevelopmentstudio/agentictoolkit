@@ -42,7 +42,7 @@ export const GAMIFICATION_TOPICS: EcosystemsTopicConfig[] = [
     id: "settings",
     label: "Settings",
     icon: <Settings size={16} aria-hidden />,
-    description: "Enable gamification, pick a skin, and choose which surfaces show it.",
+    description: "Pick a skin, and choose which surfaces show gamification.",
     dividerAfter: false,
   },
 ];

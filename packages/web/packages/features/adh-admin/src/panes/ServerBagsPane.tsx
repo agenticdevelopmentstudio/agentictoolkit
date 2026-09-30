@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import {
@@ -34,7 +34,7 @@ import { UnsavedChangesAlert } from "@agenticdevelopertoolkit/ui/components/unsa
 import { Field } from "@agenticdevelopertoolkit/ui/blocks/field";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { ProgressModal } from "@agenticdevelopertoolkit/ui/blocks";
-import { ApiButton } from "@agentic-toolkit/api-explorer";
+import { FeatureTitle } from "@agentic-toolkit/resource";
 import {
   EditableList,
   TypeToConfirmDialog,
@@ -42,7 +42,6 @@ import {
   useEditableList,
   type EditableListColumn,
 } from "../components/editable-list";
-import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * Has the stored bag changed under an open dialog? Compared on what a save would OVERWRITE — the
@@ -82,7 +81,7 @@ const DELETE_WORD = "delete";
  * page can see, and a confirm button one reflex away from the trash that opened it was never a
  * gate.
  */
-export function ServerBagsPane() {
+export function ServerBagsPane({ help }: { help?: ReactNode } = {}) {
   const router = useRouter();
   const { data, isLoading, error } = useServerBags();
   const deleteBag = useDeleteBag();
@@ -172,123 +171,118 @@ export function ServerBagsPane() {
   );
 
   return (
-    <div>
-      <SectionHeader
-        paneTitle
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FeatureTitle
         title="Server Bags"
-        className="mb-4"
-        actions={
-          <ApiButton
-            endpoint={{ method: "GET", path: "/system/server-bag" }}
-            title="Server bag API"
-          />
-        }
+        api={{ method: "GET", path: "/system/server-bag", pathValues: {}, title: "Server bag API" }}
+        help={help}
       />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 pb-8 pt-2">
+        <p className="mb-6 max-w-2xl text-sm text-apt-text-muted">
+          Global key → JSON configuration values read by the backend at runtime. Every site reads
+          the same store; a value is arbitrary JSON. Distinct from Settings, which are typed
+          per-user and per-ecosystem policy.
+        </p>
 
-      <p className="mb-6 max-w-2xl text-sm text-apt-text-muted">
-        Global key → JSON configuration values read by the backend at runtime. Every site reads
-        the same store; a value is arbitrary JSON. Distinct from Settings, which are typed
-        per-user and per-ecosystem policy.
-      </p>
+        <EditableList<ServerBag>
+          list={list}
+          ariaLabel="Server bags"
+          loading={isLoading}
+          error={error}
+          errorTitle="Couldn't load the server bag"
+          columnWidthsKey="admin-server-bags"
+          // The key IS the row id, so the table's guess skips it and reads whatever string comes
+          // next. Named here instead — the key is the only thing on the row that is unique.
+          describeRow={(bag) => bag.key}
+          searchPlaceholder="Key, value or description"
+          emptyLabel="No server bags yet."
+          emptyFilteredLabel="No bags match these filters."
+          actions={
+            <>
+              <Button size="sm" variant="ghost" onClick={() => setCreating(true)}>
+                <Plus data-icon="inline-start" />
+                New Server Bag
+              </Button>
+              {/* One row, or nothing: the dialog edits one key and one JSON document. */}
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={selected.length !== 1}
+                onClick={() => setEditing(selected[0]!)}
+              >
+                <Pencil data-icon="inline-start" />
+                Edit
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive-ghost"
+                disabled={selected.length === 0}
+                onClick={() => setConfirmDelete(true)}
+              >
+                <Trash2 data-icon="inline-start" />
+                Delete
+              </Button>
+            </>
+          }
+        />
 
-      <EditableList<ServerBag>
-        list={list}
-        ariaLabel="Server bags"
-        loading={isLoading}
-        error={error}
-        errorTitle="Couldn't load the server bag"
-        columnWidthsKey="admin-server-bags"
-        // The key IS the row id, so the table's guess skips it and reads whatever string comes
-        // next. Named here instead — the key is the only thing on the row that is unique.
-        describeRow={(bag) => bag.key}
-        searchPlaceholder="Key, value or description"
-        emptyLabel="No server bags yet."
-        emptyFilteredLabel="No bags match these filters."
-        actions={
-          <>
-            <Button size="sm" variant="ghost" onClick={() => setCreating(true)}>
-              <Plus data-icon="inline-start" />
-              New Server Bag
-            </Button>
-            {/* One row, or nothing: the dialog edits one key and one JSON document. */}
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={selected.length !== 1}
-              onClick={() => setEditing(selected[0]!)}
-            >
-              <Pencil data-icon="inline-start" />
-              Edit
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive-ghost"
-              disabled={selected.length === 0}
-              onClick={() => setConfirmDelete(true)}
-            >
-              <Trash2 data-icon="inline-start" />
-              Delete
-            </Button>
-          </>
-        }
-      />
+        <UnsavedChangesGuard when={dialogDirty} onNavigate={(href) => router.push(href)} />
 
-      <UnsavedChangesGuard when={dialogDirty} onNavigate={(href) => router.push(href)} />
+        <BagDialog
+          // A fresh key per target remounts the form, so its draft resets between opens.
+          key={editing ? `edit:${editing.key}` : creating ? "create" : "closed"}
+          open={creating || editing !== null}
+          bag={editing}
+          latest={editingLatest}
+          existingKeys={allKeys}
+          onClose={() => {
+            setCreating(false);
+            setEditing(null);
+          }}
+          onDirtyChange={setDialogDirty}
+        />
 
-      <BagDialog
-        // A fresh key per target remounts the form, so its draft resets between opens.
-        key={editing ? `edit:${editing.key}` : creating ? "create" : "closed"}
-        open={creating || editing !== null}
-        bag={editing}
-        latest={editingLatest}
-        existingKeys={allKeys}
-        onClose={() => {
-          setCreating(false);
-          setEditing(null);
-        }}
-        onDirtyChange={setDialogDirty}
-      />
+        <TypeToConfirmDialog
+          open={confirmDelete}
+          title={selected.length === 1 ? "Delete this bag?" : `Delete ${selected.length} bags?`}
+          description={
+            <>
+              Permanently deletes{" "}
+              <span className="font-mono text-apt-text">{selected.map((b) => b.key).join(", ")}</span>
+              . Anything reading a deleted bag falls back to its own default.
+            </>
+          }
+          confirmValue={DELETE_WORD}
+          valueNoun="word"
+          confirmLabel="Delete"
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={() => {
+            setConfirmDelete(false);
+            void deleteRun.run(
+              selected.map((bag) => ({ id: bag.key, label: bag.key })),
+              (item) => deleteBag.mutateAsync(item.id),
+            );
+          }}
+        />
 
-      <TypeToConfirmDialog
-        open={confirmDelete}
-        title={selected.length === 1 ? "Delete this bag?" : `Delete ${selected.length} bags?`}
-        description={
-          <>
-            Permanently deletes{" "}
-            <span className="font-mono text-apt-text">{selected.map((b) => b.key).join(", ")}</span>
-            . Anything reading a deleted bag falls back to its own default.
-          </>
-        }
-        confirmValue={DELETE_WORD}
-        valueNoun="word"
-        confirmLabel="Delete"
-        onCancel={() => setConfirmDelete(false)}
-        onConfirm={() => {
-          setConfirmDelete(false);
-          void deleteRun.run(
-            selected.map((bag) => ({ id: bag.key, label: bag.key })),
-            (item) => deleteBag.mutateAsync(item.id),
-          );
-        }}
-      />
-
-      <ProgressModal
-        open={deleteRun.state.running || deleteRun.state.finished}
-        title="Deleting server bags"
-        description="Each bag is deleted on its own; a failure leaves the earlier deletions in place."
-        total={deleteRun.state.total}
-        done={deleteRun.state.done}
-        currentLabel={deleteRun.state.currentLabel}
-        error={deleteRun.state.error}
-        results={deleteRun.state.results}
-        finished={deleteRun.state.finished}
-        onContinue={deleteRun.continueRun}
-        onStop={deleteRun.stop}
-        onClose={() => {
-          deleteRun.reset();
-          list.clearSelection();
-        }}
-      />
+        <ProgressModal
+          open={deleteRun.state.running || deleteRun.state.finished}
+          title="Deleting server bags"
+          description="Each bag is deleted on its own; a failure leaves the earlier deletions in place."
+          total={deleteRun.state.total}
+          done={deleteRun.state.done}
+          currentLabel={deleteRun.state.currentLabel}
+          error={deleteRun.state.error}
+          results={deleteRun.state.results}
+          finished={deleteRun.state.finished}
+          onContinue={deleteRun.continueRun}
+          onStop={deleteRun.stop}
+          onClose={() => {
+            deleteRun.reset();
+            list.clearSelection();
+          }}
+        />
+      </div>
     </div>
   );
 }

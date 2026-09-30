@@ -17,6 +17,10 @@
 
 export { ProductsFeature, PRODUCT_TOPIC_CONFIGS, type ProductsFeatureProps } from "./ProductsFeature";
 
+// The Applications row — the applications, a divider, then Settings (the ecosystem's client auth).
+// Exported because the hub's workspace rail draws the same row, scoped to its default ecosystem.
+export { ApplicationsGroup } from "./ApplicationsGroup";
+
 // The rail as data. Re-exported for convenience, but a SERVER-safe consumer must import it from
 // `@agentic-toolkit/adh-products/topics` instead — this barrel is `use client` end to end.
 export { PRODUCT_TOPICS, HOST_RENDERED_TOPIC_IDS, type ProductTopicId } from "./topics";

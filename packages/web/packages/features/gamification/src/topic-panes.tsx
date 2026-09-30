@@ -16,8 +16,8 @@ import { RealmCatalogProvider } from "./realm-catalog";
  *
  * - **A scroller.** A topic pane is handed the detail column at whatever height the rail gives
  *   it; without `min-h-0 … overflow-y-auto` a long badge list grows the column instead of
- *   scrolling inside it. `RealmSettingsPane` owns its own (it has a save bar above the scroll
- *   region), so the Settings topic is not wrapped here.
+ *   scrolling inside it. `RealmSettingsPane` draws its own DetailsPane (one bar over a scrolling
+ *   body), so the Settings topic is not wrapped here.
  * - **A {@link SettingsDirtyProvider}.** It must sit INSIDE the rail host `ResourceExplorer`
  *   mounts — outside it, `useRailExitGuard` finds no host and a rail row switch never learns the
  *   pane is dirty. One per pane rather than one around the feature, and safe either way: a

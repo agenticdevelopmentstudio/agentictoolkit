@@ -11,6 +11,9 @@ import { useDetailTitle } from "@agenticdevelopertoolkit/ui/blocks/detail-title"
 import { SaveCancelButtons } from "./SaveCancelButtons";
 import { HelpPopover } from "../HelpPopover";
 import { ToolbarPortal } from "../rail-host";
+import { HeaderApiButton } from "../header-api-button";
+import { DetailHeaderActions } from "../detail-header-actions";
+import type { RecordAffordanceProps } from "../record-affordance";
 
 export interface MasterDetailItem {
   id: string;
@@ -95,23 +98,41 @@ function ItemList({
 }
 
 /** Feature title row that sits above the button bar: the feature name in the
- * accent color on the left, the "?" help on the far right.
+ * accent color on the left, any `trailing` affordance on the right.
  *
  * Inside a detail stack the NAME moves up into the stack's detail strip, beside `<<< | >>>`
- * (Mike: "the title should not be in the details pane") — only the trailing slot and the help
- * stay here, and a row with neither is not drawn at all. Outside a stack it draws as before. */
+ * (Mike: "the title should not be in the details pane"); a row left with no `trailing` is not
+ * drawn at all. Outside a stack it draws as before.
+ *
+ * The view's API button and "?" help go to the DETAIL HEADER, help on the far right
+ * ({@link DetailHeaderActions}); inline here only with no host header. The API slot is
+ * ALWAYS drawn: the host's live button for `api`, or a disabled one saying this view has
+ * no endpoint. Pass `showApi={false}` only where a {@link ButtonBar} in the same pane
+ * already carries it. */
 export function FeatureTitle({
   title,
   trailing,
+  api,
+  showApi = true,
   help,
 }: {
   title: ReactNode;
-  /** Optional trailing affordance (e.g. an <ApiButton>), left of the "?" help. */
+  /** Optional non-API affordance, left of the API button. */
   trailing?: ReactNode;
+  /** The endpoint this view is about; omit (or null) for a view with none. */
+  api?: RecordAffordanceProps | null;
+  /** Draw the API slot. Off only when the pane's own ButtonBar already draws it. */
+  showApi?: boolean;
   help?: ReactNode;
 }) {
   const { hoisted, portal } = useDetailTitle(title);
-  if (hoisted && !trailing && !help) return portal;
+  if (hoisted && !trailing)
+    return (
+      <>
+        {portal}
+        <DetailHeaderActions api={api} showApi={showApi} help={help} />
+      </>
+    );
   return (
     <div
       className={cn(
@@ -127,11 +148,7 @@ export function FeatureTitle({
       )}
       <div className="flex items-center gap-2">
         {trailing}
-        {help && (
-          <HelpPopover>
-            {help}
-          </HelpPopover>
-        )}
+        <DetailHeaderActions api={api} showApi={showApi} help={help} />
       </div>
     </div>
   );
@@ -145,7 +162,11 @@ export function ButtonBar({
   showCreate = true,
   showDelete = true,
   title,
+  leading,
   trailing,
+  api,
+  showApi,
+  status,
   help,
   hoist = true,
 }: {
@@ -158,9 +179,22 @@ export function ButtonBar({
   showDelete?: boolean;
   /** Centered title naming the details pane's contents (the bar may have no buttons). */
   title?: ReactNode;
-  /** Optional trailing affordance on the right (before "?"), e.g. an <ApiButton>
-   *  for the record being edited. Generic slot — the pane owns what goes here. */
+  /** Content after New/Delete on the left — a read-only badge, a bulk action on the selection. */
+  leading?: ReactNode;
+  /** Optional non-API affordance on the right, left of the API button. Generic slot — the pane
+   *  owns what goes here. The record's API button goes in `api`, never here. */
   trailing?: ReactNode;
+  /** The endpoint the pane is about, for the header's API button just left of "?" — the host's
+   *  live button when it can draw one, else a disabled "API" saying this view has no endpoint
+   *  ({@link HeaderApiButton}). Omit or pass null for a view with no endpoint. */
+  api?: RecordAffordanceProps | null;
+  /** Draw the API slot. Defaults to on for the pane's header bar (`hoist`) and for a nested bar
+   *  that names its own `api`; off for a nested bar without one, whose pane header already has
+   *  it — two API buttons stacked in one pane cannot say which is whose. */
+  showApi?: boolean;
+  /** A saving / saved / error line for the bar's live caption row (below the bar, where
+   *  `blockedReason` shows). A blocked reason, when there is one, wins the row. */
+  status?: ReactNode;
   /** Help text for the right-justified "?" — describes the pane's contents. */
   help?: ReactNode;
   /**
@@ -201,7 +235,8 @@ export function ButtonBar({
   // `blockedReason` (the prop is optional) gets no caption row, ever. A bar that DOES set it
   // (even to `null`, meaning "nothing's wrong right now") keeps the row mounted so the caption can
   // change without the row itself mounting/unmounting under it — see the caption comment below.
-  const hasBlockedReasonChannel = actions.blockedReason !== undefined;
+  const hasBlockedReasonChannel = actions.blockedReason !== undefined || status !== undefined;
+  const drawApi = showApi ?? (hoist || api !== undefined);
   // Inside a detail stack the title rides the stack's detail strip instead of the bar (see
   // FeatureTitle). `titlePortal` renders beside the bar, never inside it: the bar may itself be
   // portalled into the host's toolbar slot, and the title must not follow it there.
@@ -241,6 +276,7 @@ export function ButtonBar({
           Delete
         </Button>
       )}
+      {leading}
       {/* Centered title naming the pane's contents — absolutely centred so it stays put
           regardless of the left/right buttons; pointer-events-none so it never blocks them. */}
       {title && !titleHoisted && (
@@ -257,10 +293,23 @@ export function ButtonBar({
         onSave={onSave}
       />
       {trailing && <div className="ml-1 flex items-center">{trailing}</div>}
-      {help && (
-        <HelpPopover triggerClassName="ml-1">
-          {help}
-        </HelpPopover>
+      {/* The pane's API button and help live in the DETAIL HEADER (help on the far right), not in
+          this bar; a nested bar keeps its own inline, since the header already names the pane's. */}
+      {hoist ? (
+        <DetailHeaderActions api={api} showApi={drawApi} help={help} helpClassName="ml-1" />
+      ) : (
+        <>
+          {drawApi && (
+            <div className="ml-1 flex items-center">
+              <HeaderApiButton api={api} />
+            </div>
+          )}
+          {help && (
+            <HelpPopover triggerClassName="ml-1">
+              {help}
+            </HelpPopover>
+          )}
+        </>
       )}
     </div>
   );
@@ -293,7 +342,7 @@ export function ButtonBar({
           title={blockedReason || undefined}
           className="truncate border-b border-apt-border bg-apt-bg px-6 py-1 text-right text-xs text-apt-text-muted"
         >
-          {blockedReason || " "}
+          {blockedReason || status || " "}
         </p>
       )}
     </div>
@@ -341,6 +390,7 @@ export function MasterDetailLayout({
   actions,
   title,
   trailing,
+  api,
   help,
   nested = false,
   children,
@@ -354,8 +404,10 @@ export function MasterDetailLayout({
   actions?: MasterDetailActions;
   /** Feature title shown (accent-colored) in a row above the button bar. */
   title?: ReactNode;
-  /** Optional trailing affordance on the button bar (e.g. an <ApiButton>). */
+  /** Optional non-API affordance on the button bar, left of the API button. */
   trailing?: ReactNode;
+  /** The endpoint for the bar's API button — see {@link ButtonBar}'s `api`. */
+  api?: RecordAffordanceProps | null;
   /** Optional "?" help; shown on the far right of the title row. */
   help?: ReactNode;
   /** This layout sits INSIDE another pane's detail, so its bar stays with its own list rather
@@ -376,6 +428,7 @@ export function MasterDetailLayout({
           actions={actions}
           title={title}
           trailing={trailing}
+          api={api}
           help={help}
           hoist={!nested}
         />
@@ -396,9 +449,12 @@ export function MasterDetailLayout({
     );
   }
 
+  // Legacy (no bar). It fills its container and never grows it: the list and the detail each
+  // scroll in place. It used to be a `min-h-[440px]` grid that grew with its content, so opening a
+  // long record resized the whole pane under the user.
   return (
-    <div className="grid min-h-[440px] grid-cols-1 gap-6 md:grid-cols-[220px_1fr]">
-      <aside className="flex flex-col gap-3 md:border-r md:border-apt-border md:pr-6">
+    <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
+      <aside className="flex min-h-0 flex-col gap-3 overflow-y-auto md:border-r md:border-apt-border md:pr-6">
         {onNew && (
           <Button variant="outline" size="sm" className="justify-start" onClick={onNew}>
             <Plus data-icon="inline-start" />
@@ -412,7 +468,7 @@ export function MasterDetailLayout({
           emptyLabel={emptyLabel}
         />
       </aside>
-      <section className="flex min-w-0 flex-col gap-6">{children}</section>
+      <section className="flex min-h-0 min-w-0 flex-col gap-6 overflow-y-auto">{children}</section>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
 
 import { AuditPane } from "./panes/AuditPane";
 import { AuthenticationPane } from "./panes/AuthenticationPane";
@@ -23,7 +23,7 @@ import type { AdminTopicId } from "./adminTopics";
 /** Every topic's detail pane, keyed by {@link AdminTopicId}. Both hosts (the admin site's own
  *  `AdminShell` and this package's `AdminFeature`) render off this same map, so a pane added
  *  here appears in both places by construction rather than by two call sites agreeing. */
-export const ADMIN_PANES: Record<AdminTopicId, ComponentType> = {
+export const ADMIN_PANES: Record<AdminTopicId, ComponentType<{ help?: ReactNode }>> = {
   users: UsersPane,
   invitations: InvitationsPane,
   "feature-flags": FeatureFlagsPane,

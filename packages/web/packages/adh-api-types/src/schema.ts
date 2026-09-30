@@ -713,7 +713,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Current user */
+        /**
+         * Current user
+         * @description A platform token answers the hub user (User). An end-customer token (client-auth) answers its customer record in the customer realm instead — the CustomerMe schema, linked from the 200 response's `x-customer-realm`. For a customer token, a customer row that is gone (or an ecosystem that is deleted, archived or has login disabled) is 401, never 404; 404 is the platform user-not-found case only.
+         */
         get: {
             parameters: {
                 query?: never;
@@ -734,6 +737,15 @@ export interface paths {
                 };
                 /** @description Error */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -1831,6 +1843,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Refused: this would leave no live operator (error.code = "last_operator"). Make someone else an operator first. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -2844,6 +2865,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/oauth/signin/discovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Client-auth discovery: issuer, endpoints, sign-in apps, realm switches, providers */
+        get: {
+            parameters: {
+                query?: {
+                    clientId?: string;
+                    ecosystem?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description discovery document */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            issuer: string;
+                            authorizationEndpoint: string;
+                            tokenEndpoint: string;
+                            ecosystemId: string;
+                            ecosystemName: string;
+                            clients: {
+                                clientId: string;
+                                name: string;
+                                redirectUris: string[];
+                                providers: {
+                                    slug: string;
+                                    name: string;
+                                }[];
+                            }[];
+                            loginEnabled: boolean;
+                            /** @enum {string} */
+                            signupMode: "open" | "invite_only" | "closed";
+                            passwordEnabled: boolean;
+                            providers: {
+                                slug: string;
+                                name: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/oauth/signin/complete": {
         parameters: {
             query?: never;
@@ -2922,7 +3032,10 @@ export interface paths {
                 query: {
                     clientId: string;
                     providerId: string;
-                    return: string;
+                    /** @description Brand callback URL. Required unless `login_challenge` is given. */
+                    return?: string;
+                    /** @description Hydra login challenge of the hosted customer sign-in page. The callback then accepts that Hydra login (303 to Hydra) instead of returning an exchange code. */
+                    login_challenge?: string;
                 };
                 header?: never;
                 path?: never;
@@ -2978,6 +3091,13 @@ export interface paths {
             responses: {
                 /** @description redirect to returnUrl with code */
                 302: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Hydra-login mode: redirect to Hydra, or back to the login page */
+                303: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -16111,6 +16231,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description The customer realm refuses: the ecosystem is gone or Client Auth was removed, or the ecosystem's policy has this switched off. error.code is one of: login_disabled, password_disabled. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -16265,6 +16394,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description The customer realm refuses: the ecosystem is gone or Client Auth was removed, or the ecosystem's policy has this switched off. error.code is one of: login_disabled, password_disabled. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Error */
                 409: {
                     headers: {
@@ -16398,6 +16536,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description The customer realm refuses: the ecosystem is gone or Client Auth was removed, or the ecosystem's policy has this switched off. error.code is one of: login_disabled, password_disabled, signup_closed, invite_required. In the hub realm: A caller who is not an operator may not give a hub account an address reserved for operators ("this email cannot be self-assigned"). */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Error */
                 409: {
                     headers: {
@@ -16463,6 +16610,15 @@ export interface paths {
                 };
                 /** @description Error */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A caller who is not an operator may not give a hub account an address reserved for operators ("this email cannot be self-assigned"). */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -17617,7 +17773,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** An ecosystem's feature flags, by key (owner or admin) */
+        /** An ecosystem's feature flags, by key (owner or admin, or an end-customer of this ecosystem) */
         get: {
             parameters: {
                 query?: never;
@@ -18091,43 +18247,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/ecosystem/features/{id}/{key}": {
+    "/ecosystem/features/{id}/availability": {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 id: string;
-                key: string;
             };
             cookie?: never;
         };
-        get?: never;
-        put?: never;
-        post?: never;
         /**
-         * Take a feature off the ecosystem
-         * @description Marks the feature removed and DESTROYS NOTHING — the buckets, roles and rows it provisioned are left exactly as they are. Taking a feature off the rail is a display decision; deleting the owner’s data is not, and the two do not share a verb.
+         * The catalog features this ecosystem may not add, and why
+         * @description A client ecosystem cannot hold an `ownEcosystemOnly` feature (Organizations). The picker disables exactly these, and POST /ecosystem/features/{id} refuses the same list. Coming-soon features are not listed — the catalog already marks them.
          */
-        delete: {
+        get: {
             parameters: {
                 query?: never;
                 header?: never;
                 path: {
                     id: string;
-                    key: string;
                 };
                 cookie?: never;
             };
             requestBody?: never;
             responses: {
-                /** @description Success */
+                /** @description Unavailable features */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
                         "application/json": {
-                            ok: boolean;
+                            unavailable: components["schemas"]["UnavailableFeature"][];
                         };
                     };
                 };
@@ -18160,6 +18311,110 @@ export interface paths {
                 };
             };
         };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ecosystem/features/{id}/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Take a feature off the ecosystem
+         * @description Marks the feature removed and DESTROYS NOTHING — the buckets, roles and rows it provisioned are left exactly as they are. Taking a feature off the rail is a display decision; deleting the owner’s data is not, and the two do not share a verb. What comes with the feature (`includedWith`) is taken off with it; a feature that comes with another cannot be taken off on its own (400).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                    key: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Success */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            ok: boolean;
+                        };
+                    };
+                };
+                /** @description Error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Another active feature needs this one; nothing was removed */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: {
+                                /** @enum {string} */
+                                code: "feature_required";
+                                /** @description this feature is needed by <labels> */
+                                message: string;
+                                /** @description Keys of the active features that require this one or what comes with it, named by the feature the picker lists. */
+                                neededBy: string[];
+                            };
+                        };
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -18174,7 +18429,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** An ecosystem's server-bag entries, by key (owner or admin) */
+        /** An ecosystem's server-bag entries, by key (owner or admin, or an end-customer of this ecosystem) */
         get: {
             parameters: {
                 query?: never;
@@ -36029,7 +36284,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Archive an organization — hides it and releases its rdid (org creator, org-team admin, or site-admin) */
+        /**
+         * Archive an organization — hides it and releases its rdid (org creator, org-team admin, or site-admin)
+         * @description Archives the organization, its workspace and everything addressed under its slug. 404 when it does not exist or is already archived. 409 with a `code` when it may not be archived: `operators_org` for the operators organization, the root every workspace hangs under; `org_has_child_orgs` while it owns a live organization, which must be archived or deleted first. Nothing is archived on a 409.
+         */
         delete: {
             parameters: {
                 query?: never;
@@ -36068,6 +36326,15 @@ export interface paths {
                 };
                 /** @description Error */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -36168,7 +36435,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Restore an archived organization to its own rdid (org creator, org-team admin, or site-admin) */
+        /**
+         * Restore an archived organization to its own rdid (org creator, org-team admin, or site-admin)
+         * @description Restores the organization under its own slug, and its workspace under the owner's workspace as it is now; an address that moves with it keeps its old form as an alias. A 409 leaves the organization archived: its handle was taken while it was archived, by an organization or as a user slug; `code: owner_org_archived` while the organization that owns it is archived (restore that one first); `code: owner_has_no_workspace` when its owner has no workspace to restore its own into; or the restored addresses would be inconsistent (`violations`).
+         */
         post: {
             parameters: {
                 query?: never;
@@ -36736,6 +37006,285 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ecosystem/client-auth/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Ecosystem uuid or rdid */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Read an ecosystem's client auth */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ecosystem uuid or rdid */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The client auth in force */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EcosystemClientAuth"];
+                    };
+                };
+                /** @description Error */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /**
+         * Update an ecosystem's client auth
+         * @description Every 400 is checked before anything is written. The registration Hydra client is written last; if Hydra fails the call is a 500 and nothing is written.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Ecosystem uuid or rdid */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["EcosystemClientAuthUpdate"];
+                };
+            };
+            responses: {
+                /** @description The client auth after the update */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EcosystemClientAuth"];
+                    };
+                };
+                /** @description Error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ecosystem/applications/{appId}/client-auth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The application uuid or rdid */
+                appId: string;
+            };
+            cookie?: never;
+        };
+        /** Read an application's client auth */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The application uuid or rdid */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The application's platform and registration */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationClientAuth"];
+                    };
+                };
+                /** @description Error */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /**
+         * Update an application's client auth
+         * @description Requires managing the application's ecosystem. Every 400 is checked before anything is written; the registration Hydra client is written last.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The application uuid or rdid */
+                    appId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["ApplicationClientAuthUpdate"];
+                };
+            };
+            responses: {
+                /** @description The client auth after the update */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApplicationClientAuth"];
+                    };
+                };
+                /** @description Error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Error */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ecosystem/signin-apps/{id}": {
         parameters: {
             query?: never;
@@ -36803,7 +37352,7 @@ export interface paths {
         put?: never;
         /**
          * Create a sign-in app for an ecosystem
-         * @description The client is bound to this ecosystem by the server; the body cannot name a different one. Asking for GitHub sign-in when no GitHub provider is configured is a 400, checked before anything is written.
+         * @description The client is bound to this ecosystem by the server; the body cannot name a different one. Asking for GitHub sign-in when no GitHub provider is configured is a 400, checked before anything is written. The app is also registered as a Hydra public PKCE client; if that fails the call is a 500 and nothing is written.
          */
         post: {
             parameters: {
@@ -36900,7 +37449,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a sign-in app
-         * @description Also removes the client’s provider links. Internal clients cannot be deleted (403).
+         * @description Also removes the client’s provider links and its Hydra client (Hydra first, so a Hydra failure leaves the app in place to retry). Internal clients cannot be deleted (403).
          */
         delete: {
             parameters: {
@@ -54932,7 +55481,6 @@ export interface paths {
                         slug: string;
                         avatarUrl?: string;
                         profileVisibility?: string;
-                        tokenVersion?: number;
                         preferredMfaMethod?: string | null;
                     };
                 };
@@ -54978,6 +55526,15 @@ export interface paths {
                 };
                 /** @description Error */
                 401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Besides the 403s every generated write can answer with, a caller who is not an operator may not create a hub account ("hub accounts are created through registration or by an operator") or give one an address reserved for operators ("this email cannot be self-assigned"). */
+                403: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -55083,7 +55640,6 @@ export interface paths {
                         slug?: string;
                         avatarUrl?: string;
                         profileVisibility?: string;
-                        tokenVersion?: number;
                         preferredMfaMethod?: string | null;
                     };
                 };
@@ -55136,6 +55692,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description Besides the 403s every generated write can answer with, a caller who is not an operator may not give a hub account an address reserved for operators ("this email cannot be self-assigned") or change its handle, which changes only through PATCH /auth/me ("a hub handle is changed through PATCH /auth/me"). */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description Error */
                 404: {
                     headers: {
@@ -55178,6 +55743,15 @@ export interface paths {
                 };
                 /** @description Error */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Refused: this would leave no live operator (error.code = "last_operator"). Make someone else an operator first. */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -56805,6 +57379,7 @@ export interface paths {
                             slug: string;
                             displayName: string;
                             consumerKind: string;
+                            platform: string;
                             createdAt: string;
                             updatedAt: string;
                             isDeleted: boolean;
@@ -56842,6 +57417,7 @@ export interface paths {
                         slug: string;
                         displayName: string;
                         consumerKind: string;
+                        platform?: string;
                         id?: string;
                     };
                 };
@@ -56859,6 +57435,7 @@ export interface paths {
                             slug: string;
                             displayName: string;
                             consumerKind: string;
+                            platform: string;
                             createdAt: string;
                             updatedAt: string;
                             isDeleted: boolean;
@@ -56928,6 +57505,7 @@ export interface paths {
                             slug: string;
                             displayName: string;
                             consumerKind: string;
+                            platform: string;
                             createdAt: string;
                             updatedAt: string;
                             isDeleted: boolean;
@@ -56975,6 +57553,7 @@ export interface paths {
                         slug?: string;
                         displayName?: string;
                         consumerKind?: string;
+                        platform?: string;
                     };
                 };
             };
@@ -56991,6 +57570,7 @@ export interface paths {
                             slug: string;
                             displayName: string;
                             consumerKind: string;
+                            platform: string;
                             createdAt: string;
                             updatedAt: string;
                             isDeleted: boolean;
@@ -70580,6 +71160,19 @@ export interface components {
             profileVisibility: "public" | "hub" | "private";
             capabilities: string[];
         };
+        CustomerMe: {
+            user: {
+                id: string;
+                email: string | null;
+                name: string | null;
+                /** @description Customers carry no avatar today; always null. */
+                avatarUrl: string | null;
+            };
+            /** @description The ecosystem the customer belongs to */
+            ecosystemId: string;
+            /** @enum {string} */
+            realm: "customer";
+        };
         AuthResult: {
             /** @description JWT access token (Bearer credential) */
             token: string;
@@ -72108,6 +72701,17 @@ export interface components {
             featureSite?: boolean;
             /** @description Not built yet. Listed so the picker can say it is coming; provisioning it is refused (400). */
             comingSoon?: boolean;
+            /** @description Feature keys this one needs. Adding it provisions them too; they cannot be removed while it is active (409 feature_required). */
+            requiresFeatures?: string[];
+            /** @description Only a user's or an organization's own ecosystem may hold it; a client ecosystem cannot (400). GET /ecosystem/features/{id}/availability names these per ecosystem. */
+            ownEcosystemOnly?: boolean;
+            /** @description The feature this one comes with (the Users Settings, the Applications Client Auth panel). The picker does not list it: adding the parent adds it, removing the parent removes it, adding it adds the parent, and removing it on its own is refused (400). */
+            includedWith?: string;
+        };
+        UnavailableFeature: {
+            key: string;
+            /** @description Why this ecosystem may not add it — shown by the picker. */
+            reason: string;
         };
         ProvisionedFeature: {
             featureKey: string;
@@ -73977,6 +74581,8 @@ export interface components {
             signupMode: "open" | "invite_only" | "closed";
             /** @description Defaults to true */
             loginEnabled: boolean;
+            /** @description Email and password sign-in and sign-up for the customer realm. Defaults to true */
+            passwordEnabled: boolean;
             /** @description null means every configured provider. An empty array is stored as null, never as "none". */
             allowedProviders: string[] | null;
         };
@@ -73985,8 +74591,51 @@ export interface components {
             /** @enum {string} */
             signupMode?: "open" | "invite_only" | "closed";
             loginEnabled?: boolean;
+            passwordEnabled?: boolean;
             /** @description Every slug must name a configured provider, or the call is a 400. An empty array is coerced to null (all providers) rather than locking everyone out. */
             allowedProviders?: string[] | null;
+        };
+        /** @description A login registration: the OIDC client (a Hydra public PKCE client) a website or app signs customers in through. `clientId` is assigned by the server. */
+        ClientAuthRegistration: {
+            /** @description The OIDC client_id */
+            clientId: string;
+            allowedReturnOrigins: string[];
+            redirectUris: string[];
+        };
+        /** @description Creates the registration when there is none, updates it when there is. Origins must be bare http(s) origins and are stored canonical; redirect URIs are validated as OAuth redirect URIs. Up to 20 of each. For an application the platform shapes both: a web application redirects to https or loopback http; a native application may also use a custom scheme and has no return origins (any is a 400). */
+        ClientAuthRegistrationInput: {
+            /** @description Omitted means none */
+            allowedReturnOrigins?: string[];
+            redirectUris: string[];
+        };
+        /** @description A configured OAuth provider an ecosystem can switch on. Never carries a secret. */
+        ClientAuthProvider: {
+            slug: string;
+            name: string;
+        };
+        /** @description An ecosystem's client auth: its policy, its own login registration, the providers. */
+        EcosystemClientAuth: {
+            settings: components["schemas"]["EcosystemAuthSettings"];
+            registration: components["schemas"]["ClientAuthRegistration"] | null;
+            providers: components["schemas"]["ClientAuthProvider"][];
+        };
+        /** @description Supply at least one key. `registration: null` removes the ecosystem registration. A registration for the platform ecosystem is a 400. */
+        EcosystemClientAuthUpdate: {
+            settings?: components["schemas"]["EcosystemAuthSettingsUpdate"];
+            registration?: components["schemas"]["ClientAuthRegistrationInput"] | null;
+        };
+        /** @description An application's client auth. The ecosystem's policy governs every sign-in; `registration` null means the application signs in through the ecosystem's registration. */
+        ApplicationClientAuth: {
+            /**
+             * @description Set on the application itself; it shapes what the registration accepts
+             * @enum {string}
+             */
+            platform: "web" | "native";
+            registration: components["schemas"]["ClientAuthRegistration"] | null;
+        };
+        /** @description `registration: null` removes the application registration. */
+        ApplicationClientAuthUpdate: {
+            registration: components["schemas"]["ClientAuthRegistrationInput"] | null;
         };
         /** @description An OAuth client that signs users into this ecosystem. The app token is represented by its non-secret prefix only — the secret itself is never part of this shape. */
         EcosystemSigninApp: {
@@ -74001,6 +74650,8 @@ export interface components {
             isInternal: boolean;
             appTokenPrefix: string | null;
             githubEnabled: boolean;
+            /** @description The OAuth redirect URIs registered on the app’s Hydra client. Empty when Hydra is unreachable or not configured (the list never fails on Hydra). */
+            redirectUris: string[];
         };
         EcosystemSigninAppCreate: {
             /** @description The LEAF only — the stored slug is "<ecosystem-slug>.<this>", composed by the server. A composed slug over 100 characters is a 400. */
@@ -74013,12 +74664,19 @@ export interface components {
             allowedReturnOrigins: string[];
             /** @default true */
             enableGithub: boolean;
+            /**
+             * @description OAuth redirect URIs for the app’s Hydra PKCE client: https, loopback http (localhost, 127.0.0.1, [::1]), or a private-use native scheme (com.example.app:/cb). No fragment, no credentials. Anything else is a 400.
+             * @default []
+             */
+            redirectUris: string[];
         };
         /** @description A partial update — supply at least one field. `slug` and the owning ecosystem are deliberately not patchable: both are identity, not configuration. */
         EcosystemSigninAppUpdate: {
             name?: string;
             allowedReturnOrigins?: string[];
             githubEnabled?: boolean;
+            /** @description OAuth redirect URIs for the app’s Hydra PKCE client: https, loopback http (localhost, 127.0.0.1, [::1]), or a private-use native scheme (com.example.app:/cb). No fragment, no credentials. Anything else is a 400. */
+            redirectUris?: string[];
         };
         PersonaDemoPreviewChoice: {
             /** @description The choice's own text, minus its tags */

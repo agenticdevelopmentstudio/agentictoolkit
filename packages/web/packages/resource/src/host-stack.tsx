@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useMemo, useState, type ReactElement, type ReactNode } from "react";
 import { deepestSelectedLevel, type TopicLevel } from "@agenticdevelopertoolkit/ui/blocks";
 import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 

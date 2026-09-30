@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Info, Pencil, ShieldCheck, ShieldOff, TriangleAlert } from "lucide-react";
 import {
@@ -45,7 +53,7 @@ import {
 import { DialogActions } from "@agenticdevelopertoolkit/ui/components/dialog-actions";
 import { UnsavedChangesGuard } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-guard";
 import { Field, ProgressModal } from "@agenticdevelopertoolkit/ui/blocks";
-import { ApiButton } from "@agentic-toolkit/api-explorer";
+import { FeatureTitle } from "@agentic-toolkit/resource";
 import {
   EditableList,
   useBatchRun,
@@ -53,7 +61,6 @@ import {
   type EditableListColumn,
   type EditableListFacet,
 } from "../components/editable-list";
-import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 // The metering console. A metered cap refuses a request only when TWO switches agree — the tier's
 // own `Enforced` box and the one global switch above all of them — so both live on this page, and
@@ -117,7 +124,7 @@ function refusalOf(
       };
 }
 
-export function UsagePane() {
+export function UsagePane({ help }: { help?: ReactNode } = {}) {
   const router = useRouter();
   const enforcement = useUsageEnforcement();
   const { data, isLoading, error } = useRateLimitTiers();
@@ -250,127 +257,127 @@ export function UsagePane() {
     selected.some((tier) => tier.quotaEnforced !== quotaEnforced);
 
   return (
-    <div>
-      <SectionHeader
-        paneTitle
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FeatureTitle
         title="Usage Limits"
-        className="mb-6"
-        actions={
-          <ApiButton
-            endpoint={{ method: "GET", path: "/usage/enforcement" }}
-            title="Usage enforcement API"
-          />
-        }
-      />
-
-      <p className="mb-6 max-w-3xl px-2 text-sm text-apt-text-muted">
-        Every authenticated request and every LLM turn is metered regardless of what is set here.
-        A cap only <em>refuses</em> anything when both switches agree: the global switch below, and
-        the tier&apos;s own <span className="font-mono">Enforced</span> state.
-      </p>
-
-      {enforcement.error && (
-        <Alert variant="error" className="mb-6">
-          <TriangleAlert />
-          <AlertTitle>Couldn&apos;t read the enforcement switch</AlertTitle>
-          <AlertDescription>{errorMessage(enforcement.error)}</AlertDescription>
-        </Alert>
-      )}
-
-      {enforcement.data && <GlobalSwitchCard state={enforcement.data} />}
-      {enforcement.data && <KnobsPanel state={enforcement.data} />}
-      {enforcement.data && <VisitorFloorPanel state={enforcement.data} />}
-
-      <h2 className="mb-2 px-2 text-lg font-semibold text-apt-text">Tiers</h2>
-      <p className="mb-4 max-w-3xl px-2 text-sm text-apt-text-muted">
-        One row per <span className="font-mono">usage.rate_limit_tiers</span> tier. A principal with
-        no explicit assignment falls to the default tier. Blank quota means <em>uncapped</em> (shown
-        as ∞), not zero — a tier with all four quotas blank can only ever refuse with a 429 from its
-        rate bucket, however armed it is.
-      </p>
-
-      {/* No New and no Delete, by design: dropping a tier would orphan its
-          `usage.principal_tiers` assignments, and deleting the `is_default` row makes every
-          subsequent resolve throw NoDefaultTierError — platform-wide. Same reason
-          `isDefault`/`isActive` are read-only badges: a write here could leave zero default rows.
-          Tier lifecycle stays in All-Data, under generic CRUD. */}
-      <EditableList<RateLimitTier>
-        list={list}
-        ariaLabel="Rate-limit tiers"
-        loading={isLoading}
-        error={error}
-        errorTitle="Couldn't load the tiers"
-        columnWidthsKey="admin-usage-tiers"
-        describeRow={(tier) => tier.slug}
-        searchPlaceholder="Tier slug or name"
-        emptyLabel="No rate-limit tiers."
-        emptyFilteredLabel="No tiers match these filters."
-        actions={
-          <>
-            {/* One row, or nothing: the dialog holds ONE tier's nine values. */}
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={selected.length !== 1}
-              onClick={() => {
-                setEditingId(selected[0]!.id);
-                setDialogOpen(true);
-              }}
-            >
-              <Pencil data-icon="inline-start" />
-              Edit
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!wouldChange(true)}
-              onClick={() => setEnforced(true)}
-            >
-              <ShieldCheck data-icon="inline-start" />
-              Arm
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!wouldChange(false)}
-              onClick={() => setEnforced(false)}
-            >
-              <ShieldOff data-icon="inline-start" />
-              Disarm
-            </Button>
-          </>
-        }
-      />
-
-      <UnsavedChangesGuard when={dialogDirty} onNavigate={(href) => router.push(href)} />
-
-      <TierDialog
-        // Keyed by the TARGET, not by openness: reopening the same tier restores what was typed,
-        // while pointing the dialog at another tier remounts it on that row's values.
-        key={editingId ?? "none"}
-        open={dialogOpen && editing !== null}
-        tier={editing}
-        onClose={() => setDialogOpen(false)}
-        onDirtyChange={setDialogDirty}
-      />
-
-      <ProgressModal
-        open={armRun.state.running || armRun.state.finished}
-        title="Saving tiers"
-        description="Each tier is saved on its own; a failure leaves the earlier saves in place."
-        total={armRun.state.total}
-        done={armRun.state.done}
-        currentLabel={armRun.state.currentLabel}
-        error={armRun.state.error}
-        results={armRun.state.results}
-        finished={armRun.state.finished}
-        onContinue={armRun.continueRun}
-        onStop={armRun.stop}
-        onClose={() => {
-          armRun.reset();
-          list.clearSelection();
+        api={{
+          method: "GET",
+          path: "/usage/enforcement",
+          pathValues: {},
+          title: "Usage enforcement API",
         }}
+        help={help}
       />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 pb-8 pt-2">
+        <p className="mb-6 max-w-3xl px-2 text-sm text-apt-text-muted">
+          Every authenticated request and every LLM turn is metered regardless of what is set here.
+          A cap only <em>refuses</em> anything when both switches agree: the global switch below, and
+          the tier&apos;s own <span className="font-mono">Enforced</span> state.
+        </p>
+
+        {enforcement.error && (
+          <Alert variant="error" className="mb-6">
+            <TriangleAlert />
+            <AlertTitle>Couldn&apos;t read the enforcement switch</AlertTitle>
+            <AlertDescription>{errorMessage(enforcement.error)}</AlertDescription>
+          </Alert>
+        )}
+
+        {enforcement.data && <GlobalSwitchCard state={enforcement.data} />}
+        {enforcement.data && <KnobsPanel state={enforcement.data} />}
+        {enforcement.data && <VisitorFloorPanel state={enforcement.data} />}
+
+        <h2 className="mb-2 px-2 text-lg font-semibold text-apt-text">Tiers</h2>
+        <p className="mb-4 max-w-3xl px-2 text-sm text-apt-text-muted">
+          One row per <span className="font-mono">usage.rate_limit_tiers</span> tier. A principal with
+          no explicit assignment falls to the default tier. Blank quota means <em>uncapped</em> (shown
+          as ∞), not zero — a tier with all four quotas blank can only ever refuse with a 429 from its
+          rate bucket, however armed it is.
+        </p>
+
+        {/* No New and no Delete, by design: dropping a tier would orphan its
+            `usage.principal_tiers` assignments, and deleting the `is_default` row makes every
+            subsequent resolve throw NoDefaultTierError — platform-wide. Same reason
+            `isDefault`/`isActive` are read-only badges: a write here could leave zero default rows.
+            Tier lifecycle stays in All-Data, under generic CRUD. */}
+        <EditableList<RateLimitTier>
+          list={list}
+          ariaLabel="Rate-limit tiers"
+          loading={isLoading}
+          error={error}
+          errorTitle="Couldn't load the tiers"
+          columnWidthsKey="admin-usage-tiers"
+          describeRow={(tier) => tier.slug}
+          searchPlaceholder="Tier slug or name"
+          emptyLabel="No rate-limit tiers."
+          emptyFilteredLabel="No tiers match these filters."
+          actions={
+            <>
+              {/* One row, or nothing: the dialog holds ONE tier's nine values. */}
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={selected.length !== 1}
+                onClick={() => {
+                  setEditingId(selected[0]!.id);
+                  setDialogOpen(true);
+                }}
+              >
+                <Pencil data-icon="inline-start" />
+                Edit
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!wouldChange(true)}
+                onClick={() => setEnforced(true)}
+              >
+                <ShieldCheck data-icon="inline-start" />
+                Arm
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!wouldChange(false)}
+                onClick={() => setEnforced(false)}
+              >
+                <ShieldOff data-icon="inline-start" />
+                Disarm
+              </Button>
+            </>
+          }
+        />
+
+        <UnsavedChangesGuard when={dialogDirty} onNavigate={(href) => router.push(href)} />
+
+        <TierDialog
+          // Keyed by the TARGET, not by openness: reopening the same tier restores what was typed,
+          // while pointing the dialog at another tier remounts it on that row's values.
+          key={editingId ?? "none"}
+          open={dialogOpen && editing !== null}
+          tier={editing}
+          onClose={() => setDialogOpen(false)}
+          onDirtyChange={setDialogDirty}
+        />
+
+        <ProgressModal
+          open={armRun.state.running || armRun.state.finished}
+          title="Saving tiers"
+          description="Each tier is saved on its own; a failure leaves the earlier saves in place."
+          total={armRun.state.total}
+          done={armRun.state.done}
+          currentLabel={armRun.state.currentLabel}
+          error={armRun.state.error}
+          results={armRun.state.results}
+          finished={armRun.state.finished}
+          onContinue={armRun.continueRun}
+          onStop={armRun.stop}
+          onClose={() => {
+            armRun.reset();
+            list.clearSelection();
+          }}
+        />
+      </div>
     </div>
   );
 }

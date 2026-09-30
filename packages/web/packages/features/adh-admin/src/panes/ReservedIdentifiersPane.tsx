@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { CircleCheck, KeyRound, Lock, TriangleAlert } from "lucide-react";
 import {
   useReleaseReservedIdentifier,
@@ -18,7 +18,7 @@ import { Badge } from "@agenticdevelopertoolkit/ui/components/badge";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { Alert, AlertDescription, AlertTitle } from "@agenticdevelopertoolkit/ui/components/alert";
 import { errorMessage } from "@agenticdevelopertoolkit/ui/lib/errors";
-import { ApiButton } from "@agentic-toolkit/api-explorer";
+import { FeatureTitle } from "@agentic-toolkit/resource";
 import {
   EditableList,
   TypeToConfirmDialog,
@@ -26,7 +26,6 @@ import {
   type EditableListColumn,
 } from "../components/editable-list";
 import { formatDate } from "../lib/timestamps";
-import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * Reserved Identifiers — names that are TAKEN with nothing using them, and the bar that gives them
@@ -42,7 +41,7 @@ import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header
 /** The row identity used by the table AND by the release queue, so the two cannot disagree. */
 const rowId = (item: ReservedIdentifier) => `${item.entityType}/${item.entityId}/${item.rdid}`;
 
-export function ReservedIdentifiersPane() {
+export function ReservedIdentifiersPane({ help }: { help?: ReactNode } = {}) {
   const [results, setResults] = useState<{
     freed: ReleaseResult[];
     skipped: string[];
@@ -188,109 +187,109 @@ export function ReservedIdentifiersPane() {
   }
 
   return (
-    <div>
-      <SectionHeader
-        paneTitle
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FeatureTitle
         title="Reserved Identifiers"
-        className="mb-6"
-        actions={
-          <ApiButton
-            endpoint={{ method: "GET", path: "/system/reserved-identifiers" }}
-            title="Reserved Identifiers API"
-          />
-        }
-      />
-
-      <p className="mb-4 max-w-3xl text-sm text-apt-text-muted">
-        Names nothing is using but that can&apos;t be taken again — left over from a rename, pointing
-        at something that no longer exists, or still held by something deleted. Releasing one puts it
-        back in the pool, along with any held name underneath it.
-      </p>
-
-      {failure && (
-        <Alert variant="error" className="mb-6">
-          <TriangleAlert />
-          <AlertTitle>Couldn&apos;t release the name</AlertTitle>
-          <AlertDescription>{failure}</AlertDescription>
-        </Alert>
-      )}
-
-      {/* A release that only PARTLY worked reports as a warning, not a success: `stillHeldBy` names
-          live addresses the cascade refused to move, and an operator who reads "released" and walks
-          away would find the name still taken. */}
-      {results && <RunOutcome results={results.freed} skipped={results.skipped} />}
-
-      <EditableList
-        list={list}
-        ariaLabel="Reserved identifiers"
-        loading={isLoading}
-        error={error}
-        errorTitle="Couldn't load reserved identifiers"
-        // The backend's scans are capped, and the filtering above them is client-side — so a name
-        // beyond the cap answers a search with an empty table, which on THIS surface reads as
-        // "free to use". Said out loud, with the number, so the operator can tell the two apart.
-        truncationNotice={
-          data?.truncated ? (
-            <>
-              Showing {data.total.toLocaleString()} held names, and there are more than this page
-              fetches. <strong>A name missing from this table may still be held</strong> — an empty
-              result here is not proof that a name is free.
-            </>
-          ) : undefined
-        }
-        columnWidthsKey="admin-reserved-identifiers"
-        // The rdid is the name the operator is looking at; the row id is a composite of three
-        // fields and names nothing. Without this the checkbox would fall back to `entityType` and
-        // every held bucket on the page would read "Select bucket".
-        describeRow={(item) => item.rdid}
-        searchPlaceholder="Filter identifiers"
-        emptyLabel="Nothing is being held."
-        emptyFilteredLabel="No held names match these filters."
-        actions={
-          <Button
-            size="sm"
-            variant="destructive-ghost"
-            disabled={releasable.length === 0}
-            onClick={startRun}
-          >
-            <KeyRound data-icon="inline-start" />
-            Release
-            {releasable.length > 0 ? ` (${releasable.length})` : ""}
-          </Button>
-        }
-      />
-
-      <TypeToConfirmDialog
-        open={current !== null}
-        title={
-          queue && queue.length > 1
-            ? `Release name ${cursor + 1} of ${queue.length}`
-            : "Release this name?"
-        }
-        description={current ? releaseExplanation(current) : undefined}
-        confirmValue={current?.rdid ?? ""}
-        valueNoun="name"
-        confirmLabel="Release"
-        busy={release.isPending}
-        error={failure}
-        onCancel={() => finish(done, skipped)}
-        // Only while there is somewhere to skip TO. On a one-name run the two buttons would be
-        // Cancel and Cancel.
-        onSkip={
-          queue && queue.length > 1 && current
-            ? () => advance(done, [...skipped, current.rdid])
-            : undefined
-        }
-        skipLabel="Skip this one"
-        onConfirm={() => {
-          if (!current) return;
-          setFailure(null);
-          release.mutate(current, {
-            onSuccess: (result) => advance([...done, result], skipped),
-            onError: (e) => setFailure(errorMessage(e)),
-          });
+        api={{
+          method: "GET",
+          path: "/system/reserved-identifiers",
+          pathValues: {},
+          title: "Reserved Identifiers API",
         }}
+        help={help}
       />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 pb-8 pt-2">
+        <p className="mb-4 max-w-3xl text-sm text-apt-text-muted">
+          Names nothing is using but that can&apos;t be taken again — left over from a rename, pointing
+          at something that no longer exists, or still held by something deleted. Releasing one puts it
+          back in the pool, along with any held name underneath it.
+        </p>
+
+        {failure && (
+          <Alert variant="error" className="mb-6">
+            <TriangleAlert />
+            <AlertTitle>Couldn&apos;t release the name</AlertTitle>
+            <AlertDescription>{failure}</AlertDescription>
+          </Alert>
+        )}
+
+        {/* A release that only PARTLY worked reports as a warning, not a success: `stillHeldBy` names
+            live addresses the cascade refused to move, and an operator who reads "released" and walks
+            away would find the name still taken. */}
+        {results && <RunOutcome results={results.freed} skipped={results.skipped} />}
+
+        <EditableList
+          list={list}
+          ariaLabel="Reserved identifiers"
+          loading={isLoading}
+          error={error}
+          errorTitle="Couldn't load reserved identifiers"
+          // The backend's scans are capped, and the filtering above them is client-side — so a name
+          // beyond the cap answers a search with an empty table, which on THIS surface reads as
+          // "free to use". Said out loud, with the number, so the operator can tell the two apart.
+          truncationNotice={
+            data?.truncated ? (
+              <>
+                Showing {data.total.toLocaleString()} held names, and there are more than this page
+                fetches. <strong>A name missing from this table may still be held</strong> — an empty
+                result here is not proof that a name is free.
+              </>
+            ) : undefined
+          }
+          columnWidthsKey="admin-reserved-identifiers"
+          // The rdid is the name the operator is looking at; the row id is a composite of three
+          // fields and names nothing. Without this the checkbox would fall back to `entityType` and
+          // every held bucket on the page would read "Select bucket".
+          describeRow={(item) => item.rdid}
+          searchPlaceholder="Filter identifiers"
+          emptyLabel="Nothing is being held."
+          emptyFilteredLabel="No held names match these filters."
+          actions={
+            <Button
+              size="sm"
+              variant="destructive-ghost"
+              disabled={releasable.length === 0}
+              onClick={startRun}
+            >
+              <KeyRound data-icon="inline-start" />
+              Release
+              {releasable.length > 0 ? ` (${releasable.length})` : ""}
+            </Button>
+          }
+        />
+
+        <TypeToConfirmDialog
+          open={current !== null}
+          title={
+            queue && queue.length > 1
+              ? `Release name ${cursor + 1} of ${queue.length}`
+              : "Release this name?"
+          }
+          description={current ? releaseExplanation(current) : undefined}
+          confirmValue={current?.rdid ?? ""}
+          valueNoun="name"
+          confirmLabel="Release"
+          busy={release.isPending}
+          error={failure}
+          onCancel={() => finish(done, skipped)}
+          // Only while there is somewhere to skip TO. On a one-name run the two buttons would be
+          // Cancel and Cancel.
+          onSkip={
+            queue && queue.length > 1 && current
+              ? () => advance(done, [...skipped, current.rdid])
+              : undefined
+          }
+          skipLabel="Skip this one"
+          onConfirm={() => {
+            if (!current) return;
+            setFailure(null);
+            release.mutate(current, {
+              onSuccess: (result) => advance([...done, result], skipped),
+              onError: (e) => setFailure(errorMessage(e)),
+            });
+          }}
+        />
+      </div>
     </div>
   );
 }

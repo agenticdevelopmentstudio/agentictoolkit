@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Plus, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
 import {
@@ -34,7 +42,7 @@ import { DialogActions } from "@agenticdevelopertoolkit/ui/components/dialog-act
 import { UnsavedChangesGuard } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-guard";
 import { Field } from "@agenticdevelopertoolkit/ui/blocks/field";
 import { ProgressModal } from "@agenticdevelopertoolkit/ui/blocks";
-import { ApiButton } from "@agentic-toolkit/api-explorer";
+import { FeatureTitle } from "@agentic-toolkit/resource";
 import {
   EditableList,
   TypeToConfirmDialog,
@@ -42,7 +50,6 @@ import {
   useEditableList,
   type EditableListColumn,
 } from "../components/editable-list";
-import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * Feature flags — the site-wide on/off toggles, and the five things an admin does to a set of them.
@@ -66,7 +73,7 @@ function stateLabel(flag: FeatureFlag): string {
   return flag.enabled ? "Enabled" : "Disabled";
 }
 
-export function FeatureFlagsPane() {
+export function FeatureFlagsPane({ help }: { help?: ReactNode } = {}) {
   const router = useRouter();
   const { data, isLoading, error } = useAdminFlags();
   const updateFlag = useUpdateFlag();
@@ -155,159 +162,154 @@ export function FeatureFlagsPane() {
   const wouldChange = (enabled: boolean) => selected.some((flag) => flag.enabled !== enabled);
 
   return (
-    <div>
-      <SectionHeader
-        paneTitle
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FeatureTitle
         title="Feature Flags"
-        className="mb-6"
-        actions={
-          <ApiButton
-            endpoint={{ method: "GET", path: "/system/feature-flags" }}
-            title="Feature flags API"
-          />
-        }
+        api={{ method: "GET", path: "/system/feature-flags", pathValues: {}, title: "Feature flags API" }}
+        help={help}
       />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 pb-8 pt-2">
+        <p className="mb-6 max-w-2xl text-sm text-apt-text-muted">
+          Site-wide toggles — every app reads the same value. A product&apos;s own per-ecosystem
+          flags live in that ecosystem&apos;s settings, not here.
+        </p>
 
-      <p className="mb-6 max-w-2xl text-sm text-apt-text-muted">
-        Site-wide toggles — every app reads the same value. A product&apos;s own per-ecosystem
-        flags live in that ecosystem&apos;s settings, not here.
-      </p>
+        <EditableList<FeatureFlag>
+          list={list}
+          ariaLabel="Feature flags"
+          loading={isLoading}
+          error={error}
+          errorTitle="Couldn't load feature flags"
+          columnWidthsKey="admin-feature-flags"
+          describeRow={(flag) => flag.key}
+          searchPlaceholder="Key or description"
+          emptyLabel="No feature flags yet."
+          emptyFilteredLabel="No flags match these filters."
+          actions={
+            <>
+              <Button size="sm" variant="ghost" onClick={() => setEditing({ flag: null })}>
+                <Plus data-icon="inline-start" />
+                New Feature Flag
+              </Button>
+              {/* Edit takes exactly one row, and says so by being dead for any other count: the
+                  dialog shows one key and one description, and there is no honest way to point it at
+                  four. Every action that DOES generalise across a selection is a button of its
+                  own. */}
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={selected.length !== 1}
+                onClick={() => setEditing({ flag: selected[0]! })}
+              >
+                <Pencil data-icon="inline-start" />
+                Edit
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!wouldChange(true)}
+                onClick={() => setEnabled(true)}
+              >
+                <ToggleRight data-icon="inline-start" />
+                Enable
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!wouldChange(false)}
+                onClick={() => setEnabled(false)}
+              >
+                <ToggleLeft data-icon="inline-start" />
+                Disable
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive-ghost"
+                disabled={selected.length === 0}
+                onClick={() => setConfirmDelete(true)}
+              >
+                <Trash2 data-icon="inline-start" />
+                Delete
+              </Button>
+            </>
+          }
+        />
 
-      <EditableList<FeatureFlag>
-        list={list}
-        ariaLabel="Feature flags"
-        loading={isLoading}
-        error={error}
-        errorTitle="Couldn't load feature flags"
-        columnWidthsKey="admin-feature-flags"
-        describeRow={(flag) => flag.key}
-        searchPlaceholder="Key or description"
-        emptyLabel="No feature flags yet."
-        emptyFilteredLabel="No flags match these filters."
-        actions={
-          <>
-            <Button size="sm" variant="ghost" onClick={() => setEditing({ flag: null })}>
-              <Plus data-icon="inline-start" />
-              New Feature Flag
-            </Button>
-            {/* Edit takes exactly one row, and says so by being dead for any other count: the
-                dialog shows one key and one description, and there is no honest way to point it at
-                four. Every action that DOES generalise across a selection is a button of its
-                own. */}
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={selected.length !== 1}
-              onClick={() => setEditing({ flag: selected[0]! })}
-            >
-              <Pencil data-icon="inline-start" />
-              Edit
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!wouldChange(true)}
-              onClick={() => setEnabled(true)}
-            >
-              <ToggleRight data-icon="inline-start" />
-              Enable
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!wouldChange(false)}
-              onClick={() => setEnabled(false)}
-            >
-              <ToggleLeft data-icon="inline-start" />
-              Disable
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive-ghost"
-              disabled={selected.length === 0}
-              onClick={() => setConfirmDelete(true)}
-            >
-              <Trash2 data-icon="inline-start" />
-              Delete
-            </Button>
-          </>
-        }
-      />
+        {/* ── Delete ─────────────────────────────────────────────────────────
+            Typed, not clicked. A flag is read by every app on the site, so deleting one changes code
+            paths nobody on this page can see. The word is typed once for the whole selection, and
+            the keys are named in the description because those are what have to be read. */}
+        <TypeToConfirmDialog
+          open={confirmDelete}
+          title={selected.length === 1 ? "Delete this flag?" : `Delete ${selected.length} flags?`}
+          description={
+            <>
+              Permanently deletes{" "}
+              <span className="font-mono text-apt-text">{selected.map((f) => f.key).join(", ")}</span>
+              . Anything still reading a deleted flag falls back to its own default.
+            </>
+          }
+          confirmValue={DELETE_WORD}
+          valueNoun="word"
+          confirmLabel="Delete"
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={() => {
+            setConfirmDelete(false);
+            void deleteRun.run(
+              selected.map((flag) => ({ id: String(flag.id), label: flag.key })),
+              (item) => deleteFlag.mutateAsync(Number(item.id)),
+            );
+          }}
+        />
 
-      {/* ── Delete ─────────────────────────────────────────────────────────
-          Typed, not clicked. A flag is read by every app on the site, so deleting one changes code
-          paths nobody on this page can see. The word is typed once for the whole selection, and
-          the keys are named in the description because those are what have to be read. */}
-      <TypeToConfirmDialog
-        open={confirmDelete}
-        title={selected.length === 1 ? "Delete this flag?" : `Delete ${selected.length} flags?`}
-        description={
-          <>
-            Permanently deletes{" "}
-            <span className="font-mono text-apt-text">{selected.map((f) => f.key).join(", ")}</span>
-            . Anything still reading a deleted flag falls back to its own default.
-          </>
-        }
-        confirmValue={DELETE_WORD}
-        valueNoun="word"
-        confirmLabel="Delete"
-        onCancel={() => setConfirmDelete(false)}
-        onConfirm={() => {
-          setConfirmDelete(false);
-          void deleteRun.run(
-            selected.map((flag) => ({ id: String(flag.id), label: flag.key })),
-            (item) => deleteFlag.mutateAsync(Number(item.id)),
-          );
-        }}
-      />
+        <ProgressModal
+          open={deleteRun.state.running || deleteRun.state.finished}
+          title="Deleting flags"
+          description="Each flag is deleted on its own; a failure leaves the earlier deletions in place."
+          total={deleteRun.state.total}
+          done={deleteRun.state.done}
+          currentLabel={deleteRun.state.currentLabel}
+          error={deleteRun.state.error}
+          results={deleteRun.state.results}
+          finished={deleteRun.state.finished}
+          onContinue={deleteRun.continueRun}
+          onStop={deleteRun.stop}
+          onClose={() => {
+            deleteRun.reset();
+            list.clearSelection();
+          }}
+        />
 
-      <ProgressModal
-        open={deleteRun.state.running || deleteRun.state.finished}
-        title="Deleting flags"
-        description="Each flag is deleted on its own; a failure leaves the earlier deletions in place."
-        total={deleteRun.state.total}
-        done={deleteRun.state.done}
-        currentLabel={deleteRun.state.currentLabel}
-        error={deleteRun.state.error}
-        results={deleteRun.state.results}
-        finished={deleteRun.state.finished}
-        onContinue={deleteRun.continueRun}
-        onStop={deleteRun.stop}
-        onClose={() => {
-          deleteRun.reset();
-          list.clearSelection();
-        }}
-      />
+        <ProgressModal
+          open={toggleRun.state.running || toggleRun.state.finished}
+          title="Saving flags"
+          description="A flag already in the requested state is left alone."
+          total={toggleRun.state.total}
+          done={toggleRun.state.done}
+          currentLabel={toggleRun.state.currentLabel}
+          error={toggleRun.state.error}
+          results={toggleRun.state.results}
+          finished={toggleRun.state.finished}
+          onContinue={toggleRun.continueRun}
+          onStop={toggleRun.stop}
+          onClose={() => toggleRun.reset()}
+        />
 
-      <ProgressModal
-        open={toggleRun.state.running || toggleRun.state.finished}
-        title="Saving flags"
-        description="A flag already in the requested state is left alone."
-        total={toggleRun.state.total}
-        done={toggleRun.state.done}
-        currentLabel={toggleRun.state.currentLabel}
-        error={toggleRun.state.error}
-        results={toggleRun.state.results}
-        finished={toggleRun.state.finished}
-        onContinue={toggleRun.continueRun}
-        onStop={toggleRun.stop}
-        onClose={() => toggleRun.reset()}
-      />
+        {/* Leaving the page loses a half-typed flag — the only draft this page still holds now that
+            the rows themselves are no longer editable. Same-origin hops navigate client-side. */}
+        <UnsavedChangesGuard when={dialogDirty} onNavigate={(href) => router.push(href)} />
 
-      {/* Leaving the page loses a half-typed flag — the only draft this page still holds now that
-          the rows themselves are no longer editable. Same-origin hops navigate client-side. */}
-      <UnsavedChangesGuard when={dialogDirty} onNavigate={(href) => router.push(href)} />
-
-      <FlagDialog
-        // Keyed by the row it is pointed at, so aiming the dialog at a different flag rebuilds its
-        // state instead of carrying the previous row's typing across.
-        key={editing?.flag?.id ?? "new"}
-        open={editing !== null}
-        flag={editing?.flag ?? null}
-        existingKeys={allKeys}
-        onClose={() => setEditing(null)}
-        onDirtyChange={setDialogDirty}
-      />
+        <FlagDialog
+          // Keyed by the row it is pointed at, so aiming the dialog at a different flag rebuilds its
+          // state instead of carrying the previous row's typing across.
+          key={editing?.flag?.id ?? "new"}
+          open={editing !== null}
+          flag={editing?.flag ?? null}
+          existingKeys={allKeys}
+          onClose={() => setEditing(null)}
+          onDirtyChange={setDialogDirty}
+        />
+      </div>
     </div>
   );
 }

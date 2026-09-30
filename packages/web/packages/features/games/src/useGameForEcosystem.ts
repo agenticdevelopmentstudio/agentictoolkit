@@ -9,15 +9,15 @@ import { gamificationApi, type GamingMode, type RealmConfig } from "@agentic-too
  *  `GameSettingsPane` can read the RAW (mode-independent) row — it needs to know whether a
  *  game has ever been minted regardless of the current mode, since that is what decides
  *  whether its operational fields have anything to show — and so it can push its own
- *  mint/update result straight into the same cache entry every other pane on this rail
+ *  update result straight into the same cache entry every other pane on this rail
  *  reads through {@link useGameForEcosystem}. */
 export const GAME_FOR_ECOSYSTEM_CACHE_KEY = "game-for-ecosystem";
 
 /** The cache key the realm config lookup reads/writes — the SAME key
  *  `@agentic-toolkit/gamification`'s `RealmSettingsPane` uses for the identical
  *  `RealmConfig` row. Sharing it (rather than games keeping its own copy) is deliberate:
- *  it is what lets `GameSettingsPane`'s own mode write, and any future gamification-side
- *  edit, invalidate/replace the exact entry this hook reads, with no cross-package
+ *  it is what lets a realm-config save on the gamification side replace the exact entry
+ *  this hook reads, with no cross-package
  *  invalidation wiring required. */
 export const REALM_CONFIG_CACHE_KEY = "realm-config";
 
@@ -45,8 +45,7 @@ export async function loadGameRow(ecosystemId: string): Promise<Game | null> {
 /** Realm-config loader, identical in shape (and error wording) to `RealmSettingsPane`'s own
  *  `loadRealmConfig` — duplicated rather than imported because that one is a module-private
  *  function of a package this one may not depend on (`features/gamification` is off limits
- *  here), but exported from THIS file so `GameSettingsPane` shares one copy with this hook
- *  instead of growing a second. */
+ *  here). */
 export async function loadRealmConfig(ecosystemId: string): Promise<RealmConfig> {
   try {
     return await gamificationApi.getRealmConfig(ecosystemId);

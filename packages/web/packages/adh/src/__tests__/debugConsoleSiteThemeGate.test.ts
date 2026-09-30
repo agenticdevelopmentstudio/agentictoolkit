@@ -46,13 +46,15 @@ describe('rootTopicsFor', () => {
     expect(ids({ devBuild: true, hasChatTheme: false })).not.toContain('chat-theme')
   })
 
-  it('preserves the declared topic order', () => {
+  it('preserves the declared topic order, Settings last under a divider', () => {
     expect(ids({ devBuild: true, hasChatTheme: true })).toEqual([
-      'settings',
       'environment',
       'site-theme',
       'chat-theme',
+      'settings',
     ])
+    const topics = rootTopicsFor({ devBuild: false, hasChatTheme: false })
+    expect(topics.filter((t) => t.dividerAfter).map((t) => t.id)).toEqual(['environment'])
   })
 })
 

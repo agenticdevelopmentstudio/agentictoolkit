@@ -8,14 +8,13 @@ import {
   Flag,
   Server,
   Gamepad2,
-  ShieldCheck,
+  Trophy,
   HardDrive,
   Plug,
   MessageCircle,
   LayoutDashboard,
   CreditCard,
   Users,
-  Contact,
   MonitorSmartphone,
   Globe,
   School,
@@ -31,7 +30,6 @@ import {
   type RenderTopicPaneCtx,
 } from "@agentic-toolkit/ecosystems";
 import {
-  ApplicationsPane,
   MessagingPane,
   SchemasPane,
   UsersPane,
@@ -41,15 +39,20 @@ import {
 } from "@agentic-toolkit/adh-ecosystem-panes";
 import { IntegrationsPane } from "@agentic-toolkit/integrations";
 import {
-  AuthPane,
+  ClientAuthSettingsPane,
   FeatureFlagsPane,
   ServerBagsPane,
-  SigninAppsPane,
   StorageTokensPanel,
 } from "@agentic-toolkit/ecosystem-config";
 import { AccessPane } from "@agentic-toolkit/authentication";
 import { helpFor } from "@agentic-toolkit/adh/help/store";
-import { PLACEHOLDER_TOPIC_IDS, PRODUCT_TOPICS } from "./topics";
+import {
+  PLACEHOLDER_TOPIC_IDS,
+  PRODUCT_MEMBER_MOVES,
+  PRODUCT_TOPIC_ALIASES,
+  PRODUCT_TOPICS,
+} from "./topics";
+import { ApplicationsGroup } from "./ApplicationsGroup";
 import { GamingGroup } from "./GamingGroup";
 
 // The PRODUCTS feature — @agentic-toolkit/ecosystems's EcosystemsFeature presented as Products
@@ -83,19 +86,16 @@ const ICONS: Record<string, ReactNode> = {
   // The "Users" topic keeps id "invitations" for deep-link stability (its members are
   // Users + Requests / Pending users / Invites); a people icon matches the label.
   invitations: <UsersRound size={16} aria-hidden />,
-  // The GROUP that absorbed the old auth / signin-apps / tokens rows. Its members keep their own
-  // glyphs (EcosystemsFeature's groupMembers); this is the row that discloses them.
-  authentication: <ShieldCheck size={16} aria-hidden />,
   gaming: <Gamepad2 size={16} aria-hidden />,
+  gamification: <Trophy size={16} aria-hidden />,
   "feature-flags": <Flag size={16} aria-hidden />,
   "server-bags": <Server size={16} aria-hidden />,
   billing: <CreditCard size={16} aria-hidden />,
-  // The eight that came down from the hub's workspace rail. Each wears the glyph its SITE wears
+  // The ones that came down from the hub's workspace rail. Each wears the glyph its SITE wears
   // in the site menu (adh/header/menu-icons), which is where the hub's own rail row got its icon
   // from too — so the row looks the same whether you reached it as a workspace feature before or
   // as a product topic now. (Copied, not imported: see the note above about FEATURE_META.)
   communities: <Users size={16} aria-hidden />,
-  customers: <Contact size={16} aria-hidden />,
   devices: <MonitorSmartphone size={16} aria-hidden />,
   domains: <Globe size={16} aria-hidden />,
   education: <School size={16} aria-hidden />,
@@ -163,12 +163,14 @@ export function productTopicPaneRenderer({
   return function renderProductTopicPane(topicId, ctx) {
     switch (topicId) {
       case "applications":
+        // ONE list: the applications, a divider, then Settings (the ecosystem's client auth).
         return (
-          <ApplicationsPane
+          <ApplicationsGroup
             ecosystemId={ctx.ecosystemId}
             title={ctx.title}
-            help={helpFor("ecosystems/applications")}
             leaf={ctx.leaf}
+            subLeafFor={ctx.subLeafFor}
+            helpFor={helpFor}
             renderTransfer={renderTransfer}
           />
         );
@@ -200,16 +202,6 @@ export function productTopicPaneRenderer({
         // new token (and its bucket) to it. The hub's workspace-rail Tokens feature is the
         // same panel unscoped (all the owner's tokens, minting into the default ecosystem).
         return <StorageTokensPanel ecosystemId={ctx.ecosystemId} workspace={workspaceSlug} />;
-      case "auth":
-        // Single-record config pane (no inner deep-link): the product's explicit auth
-        // policy governing its vended customer realm.
-        return (
-          <AuthPane
-            ecosystemId={ctx.ecosystemId}
-            title={ctx.title}
-            help={helpFor("ecosystems/auth")}
-          />
-        );
       case "feature-flags":
         // Per-product feature flags: named on/off toggles this product's apps read.
         return (
@@ -228,25 +220,16 @@ export function productTopicPaneRenderer({
             help={helpFor("ecosystems/server-bags")}
           />
         );
-      case "signin-apps":
-        // Master/detail: the product's vended sign-in clients, deep-linked by client id
-        // (/products/<id>/signin-apps/<clientId>).
-        return (
-          <SigninAppsPane
-            ecosystemId={ctx.ecosystemId}
-            title={ctx.title}
-            help={helpFor("ecosystems/signin-apps")}
-            leaf={ctx.leaf}
-          />
-        );
       case "gaming":
-        // A host-owned GROUP, not a single-record pane (design doc §4.2): the member list
+      case "gamification":
+        // Host-owned GROUPS, not single-record panes (design doc §4.2): Gaming's member list
         // depends on the realm's mode, which is data GamingGroup reads itself — the toolkit's
         // own GROUP_IDS/groupMembers stay static and untouched. `helpFor` itself (not a resolved
         // string) is passed through because the group builds several members' worth of help
         // text, where every other case here only ever resolves one.
         return (
           <GamingGroup
+            part={topicId}
             ecosystemId={ctx.ecosystemId}
             leaf={ctx.leaf}
             subLeafFor={ctx.subLeafFor}
@@ -287,6 +270,9 @@ export function productTopicPaneRenderer({
             leaf={ctx.leaf}
           />
         );
+      // Users ▸ Authentication: the ecosystem's client auth — how its customers sign in and sign up.
+      case "auth":
+        return <ClientAuthSettingsPane ecosystemId={ctx.ecosystemId} help={helpFor("ecosystems/client-auth")} />;
       default:
         // The topics with no surface anywhere yet (PLACEHOLDER_TOPIC_IDS) are answered HERE rather
         // than declined, because declining routes them to a host seam that has nothing to say
@@ -383,6 +369,8 @@ export function ProductsFeature({
       activeLeafId={activeLeafId}
       activeMemberEntityId={activeMemberEntityId}
       renderTransferOwnership={renderTransferOwnership}
+      topicAliases={PRODUCT_TOPIC_ALIASES}
+      memberMoves={PRODUCT_MEMBER_MOVES}
     />
   );
 }

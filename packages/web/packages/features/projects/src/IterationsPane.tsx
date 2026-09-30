@@ -23,7 +23,6 @@ import {
   MasterDetailLeaf,
   useMasterDetailForm,
   useMasterDetailLevel,
-  useRecordAffordance,
   type TopicLeaf,
 } from "@agentic-toolkit/resource";
 import { ItemKey } from "./ItemKey";
@@ -314,7 +313,6 @@ export function IterationsPane({
    *  exactly as the project list does. */
   workspaceSlug?: string;
 }): ReactElement {
-  const renderRecordAffordance = useRecordAffordance();
   const [newOpen, setNewOpen] = useState(false);
 
   // The SAME cache key the Work Items surface reads its iteration picker from, so a box created
@@ -381,15 +379,16 @@ export function IterationsPane({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <FeatureTitle title={title} />
+      {/* The leaf's own bar draws the API button; one per pane. */}
+      <FeatureTitle title={title} showApi={false} />
       <MasterDetailLeaf
         form={form}
         error={loadError}
-        trailing={renderRecordAffordance?.({
+        api={{
           path: "/project/iterations/{id}",
           pathValues: { id: form.selectedId },
           title: "Iteration API",
-        })}
+        }}
         emptyTitle={
           iterations === null
             ? "Loading…"

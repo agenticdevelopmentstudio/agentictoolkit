@@ -12,9 +12,9 @@ A product is an **ecosystem**: a boundary with its own settings, its own project
 and its own data. Inside one you manage:
 
 - **Applications** — one per thing that talks to the Hub. Each carries API tokens
-  scoped to this product and nothing else.
-- **Sign-in apps** — let your own site sign *its* customers in through the Hub.
-  OAuth you do not have to build.
+  scoped to this product and nothing else, and its own login registration: the
+  client id your app signs *its* customers in through the Hub with. OAuth you do
+  not have to build.
 - **Users** — your product's customers: invitations, access requests, and pending
   members. These are not Hub users.
 - **Email signup** — a waitlist or launch-notification capture, with the list
@@ -41,8 +41,8 @@ something.** The project names the persona, the stores, and the status group tha
 ship together. Without it, an application is a credential with nothing on the
 other end.
 
-**Sign-in apps plus [members](/hub/workspaces) is the distinction to get right.**
-Members are people in *your workspace* — colleagues. Sign-in apps serve people in
+**Client auth plus [members](/hub/workspaces) is the distinction to get right.**
+Members are people in *your workspace* — colleagues. Client auth serves people in
 *your product* — customers. They sign in through different flows, appear in
 different lists, and a customer never gains reach into your workspace.
 
@@ -76,13 +76,11 @@ applications, and neither can read Shelterly:
 
 ![The Dognamr applications — Dognamr Web and Dognamr CLI, their consumer kinds differing](https://agenticdeveloperhub.com/screenshots/applications.png)
 
-Dognamr's visitors sign in through the product's own sign-in app. These are
-Casey's customers, not Hub users — the distinction most readers get wrong the
+Dognamr's visitors sign in through the product's own login registration. These
+are Casey's customers, not Hub users — the distinction most readers get wrong the
 first time:
 
-![Dognamr's sign-in apps](https://agenticdeveloperhub.com/screenshots/signin-apps.png)
-
-![Dognamr's end-user sign-in settings](https://agenticdeveloperhub.com/screenshots/auth.png)
+![Dognamr's client auth settings](https://agenticdeveloperhub.com/screenshots/auth.png)
 
 Shelterly is not open yet, so its front page captures interest instead of
 accounts:

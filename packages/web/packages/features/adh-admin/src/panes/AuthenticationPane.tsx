@@ -1,7 +1,16 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef, type ReactElement } from "react";
+import {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { useRouter } from "next/navigation";
+import { FeatureTitle } from "@agentic-toolkit/resource";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
@@ -153,7 +162,7 @@ interface AuthSnapshot {
 const TOPICS = [{ id: "oauth", label: "OAuth" }] as const;
 type TopicId = (typeof TOPICS)[number]["id"];
 
-export function AuthenticationPane(): ReactElement {
+export function AuthenticationPane({ help }: { help?: ReactNode } = {}): ReactElement {
   const router = useRouter();
   const providersQ = useProviders();
   const clientsQ = useClients();
@@ -533,9 +542,10 @@ export function AuthenticationPane(): ReactElement {
   );
 
   return (
-    <div>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FeatureTitle title="Authentication" help={help} />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 pb-8 pt-2">
       <div className="mb-8">
-        <SectionHeader paneTitle title="Authentication" className="mb-2" />
         <p className="text-sm text-muted-foreground">
           Configure entry points (apps that sign users in here) and identity
           providers.
@@ -684,6 +694,7 @@ export function AuthenticationPane(): ReactElement {
           doDiscard();
         }}
       />
+      </div>
     </div>
   );
 }

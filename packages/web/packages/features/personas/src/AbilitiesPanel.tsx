@@ -3,7 +3,6 @@
 import { useId, useMemo } from "react";
 import { useAction } from "@agentic-toolkit/crud";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
-import { useRecordAffordance } from "@agentic-toolkit/resource";
 import { Checkbox } from "@agenticdevelopertoolkit/ui/components/checkbox";
 import { Switch } from "@agenticdevelopertoolkit/ui/components/switch";
 import { FieldGroup } from "@agenticdevelopertoolkit/ui/blocks/field-group";
@@ -31,7 +30,6 @@ export function AbilitiesPanel({ personaId }: { personaId: string }) {
   // Base id for the per-tool rows (checkbox ↔ its tool-name label).
   const rowIdPrefix = useId();
   const { error, run } = useAction();
-  const renderRecordAffordance = useRecordAffordance();
   const {
     rows: tools,
     loadError,
@@ -76,14 +74,9 @@ export function AbilitiesPanel({ personaId }: { personaId: string }) {
   const groups = useMemo(() => groupBySource(tools ?? [], (t) => t.source), [tools]);
 
   return (
-    <FieldGroup
-      title="Abilities"
-      trailing={renderRecordAffordance?.({
-        path: "/access/personas/{id}/tools",
-        pathValues: { id: personaId },
-        title: "Persona tools API",
-      })}
-    >
+    <FieldGroup title="Abilities">
+      {/* The API affordance for this persona lives in PersonaEditor's leafHeader (the persisted
+          persona's ButtonBar `api`), one button per header — not here. */}
       <ErrorText error={loadError ?? error} />
       {tools === null ? (
         // A failed read leaves the catalog null too, and the banner above already says why — so

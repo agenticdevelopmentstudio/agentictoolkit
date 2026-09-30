@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
+import { FeatureTitle } from "@agentic-toolkit/resource";
 import { useAccessAudit, type AccessAuditEvent } from "../api/admin";
 import {
   EditableList,
@@ -9,7 +10,6 @@ import {
   type EditableListColumn,
 } from "../components/editable-list";
 import { formatDateTime } from "../lib/timestamps";
-import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 // Raw action enums → plain language: a reader shouldn't need to know the backend's
 // enum values (labels must never be internal jargon).
@@ -45,7 +45,7 @@ function details(e: AccessAuditEvent): string {
   return after || before || "";
 }
 
-export function AuditPane() {
+export function AuditPane({ help }: { help?: ReactNode } = {}) {
   const trail = useAccessAudit();
 
   const columns = useMemo<EditableListColumn<AccessAuditEvent>[]>(
@@ -128,45 +128,46 @@ export function AuditPane() {
   });
 
   return (
-    <div>
-      <SectionHeader paneTitle title="Audit" className="mb-4" />
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FeatureTitle title="Audit" help={help} />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 pb-8 pt-2">
+        <p className="mb-6 max-w-2xl text-sm text-apt-text-muted">
+          The authorization audit trail — every role and access-assignment change across all
+          workspaces, newest first. Most other platform actions are not audited yet; this covers
+          the access-control changes written by the roles &amp; permissions system.
+        </p>
 
-      <p className="mb-6 max-w-2xl text-sm text-apt-text-muted">
-        The authorization audit trail — every role and access-assignment change across all
-        workspaces, newest first. Most other platform actions are not audited yet; this covers
-        the access-control changes written by the roles &amp; permissions system.
-      </p>
-
-      {/* The one admin list with NO actions, and deliberately so: the trail is append-only
-          everywhere, including in the backend, so a selection here could only ever act on rows
-          nothing is allowed to change. The checkboxes come with the shared list and cost the
-          operator nothing; a button bar with buttons that lied about what they could do would. */}
-      <EditableList<AccessAuditEvent>
-        list={list}
-        ariaLabel="Access audit events"
-        searchPlaceholder="Search the trail"
-        emptyLabel="No audit events recorded yet."
-        emptyFilteredLabel="Nothing in the loaded window matches — load older events, or widen the filters."
-        loading={trail.isLoading}
-        error={trail.error}
-        errorTitle="Couldn't load the audit trail"
-        columnWidthsKey="admin.audit"
-        // An event has no name of its own, so the checkbox borrows the three columns that tell two
-        // events apart. Left to the table's guess it would read the first string field — the
-        // action — and every grant on the page would be "Select role granted".
-        describeRow={(e) => `${actionLabel(e.action)} by ${actor(e)}, ${formatDateTime(e.at)}`}
-        footer={
-          <WindowFooter
-            noun="events"
-            loaded={trail.rows.length}
-            showing={list.rows.length}
-            total={trail.total}
-            hasMore={trail.hasMore}
-            busy={trail.isFetchingMore}
-            onLoadMore={trail.loadMore}
-          />
-        }
-      />
+        {/* The one admin list with NO actions, and deliberately so: the trail is append-only
+            everywhere, including in the backend, so a selection here could only ever act on rows
+            nothing is allowed to change. The checkboxes come with the shared list and cost the
+            operator nothing; a button bar with buttons that lied about what they could do would. */}
+        <EditableList<AccessAuditEvent>
+          list={list}
+          ariaLabel="Access audit events"
+          searchPlaceholder="Search the trail"
+          emptyLabel="No audit events recorded yet."
+          emptyFilteredLabel="Nothing in the loaded window matches — load older events, or widen the filters."
+          loading={trail.isLoading}
+          error={trail.error}
+          errorTitle="Couldn't load the audit trail"
+          columnWidthsKey="admin.audit"
+          // An event has no name of its own, so the checkbox borrows the three columns that tell two
+          // events apart. Left to the table's guess it would read the first string field — the
+          // action — and every grant on the page would be "Select role granted".
+          describeRow={(e) => `${actionLabel(e.action)} by ${actor(e)}, ${formatDateTime(e.at)}`}
+          footer={
+            <WindowFooter
+              noun="events"
+              loaded={trail.rows.length}
+              showing={list.rows.length}
+              total={trail.total}
+              hasMore={trail.hasMore}
+              busy={trail.isFetchingMore}
+              onLoadMore={trail.loadMore}
+            />
+          }
+        />
+      </div>
     </div>
   );
 }

@@ -19,7 +19,6 @@ import {
   MasterDetailLeaf,
   useMasterDetailForm,
   useMasterDetailLevel,
-  useRecordAffordance,
   type TopicLeaf,
 } from "@agentic-toolkit/resource";
 import {
@@ -148,7 +147,6 @@ export function ProgramsPane({
    *  exactly as the project and iteration lists do. */
   workspaceSlug?: string;
 }): ReactElement {
-  const renderRecordAffordance = useRecordAffordance();
   const [newOpen, setNewOpen] = useState(false);
 
   // The SAME cache key the project's settings read their program picker from, so a program created
@@ -212,15 +210,16 @@ export function ProgramsPane({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <FeatureTitle title={title} />
+      {/* The leaf's own bar draws the API button; one per pane. */}
+      <FeatureTitle title={title} showApi={false} />
       <MasterDetailLeaf
         form={form}
         error={loadError}
-        trailing={renderRecordAffordance?.({
+        api={{
           path: "/project/programs/{id}",
           pathValues: { id: form.selectedId },
           title: "Program API",
-        })}
+        }}
         emptyTitle={
           programs === null ? "Loading…" : "Select a program to edit, or create a new one."
         }

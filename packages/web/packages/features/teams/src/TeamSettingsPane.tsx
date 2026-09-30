@@ -6,7 +6,6 @@ import { teamsApi, type Team, type TeamInput } from "@agentic-toolkit/data/teams
 import {
   useMasterDetailForm,
   RecordSettingsPane,
-  useRecordAffordance,
 } from "@agentic-toolkit/resource";
 import { DeleteEntitySection } from "@agentic-toolkit/adh-ui/blocks";
 import { TeamDetail, teamBlank, teamToInput, teamValidate } from "./TeamDetail";
@@ -44,9 +43,6 @@ export function TeamSettingsPane({
   /** Delete the active team (and navigate away). Renders the Danger section. */
   onDelete?: () => Promise<void>;
 }): ReactElement {
-  // The host-injected per-record affordance (the hub's api-explorer button); null on
-  // a standalone feature site → the trailing slot renders nothing.
-  const renderRecordAffordance = useRecordAffordance();
   const form = useMasterDetailForm<Team, TeamInput>({
     items,
     getId: (t) => t.id,
@@ -77,11 +73,11 @@ export function TeamSettingsPane({
       items={items}
       getId={(t) => t.id}
       title={title}
-      trailing={renderRecordAffordance?.({
+      api={{
         path: "/team/teams/{id}",
         pathValues: { id: teamId },
         title: "Team API",
-      })}
+      }}
       loadError={loadError}
       emptyLabel={
         items === null ? "Loading…" : "Select a team in the sidebar, or create a new one."

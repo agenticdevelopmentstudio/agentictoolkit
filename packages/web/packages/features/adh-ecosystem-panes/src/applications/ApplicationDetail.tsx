@@ -1,27 +1,31 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Card, CardContent } from "@agenticdevelopertoolkit/ui/components/card";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Label } from "@agenticdevelopertoolkit/ui/components/label";
-import { Select } from "@agenticdevelopertoolkit/ui/components/select";
 import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
 import { RdidEditor } from "@agentic-toolkit/adh-ui/components/rdid-editor";
+import { DeleteEntitySection } from "@agentic-toolkit/adh-ui/blocks";
 import { isRdid } from "@agentic-toolkit/adh-ui/rdid";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
-import {
-  APPLICATION_KINDS,
-  type ApplicationInput,
-  type ApplicationKind,
-  type PrototypeApplication,
-} from "../api/applications-prototype";
+import type { ApplicationPlatform } from "@agentic-toolkit/data/ecosystem-config";
+import type { ApplicationInput, PrototypeApplication } from "../api/applications-prototype";
 import { DetailSection, unchangedFromStored } from "@agentic-toolkit/resource";
 import { SchemaPermissionsSection } from "./SchemaPermissionsSection";
 import { AccessTokensSection } from "./AccessTokensSection";
 import type { RenderTransferSection } from "../transfer-seam";
 
-export function appBlank(): ApplicationInput {
-  return { identifier: "", name: "", kind: "developer", schemaGrants: [] };
+export function appBlank(platform: ApplicationPlatform = "web"): ApplicationInput {
+  return { identifier: "", name: "", platform, schemaGrants: [] };
 }
+
+/** What each platform's application is called on screen — the list toolbar's creators, the
+ *  create dialog, the detail's heading and its danger zone. */
+export const PLATFORM_NOUNS: Record<ApplicationPlatform, string> = {
+  web: "Website",
+  native: "App",
+};
 
 /**
  * Split an application id into its fixed inherited prefix (`app.<ecosystem>.`) and the
@@ -53,7 +57,7 @@ export function appToInput(a: PrototypeApplication): ApplicationInput {
   return {
     identifier: a.identifier,
     name: a.name,
-    kind: a.kind,
+    platform: a.platform,
     schemaGrants: a.schemaGrants,
   };
 }
@@ -86,10 +90,12 @@ export function appValidate(
 }
 
 /**
- * The application's PLACEMENT fields — name, id, and consumer kind — shared by the full
- * detail and the "New application" create modal (HTD recipe `must-create-in-modal`), so the
- * `app.<ecosystem>.` id-splitting lives in one place. Everything else (schema grants, access
- * tokens) belongs to the detail that opens once the created app is selected.
+ * The application's PLACEMENT fields — name and id — shared by the full detail and
+ * the create modal (HTD recipe `must-create-in-modal`), so the `app.<ecosystem>.` id-splitting
+ * lives in one place. The platform is not a field: it is chosen by which creator opened the modal
+ * (Add Website / Add App) and fixed from then on. Everything else (schema grants, access
+ * tokens, login registration) belongs to the application's detail, which opens once the
+ * created app is selected.
  */
 export function ApplicationPlacementFields({
   draft,
@@ -117,7 +123,7 @@ export function ApplicationPlacementFields({
           /* eslint-disable-next-line jsx-a11y/no-autofocus -- focus the first field when the modal opens */
           autoFocus={autoFocusName}
           value={draft.name}
-          placeholder="My Application"
+          placeholder={draft.platform === "native" ? "My App" : "My Website"}
           onChange={(e) => onChange({ ...draft, name: e.target.value })}
         />
       </div>
@@ -135,34 +141,23 @@ export function ApplicationPlacementFields({
           })
         }
       />
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="app-kind">Consumer kind</Label>
-        <Select
-          id="app-kind"
-          value={draft.kind}
-          onChange={(e) => onChange({ ...draft, kind: e.target.value as ApplicationKind })}
-        >
-          {APPLICATION_KINDS.map((k) => (
-            <option key={k} value={k}>
-              {k}
-            </option>
-          ))}
-        </Select>
-        <p className="text-xs text-apt-text-muted">Who consumes this application.</p>
-      </div>
     </>
   );
 }
 
 /**
- * Controlled application form — fields + schema grants only. Save/Cancel/Delete
- * live in the MasterDetailLayout button bar; the pane owns the draft +
- * dirty/validity state. Access tokens are a SEPARATE sub-section that persists
- * independently of the unsaved field edits, so they keep their own actions and
- * are NOT part of the save draft.
+ * Controlled application form, shaped by the application's platform. Save/Cancel live in the
+ * pane's button bar; the pane owns the draft + dirty/validity state. Access tokens are a SEPARATE
+ * sub-section that persists independently of the unsaved field edits, so they keep their own
+ * actions and are NOT part of the save draft.
+ *
+ * A native app gets no access tokens: a token is a long-lived secret, and one shipped inside an
+ * app on a user's device is readable by anyone holding the device. It signs its users in through
+ * its login registration instead. The pane draws this form when the application is opened
+ * (`…/applications/<appId>`) and hands the login registration in as `clientAuth`.
+ * Deleting is the danger zone at the foot, never a bar button one click from Save.
  */
 export function ApplicationDetail({
-  title,
   draft,
   onChange,
   error,
@@ -170,8 +165,9 @@ export function ApplicationDetail({
   scopePrefix,
   ecosystemRdid,
   renderTransfer,
+  clientAuth,
+  onDelete,
 }: {
-  title: string;
   draft: ApplicationInput;
   onChange: (next: ApplicationInput) => void;
   error?: string | null;
@@ -190,10 +186,16 @@ export function ApplicationDetail({
   ecosystemRdid?: string;
   /** The host's Transfer Ownership section; omitted ⇒ the application offers no transfer. */
   renderTransfer?: RenderTransferSection;
+  /** The saved application's login registration section, drawn by the pane that folds its edits
+   *  into the one bar. */
+  clientAuth?: ReactNode;
+  /** Deletes the saved application (and leaves its detail); omitted ⇒ no danger zone. */
+  onDelete?: () => Promise<void>;
 }) {
+  const noun = PLATFORM_NOUNS[draft.platform];
   return (
     <>
-      <DetailSection title={title}>
+      <DetailSection title={noun}>
         <Card>
           <CardContent className="flex flex-col gap-5">
             <ApplicationPlacementFields
@@ -214,11 +216,14 @@ export function ApplicationDetail({
         ecosystemRdid={ecosystemRdid}
       />
 
-      {app ? (
-        <AccessTokensSection appId={app.id} />
-      ) : (
-        <EmptyState className="min-h-0 px-3 py-4" title="Save the application to create access tokens." />
-      )}
+      {draft.platform === "web" &&
+        (app ? (
+          <AccessTokensSection appId={app.id} />
+        ) : (
+          <EmptyState className="min-h-0 px-3 py-4" title="Save the application to create access tokens." />
+        ))}
+
+      {app && clientAuth}
 
       {/* Only once the application is SAVED — there is nothing to transfer while still drafting
           one. `ecosystemRdid` here is the PANE's scope (see the prop doc above), not derived
@@ -231,6 +236,19 @@ export function ApplicationDetail({
           entityLabel: app.identifier,
           ecosystemRdid,
         })}
+
+      {app && onDelete && (
+        <DeleteEntitySection
+          entityNoun={noun}
+          confirmValue={app.identifier}
+          childEntities={
+            draft.platform === "web"
+              ? "its access tokens, schema permissions and login registration"
+              : "its schema permissions and login registration"
+          }
+          onConfirm={onDelete}
+        />
+      )}
     </>
   );
 }

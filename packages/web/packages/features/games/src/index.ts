@@ -30,9 +30,8 @@ export {
   type GameForEcosystem,
   GAME_FOR_ECOSYSTEM_CACHE_KEY,
   REALM_CONFIG_CACHE_KEY,
-  // Exported for the same reason `GameSettingsPane` reaches for it: a pane that WRITES the
-  // mode has just (possibly) minted a game, and the only honest way to refresh the shared
-  // cache entry is to re-read through the identical loader rather than a near-copy of it.
+  // Exported so a pane that needs the RAW row (mode-independent) reads through the identical
+  // loader rather than a near-copy of it.
   loadGameRow,
 } from "./useGameForEcosystem";
 export { GameChildPane, type GameChildPaneConfig } from "./GameChildPane";

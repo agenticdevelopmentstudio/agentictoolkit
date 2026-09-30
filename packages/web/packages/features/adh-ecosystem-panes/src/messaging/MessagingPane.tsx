@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from "react";
-import { HelpPopover, type TopicLeaf, useSettingsDirty } from "@agentic-toolkit/resource";
+import { DetailHeaderActions, type TopicLeaf, useSettingsDirty } from "@agentic-toolkit/resource";
 import { MessagingSurface, type SendMessageDraft } from "@agentic-toolkit/adh/messaging";
 import {
   useMessagingStatus,
@@ -27,7 +27,7 @@ export function MessagingPane({
   ecosystemId?: string;
   /** Unused: the breadcrumb names the pane (kept for the ScopedPane prop shape). */
   title?: ReactNode;
-  /** Contextual help for the feature, surfaced via the "?" popover on the Send heading. */
+  /** Contextual help for the feature, the "?" on the far right of the detail header. */
   help?: ReactNode;
   /** Unused: this pane has no deep-linkable sub-resource (kept for the ScopedPane prop shape). */
   leaf?: TopicLeaf;
@@ -60,32 +60,36 @@ export function MessagingPane({
   useEffect(() => () => reportDirty(key, false), [key, reportDirty]);
 
   return (
-    <MessagingSurface
-      status={{ data: status.data, isLoading: status.isLoading, isError: status.isError }}
-      templates={templates}
-      send={{
-        mutate: (draft: SendMessageDraft, options) => send.mutate(draft, options),
-        isPending: send.isPending,
-        isSuccess: send.isSuccess,
-        isError: send.isError,
-      }}
-      log={{ data: log.data, isLoading: log.isLoading }}
-      page={page}
-      onPageChange={setPage}
-      enabled={ecosystemId != null}
-      providerSetupHint={(channel) => (
-        <>
-          Connect a {channel === "email" ? "Postmark" : "Twilio"} integration on this product&apos;s
-          Integrations tab.
-        </>
-      )}
-      headerAccessory={
-        /* `px-1` was HelpPopover's old default padding, which only this call site (the one
-           that passed no triggerClassName) ever got. Stated here now the prop carries
-           metrics rather than the whole look. */
-        help ? <HelpPopover triggerClassName="px-1">{help}</HelpPopover> : undefined
-      }
-      onDirtyChange={handleDirtyChange}
-    />
+    <>
+      <DetailHeaderActions
+        api={{
+          path: "/messaging/ecosystems/{id}/log",
+          pathValues: { id: ecosystemId },
+          title: "Messaging API",
+        }}
+        help={help}
+      />
+      <MessagingSurface
+        status={{ data: status.data, isLoading: status.isLoading, isError: status.isError }}
+        templates={templates}
+        send={{
+          mutate: (draft: SendMessageDraft, options) => send.mutate(draft, options),
+          isPending: send.isPending,
+          isSuccess: send.isSuccess,
+          isError: send.isError,
+        }}
+        log={{ data: log.data, isLoading: log.isLoading }}
+        page={page}
+        onPageChange={setPage}
+        enabled={ecosystemId != null}
+        providerSetupHint={(channel) => (
+          <>
+            Connect a {channel === "email" ? "Postmark" : "Twilio"} integration on this product&apos;s
+            Integrations tab.
+          </>
+        )}
+        onDirtyChange={handleDirtyChange}
+      />
+    </>
   );
 }

@@ -98,6 +98,8 @@ export type SignupMode = "open" | "invite_only" | "closed";
 export interface AuthSettings {
   signupMode: SignupMode;
   loginEnabled: boolean;
+  /** Email + password sign-in and sign-up for the customer realm. */
+  passwordEnabled: boolean;
   /** null = all configured providers. */
   allowedProviders: string[] | null;
 }

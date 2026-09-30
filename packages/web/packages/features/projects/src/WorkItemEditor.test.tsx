@@ -547,6 +547,17 @@ describe("WorkItemEditor status field with a statusless item", () => {
   });
 });
 
+// The editor used to draw its own API affordance beside ItemKey (`useRecordAffordance`, in the
+// body row above Title); that button now lives once, in WorkItemsSurface's FeatureTitle header,
+// so the editor itself must never render one — only the read-only key stays in that row.
+describe("WorkItemEditor — no API affordance of its own", () => {
+  it("renders ItemKey but no API button in the body", () => {
+    renderEditor();
+    expect(screen.getByText("WEB-1")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: /API/ })).toBeNull();
+  });
+});
+
 describe("WorkItemEditor — board settings", () => {
   it("omits the Priority field on a board that does not rank", () => {
     renderEditor(ITEM, {}, { priorityScale: "none" });

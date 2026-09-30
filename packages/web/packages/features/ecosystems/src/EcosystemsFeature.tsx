@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   Settings, Table2, Users, KeyRound, Network, Boxes, Plus, Inbox, Send, Database,
-  ShieldCheck, LogIn, MailPlus,
+  MailPlus,
 } from "lucide-react";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { Checkbox } from "@agenticdevelopertoolkit/ui/components/checkbox";
@@ -17,6 +17,7 @@ import {
   ResourceLanding,
   CreateResourceDialog,
   StackGroupDetail,
+  settingsLast,
   useStackLevel,
   type ResourceTopic,
   type TopicLeaf,
@@ -25,11 +26,13 @@ import {
 import { useResourceList, makeEntityDeleteHandler, writeLastId } from "@agentic-toolkit/data";
 import {
   ecosystemsApi,
+  featureRowLabel,
+  useFeatureCatalog,
   useProvisionedFeatures,
   useWorkspaceDefaultEcosystemId,
   type Ecosystem,
 } from "@agentic-toolkit/data/ecosystems";
-import { heldTopics, settingsLast } from "./heldTopics";
+import { heldTopics } from "./heldTopics";
 import { EcosystemSettingsPane } from "./EcosystemSettingsPane";
 import { ManageFeaturesButton } from "./ManageFeaturesButton";
 import { ManageFeaturesDialog } from "./ManageFeaturesDialog";
@@ -169,11 +172,17 @@ export interface EcosystemsFeatureProps {
   /** Host-injected Transfer Ownership section for the settings topic. Threaded straight through
    *  to EcosystemSettingsPane — this feature neither owns the workspace list nor the mutation. */
   renderTransferOwnership?: (ecosystem: { id: string; identifier: string }) => ReactNode;
+  /** The host's own old top-level topic ids → the group that holds that pane now (a host-owned
+   *  group's members). Merged over this package's own (every in-package group member). */
+  topicAliases?: Record<string, string>;
+  /** The host's own members that moved out of a group (ResourceExplorer's `memberMoves`). Merged
+   *  per group over this package's own ({@link PACKAGE_MEMBER_MOVES}). */
+  memberMoves?: Record<string, Record<string, string | null>>;
 }
 
 /** The topic groups whose detail pane is a nested topic→detail sub-rail — the single source for
  *  both the membership check and the per-group members map below. */
-const GROUP_IDS = ["storage", "invitations", "authentication"] as const;
+const GROUP_IDS = ["storage", "invitations"] as const;
 type GroupId = (typeof GROUP_IDS)[number];
 const isGroupId = (id: string): id is GroupId => (GROUP_IDS as readonly string[]).includes(id);
 
@@ -250,6 +259,11 @@ function groupMembers(
         description: "Browse and edit the raw rows behind every bucket.",
         // Scoped to THIS ecosystem, not the workspace — "ONLY THE ECOSYSTEMS TABLES SHOULD SHOW - this is a huge huge huge data leak" (Mike, 2026-09-24).
         render: () => renderFeaturePanel("all-data", { ecosystemId: ecoId }) },
+      // Comes with Storage (the catalog's `includedWith`): tokens read and write its buckets, so
+      // they sit with them, not with sign-in (Mike, 2026-09-29).
+      { id: "tokens", label: "Storage Access Tokens", icon: <KeyRound size={16} aria-hidden />,
+        description: "Long-lived tokens that read and write this ecosystem's buckets.",
+        render: () => renderTopicPane("tokens", { ecosystemId: ecoId, title: titleFor("Storage Access Tokens") }) },
     ],
     // Users (topic id "invitations", kept for deep-link stability): the ecosystem's people —
     // the Users master/detail (host-owned) followed by Requests / Pending users / Invites, each a
@@ -271,25 +285,16 @@ function groupMembers(
       { id: "invites", label: "Invites", icon: <Send size={16} aria-hidden />,
         description: "Invitations you've sent and their status.",
         render: () => (ecoId ? <EcoInvitesPane ecosystemRdid={ecoId} /> : null) },
-    ],
-    // Authentication: everything about how someone (or something) gets in. Three of these were
-    // top-level rows on this rail — `auth`, `signin-apps`, `tokens` — and their MEMBER ids are
-    // those same ids, so the host's topic-pane switch answers them with no new cases and every
-    // existing deep link still resolves. Email Signup is the fourth and the odd one: no host-owned
-    // config pane exists for it in-package, so it goes through `renderFeaturePanel` like All Data.
-    authentication: [
-      { id: "auth", label: "User Auth", icon: <ShieldCheck size={16} aria-hidden />,
-        description: "Signup mode and login policy for the people who authenticate here.",
-        render: () => renderTopicPane("auth", { ecosystemId: ecoId, title: titleFor("User Auth") }) },
-      { id: "signin-apps", label: "Sign-in apps", icon: <LogIn size={16} aria-hidden />,
-        description: "The apps you've registered to sign your own users in.",
-        render: (subLeaf) => renderTopicPane("signin-apps", { ecosystemId: ecoId, title: titleFor("Sign-in apps"), leaf: subLeaf }) },
-      { id: "tokens", label: "Storage Access Tokens", icon: <KeyRound size={16} aria-hidden />,
-        description: "Long-lived tokens that read and write this ecosystem's buckets.",
-        render: () => renderTopicPane("tokens", { ecosystemId: ecoId, title: titleFor("Storage Access Tokens") }) },
+      // Comes with Users (the catalog's `includedWith`, Mike 2026-09-29). It has no host-owned
+      // config pane in-package, so it goes through `renderFeaturePanel` like All Data.
       { id: "email-signup", label: "Email Signup", icon: <MailPlus size={16} aria-hidden />,
         description: "Waitlists and campaigns for people signing up before they can get in.",
         render: () => renderFeaturePanel("email-signup") },
+      // The ecosystem's client auth (Mike, 2026-09-30): how these users sign in and sign up —
+      // sign-in, sign-up mode, OAuth providers. Host-owned, like the Users pane.
+      { id: "auth", label: "Authentication", icon: <KeyRound size={16} aria-hidden />,
+        description: "How your customers sign in and sign up: sign-in, sign-up mode, and OAuth providers.",
+        render: () => renderTopicPane("auth", { ecosystemId: ecoId, title: titleFor("Authentication") }) },
     ],
   };
 }
@@ -298,18 +303,39 @@ function groupMembers(
  * Every group MEMBER id → the group that holds it, derived from {@link groupMembers} itself so
  * it can never fall behind it (the renders are never called here; only the ids are read).
  *
- * Three of these ids — `auth`, `signin-apps`, `tokens` — were top-level rows of this rail before
- * they became members of Authentication, and `buckets`/`access`/`all-data` were the same for
- * Storage. Keeping their ids is only half of "the deep links still resolve": ResourceExplorer
- * matches the URL's topic segment against the TOP-LEVEL list, so without this map the old address
- * matches nothing and renders "Select a topic to view." — an apparently empty product, with no
- * 404 and nothing in the console. With it, the old address redirects into the group.
+ * `tokens` was a top-level row of this rail before it was a group member, and
+ * `buckets`/`access`/`all-data` were the same for Storage. Keeping their ids is only half of "the
+ * deep links still resolve": ResourceExplorer matches the URL's topic segment against the
+ * TOP-LEVEL list, so without this map the old address matches nothing and renders "Select a topic
+ * to view." — an apparently empty product, with no 404 and nothing in the console. With it, the
+ * old address redirects into the group.
  */
 const GROUP_MEMBER_GROUP: Record<string, string> = Object.fromEntries(
   Object.entries(groupMembers(undefined, (label) => label, () => null, () => null)).flatMap(
     ([group, members]) => members.map((member) => [member.id, group]),
   ),
 );
+
+/**
+ * Members that moved out of a group (ResourceExplorer's `memberMoves`). The Authentication group
+ * is retired (Mike, 2026-09-29): its members went where the feature they come with lives —
+ * Storage Access Tokens to Storage, Email Signup and its sign-in settings (`auth`) to Users.
+ * Client Auth (`signin-apps`) became each application's own login registration, which is the
+ * host's to place, so a host that draws applications passes its own move for it.
+ */
+export const PACKAGE_MEMBER_MOVES: Record<string, Record<string, string | null>> = {
+  authentication: { tokens: "storage", "email-signup": "invitations", auth: "invitations" },
+};
+
+/** The package's moves with the host's laid over them, group by group. */
+function mergeMemberMoves(
+  host: Record<string, Record<string, string | null>> | undefined,
+): Record<string, Record<string, string | null>> {
+  if (!host) return PACKAGE_MEMBER_MOVES;
+  const merged: Record<string, Record<string, string | null>> = { ...PACKAGE_MEMBER_MOVES };
+  for (const [group, moves] of Object.entries(host)) merged[group] = { ...merged[group], ...moves };
+  return merged;
+}
 
 /**
  * An ecosystem id, as a create's PARENT — i.e. as the thing a derived address hangs off.
@@ -354,7 +380,14 @@ export function EcosystemsFeature({
   labels,
   listFirst = false,
   renderTransferOwnership,
+  topicAliases: hostTopicAliases,
+  memberMoves: hostMemberMoves,
 }: EcosystemsFeatureProps): ReactElement {
+  const aliases = useMemo(
+    () => ({ ...GROUP_MEMBER_GROUP, ...hostTopicAliases }),
+    [hostTopicAliases],
+  );
+  const moves = useMemo(() => mergeMemberMoves(hostMemberMoves), [hostMemberMoves]);
   const router = useRouter();
   // The presented noun (see the `labels` prop doc) — every user-facing string below
   // derives from these four forms so a renaming host can't miss a surface.
@@ -537,6 +570,8 @@ export function EcosystemsFeature({
   // `activeTopic` keeps a deep link's own row while that read is in flight (see heldTopics).
   const featureKeyed = topicsConfig.some((t) => t.features != null);
   const provisionedQuery = useProvisionedFeatures(featureKeyed ? scopedId : undefined);
+  // A row that stands on one feature is called what the Manage features dialog calls it.
+  const catalog = useFeatureCatalog().data;
   // `isLoadingError`: only a read that failed with NO answer shows every row. A failed REFRESH keeps
   // the rows its last answer held — reading `isError` flashed every product topic, held or not,
   // whenever a background refetch hiccupped.
@@ -559,7 +594,11 @@ export function EcosystemsFeature({
     </div>
   );
 
-  const topics: ResourceTopic[] = shownTopics.map((t) => ({
+  const labelledTopics = shownTopics.map((t) => ({
+    ...t,
+    label: featureRowLabel(t.features, t.label, catalog),
+  }));
+  const topics: ResourceTopic[] = labelledTopics.map((t) => ({
     id: t.id,
     label: t.label,
     icon: t.icon,
@@ -888,7 +927,8 @@ export function EcosystemsFeature({
           nameSuffix={singular}
           itemIcon={<Network size={16} aria-hidden />}
           topics={topics}
-          topicAliases={GROUP_MEMBER_GROUP}
+          topicAliases={aliases}
+          memberMoves={moves}
           newLabel={`New ${singular}…`}
           rail={{
             title: plural,
@@ -968,7 +1008,8 @@ export function EcosystemsFeature({
         nameSuffix={singular}
         itemIcon={<Network size={16} aria-hidden />}
         topics={topics}
-        topicAliases={GROUP_MEMBER_GROUP}
+        topicAliases={aliases}
+        memberMoves={moves}
         newLabel={`New ${singular}…`}
         topicsTitleActions={featureKeyed ? manageFeaturesButton : undefined}
       />

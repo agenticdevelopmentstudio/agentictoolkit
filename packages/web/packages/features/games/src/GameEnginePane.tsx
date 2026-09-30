@@ -66,7 +66,7 @@ export function GameEnginePane({
       emptyLabel={
         !isSettled
           ? "Loading…"
-          : "Turn on Enable Gaming in Settings to configure this game's engine."
+          : "Add the Gaming feature to this product to configure its game's engine."
       }
       renderDetail={(draft) => (
         <GameEngineFields

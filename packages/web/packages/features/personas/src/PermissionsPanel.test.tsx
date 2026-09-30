@@ -201,6 +201,15 @@ describe("PermissionsPanel — decision queue", () => {
     });
     await waitFor(() => expect(screen.queryByText("sendEmail")).toBeNull());
   });
+
+  // The panel used to draw its own API affordance beside the "Permissions" title (FieldGroup
+  // `trailing`); that button now lives once, in PersonaEditor's leafHeader (its ButtonBar `api`),
+  // so this body must never render one of its own.
+  it("renders no API affordance of its own — that lives in the persona editor's header", async () => {
+    render(<PermissionsPanel personaId="p1" />);
+    await waitFor(() => expect(isDisabled(mayActSwitch())).toBe(false));
+    expect(screen.queryByRole("button", { name: /API/ })).toBeNull();
+  });
 });
 
 describe("PermissionsPanel — may_act switches", () => {

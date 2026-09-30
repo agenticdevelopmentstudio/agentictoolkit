@@ -20,14 +20,14 @@ import {
 import { reportUnexpectedAuthError } from "@agentic-toolkit/auth";
 import { CRUD_TABLES, CrudDataView, useExitGuardChannel } from "@agentic-toolkit/crud";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
-import { Field, FieldGroup, ButtonBar } from "@agenticdevelopertoolkit/ui/blocks";
+import { Field, FieldGroup } from "@agenticdevelopertoolkit/ui/blocks";
 import { useDirtyDraft } from "@agenticdevelopertoolkit/ui/hooks/useDirtyDraft";
 import { useExitGate, type PaneExitGuard } from "@agenticdevelopertoolkit/ui/hooks/useExitGate";
 import { UnsavedChangesAlert } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-alert";
 import {
+  ButtonBar,
   StackGroupDetail,
   useRailExitGuard,
-  useRecordAffordance,
   type GroupTopicItem,
 } from "@agentic-toolkit/resource";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
@@ -296,7 +296,6 @@ export function PersonaEditor({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const renderRecordAffordance = useRecordAffordance();
   // What a create returned, remembered locally. `commit()` deliberately leaves this editor MOUNTED
   // and re-armed after a successful save, but `persona` is a prop the parent need not refresh (it
   // may keep passing null) — so newness cannot be read from the prop alone or the second Save would
@@ -777,9 +776,28 @@ export function PersonaEditor({
           onSave: () => void save(),
           canSave: dirty && valid,
           saving,
+          onDelete: () => {},
+          canDelete: false,
         }}
         showCreate={false}
         showDelete={false}
+        hoist={false}
+        // The persona's API, on every facet: the item read once saved, the create POST while new.
+        api={
+          persisted
+            ? {
+                method: "GET",
+                path: "/persona/personas/{id}",
+                pathValues: { id: persisted.id },
+                title: "Persona API",
+              }
+            : {
+                method: "POST",
+                path: "/persona/personas",
+                pathValues: {},
+                title: "Create persona API",
+              }
+        }
         leading={
           block && (dirty || isNew) ? (
             <span className="text-xs text-apt-text-muted" role="status">
@@ -789,22 +807,6 @@ export function PersonaEditor({
         }
       />
       <ErrorText error={error} className="px-6 pt-2" />
-      {/* The persona's API, on every facet: the item read once saved, the create POST while new. */}
-      <div className="flex justify-end px-6 pt-2">
-        {persisted
-          ? renderRecordAffordance?.({
-              method: "GET",
-              path: "/persona/personas/{id}",
-              pathValues: { id: persisted.id },
-              title: "Persona API",
-            })
-          : renderRecordAffordance?.({
-              method: "POST",
-              path: "/persona/personas",
-              pathValues: {},
-              title: "Create persona API",
-            })}
-      </div>
     </>
   );
 

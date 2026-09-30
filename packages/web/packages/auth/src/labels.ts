@@ -86,5 +86,7 @@ export function oauthErrorMessage(code: string): string {
   if (code === 'user_not_found') return 'Your account could not be found.'
   if (code === 'signups_closed') return "Sign-ups aren't open right now — please check back later."
   if (code === 'login_disabled') return loginDisabledBody
+  if (code === 'password_disabled')
+    return "Email and password sign-in isn't available here — use another sign-in method."
   return `Sign-in failed (${code})`
 }

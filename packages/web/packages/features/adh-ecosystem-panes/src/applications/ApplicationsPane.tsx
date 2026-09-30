@@ -2,26 +2,32 @@
 
 import { useCallback, useState } from "react";
 import type { ReactNode } from "react";
-import { Code, UserCog, UsersRound } from "lucide-react";
+import { Globe, Smartphone } from "lucide-react";
 
 import {
   applicationsPrototypeApi,
   type ApplicationInput,
-  type ApplicationKind,
   type PrototypeApplication,
 } from "../api/applications-prototype";
 import { useResourceList } from "@agentic-toolkit/data";
+import type { ApplicationPlatform } from "@agentic-toolkit/data/ecosystem-config";
+import { ListToolButton } from "@agenticdevelopertoolkit/ui/blocks";
 import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
-import { CreateResourceDialog } from "@agentic-toolkit/resource";
-import { ButtonBar } from "@agentic-toolkit/resource";
-import { RecordApiButton } from "@agentic-toolkit/api-explorer";
+import {
+  CreateResourceDialog,
+  DetailsPane,
+  StackLevels,
+  type MasterDetailActions,
+} from "@agentic-toolkit/resource";
+import { ApplicationClientAuthSection, useApplicationClientAuth } from "@agentic-toolkit/ecosystem-config";
 import { useMasterDetailForm } from "@agentic-toolkit/resource";
 import { useMasterDetailLevel } from "@agentic-toolkit/resource";
 import type { TopicLeaf } from "@agentic-toolkit/resource";
 import {
   ApplicationDetail,
   ApplicationPlacementFields,
+  PLATFORM_NOUNS,
   appBlank,
   appToInput,
   appValidate,
@@ -107,7 +113,7 @@ export function appDiffers(a: ApplicationInput, b: ApplicationInput): boolean {
   return (
     a.identifier.trim() !== b.identifier.trim() ||
     a.name.trim() !== b.name.trim() ||
-    a.kind !== b.kind ||
+    a.platform !== b.platform ||
     !sameGrants(a.schemaGrants, b.schemaGrants)
   );
 }
@@ -116,7 +122,7 @@ function appNormalize(d: ApplicationInput): ApplicationInput {
   return {
     identifier: d.identifier.trim(),
     name: d.name.trim(),
-    kind: d.kind,
+    platform: d.platform,
     schemaGrants: d.schemaGrants,
   };
 }
@@ -138,9 +144,9 @@ export function ApplicationsPane({
   renderTransfer?: RenderTransferSection;
 }) {
   // Creating an application is a MODAL over the stack, never a blank leaf (HTD recipe
-  // `must-create-in-modal`): the `+` opens it, and on save the new app is selected so its
-  // REAL detail (schema grants, access tokens) opens.
-  const [newOpen, setNewOpen] = useState(false);
+  // `must-create-in-modal`): the list toolbar's Add Website / Add App opens it for that
+  // platform, and on save the new app is selected so its REAL detail opens. Null ⇒ closed.
+  const [newPlatform, setNewPlatform] = useState<ApplicationPlatform | null>(null);
 
   // The fixed `app.<ecosystem>.` prefix for NEW app ids — the type + ecosystem scope are
   // inherited and not the user's to edit (only the leaf is). The ecosystem id IS its rdid
@@ -166,9 +172,7 @@ export function ApplicationsPane({
 
   // URL-driven selection (the apps list is now a published stack LEVEL; the row id lives in the
   // URL leaf segment). The hook routes selection changes through `leaf.onSelect`.
-  const urlSelection = leaf
-    ? { selectedId: leaf.leafId, onSelect: leaf.onSelect }
-    : undefined;
+  const urlSelection = leaf ? { selectedId: leaf.leafId, onSelect: leaf.onSelect } : undefined;
 
   const form = useMasterDetailForm<PrototypeApplication, ApplicationInput>({
     items: apps,
@@ -182,30 +186,39 @@ export function ApplicationsPane({
     normalize: appNormalize,
     create: (input) => applicationsPrototypeApi.create(input, ecosystemId ?? ""),
     update: (id, input) => applicationsPrototypeApi.update(id, input),
-    remove: (a) => applicationsPrototypeApi.delete(a.id),
-    confirmDelete: (a) => `Delete application "${a.name}"? This cannot be undone.`,
+    // No `remove`: deleting an application is its danger zone's type-to-confirm, not a bar
+    // Delete one click from Save.
     refresh,
     createLabel: "New application",
   });
 
-  // Per-row icon = the application's kind (who consumes it): staff tooling, a developer
-  // integration, or a customer-facing app — the one discrete fact each row carries.
-  const KIND_ICONS: Record<ApplicationKind, ReactNode> = {
-    staff: <UserCog />,
-    developer: <Code />,
-    customer: <UsersRound />,
+  // Opening an application opens its settings: everything editable about it, its login
+  // registration included, in the detail. There is no rail level beneath it to pick them from.
+  const openApp = form.editing && !form.creating ? form.selected : null;
+
+  // The login registration's draft, loaded while an application is open. Its edits ride the
+  // application's one bar: they light Save and Cancel with the application's own fields.
+  const clientAuth = useApplicationClientAuth(openApp?.id ?? null);
+  const actions = openApp ? composeActions(form.actions, form.dirty, clientAuth) : form.actions;
+  const anyDirty = form.dirty || clientAuth.dirty;
+
+  // Per-row icon = the application's platform, the same glyph as the toolbar creator that makes it.
+  const PLATFORM_ICONS: Record<ApplicationPlatform, ReactNode> = {
+    web: <Globe />,
+    native: <Smartphone />,
   };
 
-  // PUBLISH the apps list as a deeper stack level + register the editor's unsaved-work guard.
-  useMasterDetailLevel({
+  // The apps list, PUBLISHED below through StackLevels — see `publish: false`.
+  // Registers the editor's unsaved-work guard either way.
+  const appsLevel = useMasterDetailLevel({
     id: "applications-list",
     title: "Applications",
-    form,
+    // The guard covers the client auth section's edits too: leaving with only those unsaved asks.
+    form: { ...form, actions, dirty: anyDirty, guard: { isDirty: () => anyDirty } },
     items: apps,
     getId: (a) => a.id,
     getLabel: (a) => a.name,
-    getSublabel: (a) => a.identifier,
-    getItemIcon: (a) => KIND_ICONS[a.kind],
+    getItemIcon: (a) => PLATFORM_ICONS[a.platform],
     newLabel: "New application",
     leaf,
     emptyLabel: loadError
@@ -216,32 +229,89 @@ export function ApplicationsPane({
     // The spinner before "Applications" — the only thing that says a revalidation is running behind
     // rows the cache already put on screen. `emptyLabel` covers the FIRST read and nothing after.
     busy: isFetching,
-    onNew: () => setNewOpen(true),
+    // One creator per platform instead of the lone `+`, which could not say which kind it makes.
+    showNew: false,
+    titleActions: (
+      <>
+        {(["web", "native"] as const).map((platform) => (
+          <ListToolButton
+            key={platform}
+            label={`Add ${PLATFORM_NOUNS[platform]}`}
+            aria-haspopup="dialog"
+            className="gap-1 px-1 text-xs"
+            onClick={() => setNewPlatform(platform)}
+          >
+            {platform === "web" ? <Globe size={13} aria-hidden /> : <Smartphone size={13} aria-hidden />}
+            {`Add ${PLATFORM_NOUNS[platform]}`}
+          </ListToolButton>
+        ))}
+      </>
+    ),
+    publish: false,
   });
 
-  // The pane is now ONLY the leaf detail: the editor's button bar + the form, or the placeholder.
+  const levels = [appsLevel];
+
+  // Create is a scoped modal: name + id, for the platform its creator named (schema grants,
+  // access tokens and client auth live in the app's real detail, which opens once the created app
+  // is selected). Drawn over whichever detail is open.
+  const createDialog = newPlatform && (
+    <CreateResourceDialog<ApplicationInput, PrototypeApplication>
+      key={newPlatform}
+      ariaLabel={`New ${PLATFORM_NOUNS[newPlatform]}`}
+      heading={`New ${PLATFORM_NOUNS[newPlatform]}`}
+      blank={() => appBlank(newPlatform)}
+      validate={(d) => appValidate(d, (apps ?? []).map((a) => a.identifier))}
+      create={(d) => applicationsPrototypeApi.create(appNormalize(d), ecosystemId ?? "")}
+      onClose={() => setNewPlatform(null)}
+      onCreated={(app) => {
+        setNewPlatform(null);
+        void refresh();
+        if (leaf) leaf.onSelect(app.id);
+        else form.select(app.id);
+      }}
+      renderForm={(draft, onChange, error) => (
+        <>
+          <ApplicationPlacementFields
+            draft={draft}
+            onChange={onChange}
+            app={null}
+            scopePrefix={scopePrefix}
+            autoFocusName
+          />
+          <ErrorText error={error} />
+        </>
+      )}
+    />
+  );
+
+  // The pane is now ONLY the leaf detail: one DetailsPane bar over the form, or the placeholder.
   // No `title` on the bar — the full-width breadcrumb (… ▸ Applications ▸ <app>) already names the
   // pane, so a centered title here would just duplicate it (and crowd the Delete / Save buttons).
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <ErrorText error={loadError} className="px-6 pt-4" />
-      <ButtonBar
-        actions={form.actions}
-        showCreate={false}
-        trailing={
-          <RecordApiButton
-            path="/ecosystem/applications/{id}"
-            pathValues={{ id: form.selectedId }}
-            title="Application API"
-          />
-        }
-        help={help}
-      />
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 py-4">
-        {form.editing && form.draft ? (
+    <StackLevels levels={levels}>
+    <DetailsPane
+      actions={actions}
+      // Creating is the list toolbar's; deleting is the detail's danger zone.
+      showCreate={false}
+      showDelete={false}
+      help={help}
+      api={
+        form.selectedId
+          ? {
+              path: "/ecosystem/applications/{id}",
+              pathValues: { id: form.selectedId },
+              title: "Application API",
+            }
+          : null
+      }
+      bodyClassName="px-6 py-4"
+    >
+      <ErrorText error={loadError} />
+      {openApp && form.draft ? (
+          // The open application: everything about it, under the one bar.
           <ApplicationDetail
             key={form.detailKey}
-            title="Application"
             draft={form.draft}
             onChange={form.onChange}
             error={form.error}
@@ -249,6 +319,18 @@ export function ApplicationsPane({
             scopePrefix={scopePrefix}
             ecosystemRdid={ecosystemId}
             renderTransfer={renderTransfer}
+            clientAuth={<ApplicationClientAuthSection state={clientAuth} />}
+            onDelete={async () => {
+              const app = form.selected;
+              if (!app) return;
+              await applicationsPrototypeApi.delete(app.id);
+              clientAuth.forget(app.id);
+              if (leaf) leaf.onSelect(null);
+              else form.actions.onCancel();
+              // Not awaited: the delete has succeeded, and a failed re-read of the list must not
+              // come back into the confirm dialog as the delete failing.
+              void refresh();
+            }}
           />
         ) : (
           <EmptyState
@@ -257,42 +339,54 @@ export function ApplicationsPane({
                 ? "Couldn't load applications."
                 : apps === null
                   ? "Loading…"
-                  : "Select an application to edit, or create a new one."
+                  : "Select an application to edit, or add a website or native app."
             }
           />
         )}
-      </div>
 
-      {/* Create is a scoped modal: name + id + kind only (schema grants and access tokens
-          live in the app's real detail, which opens once the created app is selected). */}
-      {newOpen && (
-        <CreateResourceDialog<ApplicationInput, PrototypeApplication>
-          ariaLabel="New application"
-          heading="New application"
-          blank={appBlank}
-          validate={(d) => appValidate(d, (apps ?? []).map((a) => a.identifier))}
-          create={(d) => applicationsPrototypeApi.create(appNormalize(d), ecosystemId ?? "")}
-          onClose={() => setNewOpen(false)}
-          onCreated={(app) => {
-            setNewOpen(false);
-            void refresh();
-            if (leaf) leaf.onSelect(app.id);
-            else form.select(app.id);
-          }}
-          renderForm={(draft, onChange, error) => (
-            <>
-              <ApplicationPlacementFields
-                draft={draft}
-                onChange={onChange}
-                app={null}
-                scopePrefix={scopePrefix}
-                autoFocusName
-              />
-              <ErrorText error={error} />
-            </>
-          )}
-        />
-      )}
-    </div>
+      {createDialog}
+    </DetailsPane>
+    </StackLevels>
   );
+}
+
+/** The part of the client auth state the bar needs. */
+interface BarSection {
+  dirty: boolean;
+  canSave: boolean;
+  blockedReason: string | null;
+  saving: boolean;
+  save: () => Promise<boolean>;
+  reset: () => void;
+}
+
+/**
+ * The open application's bar: its form bar with the login registration folded in. Clean
+ * registration ⇒ the form's bar unchanged. Dirty ⇒ Save saves the registration, then the form if
+ * it too is dirty; Cancel resets the registration without closing the application the way the
+ * form's own Cancel does, and cancels the form only when it has edits of its own.
+ */
+export function composeActions(
+  form: MasterDetailActions,
+  formDirty: boolean,
+  section: BarSection,
+): MasterDetailActions {
+  if (!section.dirty) return form;
+  return {
+    ...form,
+    canSave: section.canSave && !section.saving && (!formDirty || form.canSave),
+    // The form's reason only while the form has edits: a clean form is not what blocks Save.
+    blockedReason: (formDirty ? form.blockedReason : null) ?? section.blockedReason,
+    saving: form.saving || section.saving,
+    canCancel: !section.saving,
+    onSave: () => {
+      void section.save().then((ok) => {
+        if (ok && formDirty) form.onSave();
+      });
+    },
+    onCancel: () => {
+      section.reset();
+      if (formDirty) form.onCancel();
+    },
+  };
 }

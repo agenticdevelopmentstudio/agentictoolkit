@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 
 // The base hook, not hub's `useAuth` wrapper (which only adds `tenantId`) — this
@@ -8,12 +8,11 @@ import Link from "next/link";
 import { useAuth } from "@agentic-toolkit/auth";
 import { changePassword } from "../api/auth";
 import { reportUnexpectedAuthError } from "@agentic-toolkit/auth";
-import { useSettingsDirty, SettingsBody } from "@agentic-toolkit/resource";
+import { DetailsPane, type DetailsSection } from "@agentic-toolkit/resource";
 import { Card, CardContent } from "@agenticdevelopertoolkit/ui/components/card";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Label } from "@agenticdevelopertoolkit/ui/components/label";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
-import { EditActionBar } from "@agentic-toolkit/resource";
 import { DetailSection } from "@agentic-toolkit/resource";
 import { useSettingsNav } from "../layout/settings-nav";
 
@@ -28,19 +27,10 @@ export function AccountPanel() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
-  const { reportDirty } = useSettingsDirty();
   const goToTopic = useSettingsNav()?.goToTopic;
 
   const pwFilled = Boolean(current || next || confirm);
   const dirty = pwFilled;
-  useEffect(() => {
-    reportDirty("account", dirty);
-    return () => reportDirty("account", false);
-  }, [dirty, reportDirty]);
-
-  if (!user) return null;
 
   const pwError = pwFilled
     ? next.length < MIN_PASSWORD_LENGTH
@@ -52,48 +42,37 @@ export function AccountPanel() {
           : null
     : null;
 
-  const canSave = dirty && !pwError;
-
-  async function handleSave() {
-    if (!canSave) return;
-    setStatus(null);
-    setSaving(true);
-    try {
-      await changePassword({ currentPassword: current, newPassword: next });
-      setCurrent("");
-      setNext("");
-      setConfirm("");
-      setStatus({ ok: true, msg: "Password updated." });
-    } catch (err) {
-      reportUnexpectedAuthError(err, { feature: "account-panel", step: "save" });
-      setStatus({ ok: false, msg: err instanceof Error ? err.message : "Could not save." });
-    } finally {
-      setSaving(false);
-    }
-  }
-
   function handleCancel() {
     setCurrent("");
     setNext("");
     setConfirm("");
-    setStatus(null);
   }
 
+  // The password change is the pane's one section: the pane's bar saves it, reports it dirty to
+  // the settings rail, and shows the saving / saved / error line.
+  const section: DetailsSection = {
+    dirty,
+    canSave: !pwError,
+    blockedReason: pwError,
+    save: async () => {
+      try {
+        await changePassword({ currentPassword: current, newPassword: next });
+      } catch (err) {
+        reportUnexpectedAuthError(err, { feature: "account-panel", step: "save" });
+        throw err instanceof Error ? err : new Error("Could not save.");
+      }
+      handleCancel();
+    },
+    reset: handleCancel,
+  };
+
+  if (!user) return null;
+
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <EditActionBar
-        dirty={dirty}
-        canSave={canSave}
-        saving={saving}
-        onCancel={handleCancel}
-        onSave={handleSave}
-        status={
-          status ? (
-            <span className={status.ok ? "text-apt-green" : "text-apt-red"}>{status.msg}</span>
-          ) : null
-        }
-      />
-      <SettingsBody>
+    // The settings rail's own header carries the title, the API button and the help, so this bar
+    // is just Save / Cancel, in place.
+    <DetailsPane section={section} hoist={false} showApi={false} bodyClassName="px-6 py-6">
+      <div className="flex min-w-0 max-w-3xl flex-col gap-8">
         <DetailSection title="Email">
           <Card>
             <CardContent className="flex flex-col gap-2">
@@ -149,10 +128,7 @@ export function AccountPanel() {
                   id="account-current-password"
                   type="password"
                   value={current}
-                  onChange={(e) => {
-                    setCurrent(e.target.value);
-                    setStatus(null);
-                  }}
+                  onChange={(e) => setCurrent(e.target.value)}
                   autoComplete="current-password"
                 />
               </div>
@@ -162,10 +138,7 @@ export function AccountPanel() {
                   id="account-new-password"
                   type="password"
                   value={next}
-                  onChange={(e) => {
-                    setNext(e.target.value);
-                    setStatus(null);
-                  }}
+                  onChange={(e) => setNext(e.target.value)}
                   autoComplete="new-password"
                 />
               </div>
@@ -175,10 +148,7 @@ export function AccountPanel() {
                   id="account-confirm-password"
                   type="password"
                   value={confirm}
-                  onChange={(e) => {
-                    setConfirm(e.target.value);
-                    setStatus(null);
-                  }}
+                  onChange={(e) => setConfirm(e.target.value)}
                   autoComplete="new-password"
                 />
               </div>
@@ -186,7 +156,7 @@ export function AccountPanel() {
             </CardContent>
           </Card>
         </DetailSection>
-      </SettingsBody>
-    </div>
+      </div>
+    </DetailsPane>
   );
 }

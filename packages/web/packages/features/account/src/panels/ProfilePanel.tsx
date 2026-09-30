@@ -27,13 +27,12 @@ import {
   PRIVACY_LEVEL_FROM_WIRE,
   type PrivacyLevel,
 } from "@agenticdevelopertoolkit/ui/components/privacy-level-select";
-import { useSettingsDirty, SettingsBody } from "@agentic-toolkit/resource";
+import { DetailsPane, SettingsBody, type DetailsSection } from "@agentic-toolkit/resource";
 import { Card, CardContent } from "@agenticdevelopertoolkit/ui/components/card";
 import { Input } from "@agenticdevelopertoolkit/ui/components/input";
 import { Label } from "@agenticdevelopertoolkit/ui/components/label";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { UserCard, UserCardSkeleton, type UserCardDto } from "@agenticdevelopertoolkit/ui/blocks";
-import { EditActionBar } from "@agentic-toolkit/resource";
 import { DetailSection } from "@agentic-toolkit/resource";
 import { AvatarSection } from "./profile/AvatarSection";
 
@@ -82,14 +81,12 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
   const meQuery = useCurrentUser();
   const me = meQuery.data;
   const qc = useQueryClient();
-  const { reportDirty } = useSettingsDirty();
 
   // ── Identity edit state (name / slug / public toggle) ─────────────────────
   // Sparse "edits" object — only the fields the user has explicitly changed.
   // Cancel: reset to {} so current form values revert to server data.
   // Save success: reset to {} and invalidate server data query.
   const [edits, setEdits] = useState<Edits>({});
-  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Derived current form values
   const serverName = me?.name ?? "";
@@ -164,10 +161,6 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
     (edits.slug !== undefined && edits.slug !== serverSlug) ||
     (edits.profileVisibility !== undefined &&
       edits.profileVisibility !== serverProfileVisibility);
-  useEffect(() => {
-    reportDirty("profile", dirty);
-    return () => reportDirty("profile", false);
-  }, [dirty, reportDirty]);
 
   // ── Save mutation ──────────────────────────────────────────────────────────
   // Re-entrancy latch. `saveMutation.isPending` can't do this job: it is a RENDER value,
@@ -180,17 +173,7 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
     mutationFn: updateMe,
     onSuccess: () => {
       setEdits({});
-      setSaveError(null);
       qc.invalidateQueries({ queryKey: ME_QUERY_KEY });
-    },
-    onError: (err: unknown) => {
-      if (err instanceof AuthHttpError && err.status === 409) {
-        setSaveError("This slug is already taken — try a different one.");
-      } else if (err instanceof Error) {
-        setSaveError(err.message);
-      } else {
-        setSaveError("Could not save. Please try again.");
-      }
     },
     onSettled: () => {
       savingRef.current = false;
@@ -212,9 +195,9 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
         // will validate; the user should not be stuck with a silently disabled Save.
         slugStatus === "avail-error"));
   // dirty && valid ONLY. The in-flight term is NOT folded in here: `canSave` is handed
-  // to <EditActionBar> → <SaveCancelButtons>, which already applies `disabled={!canSave
-  // || saving}` itself, so including it would express the same rule twice — and the
-  // duplicate is what previously stood in for the missing re-entrancy guard below.
+  // to the DetailsPane's bar, which already disables Save while any save is in flight, so
+  // including it would express the same rule twice — and the duplicate is what previously
+  // stood in for the missing re-entrancy guard below.
   //
   // `clientSlugError` is deliberately NOT a term of its own: it is computed from `slug`,
   // which falls back to the STORED handle, so a standalone `!clientSlugError` blocks every
@@ -225,12 +208,11 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
   // this check, gated on `slugFieldChanged`, which is the whole point of that term.
   const canSave = dirty && slugClearToSave && slugStatus !== "checking";
 
-  function handleSave() {
+  async function handleSave() {
     // The in-flight check lives HERE rather than in `canSave` (see above), and reads the
     // ref rather than `isPending` for the reason given at the latch: React Query's
     // `mutate` has no re-entrancy guard of its own.
     if (!canSave || savingRef.current) return;
-    setSaveError(null);
     const body: Parameters<typeof updateMe>[0] = {};
     if (edits.name !== undefined && edits.name.trim() !== serverName) {
       body.name = edits.name.trim();
@@ -250,14 +232,24 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
       return;
     }
     savingRef.current = true;
-    saveMutation.mutate(body);
+    try {
+      await saveMutation.mutateAsync(body);
+    } catch (err) {
+      // The pane's bar shows the thrown message under Save.
+      if (err instanceof AuthHttpError && err.status === 409) {
+        throw new Error("This slug is already taken — try a different one.");
+      }
+      throw err instanceof Error ? err : new Error("Could not save. Please try again.");
+    }
   }
 
   function handleCancel() {
     setEdits({});
-    setSaveError(null);
     saveMutation.reset();
   }
+
+  // The identity fields are the pane's one section; the cards below save themselves.
+  const section: DetailsSection = { dirty, canSave, save: handleSave, reset: handleCancel };
 
   const suggestedSlug = slugify(me?.name ?? "");
   const displaySlug = slug || serverSlug || suggestedSlug;
@@ -356,23 +348,10 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <EditActionBar
-        dirty={dirty}
-        canSave={canSave}
-        saving={saveMutation.isPending}
-        onCancel={handleCancel}
-        onSave={handleSave}
-        status={
-          saveError ? (
-            <span className="text-apt-red">{saveError}</span>
-          ) : saveMutation.isSuccess && !dirty ? (
-            <span className="text-apt-green">Saved.</span>
-          ) : null
-        }
-      />
-
-      <SettingsBody>
+    // The settings rail's own header carries the title, the API button and the help, so this bar
+    // is just Save / Cancel, in place.
+    <DetailsPane section={section} hoist={false} showApi={false} bodyClassName="px-6 py-6">
+      <div className="flex min-w-0 max-w-3xl flex-col gap-8">
 
         {/* ── Identity ─────────────────────────────────────────────── */}
         <DetailSection title="Public profile">
@@ -386,7 +365,6 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
                   value={name}
                   onChange={(e) => {
                     setEdits((prev) => ({ ...prev, name: e.target.value }));
-                    setSaveError(null);
                   }}
                   placeholder="Your name"
                   autoComplete="name"
@@ -407,7 +385,6 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
                       ...prev,
                       slug: e.target.value.toLowerCase(),
                     }));
-                    setSaveError(null);
                   }}
                   placeholder={suggestedSlug || "your-handle"}
                   aria-invalid={Boolean(shownSlugError)}
@@ -463,7 +440,6 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
                     ariaLabel="Profile visibility"
                     onChange={(next) => {
                       setEdits((prev) => ({ ...prev, profileVisibility: next }));
-                      setSaveError(null);
                     }}
                   />
                 </div>
@@ -487,7 +463,7 @@ export function ProfilePanel({ reservedSlugs, profileUrlFor }: ProfilePanelProps
             <UserCardSkeleton />
           )}
         </DetailSection>
-      </SettingsBody>
-    </div>
+      </div>
+    </DetailsPane>
   );
 }

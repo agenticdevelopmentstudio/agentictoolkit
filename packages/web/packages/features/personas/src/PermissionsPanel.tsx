@@ -2,7 +2,6 @@
 
 import { useAction } from "@agentic-toolkit/crud";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
-import { useRecordAffordance } from "@agentic-toolkit/resource";
 import { Switch } from "@agenticdevelopertoolkit/ui/components/switch";
 import { Button } from "@agenticdevelopertoolkit/ui/components/button";
 import { Field } from "@agenticdevelopertoolkit/ui/blocks/field";
@@ -48,7 +47,6 @@ type MayActRow = { kind: MayActGrantableKind; granted: boolean };
  */
 export function PermissionsPanel({ personaId }: { personaId: string }) {
   const { error: mayActError, run: runMayAct } = useAction();
-  const renderRecordAffordance = useRecordAffordance();
   const mayAct = useOptimisticRowActions<MayActRow, MayActGrantableKind>(
     "persona-may-act",
     personaId,
@@ -115,14 +113,9 @@ export function PermissionsPanel({ personaId }: { personaId: string }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <FieldGroup
-        title="Permissions"
-        trailing={renderRecordAffordance?.({
-          path: "/access/personas/{id}/may-act",
-          pathValues: { id: personaId },
-          title: "Persona permissions API",
-        })}
-      >
+      <FieldGroup title="Permissions">
+        {/* The API affordance for this persona lives in PersonaEditor's leafHeader (the persisted
+            persona's ButtonBar `api`), one button per header — not here. */}
         <ErrorText error={mayAct.loadError ?? mayActError} />
         {MAY_ACT_SWITCHES.map(({ kind, label }) => {
           const row = mayAct.rows?.find((r) => r.kind === kind);

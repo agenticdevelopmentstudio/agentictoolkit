@@ -42,7 +42,7 @@ import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import { UnsavedChangesAlert } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-alert";
 import { Field } from "@agenticdevelopertoolkit/ui/blocks/field";
 import { DialogErrorText, ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
-import { useReportBusy, useReportSettingsDirty } from "@agentic-toolkit/resource";
+import { DetailsPane, useReportBusy, useReportSettingsDirty } from "@agentic-toolkit/resource";
 
 /**
  * The empty list, hoisted to module scope: `flagsQuery.data ?? []` would otherwise mint a
@@ -107,7 +107,7 @@ export function FeatureFlagsPane({
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Report unsaved dialog input to the settings overlay so a close can warn before discarding it
-  // (a no-op outside a SettingsDirtyProvider) — same wiring as AuthPane.
+  // (a no-op outside a SettingsDirtyProvider) — same wiring as the other settings panes.
   useReportSettingsDirty("ecosystem-feature-flags", dialogDirty);
 
   // The list is already alphabetized by the api layer; `allFlags` feeds lookups + the collision
@@ -217,56 +217,57 @@ export function FeatureFlagsPane({
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-        <div className="space-y-6">
-          {help && <p className="max-w-3xl text-sm text-apt-text-muted">{help}</p>}
-
-          {/* Filter field first, then the create affordance (right-justified via ml-auto). */}
-          <div className="flex items-center gap-2">
-            <Input
-              type="search"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter flags…"
-              aria-label="Filter feature flags by key or description"
-              className="max-w-xs"
-            />
-            <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setCreating(true)}>
-              <Plus data-icon="inline-start" />
-              New flag
-            </Button>
-          </div>
-
-          {flagsQuery.isError && (
-            <Alert variant="error">
-              <TriangleAlert />
-              <AlertTitle>Couldn&apos;t load the feature flags</AlertTitle>
-              <AlertDescription>{errorMessage(flagsQuery.error)}</AlertDescription>
-            </Alert>
-          )}
-
-          {updateMutation.isError && !creating && editing === null && (
-            <Alert variant="error">
-              <TriangleAlert />
-              <AlertTitle>Couldn&apos;t save the change</AlertTitle>
-              <AlertDescription>{errorMessage(updateMutation.error)}</AlertDescription>
-            </Alert>
-          )}
-
-          <DataTable<EcosystemFeatureFlag>
-            columns={columns}
-            rows={visibleFlags}
-            getRowId={(flag) => flag.key}
-            loading={flagsQuery.isPending}
-            emptyLabel={
-              query && allFlags.length > 0
-                ? "No flags match your filter."
-                : "No feature flags yet."
-            }
-            ariaLabel="Feature flags"
+    // The shared details pane: its header carries this list's API button and "?" help.
+    <DetailsPane
+      help={help}
+      api={{ path: "/ecosystem/feature-flags/{id}", pathValues: { id: ecosystemId }, title: "Feature flags API" }}
+      bodyClassName="px-6 py-6"
+    >
+      <div className="space-y-6">
+        {/* Filter field first, then the create affordance (right-justified via ml-auto). */}
+        <div className="flex items-center gap-2">
+          <Input
+            type="search"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter flags…"
+            aria-label="Filter feature flags by key or description"
+            className="max-w-xs"
           />
+          <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setCreating(true)}>
+            <Plus data-icon="inline-start" />
+            New flag
+          </Button>
         </div>
+
+        {flagsQuery.isError && (
+          <Alert variant="error">
+            <TriangleAlert />
+            <AlertTitle>Couldn&apos;t load the feature flags</AlertTitle>
+            <AlertDescription>{errorMessage(flagsQuery.error)}</AlertDescription>
+          </Alert>
+        )}
+
+        {updateMutation.isError && !creating && editing === null && (
+          <Alert variant="error">
+            <TriangleAlert />
+            <AlertTitle>Couldn&apos;t save the change</AlertTitle>
+            <AlertDescription>{errorMessage(updateMutation.error)}</AlertDescription>
+          </Alert>
+        )}
+
+        <DataTable<EcosystemFeatureFlag>
+          columns={columns}
+          rows={visibleFlags}
+          getRowId={(flag) => flag.key}
+          loading={flagsQuery.isPending}
+          emptyLabel={
+            query && allFlags.length > 0
+              ? "No flags match your filter."
+              : "No feature flags yet."
+          }
+          ariaLabel="Feature flags"
+        />
       </div>
 
       <FlagDialog
@@ -311,7 +312,7 @@ export function FeatureFlagsPane({
         }}
         busy={deleteBusy}
       />
-    </div>
+    </DetailsPane>
   );
 }
 

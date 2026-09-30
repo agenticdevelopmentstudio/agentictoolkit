@@ -11,13 +11,13 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from 'react'
-import { ButtonBar, type ButtonBarActions, type PaneExitGuard } from '@agenticdevelopertoolkit/ui/blocks'
+import type { PaneExitGuard } from '@agenticdevelopertoolkit/ui/blocks'
 import { AlertModal } from '@agenticdevelopertoolkit/ui/components/alert-modal'
 import { Badge } from '@agenticdevelopertoolkit/ui/components/badge'
 import { Button } from '@agenticdevelopertoolkit/ui/components/button'
 import { Checkbox } from '@agenticdevelopertoolkit/ui/components/checkbox'
-import { ApiButton } from '@agentic-toolkit/api-explorer'
-import { useReportBusy } from '@agentic-toolkit/resource'
+import { ButtonBar, useReportBusy, type MasterDetailActions } from '@agentic-toolkit/resource'
+import { ApiAffordanceScope } from './ApiAffordanceScope'
 import { MoveToEcosystemDialog } from './MoveToEcosystemDialog'
 import { ResizableSplit } from '@agenticdevelopertoolkit/ui/components/resizable-split'
 import { Spinner } from '@agenticdevelopertoolkit/ui/components/spinner'
@@ -341,7 +341,7 @@ export function CrudDataView({
     })
   }
 
-  const actions: ButtonBarActions = {
+  const actions: MasterDetailActions = {
     onCreate,
     createLabel: 'Create',
     onCancel,
@@ -350,7 +350,7 @@ export function CrudDataView({
     canSave: dirty,
     saving: save.busy,
     onDelete,
-    canDelete: selected.size > 0,
+    canDelete: selected.size > 0 && !save.busy,
   }
 
   // Expose the unsaved-work guard to the enclosing browser via a STABLE object whose
@@ -384,130 +384,134 @@ export function CrudDataView({
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-dirty={dirty || undefined}>
-      <ButtonBar
-        actions={actions}
-        showCreate={canWrite}
-        showDelete={canWrite}
-        leading={
-          !canWrite ? (
-            // Say WHY the actions are missing. A bar that silently loses its buttons reads as
-            // broken. The reason is VISIBLE text, not a `title`: a tooltip on a non-interactive
-            // element reaches neither a screen reader nor a touch device, which is most of the
-            // audience that needs telling. `canMove` implies admin, so it can never be the
-            // alternative here.
-            <span className="flex items-center gap-2">
-              <Badge variant="neutral">Read-only</Badge>
-              <span className="text-xs text-apt-text-dim">
-                Shared platform data — only an administrator can change it.
+    // The bar's API slot stays live on a site with no workspace shell to supply it.
+    <ApiAffordanceScope>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-dirty={dirty || undefined}>
+        <ButtonBar
+          actions={actions}
+          showCreate={canWrite}
+          showDelete={canWrite}
+          // Nested in its host pane's detail, whose own header already holds the toolbar slot.
+          hoist={false}
+          api={{
+            path: `/${meta.schema}/${meta.table}`,
+            pathValues: {},
+            queryValues: apiQuery,
+            title: `${meta.table} API`,
+          }}
+          leading={
+            !canWrite ? (
+              // Say WHY the actions are missing. A bar that silently loses its buttons reads as
+              // broken. The reason is VISIBLE text, not a `title`: a tooltip on a non-interactive
+              // element reaches neither a screen reader nor a touch device, which is most of the
+              // audience that needs telling. `canMove` implies admin, so it can never be the
+              // alternative here.
+              <span className="flex items-center gap-2">
+                <Badge variant="neutral">Read-only</Badge>
+                <span className="text-xs text-apt-text-dim">
+                  Shared platform data — only an administrator can change it.
+                </span>
               </span>
-            </span>
-          ) : canMove ? (
-            <Button
-              variant="secondary"
-              disabled={selected.size === 0}
-              onClick={() => setMovingOpen(true)}
-            >
-              Move to ecosystem…
-            </Button>
-          ) : undefined
-        }
-      />
-      <div className="flex justify-end px-4 pt-2">
-        <ApiButton
-          endpoint={{ method: 'GET', path: `/${meta.schema}/${meta.table}` }}
-          queryValues={apiQuery}
-          title={`${meta.table} API`}
+            ) : canMove ? (
+              <Button
+                variant="secondary"
+                disabled={selected.size === 0}
+                onClick={() => setMovingOpen(true)}
+              >
+                Move to ecosystem…
+              </Button>
+            ) : undefined
+          }
         />
-      </div>
-      {save.error && (
-        <div className="px-6 py-1">
-          <ErrorText error={save.error} />
-        </div>
-      )}
-      <ResizableSplit
-        className="min-h-0 flex-1"
-        // Persists the divider position across mounts (component state + localStorage).
-        storageKey="crud-data-view-split"
-        bottomLabel="Row details"
-        // The divider is the detail pane's header bar: the active row's identity
-        // lives here (was RowDetails' bespoke header) and the bar's disclosure
-        // replaces the pane's own CollapseToggle.
-        header={
-          baseline ? (
-            <>
-              <span className={fieldCaptionClass}>{isDraftActive ? 'New row' : 'Row'}</span>
-              <span className="ml-2 truncate font-mono text-xs text-apt-text">
-                {isDraftActive ? '(unsaved)' : (activeRow ? rowKey(meta, activeRow) : null) || '(no primary key)'}
-              </span>
-            </>
-          ) : (
-            'Row details'
-          )
-        }
-        top={
-          <RowList
+        {save.error && (
+          <div className="px-6 py-1">
+            <ErrorText error={save.error} />
+          </div>
+        )}
+        <ResizableSplit
+          className="min-h-0 flex-1"
+          // Persists the divider position across mounts (component state + localStorage).
+          storageKey="crud-data-view-split"
+          bottomLabel="Row details"
+          // The divider is the detail pane's header bar: the active row's identity
+          // lives here (was RowDetails' bespoke header) and the bar's disclosure
+          // replaces the pane's own CollapseToggle.
+          header={
+            baseline ? (
+              <>
+                <span className={fieldCaptionClass}>{isDraftActive ? 'New row' : 'Row'}</span>
+                <span className="ml-2 truncate font-mono text-xs text-apt-text">
+                  {isDraftActive ? '(unsaved)' : (activeRow ? rowKey(meta, activeRow) : null) || '(no primary key)'}
+                </span>
+              </>
+            ) : (
+              'Row details'
+            )
+          }
+          top={
+            <RowList
+              meta={meta}
+              rows={rows}
+              draftKeys={draftKeys}
+              draftBaseline={draftBaseline}
+              edits={edits}
+              loading={loading}
+              error={error}
+              activeKey={activeKey}
+              onSelect={setActiveKey}
+              canWrite={canWrite}
+              selected={selected}
+              allSelected={allSelected}
+              onToggleSelect={toggleSelect}
+              onToggleSelectAll={toggleSelectAll}
+            />
+          }
+          bottom={
+            <RowDetails
+              meta={meta}
+              pinned={pinnedNames}
+              baseline={baseline}
+              canWrite={canWrite}
+              mode={isDraftActive ? 'create' : 'edit'}
+              edits={activeKey != null ? edits[activeKey] : undefined}
+              onEdit={(name, value) => {
+                if (activeKey != null) setEdit(activeKey, name, value)
+              }}
+            />
+          }
+        />
+        <AlertModal
+          open={confirmingDelete}
+          title={`Delete ${selected.size} row${selected.size === 1 ? '' : 's'}?`}
+          description={
+            del.error ? (
+              <ErrorText error={del.error} />
+            ) : (
+              `This permanently deletes the selected row${selected.size === 1 ? '' : 's'}.`
+            )
+          }
+          tone="error"
+          destructive
+          confirmLabel="Delete"
+          cancelLabel="Cancel"
+          onConfirm={confirmDelete}
+          onCancel={() => setConfirmingDelete(false)}
+          busy={del.busy}
+        />
+        {canMove && (
+          <MoveToEcosystemDialog
             meta={meta}
-            rows={rows}
-            draftKeys={draftKeys}
-            draftBaseline={draftBaseline}
-            edits={edits}
-            loading={loading}
-            error={error}
-            activeKey={activeKey}
-            onSelect={setActiveKey}
-            canWrite={canWrite}
-            selected={selected}
-            allSelected={allSelected}
-            onToggleSelect={toggleSelect}
-            onToggleSelectAll={toggleSelectAll}
-          />
-        }
-        bottom={
-          <RowDetails
-            meta={meta}
-            pinned={pinnedNames}
-            baseline={baseline}
-            canWrite={canWrite}
-            mode={isDraftActive ? 'create' : 'edit'}
-            edits={activeKey != null ? edits[activeKey] : undefined}
-            onEdit={(name, value) => {
-              if (activeKey != null) setEdit(activeKey, name, value)
+            rowIds={moveIds}
+            open={movingOpen}
+            onClose={() => setMovingOpen(false)}
+            onMoved={() => {
+              setSelected(new Set())
+              void resource.refresh()
             }}
           />
-        }
-      />
-      <AlertModal
-        open={confirmingDelete}
-        title={`Delete ${selected.size} row${selected.size === 1 ? '' : 's'}?`}
-        description={
-          del.error ? (
-            <ErrorText error={del.error} />
-          ) : (
-            `This permanently deletes the selected row${selected.size === 1 ? '' : 's'}.`
-          )
-        }
-        tone="error"
-        destructive
-        confirmLabel="Delete"
-        cancelLabel="Cancel"
-        onConfirm={confirmDelete}
-        onCancel={() => setConfirmingDelete(false)}
-        busy={del.busy}
-      />
-      {canMove && (
-        <MoveToEcosystemDialog
-          meta={meta}
-          rowIds={moveIds}
-          open={movingOpen}
-          onClose={() => setMovingOpen(false)}
-          onMoved={() => {
-            setSelected(new Set())
-            void resource.refresh()
-          }}
-        />
-      )}
-    </div>
+        )}
+      </div>
+    </ApiAffordanceScope>
   )
 }
 

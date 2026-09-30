@@ -9,7 +9,6 @@ import {
   MasterDetailLeaf,
   useMasterDetailForm,
   useMasterDetailLevel,
-  useRecordAffordance,
   type TopicLeaf,
 } from "@agentic-toolkit/resource";
 import {
@@ -69,7 +68,6 @@ export function GroupsSection({
   renderTransferOwnership?: (group: { id: string; name: string }) => ReactNode;
 }) {
   const ws = { workspace: workspaceSlug };
-  const renderRecordAffordance = useRecordAffordance();
   const urlSelection = leaf ? { selectedId: leaf.leafId, onSelect: leaf.onSelect } : undefined;
   // "New group" is a POPUP (like New Ecosystem / New site), not an inline blank form.
   const [newOpen, setNewOpen] = useState(false);
@@ -131,11 +129,11 @@ export function GroupsSection({
     <>
       <MasterDetailLeaf
         form={form}
-        trailing={renderRecordAffordance?.({
+        api={{
           path: "/monitoring/site-groups/{id}",
           pathValues: { id: form.selectedId },
           title: "Site group API",
-        })}
+        }}
         emptyTitle={groups === null ? "Loading…" : "Select a group to edit, or create a new one."}
         // The transfer section belongs to the INLINE editor and only to it. `renderDetail` is
         // called by MasterDetailLeaf alone; the "New group" popup below builds its own GroupDetail

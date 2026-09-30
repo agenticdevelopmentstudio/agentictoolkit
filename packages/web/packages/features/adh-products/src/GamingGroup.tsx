@@ -8,6 +8,7 @@ import { StackGroupDetail, type GroupTopicItem, type TopicLeaf } from "@agentic-
 import {
   CatalogTopicPane,
   EventTypesTopicPane,
+  GamificationSettingsTopicPane,
   LevelsTopicPane,
 } from "@agentic-toolkit/gamification";
 import {
@@ -26,9 +27,8 @@ import { GamingSettingsPane } from "./GamingSettingsPane";
  *
  * `REALM_CONFIG_CACHE_KEY` (imported above) is `@agentic-toolkit/games`'s canonical, exported
  * constant for this row's cache key — the SAME key `RealmSettingsPane` and `useGameForEcosystem`
- * read/write, so turning gaming on or off from the Settings member (or the games site's own
- * Enable Gaming switch) is reflected here — and in which members even SHOW — without a
- * re-navigation. The LOADER function itself has no such shared export: `useGameForEcosystem.ts`
+ * read/write, so a mode the backend moved when a feature was added or removed is reflected
+ * here — and in which members even SHOW — as soon as that entry is refreshed. The LOADER function itself has no such shared export: `useGameForEcosystem.ts`
  * keeps `loadRealmConfig` package-internal (its own `GameSettingsPane` reaches it via a relative
  * import, not the barrel), so this is a private copy of that same handful of lines, same as
  * `RealmSettingsPane`'s.
@@ -62,27 +62,33 @@ function subLeafOrUndefined(
 }
 
 /**
- * The products site's Gaming group (design doc §4) — a HOST-OWNED `StackGroupDetail`, not one of
- * `@agentic-toolkit/ecosystems`'s hardcoded `GROUP_IDS`. It has to be host-owned because its
- * member list depends on DATA (the realm's `mode`), and the toolkit's own group machinery is
- * static by design (§4.2) — teaching it to read gamification config would put gaming-specific
- * knowledge in a package that has none today.
+ * The products site's Gaming and Gamification groups (design doc §4) — HOST-OWNED
+ * `StackGroupDetail`s, not `@agentic-toolkit/ecosystems`'s hardcoded `GROUP_IDS`. They have to be
+ * host-owned because the Gaming member list depends on DATA (the realm's `mode`), and the
+ * toolkit's own group machinery is static by design (§4.2) — teaching it to read gamification
+ * config would put gaming-specific knowledge in a package that has none today.
  *
- * Members by mode, Settings always last (§4.2):
- *   - `none`         → Settings
- *   - `gamification` → Catalog, Levels, Custom Events, Settings
- *   - `game`         → Engine, Content, Connections, Effects, Catalog, Levels, Custom Events, Settings
+ * Gaming and Gamification are two features, so two rail rows, each one `part` of this group
+ * (Mike, 2026-09-29). Members, Settings always last (§4.2):
+ *   - `gamification` → Catalog, Levels, Custom Events, Settings (the realm's settings) — the
+ *     feature being held is what shows them, not the realm's mode.
+ *   - `gaming`       → Settings alone while `mode` is not `game` (the mode follows the product's
+ *     features, so this is the moment between adding Gaming and the realm catching up), then
+ *     Engine, Content, Connections, Effects, Settings.
  *
  * Mode defaults to `'none'` while the config is loading or (for a brand-new product) absent, so
- * this never flashes the full eight-member list before collapsing to one — the common case (most
+ * the Gaming row never flashes the full list before collapsing to one — the common case (most
  * products are not games) renders right the first time.
  */
 export function GamingGroup({
+  part,
   ecosystemId,
   leaf,
   subLeafFor,
   helpFor,
 }: {
+  /** Which rail row this is: the Gaming feature's group or the Gamification feature's. */
+  part: "gaming" | "gamification";
   ecosystemId?: string;
   /** This group's OWN leaf (which member is active) — cedes the group's own selection to the
    *  host's URL the same way `leaf` does for every other host-owned pane (`RenderTopicPaneCtx`). */
@@ -108,7 +114,7 @@ export function GamingGroup({
 
   const items: GroupTopicItem[] = [];
 
-  if (mode === "game") {
+  if (part === "gaming" && mode === "game") {
     items.push(
       {
         id: "engine",
@@ -164,7 +170,7 @@ export function GamingGroup({
     );
   }
 
-  if (mode === "gamification" || mode === "game") {
+  if (part === "gamification") {
     items.push(
       {
         id: "catalog",
@@ -194,23 +200,33 @@ export function GamingGroup({
     );
   }
 
-  items.push({
-    id: "settings",
-    label: "Settings",
-    icon: <Settings size={16} aria-hidden />,
-    description:
-      mode === "none"
-        ? "Turn gaming on for this product."
-        : "Gaming support, and the settings that come with it.",
-    render: () => (
-      <GamingSettingsPane ecosystemId={ecosystemId} help={helpFor("ecosystems/gaming/settings")} />
-    ),
-  });
+  items.push(
+    part === "gamification"
+      ? {
+          id: "settings",
+          label: "Settings",
+          icon: <Settings size={16} aria-hidden />,
+          description: "Skin, timezone, surfaces and seasons for this product's gamification.",
+          render: () => <GamificationSettingsTopicPane ecosystemId={ecosystemId} />,
+        }
+      : {
+          id: "settings",
+          label: "Settings",
+          icon: <Settings size={16} aria-hidden />,
+          description:
+            mode === "game"
+              ? "Surfaces, seasons and the game's status."
+              : "This product's gaming settings.",
+          render: () => (
+            <GamingSettingsPane ecosystemId={ecosystemId} help={helpFor("ecosystems/gaming/settings")} />
+          ),
+        },
+  );
 
   return (
     <StackGroupDetail
-      levelId="ecosystem-gaming"
-      title="Gaming"
+      levelId={`ecosystem-${part}`}
+      title={part === "gaming" ? "Gaming" : "Gamification"}
       items={items}
       urlSelection={{ selectedId: leaf?.leafId ?? null, onSelect: leaf?.onSelect ?? (() => {}) }}
       renderSubLeaf={subLeafFor}

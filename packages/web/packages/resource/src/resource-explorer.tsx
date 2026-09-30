@@ -19,6 +19,7 @@ import {
 } from "@agenticdevelopertoolkit/ui/blocks";
 import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
 import { StackLevels } from "./rail-host";
+import { settingsLast } from "./settings-last";
 import { RailHostBoundary } from "./standalone-rail-host";
 
 /** The deep-linkable LEAF inside a topic (e.g. the selected application within the
@@ -127,6 +128,7 @@ export function ResourceExplorer<T>({
   reload,
   prefetchItem,
   topicAliases,
+  memberMoves,
   renderNewControl,
   topicsTitle,
   topicsTitleActions,
@@ -168,6 +170,13 @@ export function ResourceExplorer<T>({
    *  true: the old address redirects (replace, not push, so Back still leaves) to the same
    *  pane at its current address, carrying the leaf and inner-entity segments with it. */
   topicAliases?: Record<string, string>;
+  /** Group members that MOVED OUT of a group: old group id → member id → where it lives now (a
+   *  group id, or `null` for a top-level topic of its own). A group that was split or retired
+   *  leaves addresses like `/…/<id>/<old group>/<member>/<entity>` behind; this redirects each one
+   *  (replace, not push) to the member's current address, carrying the inner entity with it. A
+   *  retired group — one no longer in `topics` — named with no member goes to the resource
+   *  itself. `topicAliases` then finishes the job for a member that landed in a group. */
+  memberMoves?: Record<string, Record<string, string | null>>;
   /** The resource rail's naming — required for the classic list-first arrangement; omit in
    *  `promoteTopics` mode, which has no resource rail (the resource list moves into a topic). */
   rail?: ResourceRailConfig<T>;
@@ -301,6 +310,26 @@ export function ResourceExplorer<T>({
     router,
   ]);
 
+  // A member that moved out of the group the URL names (see `memberMoves`).
+  const moves = activeTopic ? memberMoves?.[activeTopic] : undefined;
+  const movedTo =
+    moves && activeLeafId && Object.hasOwn(moves, activeLeafId)
+      ? { group: moves[activeLeafId] }
+      : moves && !activeLeafId && !validTopics.has(activeTopic as string)
+        ? { group: undefined }
+        : undefined;
+  const moveTarget =
+    movedTo && scopedId
+      ? movedTo.group === undefined
+        ? `${basePath}/${scopedId}`
+        : `${basePath}/${scopedId}/${movedTo.group ? `${movedTo.group}/` : ""}${activeLeafId}${
+            activeMemberEntityId ? `/${activeMemberEntityId}` : ""
+          }`
+      : undefined;
+  useEffect(() => {
+    if (moveTarget) router.replace(moveTarget, { scroll: false });
+  }, [moveTarget, router]);
+
   const active = items?.find((i) => getId(i) === scopedId);
   // "Members (Core Platform Ecosystem)" — but the entity topic's label already IS the
   // nameSuffix, so don't double it ("Ecosystem (Core Platform)", not "… Ecosystem)").
@@ -359,7 +388,9 @@ export function ResourceExplorer<T>({
   const entityItems = matchedIds
     ? allEntityItems.filter((row) => matchedIds.has(row.id))
     : railRows;
-  const topicItems: TopicDetailItem[] = topics.map((t) => ({
+  // Every topic list closes on Settings, alone under a divider — decided here for every resource's
+  // topic rail rather than authored (and mis-authored) per feature.
+  const topicItems: TopicDetailItem[] = settingsLast(topics).map((t) => ({
     id: t.id,
     label: t.label,
     icon: t.icon,

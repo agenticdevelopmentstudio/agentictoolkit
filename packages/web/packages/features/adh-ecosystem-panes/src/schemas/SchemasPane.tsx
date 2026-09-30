@@ -27,7 +27,12 @@ import { Select } from "@agenticdevelopertoolkit/ui/components/select";
 import { Textarea } from "@agenticdevelopertoolkit/ui/components/textarea";
 import { DialogErrorText, ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { CreateResourceDialog, StackLevels } from "@agentic-toolkit/resource";
-import { CRUD_TABLES, CrudDataView, useExitGuardChannel } from "@agentic-toolkit/crud";
+import {
+  ApiAffordanceScope,
+  CRUD_TABLES,
+  CrudDataView,
+  useExitGuardChannel,
+} from "@agentic-toolkit/crud";
 import { UnsavedChangesAlert } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-alert";
 import { useExitGate } from "@agenticdevelopertoolkit/ui/hooks/useExitGate";
 import { useRailExitGuard } from "@agentic-toolkit/resource";
@@ -35,7 +40,6 @@ import { schemasApi } from "@agentic-toolkit/data/markdown";
 import { bucketsCacheKey, newSchemaTable, slugifyTableName, tableNameInput } from "./schema-model";
 import type { SchemaDefinition, SchemaDefinitionInput, SchemaTable } from "./schema-model";
 import { ButtonBar } from "@agentic-toolkit/resource";
-import { RecordApiButton } from "@agentic-toolkit/api-explorer";
 import { useMasterDetailForm } from "@agentic-toolkit/resource";
 import { useMasterDetailLevel } from "@agentic-toolkit/resource";
 import type { TopicLeaf } from "@agentic-toolkit/resource";
@@ -443,375 +447,376 @@ export function SchemasPane({
   const rowsKey = bucket && openTable ? `${bucket.id}/${openTable.id}/${openTable.type}` : "";
 
   return (
-    <StackLevels levels={bucketLevel ? [bucketsLevel, bucketLevel] : [bucketsLevel]}>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <ErrorText error={loadError} className="px-6 pt-4" />
-        {bucket && openTable ? (
-          // A table: `name: sql-table` over its data rows (Mike, 2026-09-24). A bucket table is a
-          // NAME for one of the ecosystem's sql tables, so its rows are that table's rows in the
-          // bucket's ecosystem — the rows carry no bucket of their own.
-          <>
-            <div className="flex items-center gap-2 border-b border-apt-border px-6 py-3">
-              <h2 className="min-w-0 flex-1 truncate font-mono text-sm">
-                <span className="font-semibold text-apt-text">{openTable.name}</span>
-                <span className="text-apt-text-muted">: {openTable.type}</span>
-              </h2>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                // Asked on open, not on Save: a retype swaps the rows under the table, and the
-                // dialog's Save cannot wait on a second question (a Stay would leave it saving).
-                // The staged rows go only if the save retypes the table (`rowsKey`): a rename or
-                // a cancel leaves them staged, as a refused removal does.
-                onClick={() =>
-                  !tableOpRef.current &&
-                  rowsGateRef.current.attemptExit(() => setEditTableId(openTable.id))
-                }
-                // Any table op, not only a removal: an edit opened over an Add in flight would be
-                // saved against the list that Add is replacing.
-                disabled={tablesBusy}
-                title="Edit table"
-                aria-label={`Edit ${openTable.name}`}
-              >
-                <Pencil />
-              </Button>
-              <Button
-                type="button"
-                variant="destructive-ghost"
-                size="icon"
-                // Removing the table unmounts its rows, so rows staged in them ask first — the
-                // same question leaving the table any other way asks — and then the removal itself
-                // is confirmed.
-                onClick={() =>
-                  !tableOpRef.current &&
-                  rowsGateRef.current.attemptExit(() => {
-                    setRemoveError(null);
-                    setPendingRemove({ tables: [openTable], what: `“${openTable.name}”` });
-                  })
-                }
-                disabled={tablesBusy}
-                title="Remove table from bucket"
-                aria-label={`Remove ${openTable.name} from bucket`}
-              >
-                <Trash2 />
-              </Button>
-            </div>
-            {isMarkdownType(openTable.type) ? (
-              <MarkdownRowsView
-                key={rowsKey}
-                type={openTable.type}
-                workspace={workspaceSlug}
-                ecosystemId={bucket.ecosystemId}
-              />
-            ) : meta ? (
-              <CrudDataView
-                key={rowsKey}
-                meta={meta}
-                // A SCOPE, not a filter: the backend verifies the caller manages the bucket's
-                // ecosystem and acts there on every verb. As a plain filter it read a non-admin's
-                // product bucket as empty and refused every create (Mike, 2026-09-25).
-                scopeEcosystemId={bucket.ecosystemId}
-                createDefaults={{ ecosystemId: bucket.ecosystemId }}
-                onGuardChange={registerGuard}
-              />
-            ) : (
-              <EmptyState
-                title="These rows can't be browsed here."
-                description={`${openTable.type} has no generic data view.`}
-              />
-            )}
-          </>
-        ) : (
-          <EmptyState
-            title={
-              schemas === null
-                ? "Loading…"
-                : bucket
-                  ? bucket.tables.length
-                    ? "Select a table to see its rows."
-                    : "No tables yet — add one with +."
-                  : "Select a bucket, or create a new one."
-            }
-          />
-        )}
-
-        {/* The bucket's Settings, from the gear in its rail header. */}
-        <Dialog
-          open={!!bucket && settingsFor === bucket.id}
-          onOpenChange={(open) => (open ? setSettingsFor(bucket?.id ?? null) : closeSettings())}
-        >
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>{bucket?.name}</DialogTitle>
-            </DialogHeader>
-            <ButtonBar
-              // Inside the dialog, always. The default hoists the bar into the host's toolbar slot,
-              // and a host that publishes a real one (StandaloneRailHost, on the storage and
-              // products sites) put Save and Cancel outside the modal, behind its backdrop.
-              hoist={false}
-              actions={{
-                ...form.actions,
-                // The form's Cancel deselects the bucket — right for a detail pane, wrong for a
-                // dialog over the bucket's own tables: it closed the bucket out from under the
-                // user. Cancel here drops the edit (the same re-hydrate `closeSettings` discards
-                // with) and closes, leaving the bucket and its open table where they were.
-                onCancel: () => {
-                  if (form.dirty && bucket) form.select(bucket.id);
-                  setSettingsFor(null);
-                },
-                // A new slug is a new rdid, and the open table and its rows are keyed on it, so a
-                // save that moves it leaves them — rows staged there ask first.
-                onSave: () =>
-                  bucket && form.draft && form.draft.slug.trim() !== bucket.slug
-                    ? rowsGateRef.current.attemptExit(form.actions.onSave)
-                    : form.actions.onSave(),
-              }}
-              showCreate={false}
-              // Deleting lives in the danger zone below; a bar Delete would only ever be a
-              // disabled second button naming the same action.
-              showDelete={false}
-              trailing={
-                <RecordApiButton
-                  path="/bucket/buckets/{id}"
-                  pathValues={{ id: form.selectedId }}
-                  title="Bucket API"
-                />
-              }
-              help={help}
-            />
-            {form.editing && form.draft && (
-              <div className="flex max-h-[70vh] flex-col gap-6 overflow-y-auto" key={form.detailKey}>
-                <SchemaDefinitionDetail
-                  title="Settings"
-                  draft={form.draft}
-                  onChange={form.onChange}
-                  error={form.error}
-                  schema={bucket}
-                  ecosystemRdid={ecosystemId}
-                  renderTransfer={renderTransfer}
-                  onDelete={
-                    bucket?.kind === "custom"
-                      ? async () => {
-                          await schemasApi.delete(bucket.id);
-                          setSettingsFor(null);
-                          if (leaf) leaf.onSelect(null);
-                          else form.actions.onCancel();
-                          await refresh();
-                        }
-                      : undefined
-                  }
-                />
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-
-        <UnsavedChangesAlert {...rowsGate.exitAlertProps} />
-        <UnsavedChangesAlert {...settingsGate.exitAlertProps} />
-
-        {/* A confirm, not an alert: `cancelLabel` makes the ✕ a Cancel rather than a second
-            Confirm. A refusal is said HERE, in the question it answered. */}
-        <AlertModal
-          open={pendingRemove !== null}
-          title={`Remove ${pendingRemove?.what ?? ""} from ${bucket?.name ?? "the bucket"}?`}
-          description={
+    // The bucket bar's API slot stays live on a site with no workspace shell to supply it.
+    <ApiAffordanceScope>
+      <StackLevels levels={bucketLevel ? [bucketsLevel, bucketLevel] : [bucketsLevel]}>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <ErrorText error={loadError} className="px-6 pt-4" />
+          {bucket && openTable ? (
+            // A table: `name: sql-table` over its data rows (Mike, 2026-09-24). A bucket table is a
+            // NAME for one of the ecosystem's sql tables, so its rows are that table's rows in the
+            // bucket's ecosystem — the rows carry no bucket of their own.
             <>
-              The table is taken out of this bucket, and anything that points at it by id — a
-              persona's interest in it — stops pointing anywhere. Its rows stay in the ecosystem.
-              <DialogErrorText error={removeError} />
-            </>
-          }
-          destructive
-          confirmLabel="Remove"
-          cancelLabel="Cancel"
-          busy={removing}
-          onConfirm={() =>
-            pendingRemove && void removeTables(pendingRemove.tables, pendingRemove.all)
-          }
-          onCancel={() => {
-            setPendingRemove(null);
-            setRemoveError(null);
-          }}
-        />
-        <AlertModal
-          open={addAllError !== null}
-          title="Couldn't add the tables"
-          description={addAllError ?? ""}
-          onConfirm={() => setAddAllError(null)}
-        />
-
-        {/* Create is a scoped modal: name + description only (tables are added from the new
-            bucket's own rail, which opens once the created bucket is selected). */}
-        {newOpen && (
-          <CreateResourceDialog<SchemaDefinitionInput, SchemaDefinition>
-            ariaLabel="New bucket"
-            heading="New bucket"
-            blank={schemaBlank}
-            validate={(d) => schemaValidate(d, schemas ?? [])}
-            create={(d) => schemasApi.create(schemaNormalize(d), ecosystemId ?? "")}
-            onClose={() => setNewOpen(false)}
-            onCreated={(created) => {
-              setNewOpen(false);
-              void refresh();
-              if (leaf) leaf.onSelect(created.id);
-              else form.select(created.id);
-            }}
-            renderForm={(draft, onChange, error) => (
-              <>
-                <Field label="Name" hint="Unique bucket name.">
-                  <Input
-                    /* eslint-disable-next-line jsx-a11y/no-autofocus -- focus the first field on open */
-                    autoFocus
-                    value={draft.name}
-                    placeholder="Profile Basics"
-                    onChange={(e) => onChange(withName(draft, e.target.value))}
-                  />
-                </Field>
-                <BucketSlugField
-                  draft={draft}
-                  onChange={onChange}
-                  prefix={bucketSlugPrefix(undefined, ecosystemId)}
+              <div className="flex items-center gap-2 border-b border-apt-border px-6 py-3">
+                <h2 className="min-w-0 flex-1 truncate font-mono text-sm">
+                  <span className="font-semibold text-apt-text">{openTable.name}</span>
+                  <span className="text-apt-text-muted">: {openTable.type}</span>
+                </h2>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  // Asked on open, not on Save: a retype swaps the rows under the table, and the
+                  // dialog's Save cannot wait on a second question (a Stay would leave it saving).
+                  // The staged rows go only if the save retypes the table (`rowsKey`): a rename or
+                  // a cancel leaves them staged, as a refused removal does.
+                  onClick={() =>
+                    !tableOpRef.current &&
+                    rowsGateRef.current.attemptExit(() => setEditTableId(openTable.id))
+                  }
+                  // Any table op, not only a removal: an edit opened over an Add in flight would be
+                  // saved against the list that Add is replacing.
+                  disabled={tablesBusy}
+                  title="Edit table"
+                  aria-label={`Edit ${openTable.name}`}
+                >
+                  <Pencil />
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive-ghost"
+                  size="icon"
+                  // Removing the table unmounts its rows, so rows staged in them ask first — the
+                  // same question leaving the table any other way asks — and then the removal itself
+                  // is confirmed.
+                  onClick={() =>
+                    !tableOpRef.current &&
+                    rowsGateRef.current.attemptExit(() => {
+                      setRemoveError(null);
+                      setPendingRemove({ tables: [openTable], what: `“${openTable.name}”` });
+                    })
+                  }
+                  disabled={tablesBusy}
+                  title="Remove table from bucket"
+                  aria-label={`Remove ${openTable.name} from bucket`}
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+              {isMarkdownType(openTable.type) ? (
+                <MarkdownRowsView
+                  key={rowsKey}
+                  type={openTable.type}
+                  workspace={workspaceSlug}
+                  ecosystemId={bucket.ecosystemId}
                 />
-                <Field label="Description">
-                  <Textarea
-                    rows={2}
-                    placeholder="What this bucket is for."
-                    value={draft.description}
-                    onChange={(e) => onChange({ ...draft, description: e.target.value })}
-                  />
-                </Field>
-                <ErrorText error={error} />
-              </>
-            )}
-          />
-        )}
+              ) : meta ? (
+                <CrudDataView
+                  key={rowsKey}
+                  meta={meta}
+                  // A SCOPE, not a filter: the backend verifies the caller manages the bucket's
+                  // ecosystem and acts there on every verb. As a plain filter it read a non-admin's
+                  // product bucket as empty and refused every create (Mike, 2026-09-25).
+                  scopeEcosystemId={bucket.ecosystemId}
+                  createDefaults={{ ecosystemId: bucket.ecosystemId }}
+                  onGuardChange={registerGuard}
+                />
+              ) : (
+                <EmptyState
+                  title="These rows can't be browsed here."
+                  description={`${openTable.type} has no generic data view.`}
+                />
+              )}
+            </>
+          ) : (
+            <EmptyState
+              title={
+                schemas === null
+                  ? "Loading…"
+                  : bucket
+                    ? bucket.tables.length
+                      ? "Select a table to see its rows."
+                      : "No tables yet — add one with +."
+                    : "Select a bucket, or create a new one."
+              }
+            />
+          )}
 
-        {addTableOpen && bucket && (
-          <CreateResourceDialog<NewTableDraft, SchemaDefinition>
-            ariaLabel="Add table"
-            heading={`Add a table to ${bucket.name}`}
-            blank={() => ({ name: "", type: "" })}
-            validate={(d) =>
-              d.type ? finalTableNameValidate(d.name, bucket.tables) : "Pick a type (sql-table)."
-            }
-            // Appended to the tables the server holds NOW, re-checked there: another op may have
-            // taken the name, or changed the list, since this dialog opened.
-            create={(d) => {
-              const name = slugifyTableName(d.name);
-              addedNameRef.current = name;
-              return mutateTables("add", (current) => {
-                const taken = tableNameValidate(name, current);
-                if (taken) throw new Error(taken);
-                return [...current, newSchemaTable(d.type, name)];
-              });
-            }}
-            onClose={() => setAddTableOpen(false)}
-            onCreated={(updated) => {
-              setAddTableOpen(false);
-              void refresh();
-              // Open the table just added — the saved row carries the backend's id for it. Opening
-              // it leaves the open table, so rows staged there ask first; the ref, because this
-              // runs once the create resolves, from the render that opened the dialog.
-              const added = updated.tables.find((t) => t.name === addedNameRef.current);
-              if (added) rowsGateRef.current.attemptExit(() => selectSub(added.id));
-            }}
-            renderForm={(draft, onChange, error) => (
-              <>
-                <Field label="Type (sql-table)">
-                  <Select
-                    aria-label="Type (sql-table)"
-                    value={draft.type}
-                    onChange={(e) => {
-                      const type = e.target.value;
-                      // Pre-fill the name from the type until the user has typed one of their own.
-                      const autoName = !draft.name || draft.name === nameForType(draft.type);
-                      onChange({ type, name: autoName ? nameForType(type) : draft.name });
-                    }}
-                  >
-                    <option value="">Choose a type…</option>
-                    <TypeOptions />
-                  </Select>
-                </Field>
-                <Field label="Name" hint="Unique in this bucket; lowercase, no spaces.">
-                  <Input
-                    value={draft.name}
-                    placeholder="contacts"
-                    onChange={(e) => onChange({ ...draft, name: tableNameInput(e.target.value) })}
+          {/* The bucket's Settings, from the gear in its rail header. */}
+          <Dialog
+            open={!!bucket && settingsFor === bucket.id}
+            onOpenChange={(open) => (open ? setSettingsFor(bucket?.id ?? null) : closeSettings())}
+          >
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>{bucket?.name}</DialogTitle>
+              </DialogHeader>
+              <ButtonBar
+                // Inside the dialog, always. The default hoists the bar into the host's toolbar slot,
+                // and a host that publishes a real one (StandaloneRailHost, on the storage and
+                // products sites) put Save and Cancel outside the modal, behind its backdrop.
+                hoist={false}
+                actions={{
+                  ...form.actions,
+                  // The form's Cancel deselects the bucket — right for a detail pane, wrong for a
+                  // dialog over the bucket's own tables: it closed the bucket out from under the
+                  // user. Cancel here drops the edit (the same re-hydrate `closeSettings` discards
+                  // with) and closes, leaving the bucket and its open table where they were.
+                  onCancel: () => {
+                    if (form.dirty && bucket) form.select(bucket.id);
+                    setSettingsFor(null);
+                  },
+                  // A new slug is a new rdid, and the open table and its rows are keyed on it, so a
+                  // save that moves it leaves them — rows staged there ask first.
+                  onSave: () =>
+                    bucket && form.draft && form.draft.slug.trim() !== bucket.slug
+                      ? rowsGateRef.current.attemptExit(form.actions.onSave)
+                      : form.actions.onSave(),
+                }}
+                showCreate={false}
+                // Deleting lives in the danger zone below; a bar Delete would only ever be a
+                // disabled second button naming the same action.
+                showDelete={false}
+                api={{
+                  path: "/bucket/buckets/{id}",
+                  pathValues: { id: form.selectedId },
+                  title: "Bucket API",
+                }}
+                help={help}
+              />
+              {form.editing && form.draft && (
+                <div className="flex max-h-[70vh] flex-col gap-6 overflow-y-auto" key={form.detailKey}>
+                  <SchemaDefinitionDetail
+                    title="Settings"
+                    draft={form.draft}
+                    onChange={form.onChange}
+                    error={form.error}
+                    schema={bucket}
+                    ecosystemRdid={ecosystemId}
+                    renderTransfer={renderTransfer}
+                    onDelete={
+                      bucket?.kind === "custom"
+                        ? async () => {
+                            await schemasApi.delete(bucket.id);
+                            setSettingsFor(null);
+                            if (leaf) leaf.onSelect(null);
+                            else form.actions.onCancel();
+                            await refresh();
+                          }
+                        : undefined
+                    }
                   />
-                </Field>
-                <ErrorText error={error} />
-              </>
-            )}
-          />
-        )}
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
 
-        {editTable && bucket && (
-          <CreateResourceDialog<NewTableDraft, SchemaDefinition>
-            ariaLabel="Edit table"
-            heading={`Edit ${editTable.name}`}
-            blank={() => ({ name: editTable.name, type: editTable.type })}
-            validate={(d) =>
-              finalTableNameValidate(d.name, bucket.tables.filter((x) => x.id !== editTable.id))
-            }
-            // The same id, patched in place: the data client PUTs a known table rather than
-            // re-creating it, so the table keeps its bucket_types id. Patched into the tables the
-            // server holds NOW — a table removed meanwhile is refused, never re-created by the
-            // edit, and a name another op took meanwhile is refused too.
-            create={(d) => {
-              const name = slugifyTableName(d.name);
-              return mutateTables("edit", (current) => {
-                if (!current.some((x) => x.id === editTable.id)) {
-                  throw new Error(`“${editTable.name}” is no longer in this bucket.`);
-                }
-                const taken = tableNameValidate(
-                  name,
-                  current.filter((x) => x.id !== editTable.id),
-                );
-                if (taken) throw new Error(taken);
-                return current.map((x) =>
-                  x.id === editTable.id ? { ...x, name, type: d.type } : x,
-                );
-              });
-            }}
-            onClose={() => setEditTableId(null)}
-            onCreated={() => {
-              setEditTableId(null);
-              void refresh();
-              // Pinned by id rather than left to the default (the bucket's first table): the
-              // re-read list comes back in the backend's order, which nothing promises is the same.
-              selectSub(editTable.id);
-            }}
-            renderForm={(draft, onChange, error) => (
+          <UnsavedChangesAlert {...rowsGate.exitAlertProps} />
+          <UnsavedChangesAlert {...settingsGate.exitAlertProps} />
+
+          {/* A confirm, not an alert: `cancelLabel` makes the ✕ a Cancel rather than a second
+              Confirm. A refusal is said HERE, in the question it answered. */}
+          <AlertModal
+            open={pendingRemove !== null}
+            title={`Remove ${pendingRemove?.what ?? ""} from ${bucket?.name ?? "the bucket"}?`}
+            description={
               <>
-                <Field label="Type (sql-table)">
-                  <Select
-                    aria-label="Type (sql-table)"
-                    value={draft.type}
-                    // Unlike Add table, a retype leaves the name alone: this one is already named.
-                    onChange={(e) => onChange({ ...draft, type: e.target.value })}
-                  >
-                    {/* A stored type the curated catalogue no longer lists still shows its real
-                        value, not a silently mismatched first option. */}
-                    {!TYPE_BY_ID.has(editTable.type) && (
-                      <option value={editTable.type}>{editTable.type} (unlisted)</option>
-                    )}
-                    <TypeOptions />
-                  </Select>
-                </Field>
-                <Field label="Name" hint="Unique in this bucket; lowercase, no spaces.">
-                  <Input
-                    value={draft.name}
-                    placeholder="contacts"
-                    onChange={(e) => onChange({ ...draft, name: tableNameInput(e.target.value) })}
-                  />
-                </Field>
-                <ErrorText error={error} />
+                The table is taken out of this bucket, and anything that points at it by id — a
+                persona's interest in it — stops pointing anywhere. Its rows stay in the ecosystem.
+                <DialogErrorText error={removeError} />
               </>
-            )}
+            }
+            destructive
+            confirmLabel="Remove"
+            cancelLabel="Cancel"
+            busy={removing}
+            onConfirm={() =>
+              pendingRemove && void removeTables(pendingRemove.tables, pendingRemove.all)
+            }
+            onCancel={() => {
+              setPendingRemove(null);
+              setRemoveError(null);
+            }}
           />
-        )}
-      </div>
-    </StackLevels>
+          <AlertModal
+            open={addAllError !== null}
+            title="Couldn't add the tables"
+            description={addAllError ?? ""}
+            onConfirm={() => setAddAllError(null)}
+          />
+
+          {/* Create is a scoped modal: name + description only (tables are added from the new
+              bucket's own rail, which opens once the created bucket is selected). */}
+          {newOpen && (
+            <CreateResourceDialog<SchemaDefinitionInput, SchemaDefinition>
+              ariaLabel="New bucket"
+              heading="New bucket"
+              blank={schemaBlank}
+              validate={(d) => schemaValidate(d, schemas ?? [])}
+              create={(d) => schemasApi.create(schemaNormalize(d), ecosystemId ?? "")}
+              onClose={() => setNewOpen(false)}
+              onCreated={(created) => {
+                setNewOpen(false);
+                void refresh();
+                if (leaf) leaf.onSelect(created.id);
+                else form.select(created.id);
+              }}
+              renderForm={(draft, onChange, error) => (
+                <>
+                  <Field label="Name" hint="Unique bucket name.">
+                    <Input
+                      /* eslint-disable-next-line jsx-a11y/no-autofocus -- focus the first field on open */
+                      autoFocus
+                      value={draft.name}
+                      placeholder="Profile Basics"
+                      onChange={(e) => onChange(withName(draft, e.target.value))}
+                    />
+                  </Field>
+                  <BucketSlugField
+                    draft={draft}
+                    onChange={onChange}
+                    prefix={bucketSlugPrefix(undefined, ecosystemId)}
+                  />
+                  <Field label="Description">
+                    <Textarea
+                      rows={2}
+                      placeholder="What this bucket is for."
+                      value={draft.description}
+                      onChange={(e) => onChange({ ...draft, description: e.target.value })}
+                    />
+                  </Field>
+                  <ErrorText error={error} />
+                </>
+              )}
+            />
+          )}
+
+          {addTableOpen && bucket && (
+            <CreateResourceDialog<NewTableDraft, SchemaDefinition>
+              ariaLabel="Add table"
+              heading={`Add a table to ${bucket.name}`}
+              blank={() => ({ name: "", type: "" })}
+              validate={(d) =>
+                d.type ? finalTableNameValidate(d.name, bucket.tables) : "Pick a type (sql-table)."
+              }
+              // Appended to the tables the server holds NOW, re-checked there: another op may have
+              // taken the name, or changed the list, since this dialog opened.
+              create={(d) => {
+                const name = slugifyTableName(d.name);
+                addedNameRef.current = name;
+                return mutateTables("add", (current) => {
+                  const taken = tableNameValidate(name, current);
+                  if (taken) throw new Error(taken);
+                  return [...current, newSchemaTable(d.type, name)];
+                });
+              }}
+              onClose={() => setAddTableOpen(false)}
+              onCreated={(updated) => {
+                setAddTableOpen(false);
+                void refresh();
+                // Open the table just added — the saved row carries the backend's id for it. Opening
+                // it leaves the open table, so rows staged there ask first; the ref, because this
+                // runs once the create resolves, from the render that opened the dialog.
+                const added = updated.tables.find((t) => t.name === addedNameRef.current);
+                if (added) rowsGateRef.current.attemptExit(() => selectSub(added.id));
+              }}
+              renderForm={(draft, onChange, error) => (
+                <>
+                  <Field label="Type (sql-table)">
+                    <Select
+                      aria-label="Type (sql-table)"
+                      value={draft.type}
+                      onChange={(e) => {
+                        const type = e.target.value;
+                        // Pre-fill the name from the type until the user has typed one of their own.
+                        const autoName = !draft.name || draft.name === nameForType(draft.type);
+                        onChange({ type, name: autoName ? nameForType(type) : draft.name });
+                      }}
+                    >
+                      <option value="">Choose a type…</option>
+                      <TypeOptions />
+                    </Select>
+                  </Field>
+                  <Field label="Name" hint="Unique in this bucket; lowercase, no spaces.">
+                    <Input
+                      value={draft.name}
+                      placeholder="contacts"
+                      onChange={(e) => onChange({ ...draft, name: tableNameInput(e.target.value) })}
+                    />
+                  </Field>
+                  <ErrorText error={error} />
+                </>
+              )}
+            />
+          )}
+
+          {editTable && bucket && (
+            <CreateResourceDialog<NewTableDraft, SchemaDefinition>
+              ariaLabel="Edit table"
+              heading={`Edit ${editTable.name}`}
+              blank={() => ({ name: editTable.name, type: editTable.type })}
+              validate={(d) =>
+                finalTableNameValidate(d.name, bucket.tables.filter((x) => x.id !== editTable.id))
+              }
+              // The same id, patched in place: the data client PUTs a known table rather than
+              // re-creating it, so the table keeps its bucket_types id. Patched into the tables the
+              // server holds NOW — a table removed meanwhile is refused, never re-created by the
+              // edit, and a name another op took meanwhile is refused too.
+              create={(d) => {
+                const name = slugifyTableName(d.name);
+                return mutateTables("edit", (current) => {
+                  if (!current.some((x) => x.id === editTable.id)) {
+                    throw new Error(`“${editTable.name}” is no longer in this bucket.`);
+                  }
+                  const taken = tableNameValidate(
+                    name,
+                    current.filter((x) => x.id !== editTable.id),
+                  );
+                  if (taken) throw new Error(taken);
+                  return current.map((x) =>
+                    x.id === editTable.id ? { ...x, name, type: d.type } : x,
+                  );
+                });
+              }}
+              onClose={() => setEditTableId(null)}
+              onCreated={() => {
+                setEditTableId(null);
+                void refresh();
+                // Pinned by id rather than left to the default (the bucket's first table): the
+                // re-read list comes back in the backend's order, which nothing promises is the same.
+                selectSub(editTable.id);
+              }}
+              renderForm={(draft, onChange, error) => (
+                <>
+                  <Field label="Type (sql-table)">
+                    <Select
+                      aria-label="Type (sql-table)"
+                      value={draft.type}
+                      // Unlike Add table, a retype leaves the name alone: this one is already named.
+                      onChange={(e) => onChange({ ...draft, type: e.target.value })}
+                    >
+                      {/* A stored type the curated catalogue no longer lists still shows its real
+                          value, not a silently mismatched first option. */}
+                      {!TYPE_BY_ID.has(editTable.type) && (
+                        <option value={editTable.type}>{editTable.type} (unlisted)</option>
+                      )}
+                      <TypeOptions />
+                    </Select>
+                  </Field>
+                  <Field label="Name" hint="Unique in this bucket; lowercase, no spaces.">
+                    <Input
+                      value={draft.name}
+                      placeholder="contacts"
+                      onChange={(e) => onChange({ ...draft, name: tableNameInput(e.target.value) })}
+                    />
+                  </Field>
+                  <ErrorText error={error} />
+                </>
+              )}
+            />
+          )}
+        </div>
+      </StackLevels>
+    </ApiAffordanceScope>
   );
 }

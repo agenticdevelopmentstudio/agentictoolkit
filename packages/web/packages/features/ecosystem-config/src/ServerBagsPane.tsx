@@ -42,7 +42,7 @@ import { AlertModal } from "@agenticdevelopertoolkit/ui/components/alert-modal";
 import { UnsavedChangesAlert } from "@agenticdevelopertoolkit/ui/components/unsaved-changes-alert";
 import { Field } from "@agenticdevelopertoolkit/ui/blocks/field";
 import { DialogErrorText, ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
-import { useReportBusy, useReportSettingsDirty } from "@agentic-toolkit/resource";
+import { DetailsPane, useReportBusy, useReportSettingsDirty } from "@agentic-toolkit/resource";
 
 /**
  * The empty list, hoisted to module scope: `bagsQuery.data ?? []` would otherwise mint a
@@ -226,48 +226,49 @@ export function ServerBagsPane({
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-        <div className="space-y-6">
-          {help && <p className="max-w-3xl text-sm text-apt-text-muted">{help}</p>}
-
-          {/* Filter field first, then the create affordance (right-justified via ml-auto). */}
-          <div className="flex items-center gap-2">
-            <Input
-              type="search"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter bags…"
-              aria-label="Filter server bags by key, value, or description"
-              className="max-w-xs"
-            />
-            <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setCreating(true)}>
-              <Plus data-icon="inline-start" />
-              New bag
-            </Button>
-          </div>
-
-          {bagsQuery.isError && (
-            <Alert variant="error">
-              <TriangleAlert />
-              <AlertTitle>Couldn&apos;t load the server bags</AlertTitle>
-              <AlertDescription>{errorMessage(bagsQuery.error)}</AlertDescription>
-            </Alert>
-          )}
-
-          <DataTable<EcosystemServerBag>
-            columns={columns}
-            rows={visibleBags}
-            getRowId={(bag) => bag.key}
-            loading={bagsQuery.isPending}
-            emptyLabel={
-              query && allBags.length > 0
-                ? "No bags match your filter."
-                : "No server bags yet."
-            }
-            ariaLabel="Server bags"
+    // The shared details pane: its header carries this list's API button and "?" help.
+    <DetailsPane
+      help={help}
+      api={{ path: "/ecosystem/server-bag/{id}", pathValues: { id: ecosystemId }, title: "Server bags API" }}
+      bodyClassName="px-6 py-6"
+    >
+      <div className="space-y-6">
+        {/* Filter field first, then the create affordance (right-justified via ml-auto). */}
+        <div className="flex items-center gap-2">
+          <Input
+            type="search"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter bags…"
+            aria-label="Filter server bags by key, value, or description"
+            className="max-w-xs"
           />
+          <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setCreating(true)}>
+            <Plus data-icon="inline-start" />
+            New bag
+          </Button>
         </div>
+
+        {bagsQuery.isError && (
+          <Alert variant="error">
+            <TriangleAlert />
+            <AlertTitle>Couldn&apos;t load the server bags</AlertTitle>
+            <AlertDescription>{errorMessage(bagsQuery.error)}</AlertDescription>
+          </Alert>
+        )}
+
+        <DataTable<EcosystemServerBag>
+          columns={columns}
+          rows={visibleBags}
+          getRowId={(bag) => bag.key}
+          loading={bagsQuery.isPending}
+          emptyLabel={
+            query && allBags.length > 0
+              ? "No bags match your filter."
+              : "No server bags yet."
+          }
+          ariaLabel="Server bags"
+        />
       </div>
 
       <BagDialog
@@ -308,7 +309,7 @@ export function ServerBagsPane({
         }}
         busy={deleteBusy}
       />
-    </div>
+    </DetailsPane>
   );
 }
 

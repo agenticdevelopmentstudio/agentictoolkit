@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { RotateCcw, Wifi, WifiOff } from "lucide-react";
+import { FeatureTitle } from "@agentic-toolkit/resource";
 import {
   useAdminEcosystems,
   useSyncTables,
@@ -21,7 +22,6 @@ import {
   type EditableListColumn,
   type EditableListFacet,
 } from "../components/editable-list";
-import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header";
 
 /**
  * Per-ecosystem offline-sync table enrollment — the admin console's window onto the backend's
@@ -38,7 +38,7 @@ import { SectionHeader } from "@agenticdevelopertoolkit/ui/blocks/section-header
  * Every mutation returns the full refreshed catalog, so the list always shows the server's
  * authoritative state rather than a hand-patched row.
  */
-export function SyncPane() {
+export function SyncPane({ help }: { help?: ReactNode } = {}) {
   const [ecosystemId, setEcosystemId] = useState("");
   const ecosystems = useAdminEcosystems();
   const { data, isLoading, error } = useSyncTables(ecosystemId || undefined);
@@ -146,111 +146,112 @@ export function SyncPane() {
   const anyOverridden = selected.some((row) => row.overridden);
 
   return (
-    <div>
-      <SectionHeader paneTitle title="Sync Tables" className="mb-6" />
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FeatureTitle title="Sync Tables" help={help} />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 pb-8 pt-2">
+        <p className="mb-6 max-w-2xl text-sm text-apt-text-muted">
+          Choose which catalog tables each ecosystem syncs to offline clients. Syncing a table
+          overrides the resource&apos;s platform default for this ecosystem;
+          &ldquo;Reset to default&rdquo; removes the override.
+        </p>
 
-      <p className="mb-6 max-w-2xl text-sm text-apt-text-muted">
-        Choose which catalog tables each ecosystem syncs to offline clients. Syncing a table
-        overrides the resource&apos;s platform default for this ecosystem;
-        &ldquo;Reset to default&rdquo; removes the override.
-      </p>
+        {/* Not a list filter: this picks WHAT IS FETCHED, so it sits above the bar rather than in
+            it. A control inside the bar reads as one more way to narrow rows already on screen. */}
+        <div className="mb-6 w-80">
+          <Select
+            aria-label="Ecosystem"
+            value={ecosystemId}
+            onChange={(e) => {
+              setEcosystemId(e.target.value);
+              // The selection goes with the ecosystem. Resource ids are the same catalog everywhere,
+              // so ticks would SURVIVE the switch — and a bar button pressed afterwards would write
+              // to an ecosystem whose state the operator never looked at.
+              list.clearSelection();
+            }}
+          >
+            <option value="">Select an ecosystem…</option>
+            {(ecosystems.data ?? []).map((eco) => (
+              <option key={eco.id} value={eco.id}>
+                {eco.name} ({eco.slug})
+              </option>
+            ))}
+          </Select>
+        </div>
 
-      {/* Not a list filter: this picks WHAT IS FETCHED, so it sits above the bar rather than in
-          it. A control inside the bar reads as one more way to narrow rows already on screen. */}
-      <div className="mb-6 w-80">
-        <Select
-          aria-label="Ecosystem"
-          value={ecosystemId}
-          onChange={(e) => {
-            setEcosystemId(e.target.value);
-            // The selection goes with the ecosystem. Resource ids are the same catalog everywhere,
-            // so ticks would SURVIVE the switch — and a bar button pressed afterwards would write
-            // to an ecosystem whose state the operator never looked at.
+        {!ecosystemId && (
+          <p className="text-apt-text-dim">Select an ecosystem to view its sync tables.</p>
+        )}
+
+        {ecosystemId && (
+          <EditableList<EnrollmentRow>
+            list={list}
+            ariaLabel="Sync tables"
+            loading={isLoading}
+            // Distinct from the list's own empty state — a failed load must NOT read as
+            // "No catalog tables."
+            error={error}
+            errorTitle="Couldn't load sync tables"
+            columnWidthsKey="admin-sync-tables"
+            // The resource IS the row id, so the table's own guess skips it and lands on `scope` —
+            // where every row says "customer" or "ecosystem" and no two checkboxes can be told apart.
+            describeRow={(row) => row.resource}
+            searchPlaceholder="Table or schema"
+            emptyLabel="No catalog tables."
+            emptyFilteredLabel="No tables match these filters."
+            actions={
+              <>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={!wouldSet(true)}
+                  onClick={() => setSynced(true)}
+                >
+                  <Wifi data-icon="inline-start" />
+                  Sync
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={!wouldSet(false)}
+                  onClick={() => setSynced(false)}
+                >
+                  <WifiOff data-icon="inline-start" />
+                  Don&apos;t sync
+                </Button>
+                {/* Only overridden rows have anything to clear; a selection of pure defaults leaves
+                    this dead rather than firing DELETEs that would each 404 or no-op. */}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={!anyOverridden}
+                  onClick={resetToDefault}
+                >
+                  <RotateCcw data-icon="inline-start" />
+                  Reset to default
+                </Button>
+              </>
+            }
+          />
+        )}
+
+        <ProgressModal
+          open={run.state.running || run.state.finished}
+          title="Saving sync enrollment"
+          description="Each table is saved on its own; a failure leaves the earlier saves in place."
+          total={run.state.total}
+          done={run.state.done}
+          currentLabel={run.state.currentLabel}
+          error={run.state.error}
+          results={run.state.results}
+          finished={run.state.finished}
+          onContinue={run.continueRun}
+          onStop={run.stop}
+          onClose={() => {
+            run.reset();
             list.clearSelection();
           }}
-        >
-          <option value="">Select an ecosystem…</option>
-          {(ecosystems.data ?? []).map((eco) => (
-            <option key={eco.id} value={eco.id}>
-              {eco.name} ({eco.slug})
-            </option>
-          ))}
-        </Select>
-      </div>
-
-      {!ecosystemId && (
-        <p className="text-apt-text-dim">Select an ecosystem to view its sync tables.</p>
-      )}
-
-      {ecosystemId && (
-        <EditableList<EnrollmentRow>
-          list={list}
-          ariaLabel="Sync tables"
-          loading={isLoading}
-          // Distinct from the list's own empty state — a failed load must NOT read as
-          // "No catalog tables."
-          error={error}
-          errorTitle="Couldn't load sync tables"
-          columnWidthsKey="admin-sync-tables"
-          // The resource IS the row id, so the table's own guess skips it and lands on `scope` —
-          // where every row says "customer" or "ecosystem" and no two checkboxes can be told apart.
-          describeRow={(row) => row.resource}
-          searchPlaceholder="Table or schema"
-          emptyLabel="No catalog tables."
-          emptyFilteredLabel="No tables match these filters."
-          actions={
-            <>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!wouldSet(true)}
-                onClick={() => setSynced(true)}
-              >
-                <Wifi data-icon="inline-start" />
-                Sync
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!wouldSet(false)}
-                onClick={() => setSynced(false)}
-              >
-                <WifiOff data-icon="inline-start" />
-                Don&apos;t sync
-              </Button>
-              {/* Only overridden rows have anything to clear; a selection of pure defaults leaves
-                  this dead rather than firing DELETEs that would each 404 or no-op. */}
-              <Button
-                size="sm"
-                variant="ghost"
-                disabled={!anyOverridden}
-                onClick={resetToDefault}
-              >
-                <RotateCcw data-icon="inline-start" />
-                Reset to default
-              </Button>
-            </>
-          }
         />
-      )}
-
-      <ProgressModal
-        open={run.state.running || run.state.finished}
-        title="Saving sync enrollment"
-        description="Each table is saved on its own; a failure leaves the earlier saves in place."
-        total={run.state.total}
-        done={run.state.done}
-        currentLabel={run.state.currentLabel}
-        error={run.state.error}
-        results={run.state.results}
-        finished={run.state.finished}
-        onContinue={run.continueRun}
-        onStop={run.stop}
-        onClose={() => {
-          run.reset();
-          list.clearSelection();
-        }}
-      />
+      </div>
     </div>
   );
 }

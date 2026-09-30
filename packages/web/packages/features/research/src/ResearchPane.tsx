@@ -21,7 +21,6 @@ import {
   StackLevels,
   useRailExitGuard as useWorkspaceExitGuard,
   MasterDetailLeaf,
-  useRecordAffordance,
   CreateResourceDialog,
   useResourceItem,
   type MasterDetailActions,
@@ -788,10 +787,6 @@ export function ResearchPane({
   // render-value dirty signal. `editing` is implied: a draft cannot be dirty with no editor open.
   useWorkspaceExitGuard(dirty ? { isDirty: () => dirty } : null);
 
-  // The host-injected per-record affordance (the hub's api-explorer button); null on
-  // a standalone feature site → the trailing slot renders nothing.
-  const renderRecordAffordance = useRecordAffordance();
-
   // The frontier leaf: a portaled Save/Cancel/Delete bar over the editor (or a placeholder). The
   // list itself lives in the published rail above, so this renders ONLY the editor half.
   const actions: MasterDetailActions = {
@@ -820,11 +815,11 @@ export function ResearchPane({
       <StackLevels levels={[...categoryLevels, documentsLevel]}>
         <MasterDetailLeaf
           form={{ actions, editing, draft }}
-          trailing={renderRecordAffordance?.({
+          api={{
             path: "/content/markdown/{id}",
             pathValues: { id: selectedId },
             title: "Research document API",
-          })}
+          }}
           error={listError ?? formError ?? docError}
           emptyTitle={
             // Reached only with nothing cached for this id — otherwise `draft` is already the cached

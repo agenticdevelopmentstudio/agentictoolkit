@@ -19,7 +19,6 @@ import type {
   ProjectStatus,
   ProjectParticipant,
 } from "@agentic-toolkit/data/projects";
-import { useRecordAffordance } from "@agentic-toolkit/resource";
 import { DEFAULT_ITEM_WORDS, type ItemWords } from "./vocabulary";
 import { AssigneePicker, toOptionValue, fromOptionValue, type AssigneeValue } from "./AssigneePicker";
 import { IterationPicker, NO_ITERATION } from "./IterationPicker";
@@ -220,9 +219,6 @@ export function WorkItemEditor({
   onSaved: (saved: WorkItem) => void;
   onCancel: () => void;
 }): ReactElement {
-  // The host-injected per-record affordance (the hub's api-explorer button); null on
-  // a standalone feature site → the trailing slot renders nothing.
-  const renderRecordAffordance = useRecordAffordance();
   // Seeded once from `item`; the pane keys this editor by item id (or "new") so a
   // switch remounts it with fresh state — no derive-from-props effect needed.
   const { draft, set, dirty, commit, baseline } = useDirtyDraft<WorkItemDraft>(() =>
@@ -345,15 +341,9 @@ export function WorkItemEditor({
         <div className="flex items-center justify-end gap-2">
           {/* The key identifies WHICH card this form is editing — the one thing the form itself
               never shows, since every field below is the card's content rather than its name.
-              Read-only here: neither half is a person's to type. `mr-auto` rather than
-              `justify-between` on the row, because the key renders NOTHING on a project with no
-              prefix and a two-child layout would then move the affordance. */}
+              Read-only here: neither half is a person's to type. The API affordance for this item
+              now lives in the surface's header (WorkItemsSurface's FeatureTitle), not here. */}
           <ItemKey itemKey={item.itemKey} className="mr-auto text-sm" />
-          {renderRecordAffordance?.({
-            path: "/project/work-items/{id}",
-            pathValues: { id: item.id },
-            title: "Work item API",
-          })}
         </div>
       )}
       <Field label="Title">

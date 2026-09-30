@@ -18,7 +18,6 @@ import {
   CreateResourceDialog,
   useMasterDetailForm,
   useMasterDetailLevel,
-  useRecordAffordance,
   type TopicLeaf,
 } from "@agentic-toolkit/resource";
 import { AccessGroupDetail } from "./AccessGroupDetail";
@@ -85,7 +84,6 @@ export function AccessPane({
   // `must-create-in-modal`): the `+` opens it, and on save the new list is selected so
   // its REAL detail (members + grants) opens.
   const [newOpen, setNewOpen] = useState(false);
-  const renderRecordAffordance = useRecordAffordance();
 
   // FOUR reads, each cached on its own, replacing the two hand-rolled loaders and the two
   // latest-wins generation counters they needed. A reply for an ecosystem the user has left is a
@@ -293,11 +291,11 @@ export function AccessPane({
       <ButtonBar
         actions={form.actions}
         showCreate={false}
-        trailing={renderRecordAffordance?.({
+        api={{
           path: "/bucket/access-groups/{groupId}",
           pathValues: { groupId: form.selectedId },
           title: "Access group API",
-        })}
+        }}
         help={help}
       />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-6 py-4">

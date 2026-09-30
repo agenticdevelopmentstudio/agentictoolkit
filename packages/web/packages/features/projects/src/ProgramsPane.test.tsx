@@ -202,7 +202,8 @@ describe("ProgramsPane", () => {
     render(<Harness workspaceSlug={slug} selected={PLATFORM.id} />);
 
     expect(await screen.findByText("Web")).not.toBeNull();
-    expect(screen.getByText("API")).not.toBeNull();
+    // The board named API, not the header's API button.
+    expect(screen.getByText("API", { ignore: 'button, script, style' })).not.toBeNull();
     expect(screen.getByText("Docs")).not.toBeNull();
     expect(screen.getByText("3 boards")).not.toBeNull();
     expect(screen.getByText("Oct 1, 2026")).not.toBeNull();

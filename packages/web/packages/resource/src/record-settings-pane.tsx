@@ -4,6 +4,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { TopicSelectHint } from "@agenticdevelopertoolkit/ui/blocks";
 import { ErrorText } from "@agenticdevelopertoolkit/ui/components/error-text";
 import { ButtonBar } from "./master-detail/MasterDetailLayout";
+import type { RecordAffordanceProps } from "./record-affordance";
 import type { MasterDetailForm } from "./master-detail/useMasterDetailForm";
 
 /**
@@ -22,6 +23,7 @@ export function RecordSettingsPane<TItem, TInput>({
   title,
   help,
   trailing,
+  api,
   loadError,
   emptyLabel,
   extraActions,
@@ -33,8 +35,10 @@ export function RecordSettingsPane<TItem, TInput>({
   getId: (item: TItem) => string;
   title?: ReactNode;
   help?: ReactNode;
-  /** Optional trailing affordance on the button bar (e.g. an <ApiButton> for the active record). */
+  /** Optional non-API affordance on the button bar, left of the API button. */
   trailing?: ReactNode;
+  /** The active record's endpoint, for the bar's API button (see {@link ButtonBar}'s `api`). */
+  api?: RecordAffordanceProps | null;
   loadError?: string | null;
   emptyLabel: string;
   /** Optional control rendered above the form (e.g. a Connect button). */
@@ -60,8 +64,8 @@ export function RecordSettingsPane<TItem, TInput>({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* The centered title + help live in the bar itself; New lives in the resource view's
           rail and Delete in the entity pane's Danger section, so this bar keeps just Cancel/Save. */}
-      <ButtonBar actions={form.actions} showCreate={false} showDelete={false} title={title} trailing={trailing} help={help} />
-      <section className="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-6 py-4">
+      <ButtonBar actions={form.actions} showCreate={false} showDelete={false} title={title} trailing={trailing} api={api} help={help} />
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-6 overflow-y-auto px-6 py-4">
         <ErrorText error={loadError} />
         {form.editing && form.draft ? (
           <>

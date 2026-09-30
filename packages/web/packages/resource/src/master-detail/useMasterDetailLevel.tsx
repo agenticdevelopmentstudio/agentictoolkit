@@ -38,12 +38,14 @@ export function useMasterDetailLevel<TItem, TInput>({
   onPrefetch,
   onNew,
   showNew = true,
+  titleActions,
   checkable,
   checkedIds,
   onToggleChecked,
   itemNoun,
   overviewHelp,
   publish = true,
+  trailing,
 }: {
   /** Stable level id (e.g. "applications-list"). */
   id: string;
@@ -81,6 +83,9 @@ export function useMasterDetailLevel<TItem, TInput>({
    *  `form.actions.onCreate` is untouched and is what the surface's own button calls, so the inline
    *  create path is identical either way and nothing about the editor has to know which drove it. */
   showNew?: boolean;
+  /** Tools on the list's own toolbar, right of the `+` — e.g. one creator per kind of row, when a
+   *  single `+` cannot say which kind it makes (pair with `showNew: false`). */
+  titleActions?: ReactNode;
   /** Draw a tick box on every row. The SURFACE owns this: the rail knows how to draw a tick and
    *  nothing else, and what a set of ticked rows is FOR — remove these four, test these four,
    *  export these four — is a question only the pane publishing the button bar can answer. */
@@ -103,13 +108,28 @@ export function useMasterDetailLevel<TItem, TInput>({
    *  the detail below it — so the pair has to go up as ONE `StackLevels` publish. The level is
    *  returned either way; the exit guard is registered either way. */
   publish?: boolean;
+  /** Fixed rows drawn AFTER the list's own, behind a divider — the list's Settings (every topic
+   *  list closes on Settings under a rule). They are not entities: choosing one routes through
+   *  `trailing.onSelect`, and while one is open (`trailing.selectedId`) it is the level's
+   *  selection and the form's is ignored. The pane renders the open one's detail itself. */
+  trailing?: {
+    items: TopicDetailItem[];
+    selectedId: string | null;
+    onSelect: (id: string) => void;
+  };
 }): TopicLevel {
-  const rows: TopicDetailItem[] = (items ?? []).map((it) => ({
+  const entityRows: TopicDetailItem[] = (items ?? []).map((it) => ({
     id: getId(it),
     label: getLabel(it),
     sublabel: getSublabel?.(it),
     icon: getItemIcon ? getItemIcon(it) : itemIcon,
   }));
+  if (trailing?.items.length && entityRows.length) {
+    entityRows[entityRows.length - 1] = { ...entityRows[entityRows.length - 1]!, dividerAfter: true };
+  }
+  const rows = trailing ? [...entityRows, ...trailing.items] : entityRows;
+  const trailingIds = new Set(trailing?.items.map((t) => t.id) ?? []);
+  const trailingOpen = trailing?.selectedId != null && trailingIds.has(trailing.selectedId);
 
   const newButtonLabel = newLabel.replace(/…+$/, "").trim();
   // Every converted master/detail names its creator "New <singular noun>", so the select nudge
@@ -123,13 +143,18 @@ export function useMasterDetailLevel<TItem, TInput>({
     id,
     title,
     items: rows,
-    selectedId: form.selectedId,
+    selectedId: trailingOpen ? trailing!.selectedId : form.selectedId,
     // When a leaf is threaded (a top-level master/detail topic), selection is URL-driven: route to
     // the row's leaf URL and let the form's url-sync effect re-hydrate the draft (keeps the URL the
     // single source of truth, no stale closure). With NO leaf (a group member, whose deeper
     // selection isn't a URL segment), route through the form's own local select/cancel so the
     // published rail still drives selection.
-    onSelect: (rowId) => (leaf ? leaf.onSelect(rowId) : form.select(rowId)),
+    onSelect: (rowId) =>
+      trailingIds.has(rowId)
+        ? trailing!.onSelect(rowId)
+        : leaf
+          ? leaf.onSelect(rowId)
+          : form.select(rowId),
     onClear: () => (leaf ? leaf.onSelect(null) : form.actions.onCancel()),
     emptyLabel: emptyLabel ?? (items === null ? "Loading…" : "Nothing here yet."),
     busy,
@@ -144,10 +169,11 @@ export function useMasterDetailLevel<TItem, TInput>({
     onNew: showNew ? (onNew ?? form.actions.onCreate) : undefined,
     newLabel: showNew ? newButtonLabel : undefined,
     newActive: showNew && !onNew ? form.creating : undefined,
+    titleActions,
     // While the inline editor is open the pane body IS the detail. CREATE is the
     // critical case: nothing is selected yet, so without this the automatic
     // frontier detail (the select nudge) covers the open form.
-    overview: form.editing ? false : undefined,
+    overview: form.editing || trailingOpen ? false : undefined,
     itemNoun: itemNoun ?? derivedNoun,
     overviewHelp,
   };

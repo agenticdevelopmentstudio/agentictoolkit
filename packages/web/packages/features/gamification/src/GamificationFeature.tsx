@@ -73,7 +73,7 @@ function gamificationTopicPaneRenderer(
             ecosystemId={ctx.ecosystemId}
             // The realm-settings blurb — the one help key the hub's own `/…/gamification` route
             // passed (via GamificationPane) and the one this feature renders. `RealmSettingsPane`
-            // shows it under the heading; the other three panes have no place for one.
+            // shows it as its bar's "?" help; the other three panes have no place for one.
             help={helpFor?.("ecosystems/gamification")}
           />
         );

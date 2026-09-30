@@ -1,36 +1,13 @@
-import { activeFeatureKeys, type ProvisionedFeature } from "@agentic-toolkit/data/ecosystems";
+import {
+  featureHoldings,
+  featureRowState,
+  type ProvisionedFeature,
+} from "@agentic-toolkit/data/ecosystems";
 
 /** The fields of a topic row {@link heldTopics} reads: see `EcosystemsTopicConfig.features`. */
 interface FeatureKeyedTopic {
   id: string;
   features?: readonly string[];
-}
-
-/** The fields {@link settingsLast} reads and writes. */
-interface DividedTopic {
-  id: string;
-  dividerAfter?: boolean;
-}
-
-/**
- * The same rows with Settings moved to the END, behind a divider, whatever list they came from.
- *
- * Every topics list closes on Settings, alone under a rule (Mike, 2026-09-24). Each host used to
- * place it by hand — the ecosystem site's list opened on it, and a product's hung its divider on
- * Stores, which the held-features filter drops for any product without a store, leaving Settings
- * run straight on from the row above. Deciding it here, AFTER that filter, is the one place that
- * sees the rows as drawn. The other dividers are kept as authored, except on the row that is now
- * last, which would draw a line under nothing.
- */
-export function settingsLast<T extends DividedTopic>(topics: readonly T[]): T[] {
-  const settings = topics.find((t) => t.id === "settings");
-  const rest = topics.filter((t) => t.id !== "settings").map((t) => ({ ...t }));
-  if (!settings) {
-    if (rest.length) rest[rest.length - 1]!.dividerAfter = false;
-    return rest;
-  }
-  if (rest.length) rest[rest.length - 1]!.dividerAfter = true;
-  return [...rest, { ...settings, dividerAfter: false }];
 }
 
 /** A row {@link heldTopics} kept, marked when its feature is still being set up. */
@@ -73,14 +50,14 @@ export function heldTopics<T extends FeatureKeyedTopic>(
   routed?: string,
 ): HeldTopic<T>[] {
   if (provisioned === null) return [...topics];
-  const active = activeFeatureKeys(provisioned ?? []);
-  const provisioning = new Set(
-    (provisioned ?? []).filter((f) => f.state === "provisioning").map((f) => f.featureKey),
-  );
+  // The rule itself is the feature manager's (`featureRowState`), shared with every other surface
+  // that draws an ecosystem's features — this adds only the in-flight and routed cases.
+  const holdings = featureHoldings(provisioned ?? []);
   const held: HeldTopic<T>[] = [];
   for (const t of topics) {
-    if (t.features == null || t.features.some((k) => active.has(k))) held.push(t);
-    else if (t.features.some((k) => provisioning.has(k))) held.push({ ...t, provisioning: true });
+    const state = featureRowState(t.features, holdings);
+    if (state === "active") held.push(t);
+    else if (state === "provisioning") held.push({ ...t, provisioning: true });
     else if (provisioned === undefined && t.id === routed) held.push(t);
   }
   return held;
