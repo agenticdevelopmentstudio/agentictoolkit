@@ -1,0 +1,71 @@
+<!-- leaf: implement-language/services-editor--part-2 · source: language-services-editor.md -->
+
+# LanguageServicesEditor — continued (part 2)
+
+**Rules** (cite as `implement-language/services-editor--part-2#<slug>`):
+
+- `completion-trigger-characters-resolved-eagerly` MUST
+- `completion-trigger-characters-empty-when-unresolved` MUST
+- `completion-request-reads-facts-before-suspending` MUST
+- `completion-request-generation-guards-cache` MUST
+- `completion-snippets-independent-of-server` MUST
+- `completion-context-precedence` MUST
+- `completion-cursor-move-incomplete-list-reopens` MUST
+- `completion-apply-extends-range-to-live-caret` MUST
+- `completion-apply-ignores-foreign-entry-type` MUST
+- `completion-additional-edits-bounds-and-conflict-checked` MUST
+- `completion-edits-applied-back-to-front` MUST
+- `completion-multi-edit-single-undo-group` MUST
+- `completion-snippet-text-strips-placeholders` MUST
+- `completion-entry-carries-request-range` MUST
+- `completion-entry-jump-fields-nil` MUST
+- `hover-diagnostics-take-precedence` MUST
+- `hover-generation-guards-late-publish` MUST
+- `hover-provider-false-means-unsupported` MUST
+- `hover-contents-markdown-only-when-declared` MUST
+- `hover-still-inside-range-is-a-no-op` MUST
+- `hover-invalidate-tears-down-without-crossing-actor` MUST
+- `jump-nonisolated-witness-assumes-isolation` MUST
+- `jump-definition-provider-false-means-unsupported` MUST
+- `jump-location-link-uses-selection-range` MUST
+- `jump-same-file-uses-cursor-range-not-line-column` MUST
+- `jump-same-file-detection-by-resolved-path` MUST
+- `jump-cross-file-target-carries-empty-range` MUST
+- `annotation-coordinator-witnesses-nonmainactor-protocol` MUST
+- `annotation-destroy-checks-thread-before-isolating` MUST
+- `annotation-marks-reanchored-on-edit-notification` MUST
+- `annotation-reanchor-drops-marks-inside-edit` MUST
+- `annotation-diagnostic-hover-invalidated-on-republish` MUST
+
+- **completion-trigger-characters-resolved-eagerly**: `resolveTriggerCharacters()` MUST be callable independently of a completion request and MUST cache its answer keyed to the originating session, admitting a write only when its own `triggerReadClock` stamp is at or after `resolvedTriggerReadStamp` (LSPCompletionDelegate.swift).
+- **completion-trigger-characters-empty-when-unresolved**: `completionTriggerCharacters()` MUST return the empty set until `resolveTriggerCharacters()` has completed at least once, and MUST return `[]` again once the serving session dies or is replaced by one declaring no `completionProvider` (LSPCompletionDelegate.swift).
+- **completion-request-reads-facts-before-suspending**: `completionSuggestionsRequested(textView:cursorPosition:)` MUST read the caret offset, document URI, language id, prefix start, position, and the character immediately before the caret before its first `await`, so one request describes one consistent document version (LSPCompletionDelegate.swift).
+- **completion-request-generation-guards-cache**: Every write to the cached entries, cache anchor offset, incomplete-list flag, or cache request offset from `publish(...)` MUST be gated on the request's generation still being current, so a request superseded by a newer one cannot overwrite or clear the cache the newer one owns (LSPCompletionDelegate.swift).
+- **completion-snippets-independent-of-server**: Snippet items from the injected `SnippetStore` MUST be included in the completion window even when no session serves the document's language, the session declares no `completionProvider`, or the completion request throws (LSPCompletionDelegate.swift).
+- **completion-context-precedence**: `completionContext(characterBeforeCaret:triggerCharacters:)` MUST answer `.triggerForIncompleteCompletions` when a refresh is pending, MUST answer `.triggerCharacter` only when the character immediately before the caret is one the server itself declared as a trigger, and MUST answer `.invoked` otherwise (LSPCompletionDelegate.swift).
+- **completion-cursor-move-incomplete-list-reopens**: `completionOnCursorMove(textView:cursorPosition:)` MUST return `nil` and mark a refresh pending, rather than filter locally, when the cached list is `isIncomplete` and the caret has moved past the offset the list was requested at (LSPCompletionDelegate.swift).
+- **completion-apply-extends-range-to-live-caret**: `completionWindowApplyCompletion` MUST extend the entry's stored request range forward to the live cursor position before replacing, so text typed while the window stayed open is swallowed rather than duplicated (LSPCompletionDelegate.swift).
+- **completion-apply-ignores-foreign-entry-type**: `completionWindowApplyCompletion` MUST return without effect when the applied item is not an `LSPCompletionEntry`, since the completion window is shared with `JumpToDefinitionLink` (LSPCompletionDelegate.swift).
+- **completion-additional-edits-bounds-and-conflict-checked**: `applicableAdditionalEdits` MUST discard an `additionalTextEdits` entry whose converted range falls outside the document's bounds, and MUST discard one that conflicts with the primary edit or an already-accepted edit, logging the conflict case via `logger.error` (LSPCompletionDelegate.swift).
+- **completion-edits-applied-back-to-front**: Accepted edits MUST be sorted descending by start offset, ties broken by longer range then by original index, and applied in that order, so an edit not yet applied still describes the pre-edit characters it was converted against (LSPCompletionDelegate.swift).
+- **completion-multi-edit-single-undo-group**: `completionWindowApplyCompletion` MUST wrap more than one edit in one undo group and MUST NOT open a group for a single edit (LSPCompletionDelegate.swift).
+- **completion-snippet-text-strips-placeholders**: `insertionText(for:)` MUST render a `.snippet`-formatted item's text by keeping each placeholder's default text and dropping bare tabstops (LSPCompletionDelegate.swift).
+- **completion-entry-carries-request-range**: `LSPCompletionEntry.requestRange` MUST be captured at request time from the server's `textEdit`/`InsertReplaceEdit.replace` range or, absent one, the caller's default range, since the range cannot be recomputed later against a moved live cursor (LSPCompletionEntry.swift).
+- **completion-entry-jump-fields-nil**: `LSPCompletionEntry.pathComponents`, `.targetPosition`, and `.sourcePreview` MUST all be `nil`, since a completion entry carries no jump-to-definition target (LSPCompletionEntry.swift).
+- **hover-diagnostics-take-precedence**: `present(offset:point:token:)` MUST show an overlapping diagnostic, ranked by severity, before ever asking the server for a hover, and MUST issue no request when one is found (LSPHoverController.swift).
+- **hover-generation-guards-late-publish**: Every `pointerMoved(to:)` call MUST advance the generation and cancel the pending task unconditionally, and `present` MUST re-check its own token against the current generation before publishing the diagnostic result, before issuing the request, and again before publishing the server's answer (LSPHoverController.swift).
+- **hover-provider-false-means-unsupported**: `declaresHoverProvider(_:)` MUST treat a bare `false` `hoverProvider` capability as unsupported and MUST treat a missing key the same way, distinguishing both from an object value, which it MUST treat as supported (LSPHoverController.swift).
+- **hover-contents-markdown-only-when-declared**: `hoverText(from:)` MUST render both `MarkedString` shapes as plain text and MUST treat `MarkupContent` as markdown only when its `kind` is `.markdown` (LSPHoverController.swift).
+- **hover-still-inside-range-is-a-no-op**: `pointerMoved(to:)` MUST leave the presented card alone, issuing no dismiss and no new request, while the pointer stays within the presented range (LSPHoverController.swift).
+- **hover-invalidate-tears-down-without-crossing-actor**: `invalidate()` MUST advance the generation, cancel the pending task, and dismiss the card synchronously on the main actor (LSPHoverController.swift).
+- **jump-nonisolated-witness-assumes-isolation**: `openLink(link:)` MUST be declared `nonisolated` to satisfy `JumpToDefinitionDelegate`'s non-`@MainActor` requirement, and MUST reach `openFile` only through `MainActor.assumeIsolated`, never a `Task` hop (LSPJumpToDefinitionDelegate.swift).
+- **jump-definition-provider-false-means-unsupported**: `declaresDefinitionProvider(_:)` MUST follow the same bool-or-object rule as the hover capability check: a bare `false` and a missing key both mean unsupported, an object means supported (LSPJumpToDefinitionDelegate.swift).
+- **jump-location-link-uses-selection-range**: For a `DefinitionResponse` carrying `[LocationLink]`, `queryLinks` MUST build each target from `targetSelectionRange`, never `targetRange` (LSPJumpToDefinitionDelegate.swift).
+- **jump-same-file-uses-cursor-range-not-line-column**: A same-file target MUST be built from the range-based cursor-position initializer, never the line/column one, because the line/column form leaves the range unset and the same-file caret-move branch would then do nothing (LSPJumpToDefinitionDelegate.swift).
+- **jump-same-file-detection-by-resolved-path**: `isSameFile(_:as:)` MUST fall back to comparing two file URIs by their standardized, symlink-resolved paths when a literal string comparison fails, so a server's own percent-encoding or a symlinked path does not turn a same-file jump into a cross-file one (LSPJumpToDefinitionDelegate.swift).
+- **jump-cross-file-target-carries-empty-range**: A cross-file `JumpToDefinitionLink` MUST carry a zero-length range at offset zero, since opening a different document does not read a range into that document's own line index (LSPJumpToDefinitionDelegate.swift).
+- **annotation-coordinator-witnesses-nonmainactor-protocol**: All `TextViewCoordinator` requirements MUST be declared `nonisolated`, and every one except `destroy()` MUST reach main-actor state only through `MainActor.assumeIsolated`, never a `Task` hop (LSPEditorAnnotationCoordinator.swift).
+- **annotation-destroy-checks-thread-before-isolating**: `destroy()`, also reachable from a plain `deinit` under SE-0371, MUST check whether it is already running on the main thread and run `MainActor.assumeIsolated` synchronously when true, and MUST hop via a detached main-actor `Task` rather than trap when false (LSPEditorAnnotationCoordinator.swift).
+- **annotation-marks-reanchored-on-edit-notification**: Diagnostic marks MUST be re-anchored from `NSTextStorage.didProcessEditingNotification`, registered to fire synchronously on the posting thread, not from a delegate's did-change-text callback, because only the notification carries the edited range and the length delta (LSPEditorAnnotationCoordinator.swift).
+- **annotation-reanchor-drops-marks-inside-edit**: `reanchor(replacedStart:replacedLength:delta:)` MUST shift a mark starting at or after the replaced span by the delta, MUST leave a mark ending at or before the replaced span untouched, and MUST drop, not merely leave stale, a mark the edit lands inside (LSPEditorAnnotationCoordinator.swift).
+- **annotation-diagnostic-hover-invalidated-on-republish**: `apply(_:)` MUST invalidate the hover controller when the currently presented content's origin is `.diagnostic`, since a republish means the server's complaint may have changed, and MUST leave a `.server`-origin hover card alone (LSPEditorAnnotationCoordinator.swift).

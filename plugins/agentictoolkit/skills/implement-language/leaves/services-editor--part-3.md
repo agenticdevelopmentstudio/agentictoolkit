@@ -1,0 +1,71 @@
+<!-- leaf: implement-language/services-editor--part-3 · source: language-services-editor.md -->
+
+# LanguageServicesEditor — continued (part 3)
+
+**Rules** (cite as `implement-language/services-editor--part-3#<slug>`):
+
+- `annotation-overlay-installed-as-subview-not-floating` MUST
+- `status-row-one-per-session` MUST
+- `status-row-failed-carries-reason-and-stderr` MUST
+- `status-recompute-reads-only-delivered-snapshot` MUST
+- `status-rows-sorted-deterministically` MUST
+- `status-rows-published-only-on-change` MUST
+- `status-project-close-drops-subscriptions-and-snapshot` MUST
+- `status-has-open-project-independent-of-services` MUST
+- `reload-watches-directories-not-files` MUST
+- `reload-start-seeds-from-open-documents` MUST
+- `reload-signature-avoids-unnecessary-read` MUST
+- `reload-deleted-file-forgets-signature-leaves-buffer` MUST
+- `reload-save-echo-detected-by-text-compare` MUST
+- `reload-dirty-buffer-left-alone-and-conflict-logged` MUST
+- `reload-clean-behind-replaces-whole-buffer` MUST
+- `reload-stale-read-discarded` MUST
+- `reload-read-hops-off-main-actor` MUST
+- `reload-case-insensitive-path-matching` MUST
+- `reload-stop-idempotent-start-fresh` MUST
+- `project-services-not-an-appfeature` MUST
+- `project-services-start-idempotent-and-terminal-after-shutdown` MUST
+- `project-services-shutdown-order-sync-then-diagnostics-then-registry` MUST
+- `project-services-shutdown-idempotent-but-counted` MUST
+- `project-services-diagnostics-observe-sessions-and-documents` MUST
+- `semantic-provider-registered-at-index-zero` MUST
+- `semantic-fetch-clock-orders-writes` MUST
+- `semantic-nil-vs-empty-distinguishes-unknown-from-settled` MUST
+- `semantic-ragged-response-abandoned-not-settled` MUST
+- `semantic-request-error-settles-not-parked` MUST
+- `semantic-query-parks-and-times-out` MUST
+- `semantic-refetch-debounced` MUST
+- `semantic-apply-edit-completes-without-awaiting-refetch` MUST
+
+- **annotation-overlay-installed-as-subview-not-floating**: `install(in:)` MUST add the diagnostic overlay as a subview of the text view itself, not of the scroll view, so overlay rects share the text view's own coordinate space (LSPEditorAnnotationCoordinator.swift).
+- **status-row-one-per-session**: `recomputeRows()` MUST emit exactly one status row per project/configuration pair present in that project's session-state snapshot, and MUST NOT synthesize a row for a configuration with no session entry (LanguageServerStatusModel.swift).
+- **status-row-failed-carries-reason-and-stderr**: For a `.failed` session state, row construction MUST set the failure reason from the error's localized description and the standard-error text from the failure's captured stream, trimmed of whitespace and newlines; every other state MUST leave both empty (LanguageServerStatusModel.swift).
+- **status-recompute-reads-only-delivered-snapshot**: `recomputeRows()` MUST build rows only from the snapshot delivered to its subscription closure, never by reading the registry's published properties directly inside that closure, because a `willSet`-driven publish would otherwise be read before the update it announces (LanguageServerStatusModel.swift).
+- **status-rows-sorted-deterministically**: The rebuilt row list MUST be sorted by project name, then configuration name, then configuration id, then project id, so two rows tied on the first three keys still sort deterministically across runs with different dictionary-iteration order (LanguageServerStatusModel.swift).
+- **status-rows-published-only-on-change**: `recomputeRows()` MUST compare the freshly built list against the currently published rows and MUST return without publishing when they are equal (LanguageServerStatusModel.swift).
+- **status-project-close-drops-subscriptions-and-snapshot**: Closing a project MUST remove its entry from both the per-project registry-observation table and the snapshot table, releasing its registry subscription rather than merely leaving an empty snapshot behind (LanguageServerStatusModel.swift).
+- **status-has-open-project-independent-of-services**: The open-project indicator MUST be driven from the count of observed projects, not from whether any project currently has rows, so a project whose language services failed to start is still reflected as open (LanguageServerStatusModel.swift).
+- **reload-watches-directories-not-files**: `beginWatching(_:)` MUST watch the resolved parent directory of an open document's URI, refcounted per directory, and MUST create at most one directory watcher per directory regardless of how many open documents share it (OpenDocumentReloader.swift).
+- **reload-start-seeds-from-open-documents**: `start()` MUST begin watching every document already present in the document store before subscribing to future open events, so app-startup ordering cannot leave an already-open document unwatched (OpenDocumentReloader.swift).
+- **reload-signature-avoids-unnecessary-read**: `reloadIfNeeded(_:)` MUST compare a freshly computed file signature against the last one read for that URI and MUST return without reading the file when they are equal (OpenDocumentReloader.swift).
+- **reload-deleted-file-forgets-signature-leaves-buffer**: When the file signature cannot be computed at all (deleted, renamed away, or momentarily absent), `reloadIfNeeded` MUST clear the tracked signature for that URI and MUST leave the buffer untouched (OpenDocumentReloader.swift).
+- **reload-save-echo-detected-by-text-compare**: `apply(_:to:uri:readAt:)` MUST detect the reloader's own save echoing back by comparing the read text against the buffer's current text, not by tracking the write itself, and MUST no-op when they already match (OpenDocumentReloader.swift).
+- **reload-dirty-buffer-left-alone-and-conflict-logged**: When the buffer is dirty and its text differs from what was read, `apply` MUST leave the buffer's text untouched, MUST log the conflict, and MUST clear the tracked signature so the next dirty-state change can retry the reload once the buffer goes clean (OpenDocumentReloader.swift).
+- **reload-clean-behind-replaces-whole-buffer**: When the buffer is clean and its text differs from what was read, `apply` MUST replace the entire buffer with the full text read from disk (OpenDocumentReloader.swift).
+- **reload-stale-read-discarded**: `apply` MUST discard a completed read whose signature no longer matches the URI's currently tracked signature, because a later filesystem event has already triggered another read (OpenDocumentReloader.swift).
+- **reload-read-hops-off-main-actor**: `reloadIfNeeded` MUST perform the file read off the main actor, at user-initiated quality of service, and MUST re-validate the buffer's continued existence and the signature after control returns (OpenDocumentReloader.swift).
+- **reload-case-insensitive-path-matching**: A delivered filesystem-event path MUST be matched against tracked URIs case-insensitively, and every tracked URI resolving to that path MUST be reloaded, not only the first (OpenDocumentReloader.swift).
+- **reload-stop-idempotent-start-fresh**: `stop()` MUST clear every watcher and every tracked signature; a subsequent `start()` MUST behave as a fresh start rather than a no-op (OpenDocumentReloader.swift).
+- **project-services-not-an-appfeature**: `ProjectLanguageServices` MUST NOT register as a process-lifetime app feature, since its lifetime is scoped to one project window, not the process (ProjectLanguageServices.swift).
+- **project-services-start-idempotent-and-terminal-after-shutdown**: `start()` MUST be a no-op both when already started and permanently after `shutdown()` has run (ProjectLanguageServices.swift).
+- **project-services-shutdown-order-sync-then-diagnostics-then-registry**: `shutdown()` MUST await the document-sync pipeline's shutdown before calling the diagnostics coordinator's shutdown, and MUST await the registry's shutdown last, so no pipeline queue is drained against servers the registry has already stopped (ProjectLanguageServices.swift).
+- **project-services-shutdown-idempotent-but-counted**: `shutdown()` MUST record that it was called every time, including a call blocked by having already shut down, while performing the actual teardown at most once (ProjectLanguageServices.swift).
+- **project-services-diagnostics-observe-sessions-and-documents**: `start()` MUST have the diagnostics coordinator observe both the session registry and the document store, so a document opened before its server finishes handshaking still receives diagnostics once the server answers, and a closed document's diagnostics are pruned (ProjectLanguageServices.swift).
+- **semantic-provider-registered-at-index-zero**: The provider MUST be registered with the source editor ahead of the tree-sitter highlighter, since the styled-range container prioritizes the lower provider index (SemanticTokenHighlightProvider.swift).
+- **semantic-fetch-clock-orders-writes**: A settling fetch MUST be admitted to storage only when its stamp is at or after the currently recorded highlights stamp, and both setup and edit-handling MUST advance the fetch clock and stamp before starting a fresh fetch, so a fetch begun before an edit can never overwrite that edit's invalidation (SemanticTokenHighlightProvider.swift).
+- **semantic-nil-vs-empty-distinguishes-unknown-from-settled**: Highlights being unset MUST mean "not known yet," parking a query, and highlights being an empty, settled list MUST mean "known, and empty," answering a query immediately; only a successful store MUST transition from the first state to the second (SemanticTokenHighlightProvider.swift).
+- **semantic-ragged-response-abandoned-not-settled**: A `semanticTokens/full` response whose token-data count is not a multiple of five MUST be logged and MUST abandon the fetch without storing an empty result, leaving highlights unset so a future edit or language change can retry (SemanticTokenHighlightProvider.swift).
+- **semantic-request-error-settles-not-parked**: A thrown error from the semantic-tokens request MUST settle the fetch by storing an empty highlight list, answering any parked query immediately, rather than abandoning it the way a ragged response does; the catch that does this logs nothing, which the `lsp-request-failure-unsignaled` finding below covers (SemanticTokenHighlightProvider.swift).
+- **semantic-query-parks-and-times-out**: A highlight query MUST park when highlights are unset and a fetch is in flight, MUST be answered exactly once, either by that fetch settling or by a fixed timeout elapsing, and MUST be answered immediately when no fetch is in flight at all (SemanticTokenHighlightProvider.swift).
+- **semantic-refetch-debounced**: An edit-driven refetch MUST be started after a short fixed delay rather than immediately, so consecutive edits collapse into one request instead of one per keystroke (SemanticTokenHighlightProvider.swift).
+- **semantic-apply-edit-completes-without-awaiting-refetch**: The edit-handling entry point MUST call its completion with the full-document invalidation set synchronously, without awaiting the refetch it starts, so a server round trip never sits inside the edit-handling path (SemanticTokenHighlightProvider.swift).

@@ -1,0 +1,8 @@
+<!-- leaf: implement-hub-domain-1/ecosystem-config · source: hub-domain-ecosystem-config.md -->
+
+# Ecosystem Config
+
+## Overview
+
+This component is five `EcosystemTopicProvider` implementations that hang off one ecosystem's product rail — `AuthSettingsTopic` ("User Auth"), `SigninAppsTopic` ("Sign-in apps"), `FeatureFlagsTopic` ("Feature flags"), `ServerBagsTopic` ("Server bags"), and `StorageTokensTopic` ("Storage Access Tokens", a thin wrapper around the shared `StorageTokensRail`) — plus the data models and five data-source protocols they share (`EcosystemConfigModels.swift`), and the matching web data-client layer (`feature-flags.ts`, `server-bags.ts`, `signin-apps.ts`, `storage-tokens.ts`, `wire.ts`). Each Apple topic resolves a rail-relative `path: [HTDVItem]` into a level (a list of that ecosystem's flags/bags/apps/tokens, with a create action) or a detail (a `FormSpec` for viewing/editing one entity), orchestrating an injected data-source protocol, domain validation, and error normalization through `HubError`. The web files are the corresponding fetch-layer clients for the same five resources, consumed by UI panes and dialog-state modules that are not part of this component's given sources. This is a **logic** component: `AuthSettingsTopic`, `SigninAppsTopic`, `FeatureFlagsTopic`, `ServerBagsTopic`, and `StorageTokensRail`/`StorageTokensTopic` render nothing themselves — they build declarative `FormSpec`/`HTDVLevel`/`HTDVDetail` value objects that a separate presentation layer (outside these sources) turns into UI, and the five TypeScript files are plain `fetch`-based clients with no JSX.
+

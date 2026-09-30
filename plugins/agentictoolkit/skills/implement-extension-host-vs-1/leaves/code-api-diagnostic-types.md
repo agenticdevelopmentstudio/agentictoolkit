@@ -1,0 +1,8 @@
+<!-- leaf: implement-extension-host-vs-1/code-api-diagnostic-types · source: extension-host-vs-code-api-diagnostic-types.md -->
+
+# DiagnosticTypes
+
+## Overview
+
+`DiagnosticTypes.swift` is a `VSCodeAPI` extension that gives the extension host's embedded `JSContext` real, `instanceof`-checkable implementations of four `vscode` API declarations — `vscode.DiagnosticSeverity`, `vscode.DiagnosticTag`, `vscode.DiagnosticRelatedInformation` and `vscode.Diagnostic` (`vscode.d.ts`, `:7053-7072`, `:7077-7096` and `:7102-7161` at the pinned commit named in the file's own header) — and the Swift-side mirror types and bidirectional bridging functions that let host code read an extension-built `Diagnostic` back into a Swift value, and build a real `Diagnostic` instance from a Swift value to hand back to an extension. `vscode.Location`, the fifth declaration the same task adds, is intentionally not defined here: its constructor needs `Range`'s constructor, which exists only inside `TextGeometry.swift`'s own `evaluateScript` closure, so `Location` lives in `TextGeometry.swift` instead (that file's header explains why in full). Two behaviors are drawn from the VS Code implementation (`extHostTypes.diagnostic.ts`) rather than from `vscode.d.ts`'s prose: the constructor throwing on an invalid `range` or a falsy `message`, and a missing third constructor argument defaulting `severity` to `DiagnosticSeverity.Error` (`0`). The file deliberately diverges from upstream in one place: `Diagnostic` and `DiagnosticRelatedInformation` require a real `Range`/`Location` instance at construction, where upstream accepts a duck-typed value structurally and only refuses it later, one call removed from where the extension made its mistake.
+

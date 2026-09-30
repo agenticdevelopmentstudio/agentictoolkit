@@ -1,0 +1,36 @@
+<!-- leaf: implement-extension-host-core-1/extensions-contribution-point--part-2 · source: extension-host-core-extensions-contribution-point.md -->
+
+# Contribution Point — continued (part 2)
+
+## Privacy
+
+- **Data collected**: This file carries only extension identifiers and diagnostic keys (`contributionKey`, `extensionIdentifier`); it defines no field for a credential, token, or other user-sensitive value.
+- **Storage**: `ContributionPoint.swift` itself performs no storage; `ContributionRegistrations` holds its payload and notes only in memory for as long as the owning conformer keeps it. A conformer whose payload is itself persisted, user-owned state is bound by persisted-state-absence-distinction, but that persistence mechanism lives in the conformer, not in this file.
+- **Transmission**: Not applicable — this file contains no networking code.
+- **Retention**: Not applicable at this layer — `ContributionRegistrations`' in-memory entries live only as long as the owning conformer keeps them, and are replaced or removed by `record`/`remove` (record-replaces-existing-entry, remove-clears-payload-and-its-notes); this file defines no retention policy beyond that.
+
+## Platform Notes
+
+- **AppKit / UIKit**: this is the source. The file is `packages/apple/AgenticToolkit/Core/Extensions/ContributionPoint.swift`, part of the `AgenticToolkitCore` framework target, which `project.yml` declares `platform: macOS`. The registry that drives it, `ExtensionRegistry.swift`, lives in the same directory and target. Every conformer today (`ThemeContributionPoint`, `ConfigurationContributionPoint`, `LanguageContributionPoint`, `ViewsContributionPoint`) lives one level up, under `macOS/Features/Extensions/`.
+- **SwiftUI**: no SwiftUI dependency exists in this file. A SwiftUI-backed conformer would still need to be a `@MainActor`-isolated class per reference-type-conformance and main-actor-isolation; its `ContributionRegistrations` state would typically back an `@Published`/`@Observable` property on that class rather than being exposed directly, since the struct itself has no observation mechanism.
+- **Compose**: a Kotlin port would model `ContributionPoint` as an `interface` whose implementers are confined to a single coroutine dispatcher (mirroring main-actor-isolation) rather than declared `@MainActor`, since Kotlin has no actor-isolated type system; `withdraw` stays non-throwing (`Unit`, not a `Result`), and `apply` becomes a function that can throw or return a `Result` failure. `ContributionRegistrations<Payload, Note>` becomes a generic class or data class wrapping a `MutableList<Registration<Payload>>` and a `MutableList<Note>`, since Kotlin has no direct `struct`-with-`mutating`-methods equivalent; callers must copy defensively if value semantics matter.
+- **React/Web**: a TypeScript port has no actor isolation to enforce (reference-type-conformance and main-actor-isolation have no direct analogue), so a port would instead document that every `ContributionPoint` implementation and every call into a shared `ContributionRegistrations` instance must run on the same JavaScript event-loop turn/task queue it always does, and any asynchronous `apply` must not interleave state mutation with another call. `ContributionRegistrations` becomes a plain class over two arrays (`registrations`, `notes`) with the same replace-on-`record`, filter-on-`remove` semantics (record-replaces-existing-entry, remove-clears-payload-and-its-notes).
+- **WinUI 3**: a .NET port would model `ContributionPoint` as an interface (`IContributionPoint`) with `Apply(Contributions, ExtensionManifest, string directoryPath)` (throwing an exception is the direct analogue of `apply-may-throw`) and `Withdraw(string extensionIdentifier)` (returning `void`, mirroring withdraw-does-not-throw). Because WinUI 3/`Windows App SDK` has no compile-time actor isolation, main-actor-isolation would instead be enforced by requiring every call to originate on the UI thread (`DispatcherQueue`), typically asserted with `Debug.Assert(DispatcherQueue.HasThreadAccess)` at the top of each implementation, since nothing else stops a background `Task` from calling in. `ContributionRegistrations<TPayload, TNote>` ports as a `sealed class` wrapping two `List<T>` fields (`List<(string Identifier, TPayload Payload)>` and `List<TNote>`) with `Record`, `Remove`, `Payload`, and `Identifiers`/`IdentifiersWhere` methods reproducing record-moves-identifier-to-end's move-to-end-on-replace behavior explicitly, since `List<T>.RemoveAll` followed by `Add` is the direct translation of `remove` followed by `append` in the Swift source. `INotifyPropertyChanged` is not needed on the collection itself, matching registrations-not-sendable's intent that this is private bookkeeping, not a bindable view-model property.
+
+## Design Decisions
+
+**Decision**: `ContributionPoint` is constrained to `AnyObject` and isolated to `@MainActor`.
+**Rationale**: `ExtensionRegistry` holds registered points by reference identity — the same instance that applies an extension's contributions must be the one asked to withdraw them — which only a class can guarantee under Swift's value semantics; `@MainActor` follows because every implementer written so far touches main-actor state (the theme store, settings panels, the tabs registry).
+**Approved**: pending
+
+**Decision**: `ContributionRegistrations.record(_:notes:for:)` replaces an existing entry in place and moves the identifier to the end of the reported order, rather than merging the new payload into the identifier's original position.
+**Rationale**: per the file's own doc comment, a re-application is the most recent application, and keeping the identifier's original position would report an order no real sequence of events produced; this also makes reload-withdraws-before-reapplying safe, since a rescan's withdraw-then-reapply of an unchanged extension still leaves exactly one entry, now at the end.
+**Approved**: pending
+
+**Decision**: both `registrations` and `notes` inside `ContributionRegistrations` are arrays, not dictionaries, even though lookup by identifier is a common operation.
+**Rationale**: per the file's own doc comment, application order is the only order either collection has, and it is an order callers report back — `identifiers` is specified in it, and so is the notes list a person reads in the Extensions UI; a dictionary has no order to give back, so it cannot satisfy identifiers-in-application-order or notes-in-application-order-unfiltered.
+**Approved**: pending
+
+**Decision**: the persisted-state-absence-distinction rule is written into `ContributionPoint`'s own doc comment as a property of the contract, rather than left to each conformer to rediscover.
+**Rationale**: the doc comment cites four separate prior defects (Rulings GO, GS, GV, and I1/I2), all in `ThemeContributionPoint`, that trace back to the same conflation — reading "I could not determine what this extension declares" as "this extension declares nothing" — each time deleting or orphaning a user's persisted theme. The rule is scoped to conformers whose applied state is itself persisted and user-owned; a conformer whose state is rebuilt from the manifests at every launch is explicitly exempt, because a wrong answer there costs a session, not data.
+**Approved**: pending

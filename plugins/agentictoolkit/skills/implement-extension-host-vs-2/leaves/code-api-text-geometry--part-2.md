@@ -1,0 +1,97 @@
+<!-- leaf: implement-extension-host-vs-2/code-api-text-geometry--part-2 · source: extension-host-vs-code-api-text-geometry.md -->
+
+# TextGeometry — continued (part 2)
+
+**Rules** (cite as `implement-extension-host-vs-2/code-api-text-geometry--part-2#<slug>`):
+
+- `main-actor-isolation` MUST
+- `install-once-per-context` MUST
+- `cache-write-optional` MUST
+- `member-presence-check-runs-every-call` MUST
+- `install-evaluate-failure` MUST
+- `install-installed-error` MUST
+- `install-missing-member` MUST
+- `install-failure-is-non-fatal` MUST
+- `members-returned-as-dictionary` MUST
+- `single-evaluation-builds-all-three` MUST
+- `position-constructor-validates-line` MUST
+- `position-constructor-validates-character` MUST
+- `position-fields-readonly` MUST
+- `position-instance-frozen` MUST
+- `position-is-before` MUST
+- `position-is-before-or-equal` MUST
+- `position-is-after-derived` MUST
+- `position-is-after-or-equal-derived` MUST
+- `position-is-equal` MUST
+- `position-compare-to` MUST
+- `position-translate-dispatch` MUST
+- `position-translate-omitted-defaults-zero` MUST
+- `position-translate-null-throws` MUST
+- `position-translate-new-object-when-changed` MUST
+- `position-translate-identity-on-no-change` MUST
+- `position-with-dispatch` MUST
+- `position-with-omitted-keeps-current-value` MUST
+- `position-with-null-throws` MUST
+- `position-with-identity-on-no-change` MUST
+- `position-to-json` MUST
+- `range-constructor-four-number-form` MUST
+- `range-constructor-two-position-form` MUST
+- `range-constructor-invalid-arguments-throws` MUST
+- `range-constructor-swaps-strictly-ordered` MUST
+- `range-fields-readonly` MUST
+- `range-instance-frozen` MUST
+- `range-contains-duck-typed` MUST
+- `range-contains-position-not-strictly-outside` MUST
+- `range-is-equal-not-duck-typed` MUST
+- `range-intersection-undefined-when-disjoint` MUST
+- `range-intersection-empty-not-undefined-when-touching` MUST
+- `range-intersection-span` MUST
+- `range-union-identity-shortcut` MUST
+- `range-union-span` MUST
+
+## Behavioral Requirements
+
+- **main-actor-isolation**: Every function this file adds MUST execute on the main actor; `VSCodeAPI` is declared `@MainActor` (`VSCodeAPI.swift`), a caseless `enum` with no state of its own, and this file adds no conformance of its own.
+- **install-once-per-context**: `installTextGeometryClasses(in:)` MUST evaluate `textGeometryClassesSource` at most once for a given `JSContext`; when the context already carries an object-valued cached container under the global name `__vscodeTextGeometryClasses` (`textGeometryGlobalName`), it MUST reuse that cached container rather than re-evaluating the source.
+- **cache-write-optional**: When the trailing cache-write `Object.defineProperty(globalThis, textGeometryGlobalName, ...)` inside the evaluated source fails, the evaluation MUST still return the freshly built `{ Position, Range, Location }` result for that one call rather than treat the failed cache write as an error; the failure MUST be caught and silently ignored.
+- **member-presence-check-runs-every-call**: Whether the container comes from the cache or a fresh evaluation, `installTextGeometryClasses(in:)` MUST check, on every call, that `Position`, `Range` and `Location` each resolve to an object-valued property of the container.
+- **install-evaluate-failure**: `installTextGeometryClasses(in:)` MUST return `nil`, and MUST log an error via `VSCodeAPI.logger`, when `context.evaluateScript(textGeometryClassesSource)` returns a value that is `nil` or not an object.
+- **install-installed-error**: `installTextGeometryClasses(in:)` MUST return `nil`, and MUST log an error naming the underlying message, when the evaluated result carries a non-`undefined` `installedError` property — the shape the evaluated source's own outer catch returns instead of discarding the caught error.
+- **install-missing-member**: `installTextGeometryClasses(in:)` MUST return `nil`, and MUST log an error, when the resolved container is missing an object-valued `Position`, `Range`, or `Location` property.
+- **install-failure-is-non-fatal**: `installTextGeometryClasses(in:)` MUST return `nil` rather than throw a Swift error or crash on any installation failure, so a context where installation fails is recoverable: `vscode.Position`/`vscode.Range`/`vscode.Location` simply stay the shim's not-implemented stub for that context.
+- **members-returned-as-dictionary**: On success, `installTextGeometryClasses(in:)` MUST return a `[String: JSValue]` keyed `"Position"`, `"Range"`, `"Location"`.
+- **single-evaluation-builds-all-three**: `textGeometryClassesSource` MUST construct `Position`, `Range` and `Location` inside one evaluated IIFE, so `Range`'s constructor can call `new Position` and `Location`'s constructor can call `new Range` as ordinary lexical bindings rather than by re-finding them off `globalThis`.
+- **position-constructor-validates-line**: `Position`'s constructor MUST throw when `line` is negative.
+- **position-constructor-validates-character**: `Position`'s constructor MUST throw, independently of the `line` check, when `character` is negative.
+- **position-fields-readonly**: `Position.prototype.line` and `.character` MUST be defined as read-only accessor properties over private backing fields, not plain writable own properties.
+- **position-instance-frozen**: Every constructed `Position` instance MUST be frozen via `Object.freeze` at the end of its constructor.
+- **position-is-before**: `Position.prototype.isBefore` MUST compare `line` first and compare `character` only when both `line` values are equal, returning `true` only when strictly earlier.
+- **position-is-before-or-equal**: `Position.prototype.isBeforeOrEqual` MUST use the same line-then-character comparison as `isBefore`, returning `true` on an equal `character` too.
+- **position-is-after-derived**: `Position.prototype.isAfter` MUST be defined as the logical negation of `isBeforeOrEqual`, not as an independent comparison.
+- **position-is-after-or-equal-derived**: `Position.prototype.isAfterOrEqual` MUST be defined as the logical negation of `isBefore`, not as an independent comparison.
+- **position-is-equal**: `Position.prototype.isEqual` MUST return `true` if and only if both `line` and `character` are equal.
+- **position-compare-to**: `Position.prototype.compareTo` MUST return `-1`, `0`, or `1`, ordering by `line` first and `character` second.
+- **position-translate-dispatch**: `Position.prototype.translate` MUST accept either two numeric arguments (`lineDelta`, `characterDelta`) or a single `{ lineDelta, characterDelta }` object, dispatching on the first argument's `typeof`.
+- **position-translate-omitted-defaults-zero**: In `translate`, an omitted `lineDelta`/`characterDelta` (positional `undefined`, or a missing/non-number object field) MUST be treated as a zero delta for that field.
+- **position-translate-null-throws**: `translate` MUST throw when either argument is explicitly `null`.
+- **position-translate-new-object-when-changed**: When the computed `lineDelta`/`characterDelta` is non-zero in either field, `translate` MUST return a new `Position` instance distinct from the receiver, leaving the receiver's own `line`/`character` unchanged.
+- **position-translate-identity-on-no-change**: `translate` MUST return the receiver itself (`this`), not a new object, when the computed `lineDelta` and `characterDelta` are both zero.
+- **position-with-dispatch**: `Position.prototype.with` MUST accept either two positional arguments (`line`, `character`) or a single `{ line, character }` object, dispatching on the first argument's `typeof`.
+- **position-with-omitted-keeps-current-value**: In `with`, an omitted `line`/`character` (positional `undefined`, or a missing/non-number object field) MUST keep that field's current value, never default it to zero.
+- **position-with-null-throws**: `with` MUST throw when either argument is explicitly `null`.
+- **position-with-identity-on-no-change**: `with` MUST return the receiver itself (`this`) when the computed `line` and `character` both equal the receiver's current values.
+- **position-to-json**: `Position.prototype.toJSON` MUST return a plain `{ line, character }` object built from the `line`/`character` accessors, not the instance's own enumerable backing fields.
+- **range-constructor-four-number-form**: `Range`'s constructor MUST accept four numeric arguments and build `start`/`end` as new `Position` instances from them.
+- **range-constructor-two-position-form**: `Range`'s constructor MUST accept two position-like arguments — a real `Position` or a duck-typed `{ line, character }` object — converting each through the same position-like acceptance the constructor uses for the four-number form's endpoints.
+- **range-constructor-invalid-arguments-throws**: `Range`'s constructor MUST throw `Error('Invalid arguments')` when the given arguments match neither the four-number form nor the two-position form.
+- **range-constructor-swaps-strictly-ordered**: `Range`'s constructor MUST compare `start.isBefore(end)`; when that is `false` — including when `start` and `end` are equal-but-distinct `Position` objects — it MUST swap `start` and `end` before storing them.
+- **range-fields-readonly**: `Range.prototype.start` and `.end` MUST be defined as read-only accessor properties, not plain writable own properties.
+- **range-instance-frozen**: Every constructed `Range` instance MUST be frozen via `Object.freeze` at the end of its constructor.
+- **range-contains-duck-typed**: `Range.prototype.contains` MUST accept either a position-like or a range-like argument, determined structurally rather than by `instanceof`, recursing into two `Position`-shaped `contains` calls for a range-like argument.
+- **range-contains-position-not-strictly-outside**: For a position-like argument, `contains` MUST return `true` when the converted position is not strictly before `start` and not strictly after `end`, and MUST return `false` for any argument that is neither position-like nor range-like.
+- **range-is-equal-not-duck-typed**: `Range.prototype.isEqual` MUST compare the receiver's and the other value's `start`/`end` by reading the other value's fields directly, with no structural shape check first, so a plain object literal shaped like a `Range` throws rather than comparing.
+- **range-intersection-undefined-when-disjoint**: When two ranges share no point at all (the computed start is strictly after the computed end), `intersection` MUST return `undefined`.
+- **range-intersection-empty-not-undefined-when-touching**: When two ranges merely touch at one point (the computed start equals the computed end), `intersection` MUST return a new, empty `Range`, not `undefined`.
+- **range-intersection-span**: When two ranges overlap, `intersection` MUST return a new `Range` from the later of the two starts to the earlier of the two ends.
+- **range-union-identity-shortcut**: `Range.prototype.union` MUST return the receiver itself when it already contains `other`, and MUST return `other` itself when `other` already contains the receiver, without constructing a new `Range` in either case.
+- **range-union-span**: When neither range contains the other, `union` MUST return a new `Range` spanning the earlier of the two starts to the later of the two ends.

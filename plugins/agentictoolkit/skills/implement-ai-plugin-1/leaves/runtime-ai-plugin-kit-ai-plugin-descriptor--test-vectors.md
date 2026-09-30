@@ -1,0 +1,19 @@
+<!-- leaf: implement-ai-plugin-1/runtime-ai-plugin-kit-ai-plugin-descriptor--test-vectors · source: ai-plugin-runtime-ai-plugin-kit-ai-plugin-descriptor.md -->
+
+# AI Plugin Descriptor
+
+## Conformance Test Vectors
+
+| ID | Requirements | Input | Expected |
+|----|-------------|-------|----------|
+| ai-plugin-descriptor-001 | identity-fields-required, field-identity, resolved-default-model | JSON `{schemaVersion:2, identifier:"com.example.provider", displayName:"Example", version:"1.2.3", models:["fast","smart"], defaultModel:"smart", fields:[{key:"apiKey",label:"API Key",kind:"secret"},{key:"baseURL",label:"Base URL",kind:"text",placeholder:"https://…"}]}` decoded via `JSONDecoder` (traced to `AIPluginDescriptorTests.decodesFromJSON`) | `identifier == "com.example.provider"`; `models == ["fast","smart"]`; `resolvedDefaultModel == "smart"`; `fields.count == 2`; `fields[0].isSecret == true`; `fields[1].kind == .text`; `fields[1].placeholder == "https://…"` |
+| ai-plugin-descriptor-002 | resolved-default-model | `AIPluginDescriptor(identifier: "a", displayName: "A", version: "1", models: ["one", "two"])` (traced to `AIPluginDescriptorTests.defaultModelFallback`) | `resolvedDefaultModel == "one"` |
+| ai-plugin-descriptor-003 | resolved-default-model | `AIPluginDescriptor(identifier: "b", displayName: "B", version: "1")` (no `models`, no `defaultModel`; same test) | `resolvedDefaultModel == ""` |
+| ai-plugin-descriptor-004 | resolved-templates-explicit, provider-template-identity, fields-for-template | JSON `{schemaVersion:3, ..., templates:[{id:"a",displayName:"A",defaultValues:{baseURL:"https://a/v1"},models:["m1","m2"],defaultModel:"m1",secretRequired:true}]}` (traced to `AIPluginDescriptorTemplateTests.decodesTemplates`) | `descriptor.templates?.count == 1`; `resolvedTemplates.first!.id == "a"`; `defaultValues["baseURL"] == "https://a/v1"`; `template.resolvedDefaultModel == "m1"`; `fields(for: template).map(\.key) == ["apiKey"]` |
+| ai-plugin-descriptor-005 | resolved-templates-implicit-synthesis, fields-for-template | `AIPluginDescriptor(identifier: "com.example.legacy", displayName: "Legacy", version: "1.0", models: ["only"], defaultModel: "only", fields: [.init(key: "apiKey", label: "API Key", kind: .secret)])` with `templates` omitted (traced to `AIPluginDescriptorTemplateTests.implicitTemplate`) | `templates == nil`; `resolvedTemplates.count == 1`; `resolvedTemplates[0].displayName == "Legacy"`; `resolvedTemplates[0].resolvedDefaultModel == "only"`; `fields(for: resolvedTemplates[0]).map(\.key) == ["apiKey"]` |
+| ai-plugin-descriptor-006 | fields-for-template | A `ProviderTemplate` with its own `fields: [.init(key: "apiKey", label: "Session Token", kind: .secret)]`, on a descriptor whose own `fields` has `apiKey` labeled `"API Key"` (traced to `AIPluginDescriptorTemplateTests.templateFieldOverride`) | `fields(for: template).first?.label == "Session Token"` |
+| ai-plugin-descriptor-007 | field-identity, field-is-secret | `Field(key: "k", label: "L", kind: .text)` with `placeholder` omitted | `isSecret == false`; `placeholder == nil` |
+| ai-plugin-descriptor-008 | provider-template-resolved-config-type | `ProviderTemplate(id: "t", displayName: "T", secretRequired: false)` with `configType` omitted | `resolvedConfigType == "Local"` |
+| ai-plugin-descriptor-009 | provider-template-resolved-provider, provider-template-resolved-llm | `ProviderTemplate(id: "t", displayName: "X")` with `provider` and `llm` both omitted | `resolvedProvider == "X"`; `resolvedLLM == ""` |
+| ai-plugin-descriptor-010 | model-detail-lookup | A `ProviderTemplate` with `modelDetails: [ModelDetail(id: "a")]`; call `modelDetail(for: "b")` | Returns `nil` |
+| ai-plugin-descriptor-011 | json-decoding-required-keys | The JSON from vector 001 with the `"models"` key removed entirely | `JSONDecoder().decode(AIPluginDescriptor.self, from:)` throws `DecodingError.keyNotFound` |

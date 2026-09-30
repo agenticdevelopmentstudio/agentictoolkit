@@ -1,0 +1,18 @@
+<!-- leaf: implement-status-server-monitor-2/webhook-verify--test-vectors · source: status-server-monitor-webhook-verify.md -->
+
+# Status Server Monitor Webhook Verify
+
+## Conformance Test Vectors
+
+| ID | Requirements | Input | Expected |
+|----|-------------|-------|----------|
+| status-server-monitor-webhook-verify-001 | hmac-sha1-hex-digest, signature-compared-via-safe-equal | `secret = "s3cr3t"`; `body = '{"type":"deployment.succeeded"}'`; `sig = createHmac("sha1", secret).update(body).digest("hex")`; call `verifyVercelSignature(body, sig, secret)` | Returns `true` — `webhook-verify.test.ts` › "accepts a correct HMAC-SHA1 signature" |
+| status-server-monitor-webhook-verify-002 | length-mismatch-short-circuits, signature-compared-via-safe-equal | Same `secret`/`body` as above; call `verifyVercelSignature(body, "deadbeef", secret)` | Returns `false` — the 8-character literal and the 40-character sha1 hex digest differ in length, so the length-mismatch guard rejects before any `timingSafeEqual` call — `webhook-verify.test.ts` › "rejects a wrong signature" |
+| status-server-monitor-webhook-verify-003 | missing-signature-rejected | Call `verifyVercelSignature("body", null, "secret")` | Returns `false` with no digest computed — `webhook-verify.test.ts` › "rejects a null signature" |
+| status-server-monitor-webhook-verify-004 | missing-secret-rejected | `body = "body"`; `sig = createHmac("sha1", "s").update(body).digest("hex")`; call `verifyVercelSignature(body, sig, "")` | Returns `false` even though `sig` is a well-formed digest — the empty-secret guard rejects before any comparison — `webhook-verify.test.ts` › "rejects an empty secret" |
+| status-server-monitor-webhook-verify-005 | provided-compared-via-safe-equal | Call `verifySharedSecret("my-secret", "my-secret")` | Returns `true` — `webhook-verify.test.ts` › "accepts a matching secret" |
+| status-server-monitor-webhook-verify-006 | provided-compared-via-safe-equal, length-mismatch-short-circuits | Call `verifySharedSecret("wrong", "my-secret")` | Returns `false` — the two strings differ in byte length, so the length-mismatch guard rejects them before any `timingSafeEqual` call — `webhook-verify.test.ts` › "rejects a wrong secret" |
+| status-server-monitor-webhook-verify-007 | missing-provided-rejected | Call `verifySharedSecret(null, "my-secret")` | Returns `false` — `webhook-verify.test.ts` › "rejects null provided" |
+| status-server-monitor-webhook-verify-008 | missing-configured-secret-fails-closed | Call `verifySharedSecret("anything", "")` | Returns `false` even though `"anything"` is non-empty — an unset configured secret never matches — `webhook-verify.test.ts` › "rejects empty configured secret (fails closed)" |
+| status-server-monitor-webhook-verify-009 | pure-synchronous-no-side-effects, no-throw-contract | Static read of `webhook-verify.ts`'s exported function signatures and bodies | Both `verifyVercelSignature` and `verifySharedSecret` are declared to return a plain `boolean` (not a `Promise`), take no `async`/`await`, and the file contains no `try`/`catch` of any kind — not directly asserted by `webhook-verify.test.ts`, traced to the function declarations and bodies in source |
+| status-server-monitor-webhook-verify-010 | raw-body-precondition | Static read of `verifyVercelSignature`'s doc comment and body | The doc comment states the body must be "passed EXACTLY as received (do not re-serialize)"; the implementation applies `createHmac(...).update(rawBody)` directly to the `rawBody` argument with no `JSON.parse`/`JSON.stringify` round-trip — not exercised by a dedicated assertion in `webhook-verify.test.ts`, traced to the source doc comment and implementation |

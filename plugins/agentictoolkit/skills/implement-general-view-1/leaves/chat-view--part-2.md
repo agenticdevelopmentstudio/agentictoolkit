@@ -1,0 +1,103 @@
+<!-- leaf: implement-general-view-1/chat-view--part-2 · source: chat-view.md -->
+
+# ChatView — continued (part 2)
+
+**Rules** (cite as `implement-general-view-1/chat-view--part-2#<slug>`):
+
+- `viewmodel-required-at-init` MUST
+- `coder-init-unavailable` MUST
+- `renders-initial-transcript-synchronously` MUST
+- `transcript-above-footer` MUST
+- `transcript-minimum-height` MUST
+- `transcript-explicit-width` MUST
+- `transcript-rebuild-on-width-change` MUST
+- `transcript-content-insets` MUST
+- `footer-full-width-rows` MUST
+- `footer-divider` MUST
+- `input-row-insets-and-spacing` MUST
+- `composer-placeholder` MUST
+- `composer-prompt-optional` MUST
+- `composer-enabled-by-default` MUST
+- `composer-disabled-while-responding` MUST
+- `send-button-requires-text` MUST
+- `send-button-glyph` MUST
+- `send-button-tint-reflects-enablement` MUST
+- `return-key-sends` MUST
+- `send-ignored-when-empty` MUST
+- `send-clears-composer` MUST
+- `composer-reevaluated-on-edit` MUST
+- `focus-input-api` MUST
+- `composer-field-exposed-for-tab-order` MUST
+- `composer-focus-query` MUST
+- `status-row-hidden-when-nil` MUST
+- `status-row-shows-text-and-tooltip` MUST
+- `status-icon-swap-only-on-change` MUST
+- `day-banner-per-calendar-day` MUST
+- `inflight-or-attributed-uses-row` MUST
+- `user-messages-right-aligned` MUST
+- `notice-messages-centered` MUST
+- `assistant-error-left-aligned` MUST
+- `role-differentiated-by-position` MUST
+- `plain-bubble-width-cap` MUST
+- `row-bubble-width-derivation` MUST
+- `plain-bubbles-not-line-limited` MUST
+- `typing-indicator-while-responding` MUST
+- `rebuild-skipped-when-inputs-unchanged` MUST
+- `rebuild-deferred-during-text-selection` MUST
+- `rebuild-coalesced-per-tick` MUST
+- `font-setting-change-forces-rebuild` MUST
+- `expansion-carried-to-replacement-message` MUST
+- `follow-newest-when-at-bottom` MUST
+- `preserve-scroll-position-otherwise` MUST
+- `row-selection-opt-in` MUST
+- `disabling-selection-clears-it` MUST
+
+## Behavioral Requirements
+
+- **viewmodel-required-at-init**: The component MUST be constructed with an `AIChatViewModel`; there is no parameterless initializer.
+- **coder-init-unavailable**: The component MUST NOT support construction from a coder; `init(coder:)` MUST be unavailable at compile time and MUST terminate the process via `fatalError` if invoked.
+- **renders-initial-transcript-synchronously**: The component MUST rebuild and render the transcript synchronously during `init`, before the view model's asynchronous bindings deliver their first values, so a view model already holding a conversation draws it on the very first frame.
+- **transcript-above-footer**: The component MUST pin the scrollable transcript to the view's top, leading, and trailing edges, and MUST pin a footer to the view's leading, trailing, and bottom edges directly below the transcript, with no gap between them.
+- **transcript-minimum-height**: The component MUST constrain the transcript's scroll view to a height of at least 200pt.
+- **transcript-explicit-width**: The component MUST NOT let a bubble's measured width become a floor under the window's minimum width; after the window is dragged wider, it MUST still be resizable narrower again (see Design Decisions for how this is achieved).
+- **transcript-rebuild-on-width-change**: The component MUST rebuild the transcript whenever the transcript's visible width changes by more than 1pt from the width it was last rebuilt for.
+- **transcript-content-insets**: The component MUST inset the transcript's contents 20pt from the top and bottom and 16pt from the leading and trailing edges, with 12pt of spacing between adjacent transcript items.
+- **footer-full-width-rows**: The component MUST stretch the status row, the divider, and the input row to the footer's full width.
+- **footer-divider**: The component MUST draw a 1pt hairline, filled with the theme's divider color, spanning the footer's full width between the status row and the input row.
+- **input-row-insets-and-spacing**: The component MUST inset the input row 14pt top and bottom and 16pt leading and trailing, with 10pt of spacing between the prompt, the composer field, and the send button, narrowed to 6pt between the prompt and the composer field.
+- **composer-placeholder**: The component MUST show the placeholder text `Type a message...` in the composer field whenever it is empty, styled in the active theme's body font and placeholder-text color.
+- **composer-prompt-optional**: The component MUST show `composerPrompt`'s text in a leading prompt label immediately in front of the composer field when it is non-nil, and MUST hide that label entirely when `composerPrompt` is nil.
+- **composer-enabled-by-default**: The component MUST accept input by default (`isComposerEnabled` defaults to `true`).
+- **composer-disabled-while-responding**: The component MUST disable the composer field whenever `isComposerEnabled` is `false` or the view model's `state` is `.responding`.
+- **send-button-requires-text**: The component MUST additionally require non-empty, whitespace-trimmed composer text before enabling the send button, even while the composer itself is enabled.
+- **send-button-glyph**: The component MUST render the send button as a borderless button showing the SF Symbol `arrow.up.circle.fill` at 18pt, regular weight, with an accessibility description of `Send`.
+- **send-button-tint-reflects-enablement**: The component MUST tint the send button with the theme's accent color while it is enabled, and MUST clear its tint (falling back to AppKit's own disabled template-image rendering) while it is disabled.
+- **return-key-sends**: The component MUST send the composer's trimmed text when the reader presses Return/Enter in the composer field.
+- **send-ignored-when-empty**: The component MUST take no action, on either a send-button activation or a Return key press, while the trimmed composer text is empty.
+- **send-clears-composer**: The component MUST clear the composer field's text immediately after sending a non-empty message.
+- **composer-reevaluated-on-edit**: The component MUST re-evaluate the send button's enabled state every time the composer's text changes.
+- **focus-input-api**: The component MUST expose a `focusInput()` method that makes the composer field the window's first responder and reports whether that succeeded.
+- **composer-field-exposed-for-tab-order**: The component MUST expose the composer's text field as `composerField` so a host can splice it into its own key-view (Tab) loop.
+- **composer-focus-query**: The component MUST expose `isComposerFocused`, true only when the window's first responder is the composer field itself or a descendant of it (its field editor).
+- **status-row-hidden-when-nil**: The component MUST hide the status row entirely when `setStatus(_:icon:)` is called with `nil` text.
+- **status-row-shows-text-and-tooltip**: The component MUST show the given text as both the status label's string and its tooltip when `setStatus(_:icon:)` is called with non-nil text.
+- **status-icon-swap-only-on-change**: The component MUST leave an already-installed status icon view in place, without removing or re-adding it, when `setStatus(_:icon:)` is called again with the same icon view instance.
+- **day-banner-per-calendar-day**: The component MUST insert a day-banner view, spanning the transcript's width, immediately before the first message of each calendar day (per `Calendar.current`), and MUST NOT insert one before any later message on the same day.
+- **inflight-or-attributed-uses-row**: The component MUST render a message as a transcript row rather than a plain bubble whenever it carries a non-nil `attribution`, or whenever its `delivery` is not `.settled` — including a `.sending` or `.failed` message in an ordinary, unattributed one-to-one chat.
+- **user-messages-right-aligned**: The component MUST right-align a settled, unattributed message with role `.user` by placing it after a flexible leading spacer of at least 60pt.
+- **notice-messages-centered**: The component MUST center a settled, unattributed message with role `.notice` between two spacers of equal width.
+- **assistant-error-left-aligned**: The component MUST leave a settled, unattributed message with role `.assistant` or `.error` at the transcript's natural leading alignment, with no spacer.
+- **role-differentiated-by-position**: The component MUST convey a message's role through horizontal position (right for `.user`, left for `.assistant`/`.error`, centered for `.notice`) in addition to whatever color the bubble fill itself uses.
+- **plain-bubble-width-cap**: The component MUST cap a plain (non-row) bubble's width at 75% of the transcript's visible width, with a 200pt floor below which the cap does not shrink further (`max(visibleWidth * 0.75, 200)`).
+- **row-bubble-width-derivation**: The component MUST derive a transcript row's bubble-width cap from the row's own available width (the transcript's visible width minus 32pt), not from the 75% plain-bubble fraction.
+- **plain-bubbles-not-line-limited**: The component MUST NOT apply `bubbleLineLimit` to a plain (non-row) bubble; only a transcript row (an attributed or in-flight message) receives it.
+- **typing-indicator-while-responding**: The component MUST append an animated typing indicator to the end of the transcript, and start its animation, whenever the view model's `state` is `.responding`, and MUST NOT show one otherwise.
+- **rebuild-skipped-when-inputs-unchanged**: The component MUST skip rebuilding the transcript when the transcript's width, line limit, selection mode, current selection, action set, session state, message list, and bubble style are all unchanged since the last rebuild.
+- **rebuild-deferred-during-text-selection**: The component MUST defer a pending transcript rebuild while the reader has a non-empty text selection inside the transcript, and MUST perform it once that selection collapses to a caret or moves elsewhere.
+- **rebuild-coalesced-per-tick**: The component MUST coalesce any number of rebuild requests arriving within one run-loop tick into a single rebuild.
+- **font-setting-change-forces-rebuild**: The component MUST discard its rebuild-skip cache and force a fresh transcript rebuild whenever the reader's terminal font name or size setting changes.
+- **expansion-carried-to-replacement-message**: The component MUST carry an opened-out ("expanded") message's expanded state forward to a still-unsettled message's later, settled replacement that shares its role and whitespace-normalized text, and MUST drop the expanded state for a message that disappears without such a replacement.
+- **follow-newest-when-at-bottom**: The component MUST scroll to show the newest message after a rebuild when the reader was within 30pt of the newest message before that rebuild.
+- **preserve-scroll-position-otherwise**: The component MUST, when the reader was not within 30pt of the newest message, re-locate the message that was topmost before the rebuild and restore the same visual offset from the top after it.
+- **row-selection-opt-in**: The component MUST leave row selection and its keyboard handling inactive unless `isRowSelectionEnabled` is `true`.
+- **disabling-selection-clears-it**: The component MUST clear any current row selection the moment `isRowSelectionEnabled` is set to `false`.

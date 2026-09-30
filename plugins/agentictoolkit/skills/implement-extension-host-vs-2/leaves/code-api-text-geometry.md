@@ -1,0 +1,8 @@
+<!-- leaf: implement-extension-host-vs-2/code-api-text-geometry · source: extension-host-vs-code-api-text-geometry.md -->
+
+# TextGeometry
+
+## Overview
+
+`TextGeometry.swift` is a `VSCodeAPI` extension that gives the extension host's embedded `JSContext` real, `instanceof`-checkable implementations of `vscode.Position`, `vscode.Range` and `vscode.Location` (`vscode.d.ts`, `:408-513` and `:6960-6979` at the pinned commit named in the file's own header), plus the Swift-side mirror types (`ExtensionPosition`, `ExtensionRange`, `ExtensionLocation`) and bidirectional bridging functions that let host code read an extension-built value back into Swift and build a real JS instance from a Swift value to hand back to an extension. `Position` and `Range` ship the declared `vscode.d.ts` surface complete — every member the declaration names, not a subset — because both are prerequisites of later editor APIs; `Location` is `Uri` plus `Range` and is built in this same file, one evaluation later, because its constructor must call `new Range(...)`. All three classes are constructed inside one evaluated IIFE so `Range`'s constructor can see `Position` and `Location`'s constructor can see `Range` as ordinary lexical bindings. Every instance of `Position` and `Range` is frozen via `Object.freeze`; `Location` is the one exception — its `uri`/`range` are plain, declared-mutable stored properties, so its instances are deliberately left unfrozen while its class and prototype are frozen like the other two. The `Range` constructor's own `start.isBefore(end)` check is the only place the start/end swap invariant is enforced; nothing on the Swift side reorders a pair before or after crossing the JS boundary.
+

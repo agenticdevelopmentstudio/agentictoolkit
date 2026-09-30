@@ -1,0 +1,14 @@
+<!-- leaf: implement-status-server-monitor-1/live-buffer--test-vectors · source: status-server-monitor-live-buffer.md -->
+
+# Status Server Monitor Live Buffer
+
+## Conformance Test Vectors
+
+| ID | Requirements | Input | Expected |
+|----|-------------|-------|----------|
+| status-server-monitor-live-buffer-001 | push-appends-with-receipt-time | Buffer empty; call `pushDeployEvent(deployA)` while the clock reads `T`; then call `deployEventsSince(0)` | Returns exactly one entry, `{ deploy: deployA, receivedAt: T }` — `receivedAt` equals the clock reading at the moment of the push, not any timestamp on `deployA` |
+| status-server-monitor-live-buffer-002 | push-evicts-oldest-beyond-capacity | Buffer empty; call `pushDeployEvent` 201 times in sequence with distinct `deploy.id` values `d0`..`d200` | `deployEventsSince(0)` returns exactly 200 entries, whose `deploy.id` values are `d1`..`d200` in that order — `d0`, the oldest, was evicted by the 201st push |
+| status-server-monitor-live-buffer-003 | filter-inclusive-lower-bound | Buffer holds three pushed entries with `receivedAt` 100, 200, and 300 (via an injected sequence of clock readings); call `deployEventsSince(200)` | Returns exactly the entries at 200 and 300 — the entry at 100 is excluded, and the entry at exactly 200 is included (the boundary is inclusive) |
+| status-server-monitor-live-buffer-004 | filter-preserves-insertion-order, filter-is-read-only | Buffer holds three pushed entries with `receivedAt` 100, 200, 300, pushed in that order; call `deployEventsSince(0)` twice in a row with no intervening push or clear | Both calls return an array of length 3 in the order `[100, 200, 300]`, and the two calls' results are equal — the first read did not remove or reorder anything |
+| status-server-monitor-live-buffer-005 | clear-empties-buffer, clear-is-idempotent | Buffer holds two pushed entries; call `clearDeployEvents()`, then `deployEventsSince(0)`, then call `clearDeployEvents()` a second time with no push in between | The first `deployEventsSince(0)` after clearing returns `[]`; the second `clearDeployEvents()` call raises no error and leaves the buffer at length 0 |
+| status-server-monitor-live-buffer-006 | filter-is-read-only, module-scope-singleton | `hooks.ts`-shaped call sequence from `live-deploy-targets.int.test.ts`'s "gates the WEBHOOK OVERLAY too" case: `pushDeployEvent({ ...base, id: 'vc_live', platform: 'vercel', projectName: 'docs-production' })` then `pushDeployEvent({ ...base, id: 'vc_dead', platform: 'vercel', projectName: 'studio-production' })` | `deployEventsSince(0)` returns BOTH pushed entries unfiltered by project ownership — `live-buffer.ts` itself performs no ownership filtering; that gate is applied downstream, by `reads.ts`'s `deploymentDtos`, on the array this function returns |

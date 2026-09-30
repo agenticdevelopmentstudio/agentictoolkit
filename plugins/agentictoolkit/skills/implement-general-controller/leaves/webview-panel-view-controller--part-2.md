@@ -1,0 +1,103 @@
+<!-- leaf: implement-general-controller/webview-panel-view-controller--part-2 · source: webview-panel-view-controller.md -->
+
+# WebviewPanelViewController — continued (part 2)
+
+**Rules** (cite as `implement-general-controller/webview-panel-view-controller--part-2#<slug>`):
+
+- `panel-id-generated-at-init` MUST
+- `init-applies-scheme-handler-and-relay` MUST
+- `restoring-init-seeds-prior-state` MUST
+- `coder-init-unsupported` MUST
+- `main-actor-confined` MUST
+- `title-change-notifies-listeners` MUST
+- `title-unchanged-suppresses-notification` MUST
+- `html-change-reloads-document` MUST
+- `html-unchanged-suppresses-reload` MUST
+- `load-view-configures-webkit-sandbox` MUST
+- `load-view-disables-back-forward-gestures` MUST
+- `load-view-tracks-theme-surface-color` MUST
+- `load-view-loads-host-document` MUST
+- `load-host-document-noop-after-disposal` MUST
+- `load-host-document-wraps-extension-html` MUST
+- `host-document-bootstrap-precedes-extension-markup` MUST
+- `host-document-nil-state-as-undefined` MUST
+- `local-resource-roots-proxy-to-scheme-handler` MUST
+- `options-change-updates-content-security-policy` MUST
+- `content-security-policy-floor` MUST
+- `options-change-notifies-restoration-listeners` MUST
+- `options-change-reloads-loaded-document` MUST
+- `options-unchanged-suppresses-all-effects` MUST
+- `post-rejects-unbridgeable-values` MUST
+- `post-returns-false-when-unavailable` MUST
+- `post-dispatches-message-event` MUST
+- `postable-scalar-types-accepted` MUST
+- `postable-dictionary-requires-string-keys` MUST
+- `postable-array-recurses` MUST
+- `received-message-ignored-after-disposal` MUST
+- `post-message-forwarded-verbatim` MUST
+- `set-state-persists-valid-json` MUST
+- `set-state-drops-invalid-json-without-erasing` MUST
+- `relay-holds-delegate-weakly` MUST
+- `relay-drops-unrecognized-messages` MUST
+- `relay-defaults-missing-body-to-null` MUST
+- `javascript-permission-reevaluated-per-navigation` MUST
+- `own-scheme-navigation-allowed` MUST
+- `unmatched-navigation-cancelled` MUST
+- `link-activation-opens-externally-not-in-place` MUST
+- `external-open-rate-limited` MUST
+- `external-open-state-scoped-per-panel` MUST
+- `reveal-forwards-when-listener-present` MUST
+- `reveal-deferred-before-first-placement` MUST
+- `reveal-deferred-request-overwritten` MUST
+- `reveal-after-unplacement` MUST
+- `reveal-noop-once-disposed` MUST
+
+## Behavioral Requirements
+
+- **panel-id-generated-at-init**: The component MUST assign `panelID` a freshly generated UUID string in `init(viewType:title:options:localResourceRoots:)`, distinct per instance.
+- **init-applies-scheme-handler-and-relay**: `init(viewType:title:options:localResourceRoots:)` MUST construct the scheme handler keyed to `panelID`, seed its `localResourceRoots` and `contentSecurityPolicy` from the given `options`, and set `relay.delegate` to itself, before returning.
+- **restoring-init-seeds-prior-state**: `init(restoring:localResourceRoots:)` MUST initialize from the given `WebviewPanelState`'s `viewType`, `title`, and `options`, and MUST set `state` to that `WebviewPanelState`'s stored `state` text.
+- **coder-init-unsupported**: `init(coder:)` MUST fatalError rather than returning a usable instance.
+- **main-actor-confined**: The class, its `WKNavigationDelegate` conformance, and its private `WebviewMessageRelay` MUST run isolated to the main actor.
+- **title-change-notifies-listeners**: Assigning `title` a value different from its current one MUST invoke `onTitleChanged` and then `onRestorationStateChanged`.
+- **title-unchanged-suppresses-notification**: Assigning `title` its current value MUST NOT invoke `onTitleChanged` or `onRestorationStateChanged`.
+- **html-change-reloads-document**: Assigning `html` a value different from its current one MUST reload the host document.
+- **html-unchanged-suppresses-reload**: Assigning `html` its current value MUST NOT reload the host document.
+- **load-view-configures-webkit-sandbox**: `loadView()` MUST register the scheme handler for the `agentic-webview` scheme, add the relay as the message handler named `agenticWebview`, set `allowsContentJavaScript` from `options.enableScripts`, and use a non-persistent website data store.
+- **load-view-disables-back-forward-gestures**: `loadView()` MUST set the web view's `allowsBackForwardNavigationGestures` to `false`.
+- **load-view-tracks-theme-surface-color**: `loadView()` MUST set the web view's `underPageBackgroundColor` from the active theme's `.surface` palette color immediately, and MUST update it again on every subsequent theme change.
+- **load-view-loads-host-document**: `loadView()` MUST call the host-document load after constructing the web view.
+- **load-host-document-noop-after-disposal**: The host-document load MUST do nothing when `isDisposed` is `true` or before `loadView()` has run (no web view yet).
+- **load-host-document-wraps-extension-html**: The host-document load MUST set the scheme handler's document to the wrapped form of the current `html` and `state`, and MUST load the panel's host-document URL into the web view.
+- **host-document-bootstrap-precedes-extension-markup**: The wrapped host document MUST place the `acquireVsCodeApi()` bootstrap script ahead of the extension's own markup, so `postMessage`/`setState` work before the extension's first script runs.
+- **host-document-nil-state-as-undefined**: The wrapped host document MUST encode a `nil` `state` as the JavaScript value `undefined`, not `null`, so the page can tell a first run from a restore.
+- **local-resource-roots-proxy-to-scheme-handler**: `localResourceRoots` MUST read and write directly through to the scheme handler's own `localResourceRoots`, with no separate stored copy.
+- **options-change-updates-content-security-policy**: Assigning `options` a value different from its current one MUST update the scheme handler's `contentSecurityPolicy` to the new options' policy.
+- **content-security-policy-floor**: The content security policy served through the scheme handler (`options.contentSecurityPolicy`, defined by `WebviewPanelOptions`) MUST always include `object-src 'none'`, `base-uri 'none'`, and `frame-ancestors 'none'`, and MUST include `form-action 'none'` unless the extension's options enable forms.
+- **options-change-notifies-restoration-listeners**: Assigning `options` a value different from its current one MUST invoke `onRestorationStateChanged`.
+- **options-change-reloads-loaded-document**: Assigning `options` a value different from its current one MUST reload the host document when the web view already exists and the panel is not disposed.
+- **options-unchanged-suppresses-all-effects**: Assigning `options` a value equal to its current one MUST NOT update the content security policy, invoke `onRestorationStateChanged`, or reload the document.
+- **post-rejects-unbridgeable-values**: `post(message:)` MUST return `false` and log an error, without touching the web view, for a value that cannot be passed to a page.
+- **post-returns-false-when-unavailable**: `post(message:)` MUST return `false` when the web view does not yet exist or the panel is disposed, even for an otherwise-postable value.
+- **post-dispatches-message-event**: `post(message:)` MUST dispatch the message to the page as a `message` event carrying the value as `data`, and MUST return `true` when it does.
+- **postable-scalar-types-accepted**: The postability check MUST accept `null`, a number, a string, and a date, and MUST reject any other scalar type.
+- **postable-dictionary-requires-string-keys**: The postability check MUST accept a dictionary only when every key is a string and every value is itself postable, recursively.
+- **postable-array-recurses**: The postability check MUST accept an array only when every element is itself postable, recursively.
+- **received-message-ignored-after-disposal**: A message the page sends MUST be ignored once the panel is disposed.
+- **post-message-forwarded-verbatim**: A `postMessage` the page sends MUST be forwarded to `onDidReceiveMessage` with its body unchanged.
+- **set-state-persists-valid-json**: A `setState` the page sends MUST update `state` to that value's JSON text and MUST invoke `onRestorationStateChanged`, when the value can be encoded as JSON.
+- **set-state-drops-invalid-json-without-erasing**: A `setState` the page sends MUST leave the existing `state` value unchanged and MUST NOT invoke `onRestorationStateChanged`, when the value cannot be encoded as JSON; the component MUST log the failure rather than silently discard it.
+- **relay-holds-delegate-weakly**: The message relay MUST hold its delegate weakly, so the panel is not retained through the chain of objects the web view's configuration owns.
+- **relay-drops-unrecognized-messages**: The message relay MUST drop, without forwarding, a script message whose body is not a dictionary with a `kind` of `postMessage` or `setState` — the only two kinds `WebviewHostDocument.MessageKind` defines, carrying the page's `postMessage` value or `setState` value respectively as `body`.
+- **relay-defaults-missing-body-to-null**: The message relay MUST forward a `null` body when the incoming message's payload has no `body` entry.
+- **javascript-permission-reevaluated-per-navigation**: The script-execution preferences MUST be computed from the current value of `options.enableScripts` on every navigation, not cached from an earlier value.
+- **own-scheme-navigation-allowed**: The navigation policy MUST allow a navigation whose URL uses the panel's own custom scheme.
+- **unmatched-navigation-cancelled**: The navigation policy MUST cancel a navigation that has no URL, or whose URL scheme is neither the panel's own scheme nor `http`/`https`, or whose navigation type is not link activation.
+- **link-activation-opens-externally-not-in-place**: The navigation policy MUST cancel in-place navigation and instead hand the URL to the external-open handler for a link-activated navigation to an `http`/`https` URL, provided the panel is not currently rate-limited.
+- **external-open-rate-limited**: The navigation policy MUST cancel and drop, without queuing, an external-open request that arrives less than the configured interval after the panel's last external open, and MUST log that drop.
+- **external-open-state-scoped-per-panel**: The external-open rate limit MUST be tracked independently per panel instance, not shared across panels.
+- **reveal-forwards-when-listener-present**: `reveal(preserveFocus:)` MUST call the installed reveal listener directly with the given value, when a listener is installed and the panel is not disposed.
+- **reveal-deferred-before-first-placement**: `reveal(preserveFocus:)` MUST retain the request for later replay, without calling anything, when no reveal listener has ever been installed.
+- **reveal-deferred-request-overwritten**: A `reveal(preserveFocus:)` call made before any listener has ever been installed MUST overwrite any previously retained request, so only the most recently requested `preserveFocus` value replays once a listener is installed.
+- **reveal-after-unplacement**: `reveal(preserveFocus:)` MUST do nothing and MUST NOT retain the request when a reveal listener was installed at some point but is not installed now.
+- **reveal-noop-once-disposed**: `reveal(preserveFocus:)` MUST do nothing, and MUST NOT retain the request, once the panel is disposed.

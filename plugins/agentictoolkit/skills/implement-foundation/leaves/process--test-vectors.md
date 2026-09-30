@@ -1,0 +1,21 @@
+<!-- leaf: implement-foundation/process--test-vectors · source: foundation-process.md -->
+
+# CommandRunner
+
+## Conformance Test Vectors
+
+| ID | Requirements | Input | Expected |
+|----|-------------|-------|----------|
+| foundation-process-001 | stream-draining, outcome-buffers-always-populated | `CommandRunnerTests.aFloodOfStandardOutputDoesNotDeadlock`: `head -c 200000 /dev/zero \| tr '\0' 'x'`, timeout 30. | Returns without hanging; `!outcome.timedOut`; `outcome.status == 0`; `outcome.standardOutput.count == 200_000`. |
+| foundation-process-002 | stream-draining, outcome-buffers-always-populated | `CommandRunnerTests.aFloodOfStandardErrorDoesNotDeadlock`: same shape, writing 200 KB to stderr instead. | `!outcome.timedOut`; `outcome.standardError.count == 200_000`. |
+| foundation-process-003 | run-throw-propagation | `CommandRunnerTests.aMissingExecutableThrows`: `executableURL` set to `/usr/bin/definitely-not-a-tool`, timeout 30. | The call throws; no `Outcome` is produced. |
+| foundation-process-004 | outcome-buffers-always-populated, diagnostics-trimmed-utf8 | `CommandRunnerTests.theStatusAndTheDiagnosticsComeBack`: `printf 'no such file\n' >&2; exit 3`, timeout 30. | `outcome.status == 3`; `outcome.diagnostics == "no such file"`; `!outcome.timedOut`; `outcome.standardOutput.isEmpty`. |
+| foundation-process-005 | deadline-wait-without-watchdog, terminate-on-timeout-or-abort | `CommandRunnerTests.aCommandThatWillNotFinishIsGivenUpOn`: `sleep 30`, timeout 0.5. | `outcome.timedOut == true`; call returns in under 10 seconds, not 30. |
+| foundation-process-006 | terminate-on-timeout-or-abort, sigkill-escalation | `CommandRunnerTests.aCommandGivenUpOnIsNoLongerRunning`: `sleep 30`, timeout 0.5. | `outcome.timedOut == true`; `process.isRunning == false` after the call returns. |
+| foundation-process-007 | sigkill-escalation, outcome-buffers-always-populated | `CommandRunnerTests.aToolThatIgnoresTerminationIsKilled`: `/bin/sh -c "trap '' TERM; echo armed; while :; do sleep 1 >/dev/null 2>&1; done"`, timeout 1. | `outcome.timedOut == true`; elapsed time under 8 seconds (1s timeout + 2s grace + 2s grace budget); `outcome.diagnostics.isEmpty`; `outcome.standardOutput` decodes to a string containing `"armed"`. |
+| foundation-process-008 | watchdog-polling, timedout-aborted-mutually-exclusive | `CommandRunnerTests.aWatchdogEndsTheRun`: `sleep 30`, timeout 30, `Watchdog(interval: 0.1) { calls.bump() > 2 }`. | `outcome.aborted == true`; `outcome.timedOut == false`; call returns in under 10 seconds. |
+| foundation-process-009 | timedout-aborted-mutually-exclusive | `CommandRunnerTests.aTimeoutWithAWatchdogIsStillATimeout`: `sleep 30`, timeout 0.5, `Watchdog(interval: 0.1) { false }`. | `outcome.timedOut == true`; `outcome.aborted == false`. |
+| foundation-process-010 | watchdog-polling, outcome-buffers-always-populated | `CommandRunnerTests.aQuietWatchdogChangesNothing`: `printf hello; exit 3`, timeout 30, `Watchdog(interval: 0.05) { false }`. | `outcome.aborted == false`; `outcome.timedOut == false`; `outcome.status == 3`; `outcome.standardOutput` decodes to `"hello"`. |
+| foundation-process-011 | exit-during-poll-is-clean | `CommandRunnerTests.anExitDuringAPollIsNotAnAbort`: `exit 0`, timeout 30, `Watchdog(interval: 5) { true }`. | `outcome.aborted == false`; `outcome.status == 0`. |
+| foundation-process-012 | status-sentinel-on-non-exit, watchdog-parameter-default | `CommandRunnerTests.anExitingToolReportsItsOwnStatus`: `exit 3`, timeout 10, no `watchdog` argument. | `!outcome.timedOut`; `outcome.status == 3`; `outcome.status != CommandRunner.neverExited`. |
+| foundation-process-013 | watchdog-polling, terminate-on-timeout-or-abort | `VSIXArchive.expand` (`VSIXArchive.swift`), a real caller: runs `/usr/bin/ditto -x -k <archive> <destination>` through `runToCompletion` with `timeout: 120` and `Watchdog(interval: 0.5) { expandedSize(of: destination, ...) > byteCeiling }`, against an archive engineered to expand past `byteCeiling` (2 GiB default). | `outcome.aborted == true` is observed by the caller, which deletes the half-written destination and throws `VSIXArchiveError.expansionTooLarge`; the same call site treats `outcome.timedOut` and a nonzero `outcome.status` as two further, distinct failure branches. |

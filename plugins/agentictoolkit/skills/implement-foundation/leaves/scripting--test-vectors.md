@@ -1,0 +1,25 @@
+<!-- leaf: implement-foundation/scripting--test-vectors · source: foundation-scripting.md -->
+
+# Foundation Scripting
+
+## Conformance Test Vectors
+
+| ID | Requirements | Input | Expected |
+|----|---------------|-------|----------|
+| foundation-scripting-001 | script-compilation-and-execution, success-result-value | `AppleScriptRunner.run("return \"hello\"")` | Returns `.success("hello")` (`AppleScriptRunnerTests.successReturnsString`) |
+| foundation-scripting-002 | success-result-value | `AppleScriptRunner.run("return 42")` | Returns `.success("42")` — `NSAppleScript` stringifies the numeric result (`AppleScriptRunnerTests.successReturnsNumericString`) |
+| foundation-scripting-003 | success-value-nilable | `AppleScriptRunner.run("")` (empty source) | Compiles and executes; returns `.success(nil)` (`AppleScriptRunnerTests.emptySourceSucceeds`) |
+| foundation-scripting-004 | runtime-failure-result | `AppleScriptRunner.run("error \"boom\" number -1728")` | Returns `.runtimeFailed(message:number:)` whose message contains "boom" and whose number equals -1728 (`AppleScriptRunnerTests.runtimeFailed`) |
+| foundation-scripting-005 | runtime-failure-fallback-values | An error dictionary from `executeAndReturnError` with no `NSAppleScript.errorMessage`/`errorNumber` entries | `message` equals "unknown error", `number` equals `0` (source: `AppleScriptRunner.swift`'s `?? "unknown error"` / `?? 0`; no dedicated test found) |
+| foundation-scripting-006 | compile-failure-result | A source string for which `NSAppleScript(source:)` returns `nil` | Returns `.compileFailed` (source: `AppleScriptRunner.swift`; `AppleScriptRunnerTests`' own comment notes this path is unreachable in practice) |
+| foundation-scripting-007 | result-value-equality, result-fixed-case-set | `AppleScriptRunner.Result.success("x") == AppleScriptRunner.Result.success("x")` | `true` (source: `Result: Equatable`, `@frozen`) |
+| foundation-scripting-008 | runner-caller-thread | `AppleScriptRunner.run(_:)` called from a background `DispatchQueue` | Executes and returns synchronously on that same background thread, with no internal hop to another queue (source: `AppleScriptRunner.swift` — no `DispatchQueue`/`Task` inside `run(_:)`) |
+| foundation-scripting-009 | caller-main-thread-marshaling | A background-queue caller invokes `AppleScriptRunner.run(_:)` without marshaling to the main thread, on a macOS version where `NSAppleScript` requires it | Documented as the caller's own responsibility; `AppleScriptRunner` performs no thread check or automatic marshaling (source: `AppleScriptRunner.swift` doc comment) |
+| foundation-scripting-010 | command-default-behavior | `MainActorScriptCommand(commandDescription:).performDefaultImplementation()` with no subclass override | Returns `nil` (`MainActorScriptCommandTests.baseReturnsNil`) |
+| foundation-scripting-011 | command-result-propagation, command-return-type-freedom | `ReturningCommand(value: "answer").performDefaultImplementation()` | Returns `"answer"` (`MainActorScriptCommandTests.subclassReturnValue`) |
+| foundation-scripting-012 | command-return-type-freedom | `ReturningCommand(value: 42).performDefaultImplementation()` | Returns `42` (`MainActorScriptCommandTests.subclassReturnsInt`) |
+| foundation-scripting-013 | command-result-propagation | `ReturningCommand(value: nil).performDefaultImplementation()` | Returns `nil` (`MainActorScriptCommandTests.subclassReturnsNil`) |
+| foundation-scripting-014 | command-main-actor-isolation, command-dispatch-via-assume-isolated | `MainActorAssertingCommand().performDefaultImplementation()` invoked from the main thread | `sawMainThread` observed as `true` inside `performMain()` (`MainActorScriptCommandTests.runsOnMainThread`) |
+| foundation-scripting-015 | command-sendable-conformance | A `MainActorScriptCommand` subclass instance is created and handed to Cocoa Scripting's arbitrary-thread AppleEvent dispatch, compiled under `SWIFT_STRICT_CONCURRENCY: complete` | Compiles with no Sendable-conformance diagnostic, because `MainActorScriptCommand` declares `@unchecked Sendable` (source: class declaration in `MainActorScriptCommand.swift`) |
+| foundation-scripting-016 | element-specifier-result, element-specifier-no-container-specifier, element-specifier-main-actor-work | `applicationElementSpecifier(key: "panes") { "some-uuid" }` called on the main actor while `NSApp.classDescription` is an `NSScriptClassDescription` | Returns a non-nil `NSUniqueIDSpecifier` whose `key` is `"panes"`, whose `uniqueID` is `"some-uuid"`, and whose `containerSpecifier` is `nil` (source: `MainActorScriptCommand.swift`'s `applicationElementSpecifier`; consumed by `ScriptablePane.swift`'s `objectSpecifier`) |
+| foundation-scripting-017 | element-specifier-nil-fallback | `applicationElementSpecifier(key:uniqueID:)` called while `NSApp.classDescription` cannot be cast to `NSScriptClassDescription` | Returns `nil` (source: the `guard let appDescription = NSApp.classDescription as? NSScriptClassDescription else { return }` in `MainActorScriptCommand.swift`) |

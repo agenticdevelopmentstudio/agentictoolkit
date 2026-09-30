@@ -1,0 +1,26 @@
+<!-- leaf: implement-status-server-monitor-1/cycle-runner--part-2 · source: status-server-monitor-cycle-runner.md -->
+
+# Status Server Monitor Cycle Runner — continued (part 2)
+
+## Platform Notes
+
+- **SwiftUI**: not a SwiftUI concern (no view). An Apple companion backend embedding this composition pattern models `runMonitorCycle` as an `async` function or an `actor` method taking a `Storage`-equivalent protocol and a `Sendable` `StatusConfig`-equivalent struct, using `defer` in place of `finally` to guarantee the alert flush runs whether the core sweep throws or not, and ordering the full-sync-only phase as a strict sequence of `await` calls (never `withThrowingTaskGroup`, which would let them run concurrently and defeat heartbeat-last).
+- **Compose**: same non-UI framing as SwiftUI. A Kotlin port models the function as a `suspend fun`, uses a `try`/`finally` block identical in shape to the source (Kotlin's `finally` has the same run-regardless-of-exception semantics as JavaScript's), and keeps the full-sync-only phase as sequential `suspend` calls on one coroutine rather than `async`/`awaitAll`, for the same heartbeat-last reason.
+- **React/Web** (source platform): lives at `packages/web/packages/status-server/src/monitor/cycle-runner.ts` as a plain exported `async function` on the Node status backend, imported by exactly two hosts external to this file: `monitor/worker.ts` (the monitor `Worker` thread's message handler) and the API-thread scheduler wiring re-exported from `index.ts`/built on `scheduler.ts`. It depends only on plain JavaScript `try`/`finally` and `Promise` sequencing — no framework of its own.
+- **AppKit / UIKit**: same non-UI framing as SwiftUI. A macOS/iOS agent embedding this pattern would typically run it from a background `Task` rather than a separate OS thread/process the way Node's `Worker` isolates it here; the "why a worker thread" rationale in `worker.ts`'s header comment (keeping the API event loop responsive) has no direct AppKit/UIKit analogue unless the host app also multiplexes a UI event loop with this work, in which case the same off-main-thread `Task` applies.
+- **WinUI 3**: a .NET port models `runMonitorCycle` as `async Task RunMonitorCycleAsync(IStorage storage, bool fullSync, StatusConfig config)`, using `try`/`finally` (identical run-regardless-of-exception semantics to the source) around the `RunCycleAsync` call to guarantee `FlushAlertsAsync` runs, and a strict sequence of `await`-ed calls (`FetchPeersAsync`, `CollectTelemetryAsync`, `IMaintenanceStore.RunMaintenanceAsync`, `IMaintenanceStore.SnapshotIfDueAsync`, `PingHeartbeatAsync`) for the full-sync-only phase — never `Task.WhenAll`, which would break heartbeat-last. The `console.log` line becomes an `ILogger.LogInformation` call with the same conditional-suffix message. `ObservableCollection`/`INotifyPropertyChanged` do not apply to this file: it has no UI-bound state of its own to expose: those types belong to a WinUI 3 host's dashboard view model consuming this cycle's results, not to the cycle composition itself.
+
+## Design Decisions
+
+- **Decision**: flush alerts in a `finally` around only the `runCycle` call, not around the whole full-sync phase.
+  **Rationale**: the source comment on the `finally` block states it directly — "Deliver whatever the recorders queued even when a later phase of the cycle throws — an outage alert must not be lost to an unrelated failure." Only `runCycle`'s outage-detecting sweep ever queues an alert via `notifyIssueAlert`; the full-sync-only phase has none of its own to protect, so its failures are deliberately left to propagate uncaught instead of being wrapped in the same guarantee.
+  **Approved**: pending
+- **Decision**: let a full-sync-phase failure (from `runMaintenance` or any earlier step) propagate all the way to `runMonitorCycle`'s caller instead of catching it locally.
+  **Rationale**: `heartbeat.ts`'s own header comment states the dead-man design directly — "a failing or wedged monitor stops pinging, and the external service... raises the alert no in-container code could." Catching the error here and continuing to `pingHeartbeat` would report success on a full sync that never actually completed, defeating that external detection path.
+  **Approved**: pending
+- **Decision**: call `runMaintenance()` and `snapshotIfDue()` with their default options rather than supplying explicit budgets from this file.
+  **Rationale**: the row budget, chunk size, snapshot interval, and keep-count all live inside the `MaintenanceStore` implementation (`libsql/stores/maintenance-store.ts`) specifically so every caller — this cycle and the `POST /cron/maintenance` route alike — shares one tuned policy; this file has no cycle-specific reason to diverge from it.
+  **Approved**: pending
+- **Decision**: run the full-sync-only phase as a strict sequence, never concurrently, with `pingHeartbeat` last.
+  **Rationale**: ordering is what makes the heartbeat mean "the entire full sync, including maintenance and snapshotting, completed" — running the phase's steps concurrently (e.g. via `Promise.all`) would let a hung `collectTelemetry` race a `pingHeartbeat` that had already fired, defeating the dead-man design's stated purpose of only pinging on a fully successful sync.
+  **Approved**: pending

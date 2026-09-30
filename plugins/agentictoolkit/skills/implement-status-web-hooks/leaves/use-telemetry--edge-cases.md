@@ -1,0 +1,33 @@
+<!-- leaf: implement-status-web-hooks/use-telemetry--edge-cases · source: status-web-hooks-use-telemetry.md -->
+
+# useTelemetry
+
+**Rules** (cite as `implement-status-web-hooks/use-telemetry--edge-cases#<slug>`):
+
+- `no-cache-source-failing` MUST — The hook MUST return emptySnapshot() indefinitely, with no error exposed; consumers render a healthy/empty state (MUST, …
+- `corrupt-stored-value` MUST — Invalid JSON, a wrong-shape object, or a JSON null under adh-telemetry-v1 MUST load as null, so the hook falls back to …
+- `stored-arrays-with-malformed-elements` MUST — parseSnapshot checks only that errors and analytics are arrays; malformed elements pass through to consumers unchanged …
+- `malformed-2xx-body-from-the-source` MUST — The body is cast, not validated; a body missing errors returns an object whose errors is undefined, which consumers …
+- `non-json-2xx-body` MUST — r.json() rejects, the query retries once, then enters its error state; the hook falls back to data, cache or empty per …
+- `storage-unavailable` MUST (private mode, disabled storage, quota) — load returns null and save is a silent no-op; the hook still returns live data (MUST).
+- `server-render` MUST — No effect runs, so the hook returns emptySnapshot() unless the query already has data in the server's QueryClient; …
+- `source-outage-after-a-success-in-the-same-session` MUST — react-query retains the last data, so the hook returns that live snapshot, not the cached one; the cache only covers …
+- `hidden-tab` MUST — The 60-second poll pauses while the document is hidden and a focus event triggers a refetch on return (MUST, via …
+- `concurrent-callers` MUST — JavaScript is single-threaded; concurrent mounts share one query via deduplication, and each instance's cache writes …
+- `unreachable-server-or-network-timeout` MUST — api.fetch rejects (or hangs until the browser gives up); the hook adds no timeout, the query retries once, and the …
+- `unmount-mid-fetch` MUST — The request is not aborted; any result lands in the shared query cache for other observers (MUST, as implemented).
+
+## Edge Cases
+
+- **No cache, source failing**: The hook MUST return `emptySnapshot()` indefinitely, with no error exposed; consumers render a healthy/empty state (MUST, as implemented; see the open question on telemetry-failure-signal).
+- **Corrupt stored value**: Invalid JSON, a wrong-shape object, or a JSON `null` under `adh-telemetry-v1` MUST load as `null`, so the hook falls back to `emptySnapshot()` until the source answers (MUST).
+- **Stored arrays with malformed elements**: `parseSnapshot` checks only that `errors` and `analytics` are arrays; malformed elements pass through to consumers unchanged (MUST, as implemented).
+- **Malformed 2xx body from the source**: The body is cast, not validated; a body missing `errors` returns an object whose `errors` is `undefined`, which consumers that call `errors.reduce` throw on during render. The same body is saved to the cache, but `parseSnapshot` rejects it on the next load, so a reload recovers to empty. The body shape is owned by the backend `/telemetry` route (MUST, as implemented).
+- **Non-JSON 2xx body**: `r.json()` rejects, the query retries once, then enters its error state; the hook falls back to data, cache or empty per precedence (MUST).
+- **Storage unavailable** (private mode, disabled storage, quota): `load` returns `null` and `save` is a silent no-op; the hook still returns live data (MUST).
+- **Server render**: No effect runs, so the hook returns `emptySnapshot()` unless the query already has data in the server's `QueryClient`; `localCache` also guards `typeof window === "undefined"` (MUST).
+- **Source outage after a success in the same session**: react-query retains the last data, so the hook returns that live snapshot, not the cached one; the cache only covers the gap before the first success in a `QueryClient` (for example after a reload) (MUST).
+- **Hidden tab**: The 60-second poll pauses while the document is hidden and a focus event triggers a refetch on return (MUST, via react-query defaults).
+- **Concurrent callers**: JavaScript is single-threaded; concurrent mounts share one query via deduplication, and each instance's cache writes store the same value, so there is no interleaving to order (MUST).
+- **Unreachable server or network timeout**: `api.fetch` rejects (or hangs until the browser gives up); the hook adds no timeout, the query retries once, and the fallback precedence applies (MUST).
+- **Unmount mid-fetch**: The request is not aborted; any result lands in the shared query cache for other observers (MUST, as implemented).

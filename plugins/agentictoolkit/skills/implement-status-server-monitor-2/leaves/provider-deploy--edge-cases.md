@@ -1,0 +1,18 @@
+<!-- leaf: implement-status-server-monitor-2/provider-deploy--edge-cases · source: status-server-monitor-provider-deploy.md -->
+
+# Status Server Monitor Provider Deploy
+
+**Rules** (cite as `implement-status-server-monitor-2/provider-deploy--edge-cases#<slug>`):
+
+- `null-and-empty-input` MUST — toValidDate(null) and toValidDate(undefined) MUST return null without constructing a Date …
+- `boundary-values` MUST — a numeric raw value outside Date's representable range (toValidDate(8.7e15), per timestamp-validation.test.ts) …
+- `concurrent-access` MUST — toValidDate, isoOf, and providerDeployToDTO are synchronous, pure functions with no await and no shared mutable module …
+- `error-states` MUST — this file has no dependency of its own — no network call, no database access, no file I/O — so the only failure mode it …
+
+## Edge Cases
+
+- **Null and empty input**: `toValidDate(null)` and `toValidDate(undefined)` MUST return `null` without constructing a `Date` (to-valid-date-nullish-rejection) — MUST. An empty-string `commitHash`, `commitMessage`, `branch`, `commitRepo`, or `url` on a `ProviderDeploy` is passed through `providerDeployToDTO` unchanged (dto-passthrough-fields); this file performs no non-empty validation of any of these fields itself — they are already-fetched provider data, and validating their contents is not this module's declared contract.
+- **Boundary values**: a numeric `raw` value outside `Date`'s representable range (`toValidDate(8.7e15)`, per `timestamp-validation.test.ts`) constructs a JavaScript Invalid Date and MUST be rejected as `null`, identically to an unparseable string (to-valid-date-construction) — MUST. `Number.NaN` passed to `toValidDate` MUST likewise return `null` — MUST.
+- **Concurrent access**: `toValidDate`, `isoOf`, and `providerDeployToDTO` are synchronous, pure functions with no `await` and no shared mutable module state, so any number of concurrent callers MUST NOT observe interleaved or corrupted results from any one call — MUST. `routes/reads.ts` calls `providerDeployToDTO` once per persisted row and once per live-buffer overlay row on every request; because neither call mutates the `ProviderDeploy` it is given nor any state outside its own return value, concurrent requests reading the same underlying row MUST each receive an independently correct `DeploymentDTO`.
+- **Error states**: this file has no dependency of its own — no network call, no database access, no file I/O — so the only failure mode it can encounter is a poisoned `createdAt`/`confirmedAt` `Date` value already present on a `ProviderDeploy` it is handed. `isoOf` MUST NOT throw on such a value; it MUST log the failure via `console.error` (naming the deploy's `id`) and MUST substitute the Unix epoch rather than propagating a `RangeError` out of `toISOString()` (iso-serialize-invalid-date-fail-soft) — MUST. Per the source's own comment, this fail-soft path exists only for a legacy row already poisoned before `toValidDate` existed at every construction boundary; every `ProviderDeploy` a current fetcher or webhook mapper constructs MUST already carry a valid `createdAt`, because that construction path is gated by `toValidDate` — this is a fact about the codebase's other files (the fetchers, external to this one), not a residual gap in this module.
+- **Offline or disconnected state**: not applicable — this file performs no network I/O and holds no connection of its own. The `ProviderDeploy` values it operates on were already fetched or already received via webhook by files external to this one (`fetch-vercel.ts`, `fetch-railway.ts`, `fetch-cloudflare.ts`, `webhook-events.ts`); their own connectivity failure modes are theirs to document, not this module's.

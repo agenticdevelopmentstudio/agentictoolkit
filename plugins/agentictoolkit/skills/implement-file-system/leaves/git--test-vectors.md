@@ -1,0 +1,22 @@
+<!-- leaf: implement-file-system/git--test-vectors · source: file-system-git.md -->
+
+# GitStatusProvider
+
+## Conformance Test Vectors
+
+| ID | Requirements | Input | Expected |
+|----|-------------|-------|----------|
+| file-system-git-001 | color-mapping-per-status | Evaluate `.color` on `.modified`, `.added`, `.deleted`, `.renamed`, `.copied`, `.untracked`, `.ignored`, `.conflicted`. | Returns `.orange`, `.green`, `.red`, `.blue`, `.blue`, `.green`, `.gray`, `.purple` respectively. |
+| file-system-git-002 | ns-color-mapping-per-status | Evaluate `.nsColor` on the same eight cases. | Returns `.systemOrange`, `.systemGreen`, `.systemRed`, `.systemBlue`, `.systemBlue`, `.systemGreen`, `.systemGray`, `.systemPurple` respectively. |
+| file-system-git-003 | color-and-ns-color-parity | Compare vector 001's result to vector 002's result, case by case. | Every case's `color` and `nsColor` name the same hue (e.g. `.modified` is orange in both). |
+| file-system-git-004 | refresh-result-cases | Inspect the `GitStatusRefreshResult` declaration. | Exactly two cases exist, `.status(GitStatus)` and `.unavailable`; the type conforms to `Sendable`. |
+| file-system-git-005 | observer-registration, observation-token-unregisters-on-release, weak-reference-in-cancellation-closure | `testDroppingTheObservationStopsDelivery`: register an observer, let its `GitStatusObservation` go out of scope, then call `refresh()` (`GitStatusProviderRefreshTests.swift`). | The dropped observer's callback is never invoked (the inverted `cancelled` expectation is not fulfilled). |
+| file-system-git-006 | broadcast-to-all-observers, main-actor-delivery | `testRefreshDeliversStatusesOnTheMainThread`: register one observer on a real git checkout with an untracked file, call `refresh()` (`GitStatusProviderRefreshTests.swift`). | The observer is invoked with `Thread.isMainThread == true` and receives `.status(status)` where `status.files["new.txt"] == .untracked`. |
+| file-system-git-007 | success-delivers-status-and-logs | Same setup as vector 006. | The delivered result is `.status`, and `logger.info` fires once naming `1` file and `0` directories (`status.files.count`, `status.directories.count`). |
+| file-system-git-008 | failure-yields-unavailable-never-empty | `testAFailedStatusIsReportedAsUnavailableRatherThanAnEmptyStatus`: construct a provider on a `repoRoot` that does not exist, call `refresh()` (`GitStatusProviderRefreshTests.swift`). | The observer receives `.unavailable`, never `.status(.empty)` or any other status value. |
+| file-system-git-009 | cancellation-yields-unavailable | Construct a `client` whose `status(in:)` throws `CancellationError`; call `refresh()`. | The observer receives `.unavailable`; no `error`-level log is emitted for this call. |
+| file-system-git-010 | error-log-omits-git-output | Construct a `client` whose `status(in:)` throws `GitClientError.commandFailed(verb: "status", exitStatus: 128, standardError: "fatal: secret-looking-path")`; call `refresh()`. | The `error`-level log message contains `commandFailed(verb: status, exitStatus: 128)` and does not contain the string `"secret-looking-path"`. |
+| file-system-git-011 | immediate-start-when-idle | Call `refresh()` on a newly constructed provider with no run in flight. | `client.status(in:)` is invoked without waiting for any other call; the provider's internal `isRunning` becomes `true` synchronously before the run's `await`. |
+| file-system-git-012 | coalesced-overlap, bounded-burst-cost | Call `refresh()` five times in rapid succession while the first call's `client.status(in:)` is still awaiting. | `client.status(in:)` is invoked exactly twice in total for the burst — once for the in-flight run, once for the single coalesced follow-up — never five times. |
+| file-system-git-013 | thread-safe-mutable-state | From multiple concurrent tasks, interleave calls to `observe(_:)` and `refresh()` on one provider instance. | No crash or data race occurs; the final registered-observer count equals the number of tokens still held, matching serialized access through `state.withLock`. |
+| file-system-git-014 | injectable-client-with-shared-default | Construct `GitStatusProvider(repoRoot: someURL)` with no `client` argument, and separately `GitStatusProvider(repoRoot: someURL, client: fakeClient)`. | The first instance's `client` is `GitClient.shared`; the second instance's `client` is `fakeClient`, and no call through it reaches a real subprocess unless `fakeClient` chooses to spawn one. |

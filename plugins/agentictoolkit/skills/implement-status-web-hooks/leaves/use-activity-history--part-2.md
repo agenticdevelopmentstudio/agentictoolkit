@@ -1,0 +1,96 @@
+<!-- leaf: implement-status-web-hooks/use-activity-history--part-2 · source: status-web-hooks-use-activity-history.md -->
+
+# useActivityHistory — continued (part 2)
+
+**Rules** (cite as `implement-status-web-hooks/use-activity-history--part-2#<slug>`):
+
+- `rows-state` MUST
+- `loading-state` MUST
+- `loading-guard` MUST
+- `exhausted-state` MUST
+- `exhausted-guard` MUST
+- `error-state` MUST
+- `error-does-not-prevent-retry` MUST
+- `error-is-reported` MUST
+- `cursor-initialization` MUST
+- `cursor-from-live-tail` MUST
+- `cursor-from-server` MUST
+- `page-size-constant` MUST
+- `request-timeout` MUST
+- `timeout-is-error` MUST
+- `auto-continue-budget` MUST
+- `auto-budget-tracking` MUST
+- `auto-budget-reset` MUST
+- `merge-strategy-incoming-wins` MUST
+- `merge-sorting` MUST
+- `merge-identity-preservation` MUST
+- `merge-no-duplicates` MUST
+- `shed-absorption-enabled` MUST
+- `shed-no-progress` MUST
+- `shed-not-empty-window` MUST
+- `shed-only-after-paging` MUST
+- `shed-merge-with-existing` MUST
+- `enabled-filtering` MUST
+- `enabled-state-clear` MUST
+- `epoch-validation` MUST
+- `epoch-increment` MUST
+- `abort-on-unmount` MUST
+- `mount-tracking` MUST
+- `api-client-ref` MUST
+- `url-query-params` MUST
+- `request-headers` MUST
+- `error-status-code` MUST
+- `json-parse-error` MUST
+- `loadolder-stable-identity` MUST — The loadOlder function MUST maintain a stable reference (the same function object) for the lifetime of the hook, …
+- `resetautobudget-stable-identity` MUST — The resetAutoBudget function MUST maintain a stable reference for the lifetime of the hook, achieved by wrapping it in …
+- `no-localstorage` MUST — The hook MUST NOT persist history, cursor, or any state to localStorage or any durable client store; all state is …
+- `no-cap-history-array` MUST
+
+## Behavioral Requirements
+
+- **hook-signature**: The hook accepts one argument `opts: { enabled: boolean, live: ActivityRow[] }` where `enabled` gates whether the hook operates at all, and `live` is the current live window's oldest-first rows.
+- **return-type**: The hook returns `UseActivityHistoryResult` with fields `rows` (ActivityRow[]), `loadOlder` (() => void), `loading` (boolean), `exhausted` (boolean), `error` (boolean), `autoBudgetSpent` (boolean), and `resetAutoBudget` (() => void).
+- **rows-state**: The hook MUST maintain an internal `rows` array holding all paged historical rows in oldest-first order by (at, id) comparator — where `at` is the ISO 8601 timestamp string and `id` is the string identifier, with `at` taking precedence and `id` breaking ties.
+- **loading-state**: The hook MUST set `loading: true` the instant `loadOlder()` is called and `loading: false` after the page fetch settles (success or error), provided the component is mounted and the epoch has not changed.
+- **loading-guard**: The hook MUST NOT start a new fetch while a page is already in flight; the re-entrancy guard is the `inFlight` ref (set synchronously when a request starts), not the `loading` state.
+- **exhausted-state**: The hook MUST set `exhausted: true` when the server returns a page with `nextCursor: null`, and MUST NOT attempt further fetches once exhausted until history is discarded by `enabled` going false.
+- **exhausted-guard**: The hook MUST NOT start a new fetch if `exhausted` is already true.
+- **error-state**: The hook MUST set `error: true` if a fetch fails (a non-ok response, a network error, a JSON parse failure, or the 20-second timeout abort) while the hook is still mounted and the epoch is unchanged, and MUST set `error: false` at the start of every `loadOlder()` call that passes its guards. An abort caused by unmount or by `enabled` going false does not set `error`.
+- **error-does-not-prevent-retry**: When a page fails, the hook MUST NOT roll back the fetch count, advance the cursor, or mark the history as exhausted — the next `loadOlder()` call MUST retry the same window.
+- **error-is-reported**: A failed page MUST set `error: true` so the pane can display an error message; silent errors would leave the UI stuck with no indication of failure.
+- **cursor-initialization**: Whenever `cursorRef` is null (no page has yet succeeded since the last reset), `loadOlder()` MUST derive the request cursor from the live window's current oldest row as `{ atMs: Date.parse(liveOldest.at), id: liveOldest.id }`, or send no cursor if the live window is empty; this derived cursor is used for the request only and is not written to `cursorRef`.
+- **cursor-from-live-tail**: The first page request MUST use the cursor derived from the live window's oldest row if available, and MUST use no cursor (null) if the live window is empty, causing the server to serve the newest page it has.
+- **cursor-from-server**: Subsequent pages MUST use `nextCursor` returned in the previous page's response, or leave the cursor null if `nextCursor` was null (which marks exhausted).
+- **page-size-constant**: Every page request MUST use a hard-coded page size of 300 rows (PAGE_SIZE constant).
+- **page-size-clamp**: The server clamps the page size to the same value; the client does not check how many rows a page holds — exhaustion is decided solely by `nextCursor` being null.
+- **request-timeout**: Every page request MUST time out after 20 seconds (PAGE_TIMEOUT_MS = 20_000) and MUST abort the fetch and treat the timeout as an error.
+- **timeout-is-error**: A timeout-induced abort MUST result in `error: true` and MUST NOT mark the history as exhausted or advance the cursor.
+- **auto-continue-budget**: The hook MUST track the number of fetches started since the last budget reset (auto-continued or not) in `fetchesRef` and MUST NOT call the fetch if `fetchesRef >= MAX_AUTOPAGE_FETCHES` (5).
+- **auto-budget-tracking**: The hook MUST increment `fetchesRef` by 1 at the start of each fetch and MUST set `autoBudgetSpent: true` when `fetchesRef >= MAX_AUTOPAGE_FETCHES` after the increment.
+- **auto-budget-reset**: The hook MUST expose `resetAutoBudget()` which sets `fetchesRef` to 0 and `autoBudgetSpent` to false, allowing the pane to continue fetching after the reader performs another scroll gesture.
+- **merge-strategy-incoming-wins**: When merging an incoming page with previously loaded rows, if two rows share the same `id`, the incoming copy (from the page) MUST be kept and the previous copy MUST be discarded.
+- **merge-sorting**: After merging, the entire combined array MUST be sorted by (at, id) in oldest-first order (byAtThenId comparator).
+- **merge-identity-preservation**: If every incoming row already has a held row with the same `id` whose own keys and values are all strictly equal (a shallow, per-field `===` comparison), or the incoming list is empty, the merge MUST return the previous `rows` array unchanged to preserve referential identity.
+- **merge-no-duplicates**: After merging, the returned array MUST have exactly one row per unique `id`, even if an `id` appears in both the live shed and a paged row.
+- **shed-absorption-enabled**: Once the first request has gone out (tracked by `pagedRef`) and while `enabled` is true, the hook MUST, each time `live` or `enabled` changes, compare the previous live window with the new one for rows that fall off the OLD end and MUST capture those shed rows into the history array without requiring an additional fetch.
+- **shed-absorption-guards**: A row is considered shed only if: (1) its `id` is no longer in the live window, (2) it sorts strictly before the new live window's oldest row using the (at, id) comparator, and (3) its `tone` field is not "progress".
+- **shed-no-progress**: The hook MUST NOT capture rows with `tone: "progress"` even if they appear to have aged out, because such rows assert ongoing work that should not be frozen.
+- **shed-not-empty-window**: An empty live window (length 0) MUST NOT trigger shed absorption; this condition indicates stale data or a transient API outage and the previous window MUST be retained for the next frame.
+- **shed-only-after-paging**: Shed rows MUST NOT be captured until `pagedRef: true` (the first fetch has been initiated), because there is no history to hole before the reader has paged.
+- **shed-merge-with-existing**: Shed rows MUST be merged into the existing `rows` array using the same merge strategy as paged rows (incoming-wins, sort, de-duplicate).
+- **enabled-filtering**: When `enabled: false`, the hook MUST discard all loaded history and reset all state in an effect that runs after that render — `rows: []`, `loading: false`, `exhausted: false`, `error: false`, `autoBudgetSpent: false`, cursor null, fetch count 0, the exhausted and in-flight latches cleared, `pagedRef: false`, abort any in-flight request, and increment the epoch to invalidate any pending response.
+- **enabled-state-clear**: Discarding history when `enabled: false` MUST happen via a useEffect dependency on `enabled`, not at call time.
+- **epoch-validation**: Every completed fetch MUST check that `epoch.current === myEpoch` before updating state; if the epoch has changed (`enabled` went false after the request started), the response MUST be discarded entirely, and the `finally` block MUST NOT clear `inFlight` or `loading`.
+- **epoch-increment**: The epoch MUST be incremented by 1 every time the reset effect runs with `enabled` false — on a true-to-false transition, and also on mount when the hook starts disabled.
+- **abort-on-unmount**: When the component unmounts, the hook MUST abort any in-flight AbortController to clean up the fetch.
+- **mount-tracking**: The hook MUST track `mounted.current`, and the async fetch path MUST NOT call setState after unmount.
+- **api-client-ref**: The hook MUST read the `useStatusApi()` client through `apiRef.current` (not closed over directly) so that `loadOlder()` preserves a stable identity across client updates.
+- **url-query-params**: A fetch request MUST go to the relative path `/activity` through the `useStatusApi()` client (which resolves it against its base path, `/api` by default) and MUST include a query parameter `limit=300` and, if the cursor is not null, MUST include `before` (the cursor's timestamp in milliseconds) and `beforeId` (the cursor's id string).
+- **response-type**: The response body is parsed with `res.json()` and typed, without runtime schema validation, as `ActivityPage` with shape `{ rows: ActivityRow[], nextCursor: ActivityCursor | null }` where `ActivityCursor` is `{ atMs: number, id: string }`.
+- **request-headers**: Each fetch request MUST include `headers: { accept: "application/json" }`.
+- **error-status-code**: If the response is not ok (`!res.ok`), the hook MUST throw an error and treat it as a failed page (do not advance cursor or mark exhausted).
+- **json-parse-error**: If the response body cannot be parsed as JSON, the hook MUST throw an error and treat it as a failed page.
+- **loadOlder-stable-identity**: The `loadOlder` function MUST maintain a stable reference (the same function object) for the lifetime of the hook, achieved by wrapping it in `useCallback` with an empty dependency array.
+- **resetAutoBudget-stable-identity**: The `resetAutoBudget` function MUST maintain a stable reference for the lifetime of the hook, achieved by wrapping it in `useCallback` with an empty dependency array.
+- **no-localStorage**: The hook MUST NOT persist history, cursor, or any state to localStorage or any durable client store; all state is in-memory and is discarded on page reload or when `enabled: false`.
+- **no-cap-history-array**: The hook MUST NOT impose a maximum size limit on the `rows` array; its size is implicitly bounded by the reader's ability to scroll and the 90-day server retention window.

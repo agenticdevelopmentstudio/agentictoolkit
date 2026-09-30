@@ -1,0 +1,5 @@
+{
+  "name": "agentictoolkit",
+  "version": "1.0.0",
+  "description": "Routed rule skills generated from the agentictoolkit recipes by `cookbook skills build`."
+}

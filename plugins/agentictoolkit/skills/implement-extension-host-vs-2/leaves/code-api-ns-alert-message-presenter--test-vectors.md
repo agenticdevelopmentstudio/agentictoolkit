@@ -1,0 +1,20 @@
+<!-- leaf: implement-extension-host-vs-2/code-api-ns-alert-message-presenter--test-vectors · source: extension-host-vs-code-api-ns-alert-message-presenter.md -->
+
+# NSAlertMessagePresenter
+
+## Conformance Test Vectors
+
+| ID | Requirements | Input | Expected |
+|----|-------------|-------|----------|
+| ns-alert-message-presenter-001 | button-plan-skip-flagged, button-plan-cancel-slot | `buttonPlan(for:)` on `itemTitles == ["A", "B", "C"]`, `closeAffordanceIndices == []` | Returns `[0, 1, 2, nil]` — `MainThreadWindowTests.buttonPlanOrdersButtonsAndFillsTheCancelSlotFromTheLastCloseAffordance` |
+| ns-alert-message-presenter-002 | button-plan-skip-flagged, button-plan-cancel-slot | Same items, `closeAffordanceIndices == [0]` | Returns `[1, 2, 0]` — same test |
+| ns-alert-message-presenter-003 | button-plan-skip-flagged, button-plan-cancel-slot | Same items, `closeAffordanceIndices == [0, 2]` (two items flagged) | Returns `[1, 2]` — the last flagged index, `2`, wins the cancel slot; same test |
+| ns-alert-message-presenter-004 | button-plan-skip-flagged, button-plan-cancel-slot | Same items, `closeAffordanceIndices == [0, 1, 2]` (every item flagged) | Returns `[2]` — no ordinary button survives the skip; same test |
+| ns-alert-message-presenter-005 | button-plan-skip-flagged, button-plan-cancel-slot | `itemTitles == ["A"]`, `closeAffordanceIndices == []` | Returns `[0, nil]` — same test |
+| ns-alert-message-presenter-006 | button-plan-skip-flagged, button-plan-cancel-slot | `itemTitles == ["A"]`, `closeAffordanceIndices == [0]` | Returns `[0]` — same test |
+| ns-alert-message-presenter-007 | escape-key-position-rule | `escapeKeyEquivalentPosition(in:)` on `[0, 1, 2, nil]`, `[1, 2, 0]`, and `[1, 2]` | Returns `3`, `2`, and `1` respectively — each plan's own `count - 1` — `MainThreadWindowTests.escapeKeyEquivalentPositionIsTheCancelSlotOnlyWhenThePlanHasMoreThanOneButton` |
+| ns-alert-message-presenter-008 | escape-key-position-rule | Same function on `[0]` and `[2]` (one-entry plans) | Returns `nil` for both — same test |
+| ns-alert-message-presenter-009 | empty-items-single-ok | `presentMessage(_:)` on a request with `itemTitles == []`, presented by a conformer with a window available | Adds exactly one `OK` button and returns `nil` unconditionally, regardless of that button's response; traced to the source's `guard !request.itemTitles.isEmpty else { ...; return nil }` branch — not exercised by any given test, since every `MainThreadWindowTests` case substitutes a `RecordingMessagePresenter`/`SuspendingMessagePresenter` test double for `NSAlertMessagePresenter` itself |
+| ns-alert-message-presenter-010 | severity-style-mapping | `alertStyle(for:)` on `.information`, `.warning`, and `.error` | Returns `.informational`, `.warning`, and `.critical` respectively; traced to the source's `switch` statement — not exercised by any given test |
+| ns-alert-message-presenter-011 | drop-when-no-window, dropped-message-logged | `presentMessage(_:)` where the injected `window` closure returns `nil` and no window in `NSApp.windows` satisfies both `isVisible` and `canBecomeMain` | `sheetWindow()` returns `nil`; `presentedResponse(for:)` logs an error-level message and returns `nil` without calling `beginSheetModal(for:completionHandler:)`; `presentMessage(_:)` resolves to `nil`; traced to the source — not exercised by any given test, since running it would put a sheet on screen or require a stubbed `NSApp.windows` the given sources do not provide |
+| ns-alert-message-presenter-012 | response-to-item-index, out-of-range-response-resolves-nil | `presentMessage(_:)` on a non-empty-items request where the user's response, once reduced to `buttonIndex`, falls within `buttonItemIndices`'s bounds, versus a (defensive) case where it does not | Returns `buttonItemIndices[buttonIndex]` (an item index, or `nil` for the cancel slot) in the first case, and `nil` in the second without an out-of-bounds trap; traced to the source's two-guard structure — not exercised by any given test |

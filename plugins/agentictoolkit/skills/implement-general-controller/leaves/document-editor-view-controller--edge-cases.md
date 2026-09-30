@@ -1,0 +1,11 @@
+<!-- leaf: implement-general-controller/document-editor-view-controller--edge-cases · source: document-editor-view-controller.md -->
+
+# DocumentEditorViewController
+
+## Edge Cases
+
+- **Null/empty input**: `fileURL` set to `nil` clears the selection and the breadcrumb (see **set-file-url-updates-selection**, **set-file-url-updates-breadcrumb**). `rootURL` and `store` are required, non-optional values supplied at initialization, so neither has a null case to handle here.
+- **Boundary — a stored path that now names a directory**: `restoreStoredDocument()` checks only `FileManager.default.fileExists(atPath:)`, which returns `true` for a directory as well as a file. A stored path whose file has been replaced by a same-named directory therefore restores: `fileURL` becomes that directory's URL, `paneTitle` becomes the directory's last path component, and the breadcrumb shows it — while the hosted `FileEditorView` shows no openable content for it, because its own `openableNode` filter excludes directories (see **directory-detected-via-resource-value**). The pane title names a directory that is not actually open in the editor; this is what the source does, not an unresolved question.
+- **Concurrent access**: The class is declared `@MainActor`, so every mutation of `fileURL`, the selection, and the gear-popover row references happens on the main actor; `options`'s debounced persistence (`DispatchQueue.main.asyncAfter`) is also scheduled back onto the main actor. No interleaving of two `show(_:persist:)` calls, or of a `show` and a gear-row refresh, is possible.
+- **Error states**: `isDirectory(_:)` queries `url.resourceValues(forKeys: [.isDirectoryKey])` with `try?`, silently treating any failure (a permission error, a race where the file disappears mid-query) as "not a directory" (`false`) rather than surfacing an error. `restoreStoredDocument()` treats a missing file the same way — silently clearing the stored value rather than reporting an error to the caller (see **missing-file-restore**). Both are documented here as the source implements them, not idealized with an error UI the source does not have.
+- **Offline or disconnected state**: Not applicable. This file performs no networking; its only I/O is local-disk existence and resource-value checks and reads/writes through the caller-supplied `PaneStateStore`.

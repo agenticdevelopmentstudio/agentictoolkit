@@ -1,0 +1,29 @@
+<!-- leaf: implement-status-server-monitor-2/self-check-stability--part-2 · source: status-server-monitor-self-check-stability.md -->
+
+# Status Server Monitor Self-Check Stability — continued (part 2)
+
+## Platform Notes
+
+- **SwiftUI**: not a SwiftUI concern (no view). An Apple companion process embedding this pattern would model the failure-tracking entry as a small `struct FailTrack { var runs: Int; var firstFailedAtMs: Int64 }`, held in a `[String: FailTrack]` dictionary inside a type conforming to a `SelfCheckStabilizer` protocol (`func stabilize(_ checks: [IntegrationCheck], now: Int64) -> [IntegrationCheck]`, `func reset()`); Swift's value semantics make independent-per-call-state free for a `struct`-backed implementation constructed per caller, the same way `createSelfCheckStabilizer`'s closure gives each call its own map.
+- **Compose**: same non-UI framing as SwiftUI. A Kotlin port models the tracking store as a `MutableMap<String, FailTrack>` (a small `data class FailTrack(val runs: Int, val firstFailedAtMs: Long)`) inside a class implementing the equivalent interface, using `Clock.System.now()` (kotlinx-datetime) or an injected `() -> Instant` in place of the `nowMs` parameter here so tests can drive time deterministically the way `self-check-stability.test.ts` does with its own `T0`/`LATER` constants.
+- **React/Web** (source platform): lives at `packages/web/packages/status-server/src/monitor/self-check-stability.ts` as a plain factory function on the Node status backend, with no framework dependency of its own. `integrations.ts` is its only consumer, constructing one `SelfCheckStabilizer` at module scope and forwarding it the same `checks` array and `nowMs` value `runIntegrationsCheck` itself received or defaulted.
+- **AppKit / UIKit**: same non-UI framing as SwiftUI. A macOS/iOS agent embedding this pattern for a shared, multi-threaded caller (unlike this file's single-threaded Node runtime) would prefer wrapping the tracking dictionary in a Swift `actor` rather than a plain `struct`/`class`, giving every caller on any thread the same serialized access this file gets for free from the Node event loop.
+- **WinUI 3**: a .NET port models `SelfCheckStabilizer` as a class implementing an interface with `IReadOnlyList<IntegrationCheck> Stabilize(IReadOnlyList<IntegrationCheck> checks, DateTimeOffset? now = null)` and `void Reset()`, backed by a `Dictionary<string, FailTrack>` where `FailTrack` is a `readonly record struct FailTrack(int Runs, long FirstFailedAtMs)` — mirroring the run-count-and-timestamp pair this file tracks per id. `Stabilize` defaults its `now` parameter to `DateTimeOffset.UtcNow` exactly as this file defaults `nowMs` to `Date.now()`. If a WinUI process's UI thread and a background polling `Task` might call `Stabilize` concurrently — a real possibility this file's single-threaded Node runtime never has to consider — the backing dictionary should be a `ConcurrentDictionary<string, FailTrack>` with the read-increment-write sequence performed under a `lock` (or via `AddOrUpdate`'s atomic update delegate), since C# offers no run-to-completion guarantee equivalent to the event loop this file relies on implicitly. `CONFIRM_RUNS`, `CONFIRM_WINDOW_MS`, and `CORRELATED_MIN` port as `public const int`/`public static readonly TimeSpan` fields on the same class, exactly as this file exports them as top-level constants.
+
+## Design Decisions
+
+- **Decision**: confirm a failure only when both the run count AND the wall-clock window are satisfied, rather than either alone.
+  **Rationale**: stated directly in the module's own doc comment — "the check runs on demand (every /integrations request), so a run count alone could be satisfied by two polls seconds apart inside one blip — the failure must also span real time."
+  **Approved**: pending
+- **Decision**: make recovery immediate (a single non-debounce-eligible run clears the streak) while confirmation is debounced across `CONFIRM_RUNS` runs and `CONFIRM_WINDOW_MS`.
+  **Rationale**: stated directly in the module's own doc comment — "Recovery is not debounced — one good run clears the streak." Demonstrated by status-server-monitor-self-check-stability-004.
+  **Approved**: pending
+- **Decision**: correlate simultaneous confirmed failures into one synthetic Connectivity warning instead of leaving each provider red.
+  **Rationale**: stated directly in the module's own doc comment — "When several providers are confirmed-unreachable in the SAME run, the outage is almost certainly ours, not theirs... a single synthetic Connectivity check names the real suspect, so the banner shows one amber chip instead of a wall of red provider errors." Demonstrated by status-server-monitor-self-check-stability-005.
+  **Approved**: pending
+- **Decision**: leave duplicate ids within one `checks` array unvalidated and unguarded.
+  **Rationale**: not stated in an inline comment; the one production caller (`integrations.ts`) always supplies seven statically distinct ids, so no shipped call site can trigger the duplicate-id, sequential-double-counting fact recorded under Edge Cases. Recorded here per source fidelity as fact, not endorsement.
+  **Approved**: pending
+- **Decision**: keep this recipe's own Behavioral Requirements scoped to `self-check-stability.ts`'s contract, and cross-reference — rather than repeat — how `status-server-monitor-integrations` wires and shares one instance of it.
+  **Rationale**: `self-check-stability.ts` is a small, self-contained factory (three constants, one factory function, roughly forty lines); the module-level-singleton topology that shares one `SelfCheckStabilizer` across every `/integrations` request belongs to `integrations.ts`'s own wiring and is already documented on `status-server-monitor-integrations` under its "Cross-Run Stabilization" section, so restating it here would let the two recipes drift out of sync on the same fact.
+  **Approved**: pending

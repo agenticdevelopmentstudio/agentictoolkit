@@ -1,0 +1,37 @@
+<!-- leaf: implement-status-server-monitor-2/worker-client--part-2 · source: status-server-monitor-worker-client.md -->
+
+# Status Server Monitor Worker Client — continued (part 2)
+
+**Rules** (cite as `implement-status-server-monitor-2/worker-client--part-2#<slug>`):
+
+- `winui-3` SHOULD — a .NET port models the request/reply correlation with a ConcurrentDictionary<long, TaskCompletionSource> in place of …
+
+## Privacy
+
+- **Data collected**: this file itself collects nothing; it holds the exact `opts.workerData` value it was constructed with — `db` (an opaque connection value) and `config` (a full `StatusConfig`, including `config.credentials` and `config.secrets`, the provider API tokens and other secrets) — and forwards that value unchanged into every worker it spawns.
+- **Storage**: the constructor's `opts` (including `workerData.db`/`workerData.config`) is held in memory for the lifetime of the `MonitorWorkerClient` instance, re-read on every respawn; this file never writes it to disk.
+- **Transmission**: the only "transmission" this file performs is handing `workerData` (plus the `cooldowns` `SharedArrayBuffer` it adds) to `new Worker(...)`, which crosses the `worker_threads` structured-clone boundary within the same process — never a network call. No credential or secret value is ever written into any of this file's own `Error` messages (see Localization); those name only a timeout duration, an exit code, or a reply's own `error`/message text.
+- **Retention**: not applicable beyond the "Storage" note above — this file keeps no separate history of past `config`/`db` values; it only ever holds the one it was constructed with.
+
+## Platform Notes
+
+- **SwiftUI**: not a SwiftUI concern (no view). An Apple companion backend embedding this pattern models `MonitorWorkerClient` as an `actor` (so `pending`/`seq`/the worker handle are protected from concurrent mutation without a manual lock), spawning the cycle's work as a `Task` rather than an OS-level worker thread; a "kill a wedged task" guarantee equivalent to `Worker.terminate()` requires cooperative cancellation (`Task.isCancelled` checks inside the cycle) since Swift `Task` cancellation cannot forcibly stop code that never checks it.
+- **Compose**: same non-UI framing as SwiftUI. A Kotlin port models the client as a class holding a `Channel`-backed request/reply pair per in-flight call (the `pending` map analog is a `ConcurrentHashMap<Long, CompletableDeferred<Unit>>`), launches the cycle work in its own coroutine, and enforces `cycleTimeoutMs` with `withTimeout`/`withTimeoutOrNull` — which, like `Task` cancellation, is cooperative: a coroutine that never suspends at a cancellation point cannot be forcibly killed the way `Worker.terminate()` kills an OS thread.
+- **React/Web** (source platform): lives at `packages/web/packages/status-server/src/monitor/worker-client.ts` as a plain exported class on the Node status backend, imported by `worker.ts`'s sibling wiring and re-exported from `index.ts`. It depends only on `node:worker_threads`, `node:module`'s `createRequire`, and the shared `cooldownState()`/`attachCooldownState()` pair from `@agentic-toolkit/deploy-platform/cooldown` — no framework of its own.
+- **AppKit / UIKit**: same non-UI framing as SwiftUI. A macOS/iOS agent embedding this pattern would typically reach for a background `Task` rather than a separate OS thread/process the way Node's `Worker` isolates it here; the "why isolate the cycle" rationale in this file's own header comment (keeping the scheduler's watchdog and cadence logic responsive) has no direct AppKit/UIKit analogue unless the host app also multiplexes a UI event loop with this work.
+- **WinUI 3**: a .NET port models the request/reply correlation with a `ConcurrentDictionary<long, TaskCompletionSource>` in place of `pending`, an `Interlocked.Increment(ref _seq)` in place of `++this.seq` (a stricter analog than the source needs, since the source's single JS main thread makes `++this.seq` inherently safe, while a WinUI host's UI thread and background `Task`s are not single-threaded), and `CancellationTokenSource.CancelAfter(cycleTimeoutMs)` in place of the `setTimeout`. The critical divergence to flag: .NET `Task` cancellation is COOPERATIVE — a hung `Task` that never observes its `CancellationToken` cannot be forcibly killed the way `Worker.terminate()` kills an OS-level thread. Reproducing the source's "TERMINATE the wedged worker" guarantee exactly requires isolating the cycle in a separate OS process (`Process.Start`, killed with `Process.Kill()` on timeout) rather than a `Task`; a `Task`-based port that skips this can only abandon a wedged cycle, not truly stop it, and that gap SHOULD be called out to whoever approves the port. `System.Threading.Channels.Channel<T>` is the .NET analog of the `postMessage`/`on("message")` request/reply pipe. `ObservableCollection`/`INotifyPropertyChanged` do not apply here: this client has no UI-bound state of its own to expose.
+
+## Design Decisions
+
+- **Decision**: resolve the worker entry through the package's own `exports` map (`@agentic-toolkit/status-server/worker`) rather than a relative path to `worker.ts`.
+  **Rationale**: the source comment states it plainly — a container image ships no `tsx`/TypeScript loader, so a relative path to the `.ts` source "would work in dev and die on first boot in prod"; resolving through `exports` always lands on the built `dist/monitor/worker.js`, "the only form guaranteed runnable in that container." `worker-boot.int.test.ts` exercises exactly this resolution path under bare `node`.
+  **Approved**: pending
+- **Decision**: attach the shared `cooldownState()` buffer inside `spawn()` itself rather than accepting it as part of the caller-supplied `opts.workerData`.
+  **Rationale**: the source comment states the monitor cycle (worker thread) and the API thread's dashboard enumerations poll the SAME provider tokens, so a 429 either sees must back both off; sourcing the buffer internally on every spawn — rather than trusting the caller to keep passing the current one — guarantees a respawned worker always re-adopts the live registry, so an in-force cooldown survives a respawn.
+  **Approved**: pending
+- **Decision**: on a cycle timeout, reject only that call's own pending entry directly and terminate the worker without awaiting `worker.terminate()`'s own returned promise, relying on the resulting `"exit"` event to clean up every other pending entry.
+  **Rationale**: the source comment states the intent directly — "kill the whole thread so its abandoned work stops consuming the container, and let the next cycle start clean" — and separately notes "terminate() also fires 'exit', which is why failAll below must tolerate an already-settled entry." The practical effect, not spelled out in the timeout branch itself, is that a timeout on one in-flight cycle also fails every other cycle sharing that worker; a reader of only the timeout branch would not expect that.
+  **Approved**: pending
+- **Decision**: never reset `seq` across a respawn.
+  **Rationale**: not called out in a comment, but it is what makes `unmatched-reply-ignored` correct — if `seq` were reset to a value a still-terminating old worker might still emit a stale reply for, that reply could be mismatched to an unrelated, newer cycle. A monotonically increasing `seq` for the instance's whole lifetime makes any stale reply from a terminated worker unambiguously unmatchable.
+  **Approved**: pending

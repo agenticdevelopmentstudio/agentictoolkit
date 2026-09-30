@@ -1,0 +1,17 @@
+<!-- leaf: implement-status-server-monitor-1/cadence--edge-cases · source: status-server-monitor-cadence.md -->
+
+# Status Server Monitor Cadence
+
+**Rules** (cite as `implement-status-server-monitor-1/cadence--edge-cases#<slug>`):
+
+- `null-and-empty-input` MUST — Calling shouldFullSync with no argument at all treats manual as undefined, which is falsy, so the call is treated …
+- `boundary-values` MUST — deploySyncIntervalMs of 0 or a negative number collapses the recurring cadence into "always full sync" starting from …
+- `concurrent-access` MUST — Each DeployCadence returned by createDeployCadence closes over its own private anchor; no two instances ever share …
+
+## Edge Cases
+
+- **Null and empty input**: Calling `shouldFullSync` with no argument at all treats `manual` as `undefined`, which is falsy, so the call is treated identically to `manual: false` — MUST (a fact of JavaScript truthiness, not a validated default). `opts.firstDelayMs` and `opts.now` explicitly passed as `null` are treated identically to being omitted, because both are read with the `??` nullish-coalescing operator, which falls through on `null` as well as `undefined` — MUST. `opts.deploySyncIntervalMs` passed as `undefined` produces `NaN` in the re-anchor arithmetic, which makes every subsequent comparison against the anchor evaluate to "already due" and collapses the cadence into returning `true` on every automatic call — MUST (see `interval-and-delay-validation`).
+- **Boundary values**: `deploySyncIntervalMs` of `0` or a negative number collapses the recurring cadence into "always full sync" starting from the call that first re-anchors it — MUST, and see `interval-and-delay-validation` for why this is the one genuine gap in this file. `firstDelayMs` of exactly `0` is a legitimate, non-buggy boundary distinct from that case: it disables the boot grace entirely by design (the very first automatic call is treated as already due), which is a valid caller choice with no crash-loop implication of its own, since the recurring `deploySyncIntervalMs` interval — the value that actually protects the boot tick from repeating on every subsequent call — is unaffected — MUST.
+- **Concurrent access**: Each `DeployCadence` returned by `createDeployCadence` closes over its own private anchor; no two instances ever share state, so concurrent use of two independently constructed cadences cannot interfere with each other — MUST. Within a single JavaScript thread, `shouldFullSync` performs no `await` and no asynchronous step between reading the clock and (conditionally) writing the anchor, so two calls into the SAME `DeployCadence` from that thread cannot interleave their reads and writes — this ordering is a fact of the single-threaded runtime, not a race requiring a lock — MUST. This file provides no synchronization primitive of its own and needs none for that reason.
+- **Error states**: Not applicable — `cadence.ts` performs no network call, file I/O, or database access of any kind; it is pure arithmetic and comparison over a caller-supplied or default clock, so it has no dependency that can fail or return an error.
+- **Offline or disconnected state**: Not applicable — this file has no network connectivity to lose; it decides only WHEN the deploy phase that later performs network I/O (provider polls, peer fetch, telemetry — all external to this file) is allowed to run, never whether that I/O succeeds.

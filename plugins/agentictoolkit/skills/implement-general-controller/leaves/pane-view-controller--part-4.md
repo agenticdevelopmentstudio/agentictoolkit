@@ -1,0 +1,37 @@
+<!-- leaf: implement-general-controller/pane-view-controller--part-4 · source: pane-view-controller.md -->
+
+# PaneViewController — continued (part 4)
+
+## Platform Notes
+
+- **SwiftUI**: This is an `NSViewController`/AppKit subclass, not SwiftUI. A SwiftUI-first rebuild would replace the class hierarchy with a `View` driven by an `@Observable` pane view-model exposing `resolvedTitle`, `isZoomed`, and `minimizedEdge`; the title bar becomes a custom `HStack` (close/minimize/zoom buttons, a `Text(title).lineLimit(1).truncationMode(.middle)`, an accessory `HStack`, and a gear `Menu`); the six capability protocols continue to be probed with `as?` against an `AnyObject` content, the same idiom the source uses; spacing becomes a `.padding(EdgeInsets(...))` fed by the same `PaneSpacingOverride`; the minimized rail is swapped in with a plain `if`, not a transition, to preserve the source's "no animation" behavior.
+- **Compose**: Model the pane as a `Column` with a fixed-height title `Row` (26dp-equivalent) over a `Box` holding the content. The six capability protocols become sealed interfaces the content composable optionally implements, probed the same way (`is`/`as` in Kotlin) rather than through compile-time generics. Minimizing to a side swaps the content `Row`/`Column` for a narrow `IconButton` column; persistence goes through a `PaneStateStore`-equivalent `DataStore` keyed the same way (`minimize.edge`, `zoomed`, `spacing.override`).
+- **React/Web**: A `<div>` pane wrapper with a fixed-height header `<div>` (26px) holding the same left-to-right regions — window controls, title, accessory slot, gear. The capability protocols become optional props/callbacks (`onTitleChange`, `renderAccessories`, `renderOptionRows`) checked for existence the way `as?` is checked here. The minimized rail is a `<div>` swapped in by conditional render, not a CSS transition, matching the source's instant appearance change. Persisted chrome state goes to the same key-value abstraction (`localStorage`, or a server-backed store) keyed by the same three strings.
+- **AppKit/UIKit**: This recipe's own platform (`NSViewController`, `NSView`, `NSButton`, `NSMenu`); nothing in this file targets UIKit/iOS. A UIKit port has no exact analogue for an `NSPopover`-anchored minimize picker or an app-modal sheet; it would present the minimize choices as a `UIMenu` on a long-press or a `UIPopoverPresentationController`-anchored sheet, and the "Settings…" dialog as a `UISheetPresentationController` detent sheet instead of `presentAsSheet`. The six probed capability protocols carry over unchanged — continuing to check with `as?` against `UIViewController` subclasses. Internally, the source wires the push-callback capabilities once in `wireContentCallbacks()`, re-evaluates control availability in `refreshControlAvailability()`, tracks the content's four edge pins in `contentEdgeConstraints`, and drops the title bar's `titleBarTrailing` constraint while docked to a rail — private mechanics specific to this file that a port reproduces by whatever means fits its own framework, not by name.
+- **WinUI 3**: Recreate the pane as a `UserControl` with a two-row `Grid`: a fixed-height title row (a `GridLength` matching `PaneTitleBarView.height`, 26px-equivalent) hosting a `StackPanel` of close/minimize/zoom `Button`s at the left, a `TextBlock` with `TextTrimming="CharacterEllipsis"` for the middle-truncated title, an accessory `StackPanel`, and a trailing gear `Button` (a `FontIcon` glyph for the gearshape symbol) that opens a `ContentDialog` mirroring `OptionsDialogViewController` — an optional heading, a `StackPanel` of option rows (the spacing control plus its "Use Default" `Button`, then the content's own rows), and a single closing action. Model `clampsToContainer` by setting every child's `HorizontalAlignment="Stretch"` with `MinWidth="0"` rather than letting `Auto`-sized columns demand room, matching "the bar stops insisting on the width its contents would prefer." Minimizing to a vertical edge collapses the content row's `RowDefinition` to `Height="0"` while keeping the title row; minimizing to a horizontal edge swaps the whole `Grid` for a narrow rail `Border` (28px-equivalent width, matching `PaneMinimizedStripView.thickness`) hosting a single glyph `Button`, docked with `HorizontalAlignment="Left"` or `"Right"` per edge — the direct analogue of the source's dock-to-one-side-only rail. Persist `minimize.edge`, `zoomed`, and `spacing.override` through whatever local settings store the app uses (e.g. `ApplicationData.Current.LocalSettings`), matching the string-keyed, absent-means-default contract `PaneStateStore` defines.
+
+## Design Decisions
+
+**Decision**: A pane's four host-facing controls — close, minimize, zoom, restore — send requests rather than performing actions directly.
+**Rationale**: The source's own doc comment states the host is free to refuse, substitute, or do something else entirely with the same click, and the pane changes its own state only when the host calls `setMinimized(to:)` / `setZoomed(_:)` back — this is what lets the same class be dropped into a container with different rules and still be correct.
+**Approved**: pending
+
+**Decision**: `clampsToContainer` only ever yields the title bar's width demand; it never restores it once set.
+**Rationale**: The setter's `didSet` guards on `false` and does nothing there; the doc comment explains a pane does not stop being clamped once it starts, and that restoring would mean tracking a priority per view for a case that never happens.
+**Approved**: pending
+
+**Decision**: Resetting the spacing override deletes the stored row rather than writing the current inherited value into it.
+**Rationale**: `PaneSpacingOverride.reset()`'s own comment states that overwriting with today's global would freeze it, so a later app-wide change would no longer reach the pane; deletion is what keeps "use default" meaning "inherit" rather than "freeze."
+**Approved**: pending
+
+**Decision**: Spacing-override writes are coalesced behind a 300ms timer instead of writing on every tick of a drag.
+**Rationale**: The spacing steppers are continuous and produce roughly seventeen values a second; the source's comment traces the uncoalesced cost to a JSON encode plus a synchronous SQLite write on the main thread per tick, and accepts a lag no longer than the pause between two deliberate presses.
+**Approved**: pending
+
+**Decision**: `setMinimized(to:)` called before the view loads only records the edge; it does not force the view to load.
+**Rationale**: The source's comment on `applyMinimizedAppearance()` explains that forcing a load would re-enter through `viewDidLoad`'s call to `restorePersistedState()`, building a second, untracked rail. Recording the edge now and applying it once at load time is lossless, because the edge and the store are already written by the time this method is called.
+**Approved**: pending
+
+**Decision**: A `JSONEncoder`/`JSONDecoder` failure while persisting or reading the spacing override (`spacing-decode-failure-is-absent`) is silently ignored rather than surfaced to any caller.
+**Rationale**: `PaneStateStore`'s two methods, `setPaneStateValue(_:forKey:)` and `paneStateValue(forKey:)`, return no error value at all, so this class has no channel to report through even if it wanted to; failing open — treating unreadable or unwritable state as absent — keeps the pane opening whole rather than blocking on state it cannot use.
+**Approved**: pending

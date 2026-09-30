@@ -1,0 +1,8 @@
+<!-- leaf: implement-status-server-monitor-2/webhook-events · source: status-server-monitor-webhook-events.md -->
+
+# Status Server Monitor Webhook Events
+
+## Overview
+
+`webhook-events.ts` (`packages/web/packages/status-server/src/monitor/webhook-events.ts`) exports two pure, synchronous functions — `mapVercelDeployEvent` and `mapRailwayDeployEvent` — that each translate one already-JSON-parsed provider webhook body into a `ProviderDeploy` row (`./provider-deploy`, external), the same shape the poll fetchers produce, or return `null` when the body is not a deployment event this monitor ingests. Both functions are called exactly once each, by `routes/hooks.ts` (external), after that route has verified the request's signature or shared secret (`webhook-verify.ts`, external) and parsed the raw body as JSON; a non-`null` result is then passed to `storage.deploy.upsertDeployments` for persistence, to `pushDeployEvent` (`live-buffer.ts`, external) for the in-memory live overlay, and into the board's issue-derivation and alerting path — none of which this file performs itself. This file makes no network call, touches no database, and holds no state between calls; its only work is field extraction, a fixed lookup table (Vercel), a small string transform (Railway), and delegation to three sibling pure modules — `vercelPhases`/`railwayPhases` (`./deploy-status`, agentictoolkit://recipes/status-server-monitor-deploy-status) for the build/deploy lifecycle, `shortSha`/`commitFullMessage` (`./format`, agentictoolkit://recipes/status-server-monitor-format) for commit display fields, and `toValidDate` (`./provider-deploy`, agentictoolkit://recipes/status-server-monitor-provider-deploy) for the trust-boundary timestamp parse.
+

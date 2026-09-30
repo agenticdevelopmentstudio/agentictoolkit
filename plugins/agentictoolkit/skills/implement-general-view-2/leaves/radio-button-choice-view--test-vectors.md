@@ -1,0 +1,25 @@
+<!-- leaf: implement-general-view-2/radio-button-choice-view--test-vectors · source: radio-button-choice-view.md -->
+
+# RadioButtonChoiceView
+
+## Conformance Test Vectors
+
+| ID | Requirements | Input | Expected |
+|----|-------------|-------|----------|
+| radio-button-choice-view-001 | arranges-heading-above-controls-stack | Construct `RadioButtonChoiceView` with any `viewModel` | `label` and `controlsStack` are the only two arranged subviews of a single outer stack that is pinned to the component's edges, with `label` first |
+| radio-button-choice-view-002 | builds-one-radio-button-per-choice | `viewModel.choices` has 3 entries with labels `"A"`, `"B"`, `"C"` | After init, `radioButtons.count == 3` and `radioButtons[0].title == "A"`, `radioButtons[1].title == "B"`, `radioButtons[2].title == "C"`, in that order |
+| radio-button-choice-view-003 | lays-out-controls-along-axis | Construct with `axis: .horizontal` | `controlsStack.orientation == .horizontal` and every `radioButtons` element is an arranged subview of `controlsStack` |
+| radio-button-choice-view-004 | aligns-controls-stack-by-axis | Construct with `axis: .vertical` (default) | `controlsStack.alignment == .leading` |
+| radio-button-choice-view-005 | aligns-controls-stack-by-axis | Construct with `axis: .horizontal` | `controlsStack.alignment == .firstBaseline` |
+| radio-button-choice-view-006 | spaces-stacks-by-row-spacing | Construct the component | Both the outer stack's `spacing` and `controlsStack.spacing` equal `SettingsLayout.default[.rowSpacing]` (8pt) |
+| radio-button-choice-view-007 | initializes-from-view-model | `viewModel.title = "Theme"`, `viewModel.choices = [(label: "Light", value: .light), (label: "Dark", value: .dark)]`, `viewModel.value = .dark` | After init, `label.stringValue == "Theme"`, the button paired with `.dark` has `state == .on`, the button paired with `.light` has `state == .off` |
+| radio-button-choice-view-008 | commits-radio-selection | `viewModel.settingObserver.value == choices[0].value`; invoke `radioChanged(radioButtons[1])` | `viewModel.settingObserver.value == choices[1].value` after the call |
+| radio-button-choice-view-009 | skips-redundant-commits | `viewModel.settingObserver.value == choices[0].value`; invoke `radioChanged(radioButtons[0])` (same value) | No write to `settingObserver.value` is recorded (e.g. a spy wrapping `settingObserver` that counts value-writes/notifications reports zero additional writes after the call) |
+| radio-button-choice-view-010 | ignores-unmatched-sender | Invoke `radioChanged(_:)` with an `NSButton` instance that is not one of `radioButtons` | `viewModel.settingObserver.value` is unchanged; no crash occurs |
+| radio-button-choice-view-011 | syncs-on-external-change | After construction, externally change `viewModel.title` and `viewModel.value` to a value present in `choices`, then invoke `viewModel.onChange(newValue)` directly | `label.stringValue` updates to the new title, and exactly the radio button paired with `newValue` has `state == .on` while every other button has `state == .off` |
+| radio-button-choice-view-012 | syncs-on-external-change, commits-radio-selection | Click `radioButtons[1]` (currently `.off`, paired value differs from `choices[0].value`); then, on a later main-queue turn, `settingObserver` delivers the accepted write and `viewModel.onChange` fires | Synchronously after the click, `viewModel.settingObserver.value == choices[1].value` (per commits-radio-selection); after `onChange` fires, `radioButtons[1].state == .on` and every other button is `.off` |
+| radio-button-choice-view-013 | syncs-on-external-change, commits-radio-selection | Click `radioButtons[1]`; before the next main-queue turn, an intermediary rejects/transforms the write so `viewModel.value` ends up equal to `choices[0].value` instead; `viewModel.onChange(choices[0].value)` then fires | After `onChange` fires, `syncSelection()` overrides the native click toggle: `radioButtons[0].state == .on` and `radioButtons[1].state == .off`, matching the actual `viewModel.value` rather than the clicked button |
+| radio-button-choice-view-014 | exposes-constituent-views | Construct the component, then access `.label` and `.radioButtons` from outside the type | Both properties are accessible and return the same `NSTextField`/`[NSButton]` instances built during init; `radioButtons` has no public setter |
+| radio-button-choice-view-015 | requires-designated-initializer | Attempt `RadioButtonChoiceView(coder: someCoder)` | The call traps with a fatal error; no instance is returned |
+| radio-button-choice-view-016 | rejects-frame-only-initialization | Attempt `RadioButtonChoiceView(frame: .zero)` | The call traps with a fatal error; no instance is returned |
+| radio-button-choice-view-017 | confines-to-main-actor | Attempt to construct or mutate a `RadioButtonChoiceView` from off the main actor | This is a static/compile-time check, not a runtime conformance test: the compiler rejects the call at compile time under Swift's `@MainActor` isolation checking |

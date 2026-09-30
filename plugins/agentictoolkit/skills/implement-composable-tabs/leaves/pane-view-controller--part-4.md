@@ -1,0 +1,29 @@
+<!-- leaf: implement-composable-tabs/pane-view-controller--part-4 · source: composable-tabs-pane-view-controller.md -->
+
+# ComposableTabsPaneViewController — continued (part 4)
+
+## Platform Notes
+
+- **SwiftUI**: This is an `NSViewController`/AppKit subclass, not SwiftUI. A SwiftUI-first rebuild would replace the class hierarchy with a `View` driven by an `@Observable` pane view-model exposing the same `nodeID`/`paneNumber`/`viewID` identity and computed `fallbackTitle`/`paneAccessibilityIdentifier`, use `.overlay` plus a boolean "arranging" state for the scrim instead of manually inserting an `NSView`, and drive the active-pane border with `.border(color:width:)` fed by an environment or `@FocusedValue` "active pane id" instead of `NSWindow.didBecomeKeyNotification` plus a local event monitor.
+- **Compose**: Model the active-pane accent with `Modifier.border()` toggled by a `CompositionLocal` or shared ViewModel holding "the active pane id per window" (mirroring `ComposableTabsActivePane`). Arrange mode becomes a boolean state driving an `AnimatedVisibility` scrim `Box` containing an `IconButton` row for Add/Remove/Done and a Material `DropdownMenu` for the four move directions. There is no Android equivalent of Return/Enter as a global "exit" gesture; map only Escape-equivalent (back gesture, via `BackHandler`) and the explicit Done button to the same effect.
+- **React/Web**: A `<div>` pane wrapper with `role="group"`, keyed the same way for a `data-testid` (`pane.<slug>` / `pane.<slug>.<index>`) rather than an ARIA attribute. Track the active pane via a document-level `mousedown`/`focusin` listener registered once per window (mirroring the single local `NSEvent` monitor, not a per-pane listener) and switch a CSS custom property for the border color. Arrange mode is a sibling overlay `<div>` at `position: absolute; inset: 2px;` with its own `keydown` listener scoped to the pane for Escape/Enter/Return, matching the source's "local monitor, not global handler" behavior.
+- **AppKit/UIKit**: This recipe's own platform. `ComposableTabsPaneViewController.swift` is macOS/AppKit-only (`NSViewController`, `NSMenu`, `NSAlert`, `NSEvent` local monitors); nothing in this file targets UIKit/iOS. A UIKit port would replace `NSMenu`/`NSAlert` with `UIMenu`/`UIAlertController`, replace the local `NSEvent` `keyDown` monitor with a `UIKeyCommand` set registered on the responder chain (there is no direct UIKit equivalent of "consume a hardware key before the first responder sees it" outside `UIKeyCommand`), and replace the popover-vs-sheet choice for the add picker with `UIPopoverPresentationController` vs. a `.pageSheet` presentation.
+- **WinUI 3**: Recreate the pane as a `UserControl` wrapping a two-row `Grid` — a fixed-height title-bar row (a `GridLength` matching `PaneTitleBarView.height`, 26px-equivalent) and a content row — surrounded by a 2px `Border` (`BorderThickness="2"`, `BorderBrush` bound to a `SolidColorBrush` resource that swaps between an `ActivePaneAccentBrush` and a `PaneOutlineBrush`, mirroring the AppKit layer border and its color-only state change). Track "the active pane in this window" with a small per-`Window` service (a dictionary keyed by `Window`, mirroring `ComposableTabsActivePane`) updated from `PointerPressed`/`GotFocus` handlers registered once on `Window.Content`'s root rather than per pane. Model arrange mode as a `VisualStateGroup` ("Arranging"/"Normal") that swaps in a scrim `Grid` (`Background` bound to a semi-transparent brush over the window background) hosting a `CommandBar` (or a `StackPanel` of `Button`s) for Add/Remove/Done, with Move as a `DropDownButton` whose flyout `MenuFlyoutItem`s are enabled or disabled per the available-directions set. Bind `AutomationProperties.AutomationId` to the same `pane.<slug>` / `pane.<slug>.<index>` scheme via a converter, and register the Return/Enter/Escape exit keys as `KeyboardAccelerator`s scoped to the arrange scrim's `UIElement`, since WinUI's accelerator system already scopes by focus tree the way the AppKit local monitor does by window.
+
+## Design Decisions
+
+**Decision**: The layout-change notification handler refreshes this pane's arrange-overlay availability for every tab's layout change, not only its own window's.
+**Rationale**: One pane moving changes what every other pane in every open tab may legally do next (a column's last pane loses Up, a tab's last leaf loses Remove), and the source posts one unscoped notification for exactly this reason rather than one per window.
+**Approved**: pending
+
+**Decision**: Removing a pane behind a confirmation sheet re-resolves the enclosing split inside the sheet's completion handler instead of capturing the split reference before presenting the sheet.
+**Rationale**: The tree can change while the sheet is up — another pane could be moved or removed — so acting on a reference captured before the sheet opened risks removing the wrong leaf or acting on one that already left the tree.
+**Approved**: pending
+
+**Decision**: Arrow-key handling for arrange mode is implemented as a local `NSEvent` monitor per pane rather than an override of `keyDown(_:)`.
+**Rationale**: The pane's own content (a terminal, an editor) owns first responder and would consume the arrow key before a `keyDown` override on this controller ever saw it; a local monitor sees the event before AppKit's responder chain delivers it.
+**Approved**: pending
+
+**Decision**: The active/inactive pane cue is color-only; border width stays a constant 2pt in both states.
+**Rationale**: The source's own comment states the intent — outlining only the active pane would read as one pane with a seam down the middle — but implements no additional cue (width, icon, or pattern) for a person who cannot rely on color alone; see Differentiate Without Color in Accessibility Options.
+**Approved**: pending

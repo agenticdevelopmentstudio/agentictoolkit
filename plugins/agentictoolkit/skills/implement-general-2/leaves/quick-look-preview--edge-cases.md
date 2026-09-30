@@ -1,0 +1,13 @@
+<!-- leaf: implement-general-2/quick-look-preview--edge-cases · source: quick-look-preview.md -->
+
+# Quick Look Preview
+
+## Edge Cases
+
+- **Null/empty input**: Not applicable — `url: URL` is a required, non-optional, `let` stored property with no failable construction path in this file; Swift's type system prevents constructing `QuickLookPreview` with a missing or null `url` (see **requires-preview-url**).
+- **Boundary values**: Not applicable — the component takes no numeric, size-constrained, or range-bound input; its only input is a file `URL`.
+- **Concurrent access**: Not applicable — `makeNSView`, `updateNSView`, and `dismantleNSView` are `@MainActor`-isolated by `NSViewRepresentable`'s protocol declaration (see **confines-to-main-actor**), so SwiftUI never invokes them concurrently with one another.
+- **Error states**: The only fallible operation in this file is the preview control's full-featured initializer, `QLPreviewView(frame: .zero, style: .normal)`; its failure (a `nil` return, per the source's comment "returns nil only when QuickLook is unavailable") is handled by falling back to `QLPreviewView()` instead (see **falls-back-to-default-style-when-unavailable**). Beyond that one path, this file defines no error handling. The source's own doc comment states that a file type with no QuickLook generator makes `QLPreviewView` draw its own native "no preview available" state; the doc comment makes no equivalent claim for a file that cannot be read or no longer exists, so this recipe does not extend that claim to those cases. This wrapper neither detects nor reports any of these conditions itself — whatever `QLPreviewView` does with an unreadable or missing file is its own behavior, unconfirmed by this source file.
+- **Offline/disconnected state**: Not applicable — the component performs no networking; `url` identifies a local file and QuickLook rendering happens entirely on-device.
+- **`url` changes while a preview is still generating**: When `updateNSView` receives a new `url` while `QLPreviewView` is still generating the previous preview, the component reassigns `previewItem` immediately (see **updates-preview-item-on-url-change**) without first canceling or waiting on the prior generation; any cancellation is internal to `QLPreviewView` and not implemented in this file.
+- **Repeated identical `url` across consecutive `updateNSView` calls**: The component does not restart generation by reassigning an unchanged `previewItem` (see **skips-redundant-preview-item-updates**); per the source's own comment, reassigning the same item "restarts the generator and flickers."

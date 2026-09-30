@@ -1,0 +1,18 @@
+<!-- leaf: implement-status-server-monitor-2/webhook-events--edge-cases · source: status-server-monitor-webhook-events.md -->
+
+# Status Server Monitor Webhook Events
+
+**Rules** (cite as `implement-status-server-monitor-2/webhook-events--edge-cases#<slug>`):
+
+- `null-and-empty-input` MUST — mapVercelDeployEvent(undefined) and mapVercelDeployEvent(null) MUST return null rather than throw, because the cast to …
+- `boundary-values` MUST — event.type values are matched by exact string equality against VERCEL_STATE's six keys; no prefix, case-insensitive, or …
+- `concurrent-access` MUST — not a synchronization concern by construction — both functions are synchronous, take no lock, and read or write no …
+- `error-states` MUST — neither function has a dependency of its own that can fail (no network call, no database access, no file I/O), so the …
+
+## Edge Cases
+
+- **Null and empty input**: `mapVercelDeployEvent(undefined)` and `mapVercelDeployEvent(null)` MUST return `null` rather than throw, because the cast to `VercelEvent` and every subsequent read uses optional chaining against a value that may itself be `undefined`/`null` (no-throw) — MUST. `mapRailwayDeployEvent({})` MUST return `null` via railway-missing-required-null (`event.id` is falsy) — MUST. An `event.payload.deployment.meta` that is absent MUST be treated as `{}` (vercel-commit-hash through vercel-commit-repo all read from that empty object rather than throwing on `undefined.githubCommitSha`) — MUST.
+- **Boundary values**: `event.type` values are matched by exact string equality against `VERCEL_STATE`'s six keys; no prefix, case-insensitive, or fuzzy match is performed, so e.g. `` Deployment.Succeeded `` (wrong case) fails the lookup exactly like an unrelated string (vercel-unmapped-type-null) — MUST. `railwayStatusFromType` takes the segment after the LAST `.` in `type`, so a value with no `.` at all (e.g. `"CRASHED"`) returns that whole string uppercased, and a value with multiple dots (e.g. `"a.b.crashed"`) returns only the final segment — MUST, traced to `type.split(".").pop()`.
+- **Concurrent access**: not a synchronization concern by construction — both functions are synchronous, take no lock, and read or write no module-scope or shared mutable state; each call's `state`, `dep`, `meta`, `target`, `status`, and `p` (Railway) are freshly-read locals scoped to that one call, so any number of concurrent callers observe fully independent results — MUST.
+- **Error states**: neither function has a dependency of its own that can fail (no network call, no database access, no file I/O), so the only "error" either function can encounter is a malformed `event` value, and every one of those is routed to a `null` return (vercel-unmapped-type-null, vercel-missing-deployment-null, railway-missing-required-null) or to the `toValidDate ?? new Date()` receipt-time fallback (vercel-created-at, railway-created-at) rather than a thrown exception — MUST. Neither function logs anything of its own when it returns `null` or falls back to receipt time; the caller (`routes/hooks.ts`, external) is the one that decides what a `null` result means at the HTTP layer (a `200 { ok: true, ignored: true }` response, per that file, so the provider does not retry an event this monitor deliberately does not ingest) — this file itself communicates nothing beyond its return value.
+- **Offline / disconnected state**: not applicable — this file makes no network connection of its own to lose; it is invoked only after `routes/hooks.ts` (external) has already received, signature-verified, and JSON-parsed the webhook body over an inbound HTTP request that this file has no part in.

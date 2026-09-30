@@ -1,0 +1,75 @@
+<!-- leaf: implement-extension-host-vs-2/code-api-main-thread-webviews--part-3 · source: extension-host-vs-code-api-main-thread-webviews.md -->
+
+# MainThreadWebviews — continued (part 3)
+
+**Rules** (cite as `implement-extension-host-vs-2/code-api-main-thread-webviews--part-3#<slug>`):
+
+- `restore-parses-saved-state-as-json-or-undefined` MUST
+- `restore-returns-true-on-successful-deserialize` MUST
+- `restore-keeps-the-panel-adopted-when-deserialize-throws` MUST
+- `restore-abandons-only-on-dispatch-unavailable` MUST
+- `register-view-provider-mirrors-the-serializer-contract` MUST
+- `register-view-provider-drops-the-retain-context-hint-silently` MUST
+- `register-view-provider-does-not-throw-on-duplicate` MUST
+- `has-view-provider-false-when-disposed-or-missing` MUST
+- `resolve-view-refuses-when-disposed-or-unregistered` MUST
+- `resolve-view-refuses-an-already-closed-panel` MUST
+- `resolve-context-state-is-always-undefined-and-ledgered` MUST
+- `resolve-view-token-never-cancels` MUST
+- `resolve-view-returns-true-on-successful-resolve` MUST
+- `resolve-view-abandons-only-on-dispatch-unavailable` MUST
+- `boolean-field-requires-an-actual-boolean` MUST
+- `is-truthy-flag-requires-boolean-true` MUST
+- `resource-roots-field-distinguishes-absent-from-empty` MUST
+- `resource-roots-field-drops-unparseable-entries` MUST
+- `ledger-records-a-reach-only-when-truthy-or-non-empty` MUST
+- `panel-webview-getter-builds-a-fresh-object-every-access` MUST
+- `panel-title-is-an-accessor-pair-over-the-panel` MUST
+- `panel-options-getter-answers-fixed-values` MUST
+- `panel-icon-path-is-write-only-into-the-ledger` MUST
+- `panel-view-column-is-always-undefined` MUST
+- `panel-active-and-visible-mirror-is-disposed` MUST
+- `panel-view-state-subscription-is-ledgered-every-call` MUST
+- `panel-reveal-reads-its-second-argument-as-preserve-focus` MUST
+- `panel-dispose-delegates-to-the-underlying-panel` MUST
+- `view-title-mirrors-the-panels-title` MUST
+- `view-description-and-badge-are-write-only-into-the-ledger` MUST
+- `view-has-no-dispose-method` MUST
+- `view-visible-mirrors-is-disposed` MUST
+- `view-visibility-subscription-is-ledgered-every-call` MUST
+- `view-show-reads-its-first-argument-as-preserve-focus` MUST
+
+- **restore-parses-saved-state-as-json-or-undefined**: `restoredStateValue(_:in:)` MUST parse a non-`nil` `state` string as JSON with `.fragmentsAllowed` and pass the decoded value to `deserializeWebviewPanel`, and MUST pass `JSValue(undefinedIn:)` — never JavaScript `null` — when `state` is `nil`, because an extension's `state ?? defaults` and `if (state === undefined)` read the two differently.
+- **restore-returns-true-on-successful-deserialize**: `restore(_:viewType:state:)` MUST return `true` when `VSCodeAPI.call(deserialize, ...)` answers `.returned`.
+- **restore-keeps-the-panel-adopted-when-deserialize-throws**: `restore(_:viewType:state:)` MUST log the exception at error level and return `false`, but MUST NOT call `abandon` — the model MUST stay adopted — when `VSCodeAPI.call` answers `.threw`.
+- **restore-abandons-only-on-dispatch-unavailable**: `restore(_:viewType:state:)` MUST call `abandon(model)`, log at error level, and return `false` when `VSCodeAPI.call` answers `.unavailable`.
+- **register-view-provider-mirrors-the-serializer-contract**: `handleRegisterWebviewViewProvider` MUST apply the same torn-down check, string-view-id check, and object-with-callable-`resolveWebviewView`-method check as `handleRegisterWebviewPanelSerializer` applies to view types and `deserializeWebviewPanel`, with the corresponding messages naming `vscode.window.registerWebviewViewProvider`, a view id string, and a `resolveWebviewView(webviewView, context, token)` method.
+- **register-view-provider-drops-the-retain-context-hint-silently**: `handleRegisterWebviewViewProvider` MUST read and discard the third argument's `webviewOptions.retainContextWhenHidden` field without recording a `NotImplementedLedger` row, because every pane here already retains its view controller regardless of front-most state, so a ledger row would report a limitation that does not exist.
+- **register-view-provider-does-not-throw-on-duplicate**: `handleRegisterWebviewViewProvider` MUST NOT raise or refuse a second registration for a view id already in `viewProviders`; it MUST log the replacement at error level and let the later registration win, deliberately diverging from upstream VS Code's throw — the "second" registration here is typically a post-reload registration, and honoring the app's earlier registration over the extension's would wire a live pane to a dead JavaScript context.
+- **has-view-provider-false-when-disposed-or-missing**: `hasViewProvider(for:)` MUST return `false` when `isDisposed` is `true`, and MUST otherwise return whether `viewProviders[viewID]` is non-`nil`.
+- **resolve-view-refuses-when-disposed-or-unregistered**: `resolveWebviewView(_:viewID:)` MUST return `false` immediately when `isDisposed` is `true` or no provider is registered for `viewID`.
+- **resolve-view-refuses-an-already-closed-panel**: `resolveWebviewView(_:viewID:)` MUST refuse (return `false`, call `logRefusedHandover`, adopt nothing) a panel whose `isDisposed` is already `true`, mirroring **restore-refuses-an-already-closed-panel** exactly.
+- **resolve-context-state-is-always-undefined-and-ledgered**: `resolveContextValue(of:in:)` MUST build a `WebviewViewResolveContext` whose `state` field is always `undefined`, and MUST record a `NotImplementedLedger` row for `vscode.WebviewViewResolveContext.state` the first time it is read, because a contributed view's state does not persist across a quit the way a serializer-backed panel's does.
+- **resolve-view-token-never-cancels**: `uncancelledToken(in:)` MUST return a `CancellationToken` whose `isCancellationRequested` is always `false` and whose `onCancellationRequested` returns a real, never-fired `Disposable`; this degraded argument MUST NOT be recorded in the ledger, unlike a genuinely absent capability, because it is a real (if permanently unfired) token rather than a missing member.
+- **resolve-view-returns-true-on-successful-resolve**: `resolveWebviewView(_:viewID:)` MUST return `true` when `VSCodeAPI.call(resolve, ...)` answers `.returned`, and MUST log-and-return-`false` without abandoning on `.threw`, matching `restore`'s throw handling.
+- **resolve-view-abandons-only-on-dispatch-unavailable**: `resolveWebviewView(_:viewID:)` MUST call `abandon(model)`, log at error level, and return `false` when `VSCodeAPI.call` answers `.unavailable`.
+- **boolean-field-requires-an-actual-boolean**: `booleanField(_:)` MUST return `nil` for any JavaScript value that is not a boolean (no truthy coercion of a number, string, or object).
+- **is-truthy-flag-requires-boolean-true**: `isTruthyFlag(_:)` MUST return `true` only when the JavaScript value `isBoolean` and equals `true`; every other value, including a truthy non-boolean, MUST answer `false`.
+- **resource-roots-field-distinguishes-absent-from-empty**: `resourceRootsField(_:in:)` MUST return `nil` when the value is absent, `undefined`, or `null` (letting `WebviewPanelOptions.resourceRoots` apply its extension-directory-plus-workspace default), and MUST return `[]` when the value is an explicit, empty JavaScript array (renouncing every default root).
+- **resource-roots-field-drops-unparseable-entries**: `resourceRootsField(_:in:)` MUST drop any array element that does not parse as a `Uri` via `compactMap`, rather than substituting a default for the whole list, because a partially-unreadable declared list is still the extension's explicit declaration.
+- **ledger-records-a-reach-only-when-truthy-or-non-empty**: `parseOptions` MUST record a `vscode.WebviewOptions.enableCommandUris` ledger row only when that field is present and truthy, and a `vscode.WebviewOptions.portMapping` row only when that field is a non-empty array; an explicit `false` or `[]` MUST record nothing, because a decline is not a reach for something missing.
+- **panel-webview-getter-builds-a-fresh-object-every-access**: `makePanelObject`'s `webview` readonly getter MUST construct a new `Webview` JavaScript object on every access via `makeWebviewObject`, MUST NOT cache one on the model, honoring the no-capture contract that nothing stores a `JSValue` or `JSContext` on `ExtensionWebviewPanelModel`.
+- **panel-title-is-an-accessor-pair-over-the-panel**: `makePanelObject`'s `title` accessor pair MUST read and write `model.panel.panelTitle` directly, with no local cache.
+- **panel-options-getter-answers-fixed-values**: `makePanelObject`'s `options` readonly getter MUST always answer `{retainContextWhenHidden: true, enableFindWidget: false}`, regardless of what the extension requested at creation.
+- **panel-icon-path-is-write-only-into-the-ledger**: `makePanelObject`'s `iconPath` getter MUST always answer `undefined`/`null`; its setter MUST record a `vscode.WebviewPanel.iconPath` ledger row only when assigned a non-`undefined`, non-`null` value.
+- **panel-view-column-is-always-undefined**: `makePanelObject`'s `viewColumn` readonly getter MUST always answer `undefined`, with no ledger row, since there is no numbered column for it to name.
+- **panel-active-and-visible-mirror-is-disposed**: `makePanelObject`'s `active` and `visible` readonly getters MUST both answer `!model.isDisposed`, an acknowledged approximation that never corrects itself while a panel is open, because `onDidChangeViewState` never fires.
+- **panel-view-state-subscription-is-ledgered-every-call**: `makePanelObject`'s `onDidChangeViewState` method MUST record a `vscode.WebviewPanel.onDidChangeViewState` ledger row on every call before subscribing the listener to `model.viewStateChanges`.
+- **panel-reveal-reads-its-second-argument-as-preserve-focus**: `makePanelObject`'s `reveal` method MUST read its second argument as `preserveFocus` (defaulting to `false`), MUST ignore its first argument (the dropped `ViewColumn`), and MUST call `model.panel.reveal(preserveFocus:)`.
+- **panel-dispose-delegates-to-the-underlying-panel**: `makePanelObject`'s `dispose` method MUST call `model.panel.dispose()` and rely on that call's own idempotence.
+- **view-title-mirrors-the-panels-title**: `makeWebviewViewObject`'s `title` accessor pair MUST read and write `model.panel.panelTitle`, answering the pane's current chrome name rather than `undefined`.
+- **view-description-and-badge-are-write-only-into-the-ledger**: `makeWebviewViewObject`'s `description` and `badge` accessor pairs MUST both have no-op getters (always `undefined`/`null`) and setters that record a `vscode.WebviewView.description` or `vscode.WebviewView.badge` ledger row only for a non-`undefined`, non-`null` assigned value.
+- **view-has-no-dispose-method**: `makeWebviewViewObject` MUST NOT install a `dispose` method on the JavaScript object it builds, matching upstream's `WebviewView`, because a contributed view's lifetime belongs to its manifest-declared pane, not to the extension.
+- **view-visible-mirrors-is-disposed**: `makeWebviewViewObject`'s `visible` readonly getter MUST answer `!model.isDisposed`.
+- **view-visibility-subscription-is-ledgered-every-call**: `makeWebviewViewObject`'s `onDidChangeVisibility` method MUST record a `vscode.WebviewView.onDidChangeVisibility` ledger row on every call before subscribing to `model.viewStateChanges`.
+- **view-show-reads-its-first-argument-as-preserve-focus**: `makeWebviewViewObject`'s `show` method MUST read its first argument as `preserveFocus` (there being no `ViewColumn` to occupy that position for a contributed view).

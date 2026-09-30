@@ -1,0 +1,3 @@
+# implement-ai — leaves
+
+- [`implement-ai/chat-bubble-view`](leaves/chat-bubble-view.md) — AIChatBubbleView · A macOS chat message bubble with role/style-based theming, an optional inline timestamp, and line-limited truncation with an expand/collapse toggle. · platforms: macos, swift · rules: 26 MUST · test vectors: 47 · parts: [edge-cases](leaves/chat-bubble-view--edge-cases.md), [part-2](leaves/chat-bubble-view--part-2.md), [part-3](leaves/chat-bubble-view--part-3.md), [part-4](leaves/chat-bubble-view--part-4.md), [states](leaves/chat-bubble-view--states.md), [test-vectors](leaves/chat-bubble-view--test-vectors.md)

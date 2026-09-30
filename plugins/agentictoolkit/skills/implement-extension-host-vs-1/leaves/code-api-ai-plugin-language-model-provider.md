@@ -1,0 +1,8 @@
+<!-- leaf: implement-extension-host-vs-1/code-api-ai-plugin-language-model-provider · source: extension-host-vs-code-api-ai-plugin-language-model-provider.md -->
+
+# AIPluginLanguageModelProvider
+
+## Overview
+
+`AIPluginLanguageModelProvider` (`packages/apple/AgenticToolkit/macOS/Features/Extensions/VSCodeAPI/AIPluginLanguageModelProvider.swift`) is the production `ExtensionLanguageModelProviding` conformer for the VS Code extension-host seam: it offers extensions the chat models the user has already configured in the app's own LLM Providers settings, and streams a `sendRequest` call through the same `AIPlugin` path the app's own chat surface uses. Per its own doc comment, it adds no transport, no credential handling, and no request shaping of its own — it reuses `AIProviderConfiguration`/`AIProviderResolver` (which already join a configuration to its plugin template, stored credentials, and model) and `AIPluginManager`/`PluginTransport` (which already load a plugin and drive its request) rather than opening a second route to a provider. `availableChatModels` lists the cross product of every model of every configuration the user has saved — not the app's own single selected chat configuration — because `vscode.lm.selectChatModels` asks what the host *has* and does its own selector matching one layer up, in `MainThreadLanguageModels`. `streamResponse` turns a `LanguageModelChatDescriptor.id` of the form `"<configuration UUID>/<model>"` back into a configuration and a model name, resolves the configuration to a loadable plugin, builds an `AIChatContext`, and adapts `PluginTransport`'s `AIStreamEvent` stream into the seam's own `ExtensionLanguageModelResponsePart` stream.
+

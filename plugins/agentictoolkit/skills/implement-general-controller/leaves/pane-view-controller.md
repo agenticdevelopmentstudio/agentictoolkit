@@ -1,0 +1,10 @@
+<!-- leaf: implement-general-controller/pane-view-controller · source: pane-view-controller.md -->
+
+# PaneViewController
+
+## Overview
+
+`PaneViewController` (`packages/apple/AgenticToolkit/macOS/UI/ViewControllers/Panes/PaneViewController.swift`) is a pane: a title bar, some content, and enough memory to come back the way it was left. It knows nothing about split views, layout trees, tabs, projects, or SQLite — it reaches the world outside itself through exactly three seams: a `PaneHost` it sends requests to (close, zoom, minimize, restore, and two questions about what is currently legal), a `PaneStateStore` it remembers itself through (minimize edge, zoomed flag, spacing override), and content it probes for six optional capability protocols (`PaneTitleProviding`, `PaneAccessoryProviding`, `PaneOptionsProviding`, `PaneMinimizedRepresenting`, `PaneSearchable`, `PaneSelectionDescribing`). Every one of those is supplied from outside, which is what lets the same class be dropped into a container with different rules and still be correct. A seventh protocol, `PaneContentSpacingConsuming`, is counted separately: it is not a content-capability the pane probes for chrome, but the spacing hook (see `inheritedPaneSpacing` under Spacing) — the source's own class doc names it apart from "six optional capabilities" for the same reason.
+
+It exposes seven `open` subclass hooks — `makeContentViewController()`, `makeContainerView()`, `makeOptionRows()`, `makeMenuItems()`, `fallbackTitle`, `contentInset`, and `paneAccessibilityIdentifier` — and a subclass that overrides none of them still gets a working, empty pane. Content that implements none of the six capability protocols is a supported case, not a degraded one: it gets `fallbackTitle`, no accessories, no pane-specific options beyond the universal spacing control, the generic minimized glyph, and a search field the window leaves disabled. `ComposableTabsPaneViewController` (see `related`) is the framework's own subclass, adding registry-vended content, an active-pane outline, and arrange-mode chrome on top of everything documented here.
+

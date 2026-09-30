@@ -1,0 +1,17 @@
+<!-- leaf: implement-extension-host-vs-2/code-api-uri--edge-cases · source: extension-host-vs-code-api-uri.md -->
+
+# Uri
+
+**Rules** (cite as `implement-extension-host-vs-2/code-api-uri--edge-cases#<slug>`):
+
+- `null-empty-input` MUST — Uri.parse('') MUST produce a Uri with every field '' and hasAuthority false, taking the non-strict path …
+- `lazy-adoption-race` MUST
+
+## Edge Cases
+
+- **Null/empty input**: `Uri.parse('')` MUST produce a `Uri` with every field `''` and `hasAuthority` `false`, taking the non-strict path (**parse-non-strict-allows-schemeless**). `Uri.file('')` MUST still produce a leading `'/'` (**file-ensures-leading-slash**) since the empty string is not itself falsy-as-a-path in the encoding step. `with()` and `with({})` (no argument, or an empty object) MUST return a `Uri` equal in every field to the receiver, since no key of `change` has a value `!== undefined` (**with-overrides-only-given-fields**). `Uri.joinPath(base)` with zero appended segments MUST leave `path` unchanged (**join-path-empty-appended-is-unchanged**).
+- **Boundary values**: not applicable — no function in `Uri.swift` constrains `path`, `scheme`, `authority`, `query`, `fragment`, or the number of `joinPath` segments to a minimum or maximum length or count; none is declared in the source.
+- **Concurrent access**: not applicable to a `Uri` instance itself — it is frozen at construction (**instance-frozen**) and every accessor is a pure read (**readonly-accessors**), so there is nothing for two readers to race over. The class object itself is a different story — see **lazy-adoption-race** below, and **class-caching-write-best-effort** for the narrower, fully-specified case of the global caching write itself failing (which produces two distinct-but-equally-real `Uri` classes, not a race between a real and a counterfeit one).
+- **lazy-adoption-race**: `ExtensionHost.installRuntime` installs the frozen `Uri` eagerly, before any extension code runs. If that eager install failed or was skipped, the first `installUriClass(in:)` call MUST adopt whatever object already sits under `uriClassGlobalName`, real or not, and `uriValue(for:in:)` MUST call that object's `parse` directly (**uri-value-builds-via-parse**), not through `VSCodeAPI.call(_:thisArg:arguments:)`. An extension-supplied `parse` that throws therefore lands in `ExtensionHost.pendingException` rather than being returned to `uriValue(for:in:)`'s caller. The source's doc comment names this as the one accepted residual corner of the original defect, narrowed by the freeze rather than eliminated, and no test exercises it.
+- **Error states**: when `function.context` is `nil` in the `VSCodeAPI.call(_:thisArg:arguments:)` helper `url(from:in:)` depends on (**url-from-uri-instance**), that helper answers `.unavailable`, which `url(from:in:)`'s guard converts to a plain `nil` with no further signal (**url-from-swallows-to-string-failure**) — this is the documented, deliberate shape of `.unavailable`, not a swallowed error. `Uri.parse(value, true)` with no scheme throws a JavaScript `Error` rather than swallowing the failure (**parse-strict-requires-scheme**); that throw is not caught anywhere in `Uri.swift` itself, so it propagates to whatever installed `context.exceptionHandler` or invoked the call, per that caller's own contract.
+- **Offline/disconnected state**: not applicable — `Uri.swift` performs no network or file-system I/O of its own; every member only builds or reads in-memory `JSValue`/`URL` values already resident in a caller-supplied `JSContext`.

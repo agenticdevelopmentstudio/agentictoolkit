@@ -1,0 +1,71 @@
+<!-- leaf: implement-extension-host-vs-1/code-api-main-thread-commands--part-2 · source: extension-host-vs-code-api-main-thread-commands.md -->
+
+# MainThreadCommands — continued (part 2)
+
+**Rules** (cite as `implement-extension-host-vs-1/code-api-main-thread-commands--part-2#<slug>`):
+
+- `main-actor-isolation` MUST
+- `one-registry-per-adaptor-no-default` MUST
+- `ownership-record-not-a-dispatch-table` MUST
+- `register-raises-on-torn-down-adaptor` MUST
+- `register-requires-string-command-id` MUST
+- `register-requires-callback-argument` MUST
+- `register-requires-function-callback` MUST
+- `register-rejects-duplicate-within-adaptor` MUST
+- `register-requires-dispatchable-context` MUST
+- `register-normalizes-nullish-this-arg` MUST
+- `register-marks-registration-extension-contributed` MUST
+- `register-uses-the-command-id-as-its-title` MUST
+- `register-returns-a-disposable-that-unregisters-this-registration` MUST
+- `register-records-ownership-before-returning` MUST
+- `dispatch-consumes-the-caller-flag-exactly-once` MUST
+- `dispatch-has-caller-is-static-not-instance` MUST
+- `dispatch-has-caller-restored-after-a-caller-dispatch` MUST
+- `invoke-returns-the-callback-value-on-success` MUST
+- `invoke-observes-async-rejection-only-when-caller-less` MUST
+- `invoke-logs-a-caller-less-async-rejection` MUST
+- `invoke-returns-callback-failure-on-throw` MUST
+- `invoke-logs-a-caller-less-throw` MUST
+- `invoke-returns-dispatch-unavailable-never-nil` MUST
+- `invoke-logs-dispatch-unavailable-unconditionally` MUST
+- `execute-rejects-on-torn-down-adaptor` MUST
+- `execute-requires-string-command-id` MUST
+- `execute-forwards-remaining-arguments-untouched` MUST
+- `execute-marks-its-dispatch-as-having-a-caller` MUST
+- `execute-rejects-on-dispatch-unavailable` MUST
+- `execute-rejects-with-the-extensions-own-exception` MUST
+- `execute-settles-a-thenable-result` MUST
+- `execute-resolves-a-native-result` MUST
+
+- **main-actor-isolation**: `MainThreadCommands` MUST be declared `@MainActor`; every stored property read and write and every method body MUST execute on the main actor.
+- **one-registry-per-adaptor-no-default**: `init(registry:)` MUST take `registry` as a required parameter with no default value, so a caller cannot receive a private registry silently and have every extension command vanish from the app's own command palette.
+- **ownership-record-not-a-dispatch-table**: `ownedCallbacks` MUST record only the ids this specific adaptor instance has registered (each entry holding the registered `JSValue` callback and the `CommandRegistration` token for that registration); dispatch MUST always go through `registry`, never through `ownedCallbacks` directly.
+- **register-raises-on-torn-down-adaptor**: `registerCommand` MUST be built with `VSCodeAPI.member(..., whenTornDown: .raisedException, ...)`, so a call after the adaptor's owner has been deallocated raises a JavaScript exception rather than resolving or returning `undefined`.
+- **register-requires-string-command-id**: `handleRegisterCommand` MUST call `VSCodeAPI.raise("registerCommand requires a string command id.", in: context)` and return without registering anything when `arguments.first` is missing or is not a JavaScript string.
+- **register-requires-callback-argument**: `handleRegisterCommand` MUST call `VSCodeAPI.raise("registerCommand requires a callback function.", in: context)` and return without registering anything when `arguments.count` is `1` or fewer (no second argument supplied).
+- **register-requires-function-callback**: `handleRegisterCommand` MUST test `arguments[1]` with `isInstance(of:)` against the calling context's own `Function` constructor, and when that test fails (including when the `Function` constructor is unavailable) MUST call `VSCodeAPI.raise("registerCommand's callback must be a function.", in: context)` and return without registering anything.
+- **register-rejects-duplicate-within-adaptor**: `handleRegisterCommand` MUST call `VSCodeAPI.raise("command '\(command)' already exists", in: context)` and return without registering anything when `ownedCallbacks[command]` is already non-`nil`; a duplicate the app or a different extension's adaptor instance owns is out of scope for this check and MUST fall through to `CommandRegistry.register(_:isExtensionContributed:)`'s own replace-and-warn (or built-in-refusal) behavior instead.
+- **register-requires-dispatchable-context**: `handleRegisterCommand` MUST call `VSCodeAPI.raise(VSCodeAPI.dispatchUnavailableMessage(for: context), in: context)` and return without registering anything when `VSCodeAPI.canDispatch(in: context)` is `false`, refusing before a `Disposable` is ever handed back for a command that could never be invoked.
+- **register-normalizes-nullish-this-arg**: `handleRegisterCommand` MUST treat a third argument that is absent, JavaScript `undefined`, or JavaScript `null` as "no `thisArg`" (binding `nil`), and MUST bind any other third argument value (including a JS `false` or `0`) as `thisArg` unchanged.
+- **register-marks-registration-extension-contributed**: `handleRegisterCommand` MUST call `registry.register(_:isExtensionContributed:)` with `isExtensionContributed: true` for every command it registers, so `CommandRegistry`'s built-in-versus-extension collision refusal applies to it.
+- **register-uses-the-command-id-as-its-title**: `handleRegisterCommand` MUST construct the `AppCommand` with `title` equal to `command` (the raw id), giving the command palette no separate human-readable title or category for an extension-registered command.
+- **register-returns-a-disposable-that-unregisters-this-registration**: on success, `handleRegisterCommand` MUST return the `JSValue` produced by `makeDisposable(id:token:in:)`, whose `dispose()` removes exactly the registration just made and no other.
+- **register-records-ownership-before-returning**: `handleRegisterCommand` MUST store the callback and token in `ownedCallbacks[command]` before constructing and returning the `Disposable`.
+- **dispatch-consumes-the-caller-flag-exactly-once**: the closure passed to `AppCommand.run` inside `handleRegisterCommand` MUST call `MainThreadCommands.consumeDispatchHasCaller()` exactly once per dispatch, before calling `MainThreadCommands.invoke(...)`, reading and resetting `dispatchHasCaller` to `false` in the same step.
+- **dispatch-has-caller-is-static-not-instance**: `dispatchHasCaller` MUST be a `static` property of `MainThreadCommands`, not an instance property, because the bit describes one dispatch (whether an `await`ing extension caller is waiting on it) rather than a fact about which adaptor instance is running it — an extension awaiting a command a *different* extension's adaptor registered must still be recognized as a caller by that other adaptor's dispatch.
+- **dispatch-has-caller-restored-after-a-caller-dispatch**: `dispatchingForACaller(_:)` MUST save the previous value of `dispatchHasCaller`, set it to `true`, run `body`, and restore the previous value in a `defer` — so a nested `executeCommand` call made from inside a command callback that itself has no caller is not left permanently marked as having one.
+- **invoke-returns-the-callback-value-on-success**: `MainThreadCommands.invoke` MUST, when `VSCodeAPI.call` answers `.returned(let value)`, return that `value` unchanged.
+- **invoke-observes-async-rejection-only-when-caller-less**: `MainThreadCommands.invoke` MUST attach a rejection observer (`VSCodeAPI.observeRejection`) to a returned thenable value only when `hasCaller` is `false`; when `hasCaller` is `true`, it MUST attach nothing, leaving the extension's own `await`/`.catch` as the sole observer of that rejection.
+- **invoke-logs-a-caller-less-async-rejection**: the rejection handler `invoke` attaches when `hasCaller` is `false` MUST log, at `error` level, the command id and the rejection reason's `toString()` (or `"<unprintable>"` when that is `nil`).
+- **invoke-returns-callback-failure-on-throw**: `MainThreadCommands.invoke` MUST, when `VSCodeAPI.call` answers `.threw(let exception)`, return a `CallbackFailure` wrapping `exception`, and MUST NOT let the exception propagate as a Swift error or reach `ExtensionHost.pendingException`.
+- **invoke-logs-a-caller-less-throw**: `MainThreadCommands.invoke` MUST log, at `error` level, the command id and the thrown exception's `toString()` (or `"<unprintable>"`) only when `hasCaller` is `false`; when `hasCaller` is `true` it MUST NOT log, leaving the rejection this throw becomes (via `executeCommand`) as the extension's own responsibility.
+- **invoke-returns-dispatch-unavailable-never-nil**: `MainThreadCommands.invoke` MUST, when `VSCodeAPI.call` answers `.unavailable`, return a `DispatchUnavailable` value and MUST NOT return `nil`, because a `nil` here would resolve an `executeCommand` promise with `undefined`, which is what a `void` command that ran successfully also answers.
+- **invoke-logs-dispatch-unavailable-unconditionally**: `MainThreadCommands.invoke` MUST log, at `error` level, the command id whenever `VSCodeAPI.call` answers `.unavailable`, regardless of the value of `hasCaller`, because that case is a host fault rather than an extension's, so an operator must be able to find it in the log even when the extension awaited nothing.
+- **execute-rejects-on-torn-down-adaptor**: `executeCommand` MUST be built with `VSCodeAPI.member(..., whenTornDown: .rejectedPromise, ...)`, so a call after the adaptor's owner has been deallocated rejects the returned promise rather than raising synchronously or answering `undefined`.
+- **execute-requires-string-command-id**: `handleExecuteCommand` MUST return `VSCodeAPI.rejectedPromise(message: "executeCommand requires a string command id.", in: context)` when `arguments.first` is missing or is not a JavaScript string.
+- **execute-forwards-remaining-arguments-untouched**: `handleExecuteCommand` MUST pass every argument after the command id, as the same `JSValue`s the caller supplied and with no conversion through `toObject()`, to `registry.execute(id:arguments:)`.
+- **execute-marks-its-dispatch-as-having-a-caller**: `handleExecuteCommand` MUST wrap its call to `registry.execute(id:arguments:)` in `Self.dispatchingForACaller { ... }`, marking that one dispatch as having a caller for `MainThreadCommands.invoke` to read.
+- **execute-rejects-on-dispatch-unavailable**: `handleExecuteCommand` MUST return `VSCodeAPI.rejectedPromise(message: VSCodeAPI.dispatchUnavailableMessage(for: context), in: context)` when `registry.execute` answers a `DispatchUnavailable` value, and MUST NOT resolve with `undefined` in that case.
+- **execute-rejects-with-the-extensions-own-exception**: `handleExecuteCommand` MUST return `VSCodeAPI.rejectedPromise(reason: failure.reason, in: context)`, unchanged, when `registry.execute` answers a `CallbackFailure`, preserving the extension's own `Error` subclass and `stack` rather than paraphrasing it.
+- **execute-settles-a-thenable-result**: `handleExecuteCommand` MUST return `VSCodeAPI.settledPromise(for: jsResult, in: context)` when `registry.execute` answers a `JSValue`, so an `async` command callback's own promise (or a plain returned value) settles the extension's `await` with the value the command actually produced.
+- **execute-resolves-a-native-result**: `handleExecuteCommand` MUST return `VSCodeAPI.resolvedPromise(with: result, in: context)` when `registry.execute` answers any value that is neither a `DispatchUnavailable`, a `CallbackFailure`, nor a `JSValue` (an app-registered command's native Swift return value, bridged by JavaScriptCore).

@@ -1,0 +1,29 @@
+<!-- leaf: implement-extension-host-vs-presenting/code-api-extension-message-presenting--edge-cases · source: extension-host-vs-code-api-extension-message-presenting.md -->
+
+# ExtensionMessagePresenting
+
+**Rules** (cite as `implement-extension-host-vs-presenting/code-api-extension-message-presenting--edge-cases#<slug>`):
+
+- `null-empty-input` MUST — itemTitles == [] MUST make presentMessage(_:) return nil unconditionally, per present-message-empty-items-always-nil …
+- `null-empty-input-2` MUST — detail == nil MUST be treated as "no additional detail supplied"; the type does not coerce it to an empty string or …
+- `null-empty-input-3` MUST — message == "" (an empty string) MUST be accepted unchanged; ExtensionMessageRequest performs no non-empty validation on …
+- `boundary-values` MUST — an itemTitles array of exactly one entry, with that entry's index present in closeAffordanceIndices, is the minimal …
+- `boundary-values-2` MUST — closeAffordanceIndices MAY name every index in itemTitles (every item flagged); the struct places no upper limit on how …
+- `concurrent-access` MUST — ExtensionMessagePresenting is @MainActor-isolated, so two presentMessage(_:) calls on the same conforming instance MUST …
+- `concurrent-access-2` MUST — because ExtensionMessageRequest and ExtensionMessageSeverity are Sendable, a request value MUST be safely passable …
+- `error-states` MUST — presentMessage(_:) has no thrown-error path; per present-message-no-throwing-path, any inability to present the message …
+- `cancellation-and-timeouts` MUST — ExtensionMessagePresenting defines no cancellation support and no timeout of its own; the protocol has no mechanism for …
+
+## Edge Cases
+
+- **Null/empty input**: `itemTitles == []` MUST make `presentMessage(_:)` return `nil` unconditionally, per **present-message-empty-items-always-nil** (MUST).
+- **Null/empty input**: `detail == nil` MUST be treated as "no additional detail supplied"; the type does not coerce it to an empty string or otherwise distinguish "no detail" from "empty detail," because `detail` is typed as an optional rather than defaulted (MUST).
+- **Null/empty input**: `message == ""` (an empty string) MUST be accepted unchanged; `ExtensionMessageRequest` performs no non-empty validation on `message`, so a conformer MUST NOT assume it is non-empty (MUST NOT).
+- **Boundary values**: an `itemTitles` array of exactly one entry, with that entry's index present in `closeAffordanceIndices`, is the minimal all-flagged case; **close-affordance-indices-within-item-bounds** MUST still hold for it (MUST).
+- **Boundary values**: `closeAffordanceIndices` MAY name every index in `itemTitles` (every item flagged); the struct places no upper limit on how many indices may be flagged, and **close-affordance-indices-within-item-bounds** MUST hold regardless of count (MUST).
+- **Concurrent access**: `ExtensionMessagePresenting` is `@MainActor`-isolated, so two `presentMessage(_:)` calls on the same conforming instance MUST be serialized by the main actor; the protocol requires no additional queuing or coalescing beyond what actor isolation already provides (MUST).
+- **Concurrent access**: because `ExtensionMessageRequest` and `ExtensionMessageSeverity` are `Sendable`, a request value MUST be safely passable across actor and task boundaries before it reaches `presentMessage(_:)`, even though the call itself always resumes on the main actor (MUST).
+- **Error states**: `presentMessage(_:)` has no thrown-error path; per **present-message-no-throwing-path**, any inability to present the message MUST resolve as `nil`, indistinguishable to the caller from a user dismissal (MUST).
+- **Cancellation and timeouts**: `ExtensionMessagePresenting` defines no cancellation support and no timeout of its own; the protocol has no mechanism for a caller to signal that its enclosing `Task` was cancelled while `presentMessage(_:)` was still awaiting a user response, and a conformer MUST NOT be assumed to observe or honor `Task` cancellation absent its own separate implementation of that (MUST NOT).
+- **Offline or disconnected state**: not applicable — `ExtensionMessagePresenting.swift` imports only `Foundation`, performs no network access, and has no concept of connectivity.
+- **Missing file or unreachable server**: not applicable — the file opens no file and makes no network or process call of its own.

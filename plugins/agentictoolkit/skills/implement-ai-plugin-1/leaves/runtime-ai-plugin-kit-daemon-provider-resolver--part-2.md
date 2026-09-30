@@ -1,0 +1,29 @@
+<!-- leaf: implement-ai-plugin-1/runtime-ai-plugin-kit-daemon-provider-resolver--part-2 · source: ai-plugin-runtime-ai-plugin-kit-daemon-provider-resolver.md -->
+
+# Daemon Provider Resolver — continued (part 2)
+
+**Rules** (cite as `implement-ai-plugin-1/runtime-ai-plugin-kit-daemon-provider-resolver--part-2#<slug>`):
+
+- `winui-3` MUST — model DaemonProviderResolver as a static class with static methods over a Func<string, string?> in place of …
+
+## Platform Notes
+
+- **SwiftUI**: not applicable to this file — `DaemonProviderResolver.swift` imports only `Foundation`, with no SwiftUI dependency; any SwiftUI-based daemon-status surface would call these same static functions unchanged.
+- **AppKit / UIKit**: this is the source. `packages/apple/AgenticToolkit/AIPluginKit/DaemonProviderResolver.swift` is part of the `AIPluginKit` framework target, which `project.yml` declares `platform: macOS` only (no iOS target exists for it today). It has no AppKit or UIKit import and is consumed by `DaemonAIChat` (same framework, also plain Foundation) from the daemon process, not from any app UI layer. The app-side mirror, `AIProviderResolver` (`macOS/Features/AIPlugins/AIProviderResolver.swift`), is `@MainActor`-isolated because it touches the AppKit-adjacent `AIPluginManager`; `DaemonProviderResolver` declares no such isolation because it touches nothing but the passed-in closure.
+- **Compose**: model as a Kotlin top-level `object DaemonProviderResolver` with `fun configurations(settings: (String) -> String?): List<AIProviderConfiguration>`, `fun selectedConfiguration(settings: (String) -> String?): AIProviderConfiguration?`, and `fun model(configId: UUID, settings: (String) -> String?): String`, using `kotlinx.serialization.json.Json.decodeFromString` wrapped in `runCatching { }.getOrNull()` in place of Swift's `try?`, to match the same fail-to-empty/fail-to-null contract. `UUID.toString()` on the JVM is lowercase, unlike Foundation's uppercase `uuidString`; a shared registry with an Apple host needs the same case-normalization decision the sibling `AIProviderConfigKeys` recipe calls out.
+- **React/Web**: model as a module of plain exported functions over a UUID already serialized as a string — `configurations(settings: (key: string) => string | null): AIProviderConfiguration[]`, etc. — using `JSON.parse` wrapped in `try { } catch { return [] }` to match the swallow-to-empty contract. JavaScript has no native `UUID` type, so the id-equality check in `selectedConfiguration` becomes a plain string comparison.
+- **WinUI 3**: model `DaemonProviderResolver` as a `static class` with `static` methods over a `Func<string, string?>` in place of `ProviderSettingsReader` (a pure, side-effect-free delegate preserves the same any-thread-safety property `@Sendable` gives the Swift closure): `public static List<AIProviderConfiguration> Configurations(Func<string, string?> settings)`, decoding with `System.Text.Json.JsonSerializer.Deserialize<List<AIProviderConfiguration>>(json)` inside a `try`/`catch (JsonException)` that returns an empty `List<AIProviderConfiguration>` to match the Swift `try?`-to-`[]` contract; `public static AIProviderConfiguration? SelectedConfiguration(Func<string, string?> settings)` using `Guid.TryParse` in place of `UUID(uuidString:)` (returning `null` on `false`, matching the Swift guard); and `public static string Model(Guid configId, Func<string, string?> settings) => settings(AIProviderConfigKeys.ModelKey(configId)) ?? "";`. Because `Guid.ToString("D")` is lowercase while Foundation's `uuidString` is uppercase, a WinUI 3 daemon sharing a settings store with the Apple app/daemon MUST normalize case exactly as the `AIProviderConfigKeys` recipe's WinUI 3 note requires, or `Guid`-keyed lookups against Apple-written keys will silently miss. No `ObservableCollection`/`INotifyPropertyChanged` applies — like the Swift source, this is a stateless, one-shot read API, not an observable data source.
+
+## Design Decisions
+
+**Decision**: `configurations(_:)` and `selectedConfiguration(_:)` treat every failure mode — an absent key, an empty string, malformed JSON, a JSON value of the wrong shape, or a non-UUID selected-id string — identically: return `[]` or `nil` with no distinction and no thrown error.
+**Rationale**: `ProviderSettingsReader`'s signature (`String?`, non-throwing) cannot carry an error, and the type's own doc comment states it "Returns nil / "" when the id isn't known" — the resolver fails closed rather than propagate a decode failure the daemon has no user-facing surface to report. `DaemonAIChat.complete` relies on exactly this fail-closed `nil` to fall through to its zero-config CLI path instead of erroring when the registry is empty or corrupt.
+**Approved**: pending
+
+**Decision**: `selectedConfiguration(_:)` reads `selectedConfigIdKey` and `configurationsKey` as two separate, unsynchronized calls to `settings`, rather than one combined read.
+**Rationale**: `ProviderSettingsReader` exposes only single-key reads, so any transactional read across two keys would have to be implemented by the caller's backing store, not by this type; the resolver accepts the resulting non-atomicity (see Edge Cases) because a transient mismatch resolves to the same safe `nil` outcome as "no configuration selected."
+**Approved**: pending
+
+**Decision**: `selectedConfiguration(_:)` returns the first array element matching the selected id and enforces no uniqueness invariant of its own over the decoded registry.
+**Rationale**: configuration-id uniqueness is established when a configuration is created (`AIProviderConfiguration.init(id: UUID = UUID(), …)` and the app-side store's add/rename flow), not re-verified by the daemon-side reader. `DaemonProviderResolver` trusts the registry it is handed, per its role as the mirror of the app's resolver, and duplicating that validation here would be redundant work with no daemon-observable benefit.
+**Approved**: pending

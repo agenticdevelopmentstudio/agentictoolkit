@@ -1,0 +1,26 @@
+<!-- leaf: implement-git-client/projects-git-repo-scanner--edge-cases · source: git-client-projects-git-repo-scanner.md -->
+
+# GitRepoScanner
+
+**Rules** (cite as `implement-git-client/projects-git-repo-scanner--edge-cases#<slug>`):
+
+- `null-and-empty-input` MUST — An empty roots array (GitRepoScanner(roots: [])) MUST cause scan() to return an empty array immediately, since the …
+- `boundary-values` MUST — rootSkipPatterns is applied only when depth == 1 exactly; at depth 0 (a scan root itself) and at any depth 2 or greater …
+- `concurrent-access` MUST — GitRepoScanner is Sendable and scan() keeps every piece of mutable traversal state local to the call (found, visited, …
+- `error-states` MUST — fileManager.contentsOfDirectory throwing for any reason — permission denied, the directory disappearing mid-walk — is …
+- `missing-file-or-unreachable-root` MUST — A root URL that does not exist on disk is not special-cased; contentsOfDirectory throws for it exactly as it would for …
+- `malformed-config-line-endings` MUST — originRemote(inGitDirectory:) splits .git/config text on "\n" and trims each line with .whitespaces, which strips …
+- `cancellation` MUST — isCancelled() is consulted once per directory popped from the stack, before that directory's children are read; a …
+- `symlink-cycles` MUST — Because shouldDescend(into:atDepth:) excludes every symbolic link before it is ever pushed onto the stack, a symlink …
+
+## Edge Cases
+
+- **Null and empty input**: An empty `roots` array (`GitRepoScanner(roots: [])`) MUST cause `scan()` to return an empty array immediately, since the outer `for root in roots` loop has nothing to iterate (`GitRepoScanner.swift`). An empty `rootSkipPatterns` array MUST skip nothing by name at any depth, per `root-level-skip-patterns` (verified by `testAnEmptySkipListSkipsNothing`).
+- **Boundary values**: `rootSkipPatterns` is applied only when `depth == 1` exactly; at depth `0` (a scan root itself) and at any depth `2` or greater it is never consulted, per `root-level-skip-patterns` (`GitRepoScanner.swift`, verified by `testThoseSameNamesFurtherDownAreStillScanned`). MUST.
+- **Concurrent access**: `GitRepoScanner` is `Sendable` and `scan()` keeps every piece of mutable traversal state local to the call (`found`, `visited`, `stack`); the only state shared across concurrent calls on one instance is the immutable `roots` and `rootSkipPatterns` `let` properties, so multiple threads MAY call `scan()` on the same instance concurrently with no synchronization and no shared-state hazard (`GitRepoScanner.swift`). MUST.
+- **Error states**: `fileManager.contentsOfDirectory` throwing for any reason — permission denied, the directory disappearing mid-walk — is caught and skipped identically via `continue`, with no distinction made between error causes and no signal returned to the caller; see the open question on `unreadable-directory-error-visibility` (`GitRepoScanner.swift`). A malformed or non-UTF-8 `.git/config` is handled the same way as a config with no origin section: `originRemote(inGitDirectory:)` returns `nil` in both cases via `try?`, with no way for a caller to distinguish "corrupt" from "absent" (`GitRepoScanner.swift`). MUST.
+- **Offline or disconnected state**: Not applicable — `GitRepoScanner.swift` makes no network call of any kind; its only I/O is local filesystem access through `FileManager` and local file reads through `String(contentsOf:)` (`GitRepoScanner.swift`).
+- **Missing file or unreachable root**: A root URL that does not exist on disk is not special-cased; `contentsOfDirectory` throws for it exactly as it would for a permission-denied directory, and that root is silently skipped with the walk continuing to any remaining roots — see the open question on `unreadable-directory-error-visibility` (`GitRepoScanner.swift`). MUST.
+- **Malformed config line endings**: `originRemote(inGitDirectory:)` splits `.git/config` text on `"\n"` and trims each line with `.whitespaces`, which strips spaces and tabs but not a trailing carriage return; a `config` file using CRLF line endings MUST retain a trailing `\r` on the section-header comparison string and on any parsed `url` value, since `CharacterSet.whitespaces` does not include `\r` (`GitRepoScanner.swift`). This can cause the `[remote"origin"]` comparison to fail to match, or the returned remote string to carry a trailing `\r`, on a CRLF-encoded config. MUST (describes the actual, deterministic behavior; not a marker, since the source never declares an intent to normalize line endings).
+- **Cancellation**: `isCancelled()` is consulted once per directory popped from the stack, before that directory's children are read; a cancellation observed partway through a multi-root scan MUST return only the repositories found before cancellation was observed, sorted (`GitRepoScanner.swift`, verified by `testCancellationStopsTheWalk`). MUST.
+- **Symlink cycles**: Because `shouldDescend(into:atDepth:)` excludes every symbolic link before it is ever pushed onto the stack, a symlink that would otherwise create a cycle (e.g. pointing at an ancestor directory) MUST NOT be traversed and therefore MUST NOT cause an infinite loop (`GitRepoScanner.swift`, verified by `testSymlinkedDirectoriesAreNotFollowed`).

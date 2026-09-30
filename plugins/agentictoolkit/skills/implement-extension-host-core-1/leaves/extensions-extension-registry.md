@@ -1,0 +1,8 @@
+<!-- leaf: implement-extension-host-core-1/extensions-extension-registry · source: extension-host-core-extensions-extension-registry.md -->
+
+# Extension Registry
+
+## Overview
+
+`ExtensionRegistry.swift` (`packages/apple/AgenticToolkit/Core/Extensions/ExtensionRegistry.swift`) defines `ExtensionRegistry`, the `@MainActor` class that discovers VS Code extensions from disk, gates each one by its declared `engines.vscode` compatibility against the host's `declaredVSCodeVersion`, and drives their `contributes.*` blocks through whatever `ContributionPoint`s the host has registered. Discovery reads only each extension's `package.json` manifest; it never opens the extension's `main`/`browser` JavaScript entry point and never `dlopen`s anything, because a VS Code extension's JavaScript is not something this host runs — a bad or malicious manifest can therefore only ever produce a load failure, never code execution. The file is modeled on `AIPluginManager` (`AIPluginKit/AIPluginManager.swift`), and search paths are injected by the caller rather than derived internally, exactly as `AIPluginManager`'s test-only initializer takes them. `ExtensionRegistry` also owns enablement (`isEnabled`/`setEnabled`, backed by `UserSettings.disabledExtensionIdentifiers`) and uninstall (`uninstall(_:)`), and it publishes `establishedIdentifiers`, a tri-state answer — the set of every identifier this scan can vouch for, or `nil` when the scan is not whole — that a caller uses to decide whether it is safe to prune orphaned, persisted state (for example, deleted themes) for extensions no longer found on disk.
+

@@ -1,0 +1,99 @@
+<!-- leaf: implement-language/services-snippets--part-2 · source: language-services-snippets.md -->
+
+# Language Services Snippets — continued (part 2)
+
+**Rules** (cite as `implement-language/services-snippets--part-2#<slug>`):
+
+- `extension-snippet-fields` MUST
+- `body-is-already-lsp-snippet-syntax` MUST
+- `applies-empty-scopes-is-universal` MUST
+- `applies-nonempty-scopes-is-membership` MUST
+- `completion-item-label` MUST
+- `completion-item-filter-text` MUST
+- `completion-item-kind` MUST
+- `completion-item-detail` MUST
+- `completion-item-insert-text` MUST
+- `completion-item-insert-text-format` MUST
+- `completion-item-no-text-edit` MUST
+- `snippet-file-parse-error-case` MUST
+- `snippet-file-parse-error-localized` MUST
+- `snippet-file-accepts-jsonc` MUST
+- `snippet-file-root-must-be-object` MUST
+- `snippet-file-unparseable-text-throws` MUST
+- `snippet-file-name-is-the-key` MUST
+- `snippet-file-order-is-sorted-by-name` MUST
+- `snippet-body-accepts-string-or-array` MUST
+- `snippet-body-wrong-type-skips-entry` MUST
+- `snippet-prefix-accepts-string-or-array` MUST
+- `snippet-prefix-array-element-wise-leniency` MUST
+- `snippet-prefix-empties-dropped` MUST
+- `snippet-prefix-empty-after-filtering-skips-entry` MUST
+- `snippet-one-snippet-per-prefix` MUST
+- `snippet-description-optional-and-lenient` MUST
+- `snippet-scope-split-trimmed-filtered` MUST
+- `snippet-scope-absent-yields-empty-scopes` MUST
+- `snippet-file-unknown-keys-ignored` MUST
+- `snippet-file-parse-from-url` MUST
+- `snippet-file-empty-object-is-empty-result` MUST
+- `snippet-file-failure-fields` MUST
+- `snippet-store-contribution-key` MUST
+- `snippet-store-main-actor-class` MUST
+- `apply-resolves-path-inside-directory` MUST
+- `apply-refuses-escaping-path` MUST
+- `apply-per-entry-error-isolation` MUST
+- `apply-failure-path-is-declared-string` MUST
+- `apply-failure-reason-is-localized-description` MUST
+- `apply-buckets-by-own-scope-or-manifest-language` MUST
+- `apply-multi-scope-fan-out` MUST
+- `apply-concatenates-multiple-files-per-language` MUST
+- `apply-replaces-prior-contribution` MUST
+- `apply-is-idempotent` MUST
+- `apply-no-entries-declared-contributes-none` MUST
+
+## Behavioral Requirements
+
+- **extension-snippet-fields**: `ExtensionSnippet` MUST expose `name: String`, `prefix: String`, `body: String`, `description: String?`, `scopes: [String]`, and `extensionIdentifier: String`, and MUST conform to `Sendable` and `Equatable`.
+- **body-is-already-lsp-snippet-syntax**: `ExtensionSnippet.body` MUST be the raw LSP snippet string, tabstops and placeholders such as `$1` and `${1:name}` left intact and unparsed, because it is handed directly to `CompletionItem.insertText` for `LSPCompletionDelegate` to interpret.
+- **applies-empty-scopes-is-universal**: `applies(to:)` MUST return `true` for every `language` when `scopes` is empty.
+- **applies-nonempty-scopes-is-membership**: `applies(to:)` MUST return `true` only when `scopes` contains `language` exactly, when `scopes` is non-empty; a named scope MUST NOT be treated as narrowing some wider implicit default.
+- **completion-item-label**: `completionItem()` MUST set the returned `CompletionItem.label` to `prefix`.
+- **completion-item-filter-text**: `completionItem()` MUST set the returned `CompletionItem.filterText` to `prefix`.
+- **completion-item-kind**: `completionItem()` MUST set `CompletionItem.kind` to `.snippet`.
+- **completion-item-detail**: `completionItem()` MUST set `CompletionItem.detail` to `description` when it is non-nil, and to `name` when `description` is `nil`.
+- **completion-item-insert-text**: `completionItem()` MUST set `CompletionItem.insertText` to `body`, unmodified.
+- **completion-item-insert-text-format**: `completionItem()` MUST set `CompletionItem.insertTextFormat` to `.snippet`.
+- **completion-item-no-text-edit**: `completionItem()` MUST leave `CompletionItem.textEdit` as `nil`, so `LSPCompletionDelegate.insertionText(for:)`'s fallback chain (the `textEdit`'s text, else `insertText`, else the label) supplies the inserted text, since a snippet file has no document range of its own to name.
+- **snippet-file-parse-error-case**: `SnippetFileParseError` MUST expose exactly one case, `notAnObject`, for a decoded document whose root is not a JSON object.
+- **snippet-file-parse-error-localized**: `SnippetFileParseError` MUST conform to `LocalizedError`, and its `errorDescription` MUST state that the document's root is not a JSON object, rather than Foundation's generic "The operation couldn't be completed" message.
+- **snippet-file-accepts-jsonc**: `SnippetFile.parse(_:extensionIdentifier:)` MUST decode its input through `JSONCPreprocessor.jsonObject(from:)`, which strips `//` and `/* */` comments and trailing commas and tries UTF-8, UTF-16, and UTF-32 encodings in turn, so a JSONC-flavored or non-UTF-8 `.code-snippets`/`.json` file still parses.
+- **snippet-file-root-must-be-object**: `SnippetFile.parse(_:extensionIdentifier:)` MUST throw `SnippetFileParseError.notAnObject` when the decoded root is not a `[String: Any]` object.
+- **snippet-file-unparseable-text-throws**: `SnippetFile.parse(_:extensionIdentifier:)` MUST throw — never return `[]` — for text that is not literally `{}` and does not survive `JSONCPreprocessor` stripping into valid JSON, so "this file contributes nothing" and "this file could not be read" remain distinguishable.
+- **snippet-file-name-is-the-key**: Every returned `ExtensionSnippet.name` MUST be the key under which its entry appeared in the root object.
+- **snippet-file-order-is-sorted-by-name**: `SnippetFile.parse(_:extensionIdentifier:)` MUST return snippets ordered by an ascending sort of the root object's keys, not by the file's own byte order, since a deserialized JSON object carries no order of its own.
+- **snippet-body-accepts-string-or-array**: An entry's `body` MUST be read as one string when its value is a `String`, and as that array's elements joined with `"\n"` when its value is a `[String]`.
+- **snippet-body-wrong-type-skips-entry**: An entry whose `body` is absent, or present but neither a `String` nor a `[String]` — including a `[Any]` array with any non-`String` element — MUST be skipped and MUST produce no `ExtensionSnippet`.
+- **snippet-prefix-accepts-string-or-array**: An entry's `prefix` MUST be read as one trigger word when its value is a `String`, and as every `String` element of the array, in declaration order, when its value is a `[Any]` array.
+- **snippet-prefix-array-element-wise-leniency**: When `prefix` is an array, a non-`String` element MUST cost only that element, never the entry — unlike `body`'s array handling, whose single `as? [String]` cast rejects the whole entry on any non-`String` element.
+- **snippet-prefix-empties-dropped**: An empty-string prefix, whether declared alone or as an array element, MUST be dropped and MUST NOT produce an `ExtensionSnippet`.
+- **snippet-prefix-empty-after-filtering-skips-entry**: An entry MUST be skipped entirely when no non-empty `String` prefix remains after array leniency and empty-string filtering.
+- **snippet-one-snippet-per-prefix**: An entry declaring more than one prefix MUST produce one `ExtensionSnippet` per prefix, in the array's declaration order, each sharing the same `name`, `body`, `description`, `scopes`, and `extensionIdentifier`.
+- **snippet-description-optional-and-lenient**: An entry's `description` MUST be `nil` when the key is absent or its value is not a `String`.
+- **snippet-scope-split-trimmed-filtered**: An entry's `scope` string MUST be split on `,`, each piece trimmed of leading and trailing whitespace and newlines, and any resulting empty piece dropped, to produce `scopes`.
+- **snippet-scope-absent-yields-empty-scopes**: An entry with no `scope` key MUST produce `scopes == []`.
+- **snippet-file-unknown-keys-ignored**: An entry object key other than `prefix`, `body`, `description`, or `scope` MUST NOT cause that entry, or the file, to be rejected, because entries are read by key off a deserialized `[String: Any]` rather than decoded through a strict `Codable` type.
+- **snippet-file-parse-from-url**: `SnippetFile.parse(contentsOf:extensionIdentifier:)` MUST read `url` with `Data(contentsOf:)` and pass the bytes to `parse(_:extensionIdentifier:)`, propagating whatever error `Data(contentsOf:)` throws for a URL that cannot be read.
+- **snippet-file-empty-object-is-empty-result**: `SnippetFile.parse(_:extensionIdentifier:)` MUST return `[]`, without throwing, for an input whose root is `{}`.
+- **snippet-file-failure-fields**: `SnippetFileFailure` MUST expose `extensionIdentifier: String`, `path: String`, and `reason: String`, and MUST conform to `Sendable` and `Equatable`.
+- **snippet-store-contribution-key**: `SnippetStore.contributionKey` MUST be `"snippets"`.
+- **snippet-store-main-actor-class**: `SnippetStore` MUST be a `final class` isolated to `@MainActor`, satisfying `ContributionPoint`'s constraint to `AnyObject`-conforming, `@MainActor`-isolated conformers (agentictoolkit://recipes/extension-host-core-extensions-contribution-point).
+- **apply-resolves-path-inside-directory**: `SnippetStore.apply(_:from:at:)` MUST resolve each declared `contributions.snippets` entry's `path` against `directory` through `ExtensionResourcePath.resolve(_:inside:)` (agentictoolkit://recipes/extension-host-core-extensions-extension-resource-path) before reading it.
+- **apply-refuses-escaping-path**: `SnippetStore.apply(_:from:at:)` MUST NOT read a file whose resolved path lies outside `directory`; it MUST instead catch the thrown `ExtensionResourcePathError.escapesExtensionDirectory` and record it as a `SnippetFileFailure`.
+- **apply-per-entry-error-isolation**: An entry whose path resolution or file parse throws, inside `SnippetStore.apply(_:from:at:)`, MUST NOT prevent any other declared entry for the same extension from being read.
+- **apply-failure-path-is-declared-string**: A recorded `SnippetFileFailure.path` MUST be the entry's `path` exactly as the manifest declared it, not the resolved URL.
+- **apply-failure-reason-is-localized-description**: A recorded `SnippetFileFailure.reason` MUST be the thrown error's `localizedDescription`.
+- **apply-buckets-by-own-scope-or-manifest-language**: `SnippetStore.apply(_:from:at:)` MUST file each parsed snippet under every language named in the snippet's own `scopes` when `scopes` is non-empty, and under the manifest entry's `language` when `scopes` is empty.
+- **apply-multi-scope-fan-out**: A snippet whose `scopes` names more than one language MUST be filed under every one of those languages.
+- **apply-concatenates-multiple-files-per-language**: Two or more manifest entries declaring the same `language` MUST have their snippets concatenated for that language, in the entries' declaration order.
+- **apply-replaces-prior-contribution**: `SnippetStore.apply(_:from:at:)` MUST call `withdraw(extensionIdentifier:)` for the same identifier before reading any of the extension's declared entries.
+- **apply-is-idempotent**: Calling `SnippetStore.apply(_:from:at:)` twice with the same manifest and directory MUST leave exactly one copy of each snippet, never two.
+- **apply-no-entries-declared-contributes-none**: `SnippetStore.apply(_:from:at:)` MUST leave `snippets(forLanguage:)` returning `[]` for every language, and `failures` unchanged, when `contributions.snippets` is empty.

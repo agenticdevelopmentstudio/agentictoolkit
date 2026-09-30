@@ -1,0 +1,26 @@
+<!-- leaf: implement-status-server/fetchers--test-vectors · source: status-server-fetchers.md -->
+
+# Status Server Fetchers
+
+## Conformance Test Vectors
+
+| ID | Requirements | Input | Expected |
+|----|--------------|-------|----------|
+| status-server-fetchers-001 | unconfigured-no-op | `glitchtipFetcher({}).fetch()` | Resolves `{ ok: true, items: [] }`; no `fetch` call is made — `telemetry-glitchtip-fetcher.test.ts` › "no-ops green when unconfigured" |
+| status-server-fetchers-002 | issues-request-shape, issues-request-timeout | `glitchtipFetcher(ENV).fetch()` with a stubbed `fetch` returning `[]` | The single outbound URL is `https://glitchtip.example/api/0/organizations/adh/issues/?query=is:unresolved&limit=100` — `telemetry-glitchtip-fetcher.test.ts` › "asks for exactly one page of PAGE_LIMIT unresolved issues" |
+| status-server-fetchers-003 | complete-flag-by-page-size, issue-mapping-delegated | Response body is an array of 2 issues (`a`, `b`) | `r.ok === true`, `r.complete === true`, `r.items.map(i => i.issueKey)` equals `["a","b"]` — `telemetry-glitchtip-fetcher.test.ts` › "reports a short page as COMPLETE" |
+| status-server-fetchers-004 | complete-flag-by-page-size | Response body is an array of exactly 100 (`PAGE_LIMIT`) issues | `r.ok === true`, `r.complete === false` — `telemetry-glitchtip-fetcher.test.ts` › "reports a FULL page as incomplete" |
+| status-server-fetchers-005 | non-array-body-fails-poll | Response body is `{ detail: "Authentication credentials were not provided." }` on a 200 | Resolves `{ ok: false, items: [] }` — `telemetry-glitchtip-fetcher.test.ts` › the non-array-body `it.each` (also covers a `{results:[...]}` wrapper, an HTML string, and `null`) |
+| status-server-fetchers-006 | http-error-fails-poll | Response is not `ok`, status 502 | Resolves `{ ok: false, items: [] }` — `telemetry-glitchtip-fetcher.test.ts` › "treats an HTTP error as a failed poll" |
+| status-server-fetchers-007 | thrown-fetch-fails-poll, issues-no-retry | Stubbed `fetch` throws `Error("ECONNREFUSED")` | Resolves `{ ok: false, items: [] }`; `fetch` is invoked exactly once — `telemetry-glitchtip-fetcher.test.ts` › "treats a thrown fetch as a failed poll" |
+| status-server-fetchers-008 | issue-project-fallback | `mapIssues([{id:"1",title:"t",project:{slug:"adh",name:"ADH"}},{id:"2",title:"t",project:{name:"Some Team's App"}},{id:"3",title:"t",project:null}])` | Projects resolve to `"adh"`, `"Some Team's App"`, `"unknown"` respectively — `telemetry-glitchtip-fetcher.test.ts` › "falls back through slug, name, then unknown" |
+| status-server-fetchers-009 | issue-count-coercion, issue-timestamp-normalization, issue-field-defaults | `mapIssues([{id:"1",title:"t",count:"42",firstSeen:"not-a-date",lastSeen:"2026-08-18T00:00:00Z"}])` | Resolves `{ count: 42, firstSeen: null, lastSeen: "2026-08-18T00:00:00.000Z" }` — `telemetry-glitchtip-fetcher.test.ts` › "parses GlitchTip's string counts and drops unparseable timestamps" |
+| status-server-fetchers-010 | posthog-unconfigured-no-op | `posthogFetcher({}).fetch()` | Resolves `{ ok: true, items: [] }`; no `fetch` call is made |
+| status-server-fetchers-011 | posthog-fixed-metric-set, posthog-query-text, posthog-hogql-request-shape | `posthogFetcher(ENV).fetch()` with every HogQL POST answering `{results:[[10]]}` | Exactly 4 POSTs to `https://ph.example/api/projects/42/query/`; the two `visitors` bodies contain `count(DISTINCT person_id)`, the two `pageviews` bodies contain `count()`; the two `7d` bodies contain `INTERVAL 7 DAY` |
+| status-server-fetchers-012 | posthog-per-query-timeout | The first of four HogQL POSTs never resolves | That query's own `AbortController` fires at 10,000ms and resolves `{ value: null, error: "..." }` without the batch waiting past that one query's own timeout |
+| status-server-fetchers-013 | posthog-sequential-execution | Four HogQL POSTs, each recording the order it was invoked | The second POST is not issued until the first has settled; no two POSTs are ever in flight together |
+| status-server-fetchers-014 | posthog-short-circuit-on-first-failure, posthog-partial-result-succeeds, posthog-single-warn-log | The first 2 metric queries succeed with a value; the 3rd (`pageviews`/`7d`) responds HTTP 503 | Resolves `{ ok: true, items: <the 2 items from the first two metrics> }`; the 4th query (`visitors`/`7d`) is never issued; exactly one `console.warn` call, containing `"2/4 queries answered"` |
+| status-server-fetchers-015 | posthog-empty-result-fails | All four metric queries respond HTTP 500 | Resolves `{ ok: false, items: [] }` |
+| status-server-fetchers-016 | posthog-value-coercion | One query's body is `{results:[["42"]]}`, another's is `{results:[["abc"]]}` | First resolves value `42`; second resolves value `0` (`Number("abc") || 0`) |
+| status-server-fetchers-017 | posthog-captured-at-per-batch, posthog-scope-fixed | A successful 4-metric batch | Every emitted `AnalyticsMetricDTO.capturedAt` is the identical ISO string; every `scope` is `"all"` |
+| status-server-fetchers-018 | complete-flag-omission-vs-explicit | A successful `posthogFetcher(...).fetch()` result | The returned object has no `complete` key at all — `"complete" in result` is `false` |

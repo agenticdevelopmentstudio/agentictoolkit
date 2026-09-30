@@ -1,0 +1,32 @@
+<!-- leaf: implement-hub-domain-1/access--test-vectors · source: hub-domain-access.md -->
+
+# Hub Domain Access Client
+
+## Conformance Test Vectors
+
+| ID | Requirements | Input | Expected |
+|----|-------------|-------|----------|
+| hub-domain-access-001 | feature-list-scoped-by-workspace | `listFeatures("acme")` | Request URL contains `/api/access/features` and `workspace=acme` — `access.test.ts` › "GETs the workspace-scoped features route" |
+| hub-domain-access-002 | every-call-url-encodes-identifiers | `listFeatures("a b/c")` | Request URL contains `workspace=` followed by `encodeURIComponent("a b/c")` — `access.test.ts` › "encodes a workspace slug that needs escaping" |
+| hub-domain-access-003 | feature-list-unwraps-envelope | Response body `{ features: [{ key: "projects", label: "Projects" }] }` | `listFeatures` resolves to `[{ key: "projects", label: "Projects" }]` — `access.test.ts` › "unwraps the { features } envelope to the bare array" |
+| hub-domain-access-004 | feature-order-preserved | Response body with three rows in order `projects`, `personas`, `audiences` | `listFeatures` resolves in that exact order — `access.test.ts` › "preserves registration order across multiple rows" |
+| hub-domain-access-005 | feature-row-shape-validated | Response body `{ features: "abc" }` | `listFeatures` rejects (throws) — `access.test.ts` › "rejects when features is a string, not an array" |
+| hub-domain-access-006 | feature-row-shape-validated | Response body `{ features: [{ key: "", label: "Projects" }] }` | `listFeatures` rejects — `access.test.ts` › "rejects a row whose key is the empty string" |
+| hub-domain-access-007 | feature-row-shape-validated | Response body `{}` (no `features` key) | `listFeatures` rejects — `access.test.ts` › "rejects when the features key is absent entirely" |
+| hub-domain-access-008 | fallback-features-fixed-set | Read the exported `ACCESS_FEATURES` constant | Deep-equals `[{ key: "projects", label: "Projects" }, { key: "personas", label: "Personas" }]` — no dedicated test; derived directly from the source literal |
+| hub-domain-access-009 | fallback-features-not-invoked-automatically | `listFeatures("acme")` against a response that trips `feature-row-shape-validated` | The rejection propagates to the caller unchanged; `ACCESS_FEATURES` is never referenced inside `listFeatures`'s source — no test exercises this by design, since it asserts an absence |
+| hub-domain-access-010 | role-list-scoped-by-workspace | `listRoles("acme")` against a stub returning `{ roles: [{ id: "r1", slug: "editor", ... }] }` | Resolves to that exact array, unwrapped and unvalidated — no dedicated test; derived directly from source |
+| hub-domain-access-011 | role-create-request-shape | `createRole("acme", { slug: "editor", name: "Editor", grants: [] })` | `POST /api/access/roles?workspace=acme` with that body verbatim; resolves to `body.role` — no dedicated test; derived directly from source |
+| hub-domain-access-012 | role-update-excludes-slug | Compile-time: constructing `{ slug: "x", name: "y" }` as `updateRole`'s `patch` argument | Fails to typecheck against `Partial<Omit<AccessRoleInput,"slug">>` — confirmed by the type declaration, no runtime test needed |
+| hub-domain-access-013 | role-delete-request-shape | `deleteRole("acme", "role-1")` | `DELETE /api/access/roles/role-1?workspace=acme`; resolves to `undefined` — no dedicated test; derived directly from source |
+| hub-domain-access-014 | assignment-list-workspace-wide | `listAssignments("acme")` | `GET /api/access/assignments?workspace=acme` with no `feature`/`itemId` query parameters — no dedicated test; derived directly from source |
+| hub-domain-access-015 | assignment-list-item-scoped | `listAssignments("acme", { feature: "projects", itemId: "p1" })` | Request URL also contains `&feature=projects&itemId=p1` — no dedicated test; derived directly from source |
+| hub-domain-access-016 | assignment-put-upserts-one-per-scope | `putAssignment("acme", { subjectKind: "customer", subjectId: "c1", roleId: "r1" })` | `PUT /api/access/assignments?workspace=acme` with that body verbatim; resolves to `body.assignment` — no dedicated test; derived directly from source |
+| hub-domain-access-017 | assignment-delete-request-shape | `deleteAssignment("acme", "a1")` | `DELETE /api/access/assignments/a1?workspace=acme`; resolves to `undefined` — no dedicated test; derived directly from source |
+| hub-domain-access-018 | item-restrict-request-shape | `restrictItem("acme", "projects", "p1")` | `POST /api/access/items/restrict?workspace=acme` with body `{ feature: "projects", itemId: "p1" }` — no dedicated test; derived directly from source |
+| hub-domain-access-019 | item-restrict-restore-parse-body | `restrictItem("acme", "projects", "p1")` against a stub response with `status: 204` | Throws the "Unexpected empty response (204 No Content); use authedRequest for endpoints with no body" `Error`, traced to `authedJson`'s own check; not caught anywhere in `restrictItem` |
+| hub-domain-access-020 | effective-request-shape | `effective("acme", { feature: "projects", subjectKind: "customer", subjectId: "c1" })` (no `itemId`) | Request URL has no `itemId=` segment at all — no dedicated test; derived directly from source |
+| hub-domain-access-021 | effective-request-shape | Same call with `itemId: "p1"` added | Request URL includes `&itemId=p1` — no dedicated test; derived directly from source |
+| hub-domain-access-022 | session-refresh-waterfall | Any `accessApi` call's first response is `401`; `refreshAccessToken()` resolves a new token | The request is retried once with the new token; a `401` on that retry throws `AuthHttpError` with `status: 401` — traced to `authedFetch` in `auth/src/client.ts`, exercised only indirectly through `accessApi` |
+| hub-domain-access-023 | errors-carry-status-and-code | Backend responds `403` with body `{ error: { message: "forbidden", code: "no_manage_verb" } }` | The thrown `AuthHttpError` has `status: 403` and `code: "no_manage_verb"` — no dedicated `access.ts` test; traced to `extractErrorCode`/`extractErrorMessage` in `auth/src/client.ts` |
+| hub-domain-access-024 | authorization-enforced-server-side | Backend responds `404` to `listRoles`/`listAssignments`/`effective` called by a non-member | The call rejects with `AuthHttpError` `status: 404`; `accessApi` performs no membership pre-check of its own — no source branch inspects caller identity before sending the request |

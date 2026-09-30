@@ -1,0 +1,41 @@
+<!-- leaf: implement-hub-domain-1/hooks--test-vectors · source: hub-domain-hooks.md -->
+
+# Hub Domain Messaging Hooks
+
+## Conformance Test Vectors
+
+| ID | Requirements | Input | Expected |
+|----|-------------|-------|----------|
+| hub-domain-hooks-001 | shared-stream-refcounting | Two components mount, each calling `subscribeToNotifications` | Only one `EventSource` (or poll timer) is created; unsubscribing one leaves the shared stream open — no dedicated test; derived directly from source |
+| hub-domain-hooks-002 | shared-stream-refcounting | The last subscriber unsubscribes | The shared stream/poll handle is closed and `sharedStream` is nulled, so the next `subscribeToNotifications` call reopens it — no dedicated test; derived directly from source |
+| hub-domain-hooks-003 | local-change-broadcast | Two hooks call `subscribeToNotifications`; a third piece of code calls `emitLocalChange()` | Both subscribed listeners are invoked with no arguments — no dedicated test; derived directly from source |
+| hub-domain-hooks-004 | unread-count-fetch-on-mount-and-wake | `useUnreadCount()` mounts against a stub returning `{ count: 4 }` | `count` resolves to `4` after the initial fetch — no dedicated test; derived directly from source |
+| hub-domain-hooks-005 | unread-count-preserved-on-failure | `count` is `4`; the next `GET /unread-count` rejects | `count` remains `4`; no reset to `0` — no dedicated test; derived directly from source |
+| hub-domain-hooks-006 | inbox-query-serialization | `buildInboxQuery({ categories: ["a", "b"], page: 2 })` | Serializes to `page=2&category=a&category=b` — no dedicated test; derived directly from source |
+| hub-domain-hooks-007 | inbox-status-left-to-backend-default | `buildInboxQuery({})` | Serializes to the empty string; no `status` key present — no dedicated test; derived directly from source |
+| hub-domain-hooks-008 | inbox-stale-response-ignored | `useInbox` is mounted; `params` changes before the first `GET` resolves | The first request's resolution (success or failure) is never applied to `items`/`total`/`error` — no dedicated test; derived directly from source |
+| hub-domain-hooks-009 | inbox-mutation-then-broadcast | `markRead("n1")` resolves | `POST /api/notifications/n1/read` is sent, then `emitLocalChange` fires exactly once — no dedicated test; derived directly from source |
+| hub-domain-hooks-010 | inbox-mutation-failure-leaves-list-untouched | `archive("n1")`'s `POST` rejects | `emitLocalChange` is not called; `items` is unchanged — no dedicated test; derived directly from source |
+| hub-domain-hooks-011 | dm-inbox-initial-window | `useDmConversations()` mounts | `GET /api/chat/dms?pageSize=100` is the first request — no dedicated test; derived directly from source |
+| hub-domain-hooks-012 | dm-inbox-window-growth-and-ceiling | `loadMore()` is called four times from `limit = 100` | Requested `pageSize` grows `200, 300, 400, 500` and stays at `500` on a fifth call — no dedicated test; derived directly from source |
+| hub-domain-hooks-013 | dm-inbox-presence-merge | A chat row for `otherUserId: "u1"`; presence response has no `u1` entry | That row's `online` is `false` and `lastSeenAt` is `null` — no dedicated test; derived directly from source |
+| hub-domain-hooks-014 | dm-inbox-presence-query-encoding | `otherUserId`s `["a,b", "c"]` | The presence request's `userIds` query value equals `encodeURIComponent("a,b,c")`, with the internal comma escaped — no dedicated test; derived directly from source |
+| hub-domain-hooks-015 | dm-inbox-presence-failure-is-silent | The presence `GET` rejects while the chats `GET` succeeds | `chats` still resolves, every row defaulted to `online: false, lastSeenAt: null`; no `error` is set for this reason — no dedicated test; derived directly from source |
+| hub-domain-hooks-016 | dm-inbox-stale-response-discarded | Two loads are in flight; the older one resolves after the newer one | The older resolution is discarded; `chats` reflects only the newer response — no dedicated test; derived directly from source |
+| hub-domain-hooks-017 | dm-inbox-load-failure-keeps-last-good-list | `chats` already holds two rows; the next `GET` rejects | `chats` still holds the same two rows; `error` is set to a message — no dedicated test; derived directly from source |
+| hub-domain-hooks-018 | dm-inbox-has-more-computation | `chats.length = 500`, `total = 800`, `limit = 500` | `hasMore` is `false` (ceiling reached) despite `total` exceeding `chats.length` — no dedicated test; derived directly from source |
+| hub-domain-hooks-019 | dm-thread-null-chatid-clears-state | `useDmThread(null)` | `messages` is `[]`, `loading` is `false`; no request is issued — no dedicated test; derived directly from source |
+| hub-domain-hooks-020 | dm-thread-history-load-and-sort | History response `items` in seq order `[3, 1, 2]` | `messages` resolves sorted ascending as seq `[1, 2, 3]` — no dedicated test; derived directly from source |
+| hub-domain-hooks-021 | dm-thread-message-merge-dedupe | An SSE event delivers a message whose `id` matches one already in `messages` | `messages` length is unchanged; no duplicate row is added — no dedicated test; derived directly from source |
+| hub-domain-hooks-022 | dm-thread-sse-cursor-from-last-loaded-seq | History load's last item has `seq: 42` | The stream URL is opened with `after=42` — no dedicated test; derived directly from source |
+| hub-domain-hooks-023 | dm-thread-malformed-frame-ignored | An SSE `message` event whose `data` is not valid JSON | `messages` is unchanged; no exception escapes the handler — no dedicated test; derived directly from source |
+| hub-domain-hooks-024 | dm-thread-teardown-on-change-or-unmount | `chatId` changes from `"c1"` to `"c2"` while `"c1"`'s history fetch is still pending | The `"c1"` fetch's resolution, once it arrives, is ignored (`cancelled` was set); `"c1"`'s stream is closed — no dedicated test; derived directly from source |
+| hub-domain-hooks-025 | dm-thread-send-noop-on-empty-or-missing-chat | `send("   ")` on an open thread | No `POST` is issued; the returned promise resolves with no side effect — no dedicated test; derived directly from source |
+| hub-domain-hooks-026 | dm-thread-send-client-message-id | `send("hi")` in an environment with no `crypto.randomUUID` | The POST body's `clientMessageId` matches the `` `${Date.now()}-${...}` `` fallback shape, not a UUID — no dedicated test; derived directly from source |
+| hub-domain-hooks-027 | dm-thread-mark-read-request-shape | `markRead()` on chat `"c1"` | `POST /api/chat/dms/c1/read` is sent with body `{}`; `emitLocalChange` fires once — no dedicated test; derived directly from source |
+| hub-domain-hooks-028 | dm-thread-ownership-comparison | `callerId` is `null`; `msg.senderUserId` is `""` | `isOwn(msg)` returns `false` — no dedicated test; derived directly from source |
+| hub-domain-hooks-029 | start-dm-forbidden-mapping | `POST /api/chat/dms` responds `403` | `startDm` resolves to `{ forbidden: true }`, not a rejection — no dedicated test; derived directly from source |
+| hub-domain-hooks-030 | start-dm-other-errors-propagate | `POST /api/chat/dms` responds `500` | `startDm`'s returned promise rejects with `AuthHttpError status: 500` — no dedicated test; derived directly from source |
+| hub-domain-hooks-031 | session-refresh-waterfall | Any plain HTTP call in either file first responds `401`; refresh succeeds | Exactly one retried request is sent with the new token; a `401` on that retry throws `AuthHttpError status: 401` — traced to `authedFetch` in `auth/src/client.ts`, exercised only indirectly through these hooks |
+| hub-domain-hooks-032 | sse-token-rides-the-query-string | `connectSse` opens the DM thread stream with a current access token `"tok"` | The constructed `EventSource` URL ends in `access_token=tok` — no dedicated test; derived directly from `stream/index.ts` |
+| hub-domain-hooks-033 | thread-message-isolation-on-chatid-switch | `send("hello")` is called for `chatId = "c1"`; before the POST resolves, the hook's `chatId` prop changes to `"c2"` | See the `thread-message-isolation-on-chatid-switch` edge case below — the resolved message from `"c1"`'s `send` call merges into whatever `messages` array is current when it settles, with no chatId-generation guard preventing it from landing under `"c2"` |
