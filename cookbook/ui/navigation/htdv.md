@@ -48,7 +48,7 @@ references:
   (agentictoolkit)
 - packages/apple/AgenticToolkit/Tests/AgenticToolkitHTDVTests/PlainTextMarkdownEditingTests.swift
   (agentictoolkit)
-- docs/htdv.md (agentictoolkit)
+- docs/architecture/htdv.md (agentictoolkit)
 approved-by: ''
 approved-date: ''
 ---

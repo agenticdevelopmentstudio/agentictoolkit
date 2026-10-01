@@ -78,10 +78,10 @@ cd websites/site && npm install && npm run dev
 ## Design
 
 How this repo is laid out and how it's consumed:
-[`docs/repo-pattern.md`](docs/repo-pattern.md).
+[`docs/architecture/repo-pattern.md`](docs/architecture/repo-pattern.md).
 
 Consumer setup walkthrough (git submodule path):
-[`docs/consuming-as-submodule.md`](docs/consuming-as-submodule.md).
+[`docs/project/consuming-as-submodule.md`](docs/project/consuming-as-submodule.md).
 
 Web-platform docs (adoption, migration, Next.js consumer wiring):
 [`docs/web/`](docs/web/).

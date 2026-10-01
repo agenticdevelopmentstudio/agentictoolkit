@@ -1,3 +1,8 @@
+> [!WARNING]
+> **ARCHIVED — HISTORICAL RECORD, NOT CURRENT.** Captured 2026-10-01. This document reflects a
+> past state or decision and may no longer describe how things work. Do not treat it as live
+> documentation.
+
 # Examples Site Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.

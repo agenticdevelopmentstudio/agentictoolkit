@@ -59,7 +59,7 @@ Xcode projects are wired together by `AgenticToolkit.xcworkspace`:
 
 ## Consumer wiring — first-party submodule path
 
-See [`consuming-as-submodule.md`](consuming-as-submodule.md) for the full
+See [`consuming-as-submodule.md`](../project/consuming-as-submodule.md) for the full
 walkthrough. In short:
 
 1. `git submodule add <toolkit-url> vendor/agentictoolkit`

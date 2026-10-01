@@ -57,9 +57,9 @@ reaches the demo site any more.
 
 - Repo conventions, build commands, ground rules →
   [`.claude/CLAUDE.md`](.claude/CLAUDE.md)
-- Apple toolkit code review checklist → [`docs/toolkit-checklist.md`](docs/toolkit-checklist.md)
-- Repo layout pattern (this design) → [`docs/repo-pattern.md`](docs/repo-pattern.md)
-- Consumer flow (git submodule path) → [`docs/consuming-as-submodule.md`](docs/consuming-as-submodule.md)
+- Apple toolkit code review checklist → [`docs/project/toolkit-checklist.md`](docs/project/toolkit-checklist.md)
+- Repo layout pattern (this design) → [`docs/architecture/repo-pattern.md`](docs/architecture/repo-pattern.md)
+- Consumer flow (git submodule path) → [`docs/project/consuming-as-submodule.md`](docs/project/consuming-as-submodule.md)
 - Web platform docs (adoption, migration, Next.js consumer) → [`docs/web/`](docs/web/)
 
 ## Build entry points
