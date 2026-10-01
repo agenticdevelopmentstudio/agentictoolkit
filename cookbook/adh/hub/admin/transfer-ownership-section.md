@@ -1,0 +1,484 @@
+---
+id: da441eaa-795d-4447-99b1-356186855921
+title: Transfer Ownership Section
+domain: agentictoolkit://cookbook/adh/hub/admin/transfer-ownership-section
+type: ingredient
+version: 1.2.0
+status: review
+language: en
+created: '2026-09-23'
+modified: '2026-09-27'
+author: Mike Fullerton
+copyright: 2026 Mike Fullerton
+license: MIT
+summary: Disclosure-gated destination picker (with nested workspace submenus) that
+  runs a server preflight and gates a type-to-confirm dialog before transferring ownership
+  of an object.
+platforms:
+- typescript
+- web
+tags:
+- confirmation
+- disclosure
+- settings
+- transfer
+depends-on:
+- agenticdevelopertoolkit://recipes/disclosure
+- agenticdevelopertoolkit://recipes/button
+- agenticdevelopertoolkit://recipes/dialog
+related:
+- agentictoolkit://cookbook/adh/hub/admin/delete-entity-section
+references: []
+approved-by: ''
+approved-date: ''
+---
+
+# Transfer Ownership Section
+
+## Overview
+
+This is a settings-pane section that moves an owned object to a different
+destination workspace, or a nested Product beneath one. It renders as a
+disclosure labeled "Transfer Ownership" that is collapsed by default;
+opening it reveals a short explanation of what a transfer does and a
+dropdown of candidate destinations (`targets`), where a destination with
+`children` renders as a nested submenu (a workspace's own Products).
+Picking a non-current destination runs a caller-supplied server preflight
+(`onPreview`) and opens a confirmation dialog that names every principal
+who will lose access before the transfer runs. The final Transfer action
+stays disabled until the user retypes the object's own `entityLabel`
+(edge whitespace forgiven, everything else exact). This section is a
+sibling of the delete-entity section, whose confirm vocabulary and
+type-to-confirm gate it follows.
+
+## Behavioral Requirements
+
+- **collapsed-by-default**: The section MUST render its disclosure
+  collapsed on initial render.
+- **root-section-labeled**: The component MUST render its root container
+  with the accessible label "Transfer Ownership".
+- **disclosure-labeled-transfer-ownership**: The disclosure trigger MUST
+  show a bidirectional-transfer glyph followed by the text "Transfer
+  Ownership".
+- **describes-transfer-effect**: When the disclosure is open, the section MUST show text stating
+  that the object's address changes, everything beneath it is re-addressed with it, and access
+  granted in the current workspace does not follow.
+- **trigger-button-labeled-distinctly**: The dropdown's trigger button MUST show "Transfer
+  {entityNoun}" — a label distinct from the disclosure's "Transfer Ownership" trigger, so the two
+  buttons do not share one accessible name.
+- **renders-nested-targets-as-submenu**: A destination target whose `children` array is non-empty
+  MUST render as a submenu labeled with the target's `name`, and its `children` MUST render
+  recursively inside that submenu.
+- **renders-leaf-targets-as-items**: A destination target with no `children` MUST render as a
+  single menu item labeled with the target's `name`.
+- **disables-current-target**: A destination target that matches `currentTarget` (by `slug`, and by
+  `kind` when both sides define one) MUST render its menu item disabled and MUST append
+  " (current)" to its label.
+- **current-target-not-selectable**: Activating an item rendered as "(current)" MUST NOT invoke the
+  choose operation — it MUST have no activation handler.
+- **selecting-target-opens-dialog-and-runs-preview**: Activating a non-current, non-submenu target
+  MUST close the dropdown menu, set it as the chosen target (which opens the confirmation dialog),
+  clear any prior preview result/typed value/error, and invoke the preflight operation (`onPreview`)
+  with that target.
+- **preview-populates-dialog**: When the preflight operation resolves for the current selection, its
+  transfer preview result MUST populate the confirmation dialog.
+- **preview-error-shown-inline**: When the preflight operation rejects, the section MUST show an
+  inline error — the rejection's `message` when it carries one, otherwise "Could not check this
+  transfer." — and MUST leave the dialog open.
+- **stale-preview-ignored**: A settled preflight result whose sequence number no longer matches
+  the current selection (because the user cancelled or chose a different target while it was
+  pending) MUST NOT update the preview result, error, or busy state.
+- **dialog-title-names-destination**: The dialog title MUST read "Transfer this {entityNoun} to
+  {chosen.name}?".
+- **dialog-shows-checking-state**: While a request is pending and no preview result has arrived
+  yet, the dialog body MUST show "Checking…".
+- **shows-revoked-token-count**: When the resolved preview result's `tokens` is greater than zero, the
+  dialog MUST show the count of API tokens that will be revoked, using the singular "token" only
+  when the count is exactly 1.
+- **lists-revoked-principals**: When the preview result's `revoking` is non-empty, the dialog MUST list each
+  entry's `name`, followed by its `via` alone when `kind` is `"user"`, or `"{kind}, {via}"`
+  otherwise.
+- **shows-no-access-revoked**: When the preview result's `revoking` is empty, the dialog MUST show "No access is
+  revoked.".
+- **confirm-gate-hidden-until-preview**: The type-to-confirm label and input MUST NOT render until
+  the preview result is populated.
+- **confirm-target-is-trimmed-label**: The value the user must type to arm the Transfer button MUST
+  be `entityLabel` with leading and trailing whitespace removed.
+- **confirm-requires-nonempty-target**: The Transfer button MUST stay disabled whenever the trimmed
+  `entityLabel` is empty, regardless of what is typed.
+- **confirm-match-ignores-edge-whitespace**: The typed value MUST arm the Transfer button only when
+  its own leading/trailing whitespace, once trimmed, equals the trimmed `entityLabel` exactly — an
+  interior or case difference MUST NOT match.
+- **transfer-button-disabled-until-armed**: The Transfer button MUST stay disabled while a request
+  is in flight (busy), while no preview result has arrived, or while the typed value does not
+  confirm.
+- **transfer-button-not-destructive-styled**: The Transfer button MUST use the `"warning"` visual
+  variant rather than a destructive one.
+- **transfer-invokes-onconfirm-once**: Activating the enabled Transfer button MUST invoke the
+  confirm operation (`onConfirm`) exactly once for that confirmation, passing the chosen target.
+- **transfer-label-reflects-progress**: While the confirmed transfer is pending, the Transfer
+  button MUST read "Transferring…"; otherwise it MUST read "Transfer".
+- **dialog-locks-during-transfer**: While the confirmed transfer is pending, the
+  dialog's close control MUST be hidden and the Cancel button MUST be disabled.
+- **preview-does-not-lock-dialog**: While only the preflight is pending, the dialog's
+  close control MUST remain shown, the Cancel button MUST remain enabled, and dismissing the dialog
+  (Escape, outside click, close, or Cancel) MUST reset it.
+- **transfer-error-shown-inline-dialog-stays-open**: When the confirm operation rejects, the section MUST
+  show an inline error — the rejection's `message` when it carries one, otherwise "Failed to
+  transfer {noun}." — clear the busy state, and MUST NOT close the dialog.
+- **transfer-success-resets-state**: When the confirm operation resolves, the section MUST reset the
+  chosen target, preview result, typed value, busy state, and error, which closes the dialog.
+- **cancel-resets-and-closes**: Activating Cancel, or otherwise closing the dialog while not
+  confirming, MUST reset the same state and close the dialog.
+- **reset-orphans-inflight-preview**: Resetting MUST invalidate any in-flight preflight so its
+  eventual resolution can no longer change state.
+- **switching-target-clears-typed-and-error**: Choosing a new target MUST clear any previously
+  typed confirmation text and inline error before starting the new target's preflight, regardless of
+  what was already in flight or on screen for the prior target. This is a property of the choose
+  operation itself, verified at the unit level: the open confirmation dialog currently covers the
+  destination dropdown, so a second choose call cannot be reached through pointer interaction while
+  the first target's dialog is still open.
+- **wider-dialog-for-long-identifiers**: The dialog content MUST use a wider layout than the
+  platform's default dialog width.
+
+## Appearance
+
+- **Corner radius**: Not applicable at this component's own level — no rounding is applied to any
+  element this file renders directly; corner treatment belongs to the composed disclosure, dialog,
+  button, and input components, each out of scope for this recipe.
+- **Padding**: The disclosed body is a column with 12px gaps; the dialog's status/preview area is a
+  column with 8px gaps at 14px text size; the confirm-gate group is a column with 8px gaps. No
+  independent padding value is set beyond these gaps — interior padding is the composed
+  dialog/input/button components' own.
+- **Font**: Body copy and dialog copy use 14px text; the object's identifier
+  and the value the user must type back are rendered in a monospace font.
+- **Background**: Not set at this component's own level — inherited from the disclosure and
+  dialog containers, which are out of scope for this recipe.
+- **Foreground/Text**: Muted-text theme role for descriptive copy, the "these will lose access"
+  heading, and the parenthetical `via`/`kind` text; primary-text theme role for the object's
+  identifier and each revoked-principal's name; gold theme role for the token-revocation warning
+  icon.
+- **Border**: Not applicable — no border is set on any element this file renders directly.
+- **Shadow**: Not applicable — no shadow is set on any element this file renders directly.
+- **Min/Max size**: The dialog is wider than the platform's default dialog width, because a
+  mid-length identifier wraps confusingly inside itself at the default width.
+
+## States
+
+| State | Appearance change |
+|-------|------------------|
+| Default (collapsed) | Disclosure closed; nothing else renders |
+| Disclosed | Explanatory body text and the destination dropdown trigger become visible |
+| Dropdown open | Menu of destination targets visible; entries with `children` render as nested submenus |
+| Menu item — current target | Disabled; label reads "{name} (current)" |
+| Target chosen, preflight pending | Dialog opens; body shows "Checking…" |
+| Preview loaded, `tokens > 0` | Token-revocation warning line shown with a warning glyph |
+| Preview loaded, `revoking.length > 0` | "These will lose access:" list shown |
+| Preview loaded, `revoking.length === 0` | "No access is revoked." shown |
+| Confirm gate armed (`confirmed === true`) | Transfer button enabled, `warning` variant |
+| Confirming (transfer in flight) | Dialog close control hidden, Cancel disabled, input disabled, Transfer button reads "Transferring…" |
+| Preview error | Inline error shown; dialog stays open |
+| Transfer error | Inline error shown; dialog stays open; busy state clears |
+
+## Accessibility
+
+- Root element carries the accessible label "Transfer Ownership"; every interactive control is a
+  native, focusable element via the shared button, dropdown-menu, and input components this section
+  composes — no bespoke non-semantic clickable element is used.
+- The disclosure trigger ("Transfer Ownership") and the dropdown trigger ("Transfer {entityNoun}")
+  MUST carry distinct accessible names, per `trigger-button-labeled-distinctly`, so two buttons in
+  the same section are not ambiguous to assistive technology.
+- The type-to-confirm input is labeled by an explicit, programmatically associated label, not a
+  placeholder alone.
+- Keyboard and assistive-technology navigation for the disclosure trigger, the dropdown menu
+  (including nested submenus), the dialog, and the input all come from the shared disclosure,
+  dropdown-menu, dialog, and input/button primitives this section composes — no custom key handling
+  appears in this component's own logic, so keyboard behavior is that primitive's own recipe's
+  concern, not this one's.
+- Minimum tap target sizing is likewise owned by the shared button, dropdown-menu-item, and
+  input components this section composes (all using a small size or their defaults); no local
+  min-width/min-height override is applied here.
+- Contrast is governed by the semantic color theme roles this component consumes (text, muted
+  text, gold); no raw color value or component-specific contrast override is applied here.
+- The dialog body's transition from "Checking…" to the resolved preview content (or an inline
+  error) carries no live-region announcement: neither this section nor the shared dialog primitive
+  it composes establishes one, so an assistive-technology user who already opened the dialog gets no
+  signal that the content changed without re-reading it.
+
+## Conformance Test Vectors
+
+| ID | Requirements | Input | Expected |
+|----|-------------|-------|----------|
+| transfer-ownership-section-001 | collapsed-by-default, root-section-labeled, disclosure-labeled-transfer-ownership | Initial render | Root container carries the accessible label "Transfer Ownership"; disclosure closed; trigger shows the transfer glyph + "Transfer Ownership" |
+| transfer-ownership-section-002 | describes-transfer-effect, trigger-button-labeled-distinctly | Open the disclosure | Body text about the address change and no carried-over access is shown; dropdown trigger reads "Transfer {entityNoun}", distinct from "Transfer Ownership" |
+| transfer-ownership-section-003 | renders-nested-targets-as-submenu | `targets` includes an entry with non-empty `children` | That entry renders as a submenu trigger; opening it shows its `children` as items |
+| transfer-ownership-section-004 | renders-leaf-targets-as-items | `targets` includes an entry with no `children` | Renders as a single menu item labeled with `target.name` |
+| transfer-ownership-section-005 | disables-current-target, current-target-not-selectable | `currentTarget` matches one target's `slug` (+`kind`) | That item is disabled and labeled "{name} (current)"; clicking it does not open the dialog |
+| transfer-ownership-section-006 | selecting-target-opens-dialog-and-runs-preview | Click a non-current, non-submenu target | Menu closes; dialog opens; the preflight operation is invoked once with that target |
+| transfer-ownership-section-007 | preview-populates-dialog, dialog-shows-checking-state | Preflight pending, then resolves | "Checking…" shown first, then the dialog reflects the resolved preview result |
+| transfer-ownership-section-008 | preview-error-shown-inline | The preflight operation rejects with an error whose message is "X" | Inline error reads "X"; dialog remains open |
+| transfer-ownership-section-009 | preview-error-shown-inline | The preflight operation rejects with a value that is not an error object | Inline error reads "Could not check this transfer." |
+| transfer-ownership-section-010 | stale-preview-ignored | Choose target A (preflight pending), choose target B before A resolves, then A's preflight resolves | Dialog reflects only B's state; A's late resolution changes nothing |
+| transfer-ownership-section-011 | dialog-title-names-destination | `chosen.name === "Acme"`, `entityNoun === "Persona"` | Dialog title reads "Transfer this Persona to Acme?" |
+| transfer-ownership-section-012 | shows-revoked-token-count | `preview.tokens === 1` | Text reads "1 API token bound to this {noun} will be revoked." |
+| transfer-ownership-section-013 | shows-revoked-token-count | `preview.tokens === 3` | Text reads "3 API tokens bound to this {noun} will be revoked." |
+| transfer-ownership-section-014 | lists-revoked-principals | `preview.revoking` = `[{id:"u1",name:"Ann",kind:"user",via:"direct"}, {id:"t1",name:"Ops",kind:"team",via:"Acme"}]` | List shows "Ann (direct)" for the first entry and "Ops (team, Acme)" for the second |
+| transfer-ownership-section-015 | shows-no-access-revoked | `preview.revoking === []` | "No access is revoked." shown |
+| transfer-ownership-section-016 | confirm-gate-hidden-until-preview | `preview === null` (still "Checking…") | No confirm label/input renders |
+| transfer-ownership-section-017 | confirm-target-is-trimmed-label, confirm-match-ignores-edge-whitespace | `entityLabel = " acme-x "`, typed `"acme-x"` | Transfer button enables (both sides trimmed match) |
+| transfer-ownership-section-018 | confirm-match-ignores-edge-whitespace | `entityLabel = "acme-x"`, typed `"Acme-X"` | Transfer button stays disabled (case differs) |
+| transfer-ownership-section-019 | confirm-requires-nonempty-target | `entityLabel = "   "` (blank after trim) | Transfer button stays disabled regardless of typed input |
+| transfer-ownership-section-020 | transfer-button-disabled-until-armed, transfer-button-not-destructive-styled | Preview result loaded, `confirmed === true` | Transfer button enabled, `warning` variant |
+| transfer-ownership-section-021 | transfer-invokes-onconfirm-once, transfer-label-reflects-progress, dialog-locks-during-transfer | Click the enabled Transfer button | The confirm operation is invoked once with the chosen target; label reads "Transferring…"; close control hidden; Cancel disabled |
+| transfer-ownership-section-022 | preview-does-not-lock-dialog | Preflight still pending (`busy` with no preview result yet) | Cancel enabled; close control shown; dialog dismissible |
+| transfer-ownership-section-023 | transfer-error-shown-inline-dialog-stays-open | The confirm operation rejects with an error whose message is "boom" | Inline error reads "boom"; dialog stays open; busy clears |
+| transfer-ownership-section-024 | transfer-error-shown-inline-dialog-stays-open | The confirm operation rejects with a value that is not an error object, `entityNoun === "Persona"` | Inline error reads "Failed to transfer persona." |
+| transfer-ownership-section-025 | transfer-success-resets-state | The confirm operation resolves | Dialog closes; the chosen target, preview result, typed value, busy state, and error all reset |
+| transfer-ownership-section-026 | cancel-resets-and-closes, reset-orphans-inflight-preview | Click Cancel while a preflight is still pending, then let that preflight resolve | Dialog closes and state resets immediately; the later preflight resolution changes nothing |
+| transfer-ownership-section-027 | switching-target-clears-typed-and-error | Unit-level: choose target A, set the typed value to a partial value and the error to a message, then choose target B directly | The typed value and error are both reset before the preflight for B is invoked |
+| transfer-ownership-section-028 | wider-dialog-for-long-identifiers | Dialog open | The dialog renders wider than the platform's default dialog width |
+
+## Edge Cases
+
+- Empty or all-whitespace `entityLabel`: the confirm gate MUST stay permanently disabled because
+  the trimmed label's length check fails — no input can arm the Transfer button.
+- Empty destination list: the dropdown menu content MUST render with no items when there are no
+  candidate destinations.
+- Deeply nested `children`: rendering MUST recurse through every level of nesting present, with
+  no depth limit enforced.
+- Duplicate `(kind, slug)` pairs across destination targets: callers MUST supply unique
+  `(kind, slug)` pairs, since nothing in this component deduplicates them; the identity used to key
+  each rendered item and match "(current)" is derived from `(kind, slug)`, so duplicates produce a
+  rendering-list key collision.
+- Concurrent selection (rapid re-choice): a sequence counter is the sole guard against a
+  superseded preflight's resolution overwriting newer state; every settled preflight result MUST be
+  checked against the current sequence number before it is allowed to touch state.
+- Re-selecting the currently chosen target: choosing MUST run again from scratch — clearing the
+  typed value, restarting the preflight, and advancing the sequence counter — since there is no
+  short-circuit for choosing the same target twice.
+- `currentTarget` undefined: no candidate MUST be treated as the current target when
+  `currentTarget` itself is undefined, so no menu item is marked current/disabled from that guard
+  alone.
+- `currentTarget.kind` defined but a candidate target's `kind` undefined (or vice versa): MUST fall
+  back to a slug-only match and treat the two as the same current target — the legacy behavior kept
+  for targets that carry no `kind` (a nested Product).
+- Error states: preflight and confirm rejections are both covered under
+  `preview-error-shown-inline` and `transfer-error-shown-inline-dialog-stays-open` above, including
+  the non-error-object rejection fallback text.
+- Offline/disconnected state: this component performs no network call of its own; the preflight and
+  confirm operations are caller-supplied asynchronous functions, and a connectivity failure surfaces
+  through their rejection exactly like any other error — no behavior beyond the generic error
+  handling above is defined or needed at this layer.
+
+## Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `entityNoun` | string | — | Singular entity noun (e.g. "Persona"), used verbatim in the button and dialog title, and lowercased for inline prose ("Move this persona…") and the token-count/error fallback text |
+| `entityLabel` | string | — | The object's own identifier; shown in the dialog and retyped (trimmed) to arm the Transfer button |
+| `targets` | list of destination targets | — | Candidate destinations; team workspaces must already be filtered out by the caller |
+| `currentTarget` | destination target reference (optional) | `undefined` | The destination the object already lives in; shown disabled in the menu |
+| `onPreview` | function taking a destination target, returning a transfer preview result | — | Server preflight; its result populates the dialog, a rejection shows an inline error |
+| `onConfirm` | function taking a destination target, returning nothing (asynchronously) | — | Performs the transfer; a rejection shows an inline error and keeps the dialog open |
+
+### Data Model
+
+- **Destination target**: fields `slug`, `kind` (optional — `"customer"` or `"organization"`),
+  `name`, and `children` (optional list of destination targets). `kind` is omitted only for a
+  target that is not a workspace — a nested Product, whose `slug` is already globally unique. A
+  non-empty `children` list makes the entry render as a submenu of its own child targets.
+- **Destination target reference**: the subset of a destination target's fields needed to
+  identify one — `slug` and `kind` — used for `currentTarget`.
+- **Transfer preview result**: fields `tokens` (a count) and `revoking` (a list of entries, each
+  with `kind` — one of `"user"`, `"team"`, `"persona"`, `"organization"`, `"app"`, `"token"` —
+  `id`, `name`, and `via` — one of `"role"`, `"team"`, `"direct"`, `"participant"`, `"group"`).
+  `tokens` is the count of API tokens bound to the object that will be revoked. Each `revoking`
+  entry is one principal that will lose access, its `kind`, and `via` — how it currently has access
+  (a direct grant, a role, team membership, participant seat, or access-group membership).
+
+## Deep Linking
+
+Not applicable: no URL scheme, route, or navigation call appears anywhere in this component's
+design.
+
+## Localization
+
+Not applicable: no translation-function call or string-table lookup is present; every
+user-facing string (disclosure title, body copy, dialog title/description, button labels, error
+fallbacks) is a literal, hardcoded string.
+
+The lowercased form of `entityNoun` used in inline prose is a casing transform, and casing is
+locale-sensitive — a lowercase conversion can change meaning or produce the wrong result in some
+locales (e.g. Turkish `I`/`ı`). This is a display transform of caller-supplied text, not an
+invariant-culture-style identifier normalization, so it MUST use the user's locale, never an
+invariant/ordinal casing call.
+
+## Accessibility Options
+
+| Option | Behavior |
+|--------|----------|
+| Reduce Motion | Not applicable: no transition, animation, or motion effect is defined by this section; any open/close motion belongs to the composed disclosure/dialog/dropdown-menu components, out of scope here. |
+| Increase Contrast | Not applicable: the component uses only semantic color theme roles (text, muted text, gold) and defines no raw color or opacity-based color of its own that would need a distinct high-contrast variant. |
+| Differentiate Without Color | Resolved: every state that carries meaning pairs color with text or an icon, never color alone — the token-revocation warning pairs a warning glyph with count text, the current/disabled item appends the text "(current)" rather than relying on a muted color, and the Transfer action's non-destructive nature is conveyed by its "Transfer" label, not by the `warning` variant's color alone (`warning` is itself a color treatment, per `transfer-button-not-destructive-styled`). |
+
+## Feature Flags
+
+Not applicable: no feature-flag key or conditional gate appears anywhere in this component's
+design.
+
+## Analytics
+
+Not applicable: no analytics or event-tracking call appears anywhere in this component's design.
+
+## Privacy
+
+- **Data collected**: The typed confirmation text, which the user re-enters as a copy of the
+  caller-supplied `entityLabel`; no other input is captured by this component itself.
+- **Storage**: None — the chosen target, preview result, typed value, busy state, and error all
+  live in transient, in-memory state and are cleared on reset or on unmount; nothing is written to
+  persistent storage.
+- **Transmission**: The component transmits nothing itself; it invokes the caller-supplied
+  preflight/confirm operations with the chosen target, and any network transmission those
+  operations perform is outside this component.
+- **Retention**: None beyond the component's own lifetime, or until reset runs — see Storage
+  above.
+
+## Logging
+
+Not applicable: no logging call or logger reference appears anywhere in this component's design.
+
+## Platform Notes
+
+- **SwiftUI**: Start from a `DisclosureGroup` for the collapsed/expanded "Transfer Ownership"
+  section, a `Menu` with nested `Menu` sub-items for the workspace tree (mirroring
+  `DropdownMenuSub`), and a `.sheet`/custom modal for the two-stage (preview then type-to-confirm)
+  flow. Drive the confirm gate with a `TextField` bound to `@State` text compared, trimmed, against
+  the object's identifier, and use a generation counter alongside the preflight `Task` to discard a
+  stale preview the way `previewSeq` does here, since a plain `async` call has no built-in
+  "supersede this in-flight request" primitive.
+- **Compose**: Use an expand/collapse composable (e.g. driven by `AnimatedVisibility`) for the
+  Disclosure equivalent, a `DropdownMenu` with a nested `DropdownMenu` for submenu targets — Compose
+  has no native infinitely-nested submenu primitive, so the nested case needs a custom recursive
+  composable exactly as this source does — and an `AlertDialog` for the confirm flow. Gate the
+  confirm button from a `mutableStateOf` string compared via `.trim()`, and cancel a stale preflight
+  `Job` (from a `CoroutineScope`) when a new target is chosen, mirroring the sequence guard here.
+- **React/Web**: This is the source. See
+  `packages/web/packages/adh-ui/src/blocks/transfer-ownership-section.tsx`, which composes
+  `@agenticdevelopertoolkit/ui`'s `Disclosure`, `Button`, `Input`, `Label`, `ErrorText`, the
+  `DropdownMenu` family (including `DropdownMenuSub`/`DropdownMenuSubContent`/`DropdownMenuItem`),
+  and the `Dialog`/`DialogContent` family. The component's own doc comment names it a sibling of
+  `DeleteEntitySection`, whose confirm vocabulary and type-to-confirm gate it follows. State is
+  plain `React.useState`/`useRef` — `disclosed` defaults to `false` via `useState(false)`;
+  `chosen`/`preview`/`typed`/`busy`/`error` live in `useState`, cleared by `reset()` or on unmount,
+  with nothing written to `localStorage`, a cookie, or any persistent store. The async preview-race
+  guard is a manually incremented `previewSeq` ref rather than an `AbortController` (no cancellation
+  primitive is used). The root element is a `<section aria-label="Transfer Ownership">`; the
+  disclosure trigger's icon is `ArrowRightLeft`; the token-revocation warning uses the
+  `TriangleAlert` icon. The current item's `onClick` is left `undefined` rather than calling
+  `choose`, so it cannot be activated. `TransferTarget` is `{ slug: string; kind?: "customer" |
+  "organization"; name: string; children?: TransferTarget[] }`; `TransferTargetRef` is
+  `Pick<TransferTarget, "slug" | "kind">`; `TransferPreviewResult` is `{ tokens: number; revoking:
+  { kind: "user" | "team" | "persona" | "organization" | "app" | "token"; id: string; name: string;
+  via: "role" | "team" | "direct" | "participant" | "group" }[] }`. `onPreview` is typed
+  `(target: TransferTarget) => Promise<TransferPreviewResult>`; `onConfirm` is typed
+  `(target: TransferTarget) => Promise<void>`. `renderTarget` recurses over nested `children`,
+  keying each rendered item and the "(current)" match by `targetKey` (derived from `(kind, slug)`),
+  which doubles as the React list `key` — a duplicate `(kind, slug)` pair produces a React key
+  collision. `noun` is computed as `entityNoun.toLowerCase()`. Rejections are type-checked via
+  `instanceof Error` to decide whether to show the rejection's `message` or the generic fallback
+  text. Every user-facing string is a literal JS/JSX string or template literal, with no i18n
+  library import. The type-to-confirm `Input` is labeled by an explicit `<Label
+  htmlFor={inputId}>` tied to the input via `React.useId()`. No custom key handling (`onKeyDown`,
+  `tabIndex` override) appears in source; tap targets are owned by the shared
+  `Button`/`DropdownMenuItem`/`Input` components (all `size="sm"` or their defaults).
+  Contrast/color is governed by the `apt-*` semantic color tokens (`apt-text`, `apt-text-muted`,
+  `apt-gold`); no raw hex value appears in source. The dialog's `DialogContent`
+  (`@agenticdevelopertoolkit/ui/components/dialog`, whose `DialogContent` renders a plain
+  `DialogPrimitive.Popup` with no live-region wrapper) carries no `aria-live`/`role="status"`
+  region. Layout: the disclosed body is `flex flex-col gap-3`; the dialog's status/preview area is
+  `flex flex-col gap-2 text-sm`; the confirm-gate group is `flex flex-col gap-2`; body/dialog copy
+  is `text-sm`, the identifier and typed-back value are `font-mono`. `DialogContent` uses
+  `max-w-xl`, wider than the platform's default `max-w-md`.
+- **AppKit/UIKit**: Use an `NSDisclosureButton`/custom expand-collapse `NSView` (AppKit) or a
+  collapsible `UITableView` section header (UIKit) for the Disclosure equivalent, and an `NSMenu`/
+  `UIMenu` with a nested submenu (`NSMenuItem.submenu`/nested `UIMenu`) for the workspace tree —
+  both platforms support native nested submenus, unlike Compose. Use an `NSAlert`/
+  `UIAlertController`, or a small custom sheet/panel given the richer body content here, for the
+  two-phase confirm; gate the confirm control from a text-field delegate callback compared with
+  `.trimmingCharacters(in: .whitespaces)`, and track the in-flight preflight with a generation
+  counter checked when its completion handler returns.
+- **WinUI 3**: Use an `Expander` (`IsExpanded="False"` by default) for the Disclosure equivalent,
+  with its `Header` a horizontal `StackPanel` of a `FontIcon`/`SymbolIcon` (for `ArrowRightLeft`)
+  plus a `TextBlock` reading "Transfer Ownership". Inside, a `Button` opens a `MenuFlyout` whose
+  `MenuFlyoutItem`s render the leaf targets and whose nested destinations use `MenuFlyoutSubItem` —
+  WinUI 3's native nested-submenu control, directly matching `DropdownMenuSub` — with the current
+  item's `MenuFlyoutItem.IsEnabled` set `False` and its text carrying " (current)". Model the
+  confirmation flow as a `ContentDialog` with `PrimaryButtonText="Transfer"`, binding
+  `IsPrimaryButtonEnabled` to the trimmed-match comparison from a `TextBox.TextChanged` handler, and
+  suppress dismissal while transferring by handling the dialog's `Closing` event and setting
+  `args.Cancel = true` whenever a `confirming` flag is set — the WinUI analogue of the
+  `onOpenChange` guard here. Render the "Checking…" text, the token-count warning, and
+  the revoked-principal list as conditionally visible `TextBlock`/`ItemsRepeater` content inside the
+  `ContentDialog` body, and style the Transfer button with a custom `Style` tinted for the Fluent
+  "Caution"/warning system color rather than the built-in destructive/red button style, matching the
+  source's `warning`-not-`destructive` choice.
+
+## Reference Implementations
+
+| Platform | Path |
+|----------|------|
+| web | `packages/web/packages/adh-ui/src/blocks/transfer-ownership-section.tsx` |
+
+## Design Decisions
+
+**Decision**: Trim both sides of the confirm comparison (`entityLabel` and the typed value) instead
+of an exact match.
+**Rationale**: `entityLabel` here can be a user-editable display name, not always a machine
+identifier, so trailing whitespace would render identically to its absence; a strict compare
+would leave the button permanently un-armable with nothing on screen to explain why.
+**Approved**: pending
+
+**Decision**: Seal the dialog against dismissal only while the final transfer (`onConfirm`) is
+pending, never while the preflight (`onPreview`) is pending.
+**Rationale**: `onPreview` performs no server write, so a slow or hung preflight has no correctness
+claim on the user's ability to back out; sealing it too would trap them behind "Checking…" with
+no exit.
+**Approved**: pending
+
+**Decision**: Style the Transfer button `warning`, not `destructive`.
+**Rationale**: a transfer moves the object and drops other principals' access to it, but nothing is
+destroyed and the move can be made again in the other direction; the red destructive treatment is
+reserved for what cannot be undone.
+**Approved**: pending
+
+**Decision**: Guard the async preflight race with a monotonically incrementing `previewSeq` ref
+rather than cancelling the `onPreview` promise itself.
+**Platform**: React/Web.
+**Rationale**: `onPreview` is a caller-supplied `Promise` with no cancellation contract; a sequence
+number lets a late resolution be detected and ignored without requiring the caller to support
+`AbortController`-style cancellation.
+**Approved**: pending
+
+**Decision**: Widen the confirmation dialog to `max-w-xl`.
+**Platform**: React/Web.
+**Rationale**: every load-bearing line of text in the dialog is an identifier, and at the platform's
+default `max-w-md` a mid-length one wraps confusingly inside itself.
+**Approved**: pending
+
+## Compliance
+
+| Check | Status | Category |
+|-------|--------|----------|
+| [screen-reader-support](agenticdevelopercookbook://compliance/accessibility#screen-reader-support) | partial | Accessibility |
+
+`partial` because the source both satisfies and falls short of this check: the root `<section aria-label>`, the distinct Disclosure/dropdown trigger labels (`trigger-button-labeled-distinctly`), and the `Label htmlFor` on the confirm `Input` give screen-reader users meaningful, unambiguous labels, but the dialog's "Checking…"-to-preview transition has no live region (see the Accessibility section above), so a screen-reader user who already opened the dialog is not told when its content changes.
+
+## Change History
+
+| Version | Date | Author | Summary |
+|---|---|---|---|
+| 1.2.0 | 2026-09-27 | Mike Fullerton | Platform-neutral description; platform specifics in Platform Notes; moved to adh/hub/admin/. |
+| 1.1.2 | 2026-09-25 | Mike Fullerton | Moved into the library cookbook; added Reference Implementations. |
+| 1.1.1 | 2026-09-24 | Mike Fullerton | Phase 6 lint: re-audited open-question markers against the marker rules; kept markers are one-line named bullets. |
+| 1.1.0 | 2026-09-23 | Mike Fullerton | Lint pass: cited symbols instead of source line numbers, added a Data Model section for `TransferTarget`/`TransferTargetRef`/`TransferPreviewResult`, defined `noun` and noted its locale-sensitive casing, corrected test vectors 014 and 027 to concrete inputs and unit-level reachability, corrected the Differentiate Without Color entry, bolded the Design Decisions labels, removed template residue from Accessibility Options, populated `depends-on`, and replaced the Compliance table's invented checks with the real `screen-reader-support` check. |
+| 1.0.0 | 2026-09-23 | Mike Fullerton | Initial recipe extracted from `transfer-ownership-section.tsx`: disclosure-gated destination menu with nested submenu targets, a server preflight race-guarded against stale results, and a type-to-confirm transfer dialog. |
