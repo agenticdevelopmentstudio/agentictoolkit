@@ -67,14 +67,14 @@ public struct SigninApp: Codable, Hashable, Sendable, Identifiable {
     }
 
     public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(String.self, forKey: .id)
-        slug = try c.decode(String.self, forKey: .slug)
-        name = try c.decode(String.self, forKey: .name)
-        allowedReturnOrigins = try c.decode([String].self, forKey: .allowedReturnOrigins)
-        defaultEcosystemId = try c.decode(String.self, forKey: .defaultEcosystemId)
-        githubEnabled = try c.decode(Bool.self, forKey: .githubEnabled)
-        redirectUris = try c.decodeIfPresent([String].self, forKey: .redirectUris) ?? []
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        slug = try container.decode(String.self, forKey: .slug)
+        name = try container.decode(String.self, forKey: .name)
+        allowedReturnOrigins = try container.decode([String].self, forKey: .allowedReturnOrigins)
+        defaultEcosystemId = try container.decode(String.self, forKey: .defaultEcosystemId)
+        githubEnabled = try container.decode(Bool.self, forKey: .githubEnabled)
+        redirectUris = try container.decodeIfPresent([String].self, forKey: .redirectUris) ?? []
     }
 
     /// The part of the client id after the ecosystem prefix (`myeco.whatsnow` → `whatsnow`).
