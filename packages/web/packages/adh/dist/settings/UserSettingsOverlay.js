@@ -44,7 +44,11 @@ import {
 import { UsagePanel, SocialLinksPanel, AddressesPanel } from "@agentic-toolkit/profile";
 import { TokensPanel } from "@agentic-toolkit/authentication";
 import { AssistantsPanel } from "@agentic-toolkit/personas";
-import { FeatureTitle, SettingsDirtyProvider } from "@agentic-toolkit/resource";
+import {
+  FeatureTitle,
+  RecordAffordanceContext,
+  SettingsDirtyProvider
+} from "@agentic-toolkit/resource";
 import { RecordApiButton } from "@agentic-toolkit/api-explorer";
 
 // src/site/reservedSlugs.ts
@@ -566,6 +570,7 @@ import {
   resolveSettingsTopic
 } from "@agentic-toolkit/adh/settings/topics";
 import { jsx as jsx3, jsxs as jsxs3 } from "react/jsx-runtime";
+var renderSettingsApi = (props) => /* @__PURE__ */ jsx3(RecordApiButton, { ...props });
 var ICONS = {
   account: /* @__PURE__ */ jsx3(User, { size: 16, "aria-hidden": true }),
   security: /* @__PURE__ */ jsx3(Shield, { size: 16, "aria-hidden": true }),
@@ -646,17 +651,17 @@ function buildSettingsTopics() {
       // route, which renders this same list uncontrolled. Do not "fix" it to match the
       // overlay's actual URL; there isn't one.
       href: `/settings/${t.id}`,
-      content: /* @__PURE__ */ jsxs3("div", { className: "flex min-h-0 min-w-0 flex-1 flex-col", children: [
+      content: /* @__PURE__ */ jsx3(RecordAffordanceContext.Provider, { value: renderSettingsApi, children: /* @__PURE__ */ jsxs3("div", { className: "flex min-h-0 min-w-0 flex-1 flex-col", children: [
         /* @__PURE__ */ jsx3(
           FeatureTitle,
           {
             title: t.label,
             help: HELP[t.id],
-            trailing: apiPath ? /* @__PURE__ */ jsx3(RecordApiButton, { path: apiPath, pathValues: {}, title: `${t.label} API` }) : void 0
+            api: apiPath ? { path: apiPath, pathValues: {}, title: `${t.label} API` } : null
           }
         ),
         PANELS[t.id]
-      ] })
+      ] }) })
     };
   });
 }

@@ -7,6 +7,7 @@ import { MessagesSquare, Palette, SlidersHorizontal, SquareTerminal } from "luci
 import { HierarchicalDetailView } from "@agenticdevelopertoolkit/ui/blocks";
 import { EmptyState } from "@agenticdevelopertoolkit/ui/components/empty-state";
 import { DEV_BUILD } from "@agentic-toolkit/adh-registry/deployment-env";
+import { settingsLast } from "@agentic-toolkit/resource";
 
 // src/debug-env/FloatingWindow.tsx
 import {
@@ -486,8 +487,10 @@ function rootTopicsFor({
   devBuild,
   hasChatTheme
 }) {
-  return TOP_ITEMS.filter(
-    (t) => (t.id !== "chat-theme" || hasChatTheme) && (t.id !== "site-theme" || devBuild)
+  return settingsLast(
+    TOP_ITEMS.filter(
+      (t) => (t.id !== "chat-theme" || hasChatTheme) && (t.id !== "site-theme" || devBuild)
+    )
   );
 }
 var SiteThemeConsole = process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === "local" || process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === "testing" || process.env.NEXT_PUBLIC_DEPLOYMENT_ENV === "staging" ? dynamic(
@@ -540,7 +543,7 @@ function DebugConsoleBody({
     // height and its rows align with Themes/Areas, reading as the HTD's first column rather than
     // a bare flat list floating above the others. (Matches the breadcrumb's "Debug Options" root.)
     title: "Debug Options",
-    items: rootItems.map((t) => ({ id: t.id, label: t.label, icon: t.icon })),
+    items: rootItems.map((t) => ({ id: t.id, label: t.label, icon: t.icon, dividerAfter: t.dividerAfter })),
     selectedId: top,
     onSelect: (id) => setTopGuarded(id),
     // Deselect the topic — the same clear the breadcrumb root, a re-click, and (in narrow mode)

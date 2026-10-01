@@ -503,9 +503,11 @@ the configuration you would otherwise redeploy to change.</p>
 and its own data. Inside one you manage:</p>
 <ul>
 <li><strong>Applications</strong> \u2014 one per thing that talks to the Hub. Each carries API tokens
-scoped to this product and nothing else.</li>
-<li><strong>Sign-in apps</strong> \u2014 let your own site sign <em>its</em> customers in through the Hub.
-OAuth you do not have to build.</li>
+scoped to this product and nothing else. Applications come with <strong>client auth</strong>
+(Applications \u25B8 Settings): how your own apps sign <em>their</em> customers in through
+the Hub \u2014 sign-in, sign-up, OAuth providers, and a login registration. One set of
+settings per product, which any application can override. OAuth you do not have
+to build.</li>
 <li><strong>Users</strong> \u2014 your product's customers: invitations, access requests, and pending
 members. These are not Hub users.</li>
 <li><strong>Email signup</strong> \u2014 a waitlist or launch-notification capture, with the list
@@ -529,8 +531,8 @@ because of the last link.</p>
 something.</strong> The project names the persona, the stores, and the status group that
 ship together. Without it, an application is a credential with nothing on the
 other end.</p>
-<p><strong>Sign-in apps plus <a href="/hub/workspaces">members</a> is the distinction to get right.</strong>
-Members are people in <em>your workspace</em> \u2014 colleagues. Sign-in apps serve people in
+<p><strong>Client auth plus <a href="/hub/workspaces">members</a> is the distinction to get right.</strong>
+Members are people in <em>your workspace</em> \u2014 colleagues. Client auth serves people in
 <em>your product</em> \u2014 customers. They sign in through different flows, appear in
 different lists, and a customer never gains reach into your workspace.</p>
 <p><strong>Feature flags plus billing is how a rollout usually actually looks.</strong> A flag
@@ -553,11 +555,10 @@ customers, and its flags on one screen:</p>
 is the customer-facing site; <strong>Dognamr CLI</strong> is Casey's own tool. Both are
 applications, and neither can read Shelterly:</p>
 <p><img src="https://agenticdeveloperhub.com/screenshots/applications.png" alt="The Dognamr applications \u2014 Dognamr Web and Dognamr CLI, their consumer kinds differing"></p>
-<p>Dognamr's visitors sign in through the product's own sign-in app. These are
-Casey's customers, not Hub users \u2014 the distinction most readers get wrong the
+<p>Dognamr's visitors sign in through the product's own login registration. These
+are Casey's customers, not Hub users \u2014 the distinction most readers get wrong the
 first time:</p>
-<p><img src="https://agenticdeveloperhub.com/screenshots/signin-apps.png" alt="Dognamr&#x27;s sign-in apps"></p>
-<p><img src="https://agenticdeveloperhub.com/screenshots/auth.png" alt="Dognamr&#x27;s end-user sign-in settings"></p>
+<p><img src="https://agenticdeveloperhub.com/screenshots/auth.png" alt="Dognamr&#x27;s client auth settings"></p>
 <p>Shelterly is not open yet, so its front page captures interest instead of
 accounts:</p>
 <p><img src="https://agenticdeveloperhub.com/screenshots/email-signup.png" alt="Dognamr&#x27;s email signup capture, with signups against it"></p>

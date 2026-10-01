@@ -29,7 +29,9 @@ declare const TOP_ITEMS: readonly [{
 export declare function rootTopicsFor({ devBuild, hasChatTheme, }: {
     devBuild: boolean;
     hasChatTheme: boolean;
-}): readonly (typeof TOP_ITEMS)[number][];
+}): readonly ((typeof TOP_ITEMS)[number] & {
+    dividerAfter?: boolean;
+})[];
 /**
  * The unified Debug console window — a backdrop-less {@link FloatingWindow} whose
  * {@link HierarchicalDetailView} stack hosts every debug topic (Settings / Environment /
