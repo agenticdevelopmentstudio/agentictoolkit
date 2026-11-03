@@ -8,7 +8,7 @@ sites. Ships as a pnpm monorepo of pre-built ESM packages under the
 
 Foundation — everything else builds on these. **These are not in this
 workspace.** They moved to the public
-[agenticdevelopertoolkit](https://github.com/agenticdevelopmentstudio/agenticdevelopertoolkit)
+[agenticdevelopertoolkit](https://github.com/agenticdevelopmentstudio/adhsdk)
 in 2026-08 and are named `@agenticdevelopertoolkit/*`. This repo reaches them
 through its `external/agenticdevelopertoolkit` submodule — a separate repo and
 a separate pnpm workspace, so manifests here depend on them by `link:` rather

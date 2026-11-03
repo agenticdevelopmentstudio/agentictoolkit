@@ -38,7 +38,7 @@ The Web platform is a pnpm monorepo. Libraries live under
 
 **The shared UI packages are not here any more.** `ui`, `themes`, `model`,
 `controls`, `landing`, `markdown`, `search` and `editing` now live in the
-public [agenticdevelopertoolkit](https://github.com/agenticdevelopmentstudio/agenticdevelopertoolkit)
+public [agenticdevelopertoolkit](https://github.com/agenticdevelopmentstudio/adhsdk)
 toolkit and are named `@agenticdevelopertoolkit/*`. This repo reaches them
 through its `external/agenticdevelopertoolkit` submodule, so a
 `git clone --recursive` still has every one of them on disk — look under
