@@ -69,17 +69,17 @@ importers:
         specifier: workspace:*
         version: link:../resource
       '@agenticdevelopertoolkit/landing':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/landing
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/landing
+        specifier: link:../../../../external/adhsdk/packages/web/packages/landing
+        version: link:../../../../external/adhsdk/packages/web/packages/landing
       '@agenticdevelopertoolkit/markdown':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/markdown
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/markdown
+        specifier: link:../../../../external/adhsdk/packages/web/packages/markdown
+        version: link:../../../../external/adhsdk/packages/web/packages/markdown
       '@agenticdevelopertoolkit/themes':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/themes
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/themes
+        specifier: link:../../../../external/adhsdk/packages/web/packages/themes
+        version: link:../../../../external/adhsdk/packages/web/packages/themes
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../external/adhsdk/packages/web/packages/ui
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.55.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -244,8 +244,8 @@ importers:
         specifier: workspace:*
         version: link:../next-preflight
       '@agenticdevelopertoolkit/themes':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/themes
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/themes
+        specifier: link:../../../../external/adhsdk/packages/web/packages/themes
+        version: link:../../../../external/adhsdk/packages/web/packages/themes
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -383,8 +383,8 @@ importers:
   packages/adh-ui:
     dependencies:
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../external/adhsdk/packages/web/packages/ui
       '@base-ui/react':
         specifier: 1.5.0
         version: 1.5.0(@types/react@19.2.16)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -459,8 +459,8 @@ importers:
         specifier: workspace:*
         version: link:../auth
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -538,8 +538,8 @@ importers:
   packages/auth:
     dependencies:
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../external/adhsdk/packages/web/packages/ui
       '@simplewebauthn/browser':
         specifier: ^13.3.0
         version: 13.3.0
@@ -623,8 +623,8 @@ importers:
         specifier: workspace:*
         version: link:../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -708,8 +708,8 @@ importers:
         specifier: workspace:*
         version: link:../auth
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../external/adhsdk/packages/web/packages/ui
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.101.2(react@19.2.7)
@@ -824,8 +824,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.101.2(react@19.2.7)
@@ -921,8 +921,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.101.2(react@19.2.7)
@@ -1009,8 +1009,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -1112,8 +1112,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.101.2(react@19.2.7)
@@ -1218,8 +1218,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -1306,8 +1306,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -1391,8 +1391,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.101.2(react@19.2.7)
@@ -1464,17 +1464,17 @@ importers:
   packages/features/bitbag:
     devDependencies:
       '@agenticdevelopertoolkit/avatar':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/avatar
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/avatar
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/avatar
+        version: link:../../../../../external/adhsdk/packages/web/packages/avatar
       '@agenticdevelopertoolkit/chat':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/chat
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/chat
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/chat
+        version: link:../../../../../external/adhsdk/packages/web/packages/chat
       '@agenticdevelopertoolkit/themes':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/themes
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/themes
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/themes
+        version: link:../../../../../external/adhsdk/packages/web/packages/themes
       '@agenticdevelopertoolkit/viewport':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/viewport
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/viewport
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/viewport
+        version: link:../../../../../external/adhsdk/packages/web/packages/viewport
       '@testing-library/jest-dom':
         specifier: ^6.9.1
         version: 6.9.1
@@ -1518,8 +1518,8 @@ importers:
         specifier: workspace:*
         version: link:../../data
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -1597,8 +1597,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -1679,8 +1679,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.101.2(react@19.2.7)
@@ -1764,8 +1764,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.101.2(react@19.2.7)
@@ -1849,8 +1849,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -1931,8 +1931,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -2013,8 +2013,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -2101,8 +2101,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -2183,11 +2183,11 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/markdown':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/markdown
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/markdown
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/markdown
+        version: link:../../../../../external/adhsdk/packages/web/packages/markdown
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -2316,8 +2316,8 @@ importers:
         specifier: workspace:*
         version: link:../teams
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.101.2(react@19.2.7)
@@ -2410,8 +2410,8 @@ importers:
         specifier: workspace:*
         version: link:../teams
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.101.2(react@19.2.7)
@@ -2492,8 +2492,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       '@tanstack/react-query':
         specifier: ^5.62.0
         version: 5.101.2(react@19.2.7)
@@ -2577,8 +2577,8 @@ importers:
         specifier: workspace:*
         version: link:../teams
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -2650,11 +2650,11 @@ importers:
         specifier: workspace:*
         version: link:../../auth
       '@agenticdevelopertoolkit/registry-profile':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/registry-profile
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/registry-profile
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/registry-profile
+        version: link:../../../../../external/adhsdk/packages/web/packages/registry-profile
       '@agenticdevelopertoolkit/registry-types':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/registry-types
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/registry-types
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/registry-types
+        version: link:../../../../../external/adhsdk/packages/web/packages/registry-types
       '@testing-library/jest-dom':
         specifier: ^6.9.1
         version: 6.9.1
@@ -2710,11 +2710,11 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/markdown':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/markdown
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/markdown
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/markdown
+        version: link:../../../../../external/adhsdk/packages/web/packages/markdown
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -2831,8 +2831,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -2916,8 +2916,8 @@ importers:
         specifier: workspace:*
         version: link:../../resource
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -2992,8 +2992,8 @@ importers:
         specifier: workspace:*
         version: link:../data
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)
@@ -3068,17 +3068,17 @@ importers:
   packages/persona:
     devDependencies:
       '@agenticdevelopertoolkit/avatar':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/avatar
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/avatar
+        specifier: link:../../../../external/adhsdk/packages/web/packages/avatar
+        version: link:../../../../external/adhsdk/packages/web/packages/avatar
       '@agenticdevelopertoolkit/chat':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/chat
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/chat
+        specifier: link:../../../../external/adhsdk/packages/web/packages/chat
+        version: link:../../../../external/adhsdk/packages/web/packages/chat
       '@agenticdevelopertoolkit/themes':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/themes
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/themes
+        specifier: link:../../../../external/adhsdk/packages/web/packages/themes
+        version: link:../../../../external/adhsdk/packages/web/packages/themes
       '@agenticdevelopertoolkit/viewport':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/viewport
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/viewport
+        specifier: link:../../../../external/adhsdk/packages/web/packages/viewport
+        version: link:../../../../external/adhsdk/packages/web/packages/viewport
       '@types/react':
         specifier: 19.2.16
         version: 19.2.16
@@ -3113,8 +3113,8 @@ importers:
         specifier: workspace:*
         version: link:../data
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../external/adhsdk/packages/web/packages/ui
       '@base-ui/react':
         specifier: 1.5.0
         version: 1.5.0(@types/react@19.2.16)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -3238,11 +3238,11 @@ importers:
         specifier: workspace:*
         version: link:../deploy-platform
       '@agenticdevelopertoolkit/themes':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/themes
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/themes
+        specifier: link:../../../../external/adhsdk/packages/web/packages/themes
+        version: link:../../../../external/adhsdk/packages/web/packages/themes
       '@agenticdevelopertoolkit/ui':
-        specifier: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
-        version: link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui
+        specifier: link:../../../../external/adhsdk/packages/web/packages/ui
+        version: link:../../../../external/adhsdk/packages/web/packages/ui
       lucide-react:
         specifier: ^1.16.0
         version: 1.16.0(react@19.2.7)

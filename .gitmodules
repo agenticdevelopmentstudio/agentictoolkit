@@ -1,3 +1,3 @@
 [submodule "agenticdevelopertoolkit"]
-	path = external/agenticdevelopertoolkit
+	path = external/adhsdk
 	url = https://github.com/agenticdevelopmentstudio/adhsdk.git

@@ -21,7 +21,7 @@ const CSS = readFileSync(join(__dirname, '../styles/adh-registry-theme.css'), 'u
 const SOURCES = {
   '--rp-': join(
     __dirname,
-    '../../../../../../external/agenticdevelopertoolkit/packages/web/packages/registry-profile/src/css/profile.css',
+    '../../../../../../external/adhsdk/packages/web/packages/registry-profile/src/css/profile.css',
   ),
   '--rf-': join(__dirname, '../../../features/registry/src/css/editor.css'),
 } as const

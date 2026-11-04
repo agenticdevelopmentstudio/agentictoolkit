@@ -18,7 +18,7 @@ So: snapshot the output, and hand the original mtime back to a file the run
 reproduced exactly. Content behaviour is unchanged — a real change is still written,
 so each generator's `git diff --exit-code` drift gate still fires.
 
-This is the same fix `external/agenticdevelopertoolkit/packages/web/packages/themes/scripts/build-tokens.mjs` carries for Style
+This is the same fix `external/adhsdk/packages/web/packages/themes/scripts/build-tokens.mjs` carries for Style
 Dictionary's identical habit, at the one other seam in this workspace where a
 generator writes into a package's `src/`.
 """

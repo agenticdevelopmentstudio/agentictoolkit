@@ -361,21 +361,21 @@
     "motion": "^12.40.0",
     "posthog-js": "^1.386.1",
     "tailwind-merge": "^2.6.0",
-    "@agenticdevelopertoolkit/landing": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/landing",
-    "@agenticdevelopertoolkit/markdown": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/markdown",
-    "@agenticdevelopertoolkit/themes": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/themes",
-    "@agenticdevelopertoolkit/ui": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui"
+    "@agenticdevelopertoolkit/landing": "link:../../../../external/adhsdk/packages/web/packages/landing",
+    "@agenticdevelopertoolkit/markdown": "link:../../../../external/adhsdk/packages/web/packages/markdown",
+    "@agenticdevelopertoolkit/themes": "link:../../../../external/adhsdk/packages/web/packages/themes",
+    "@agenticdevelopertoolkit/ui": "link:../../../../external/adhsdk/packages/web/packages/ui"
   },
   "peerDependencies": {
     "next": ">=15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
-  "//devDependencies": "@agenticdevelopertoolkit/themes is a TEST ORACLE, deliberately not a runtime dep: only src/__tests__/footerDock.test.tsx names it, rendering <ThemeStyle> to compute the CSS a theme should produce. This package's own src reaches theme vocabulary through @agentic-toolkit/bitbag's re-export, which is what keeps the persona toolkit out of the shipped graph — that indirection is the layering, not a workaround, and must stay. `link:` because that toolkit is a SEPARATE pnpm workspace — workspace:* cannot reach it. The target is THIS repo's own submodule at external/agenticdevelopertoolkit, so it resolves in any recursive clone; it used to climb out of the repo to a sibling checkout and resolved only by luck of the consumer's directory layout. Depth is one shallower than bitbag's identical entries, which sit under packages/features/.",
+  "//devDependencies": "@agenticdevelopertoolkit/themes is a TEST ORACLE, deliberately not a runtime dep: only src/__tests__/footerDock.test.tsx names it, rendering <ThemeStyle> to compute the CSS a theme should produce. This package's own src reaches theme vocabulary through @agentic-toolkit/bitbag's re-export, which is what keeps the persona toolkit out of the shipped graph — that indirection is the layering, not a workaround, and must stay. `link:` because that toolkit is a SEPARATE pnpm workspace — workspace:* cannot reach it. The target is THIS repo's own submodule at external/adhsdk, so it resolves in any recursive clone; it used to climb out of the repo to a sibling checkout and resolved only by luck of the consumer's directory layout. Depth is one shallower than bitbag's identical entries, which sit under packages/features/.",
   "comment:exports./styles.css": "It resolves to adh-site.css, NOT adh-components.css: the site sheet's first line is `@import \"./adh-components.css\"`, so this one subpath still delivers both halves in the order they need (primitives first — several site rules beat a primitive rule at equal specificity and depend on source order). The two sheets arrived in one package from opposite sides of a package boundary that no longer exists; keeping them as separate FILES keeps that layering legible without asking 44 sites to import twice. This note lives at the package.json ROOT, not inside `exports`, because Node rejects an exports map that mixes `.`-prefixed keys with non-prefixed ones (ERR_INVALID_PACKAGE_CONFIG) — a comment key in there is a load-time crash for every consumer, not a comment.",
   "comment:devDependencies.next": "16, not the 15 this package used to build against — the merge brought in the former `@adh/chrome`, which was always on 16, and its details/metadata.ts spreads a `Metadata` produced by @agentic-toolkit/adh-registry (also 16). Next 15 and 16 disagree on that type (15's `metadataBase` admits a string, 16's does not), so building this package against 15 while a sibling builds against 16 fails the spread with TS2322. `peerDependencies.next` stays `>=15.0.0`: the floor is what a CONSUMER must have, and nothing here needs a 16-only runtime — this pin only decides whose .d.ts we typecheck against, and it has to be the one the 44 sites ship.",
   "devDependencies": {
-    "@agenticdevelopertoolkit/themes": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/themes",
+    "@agenticdevelopertoolkit/themes": "link:../../../../external/adhsdk/packages/web/packages/themes",
     "@base-ui/react": "1.5.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",

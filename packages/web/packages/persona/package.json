@@ -66,12 +66,12 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
-  "//devDependencies": "The four @agenticdevelopertoolkit/* entries are peer deps above; these `link:`s exist only so this package can build and typecheck itself. They target THIS repo's own submodule at external/agenticdevelopertoolkit, so a `git clone --recursive` builds with no sibling checkout anywhere on disk.",
+  "//devDependencies": "The four @agenticdevelopertoolkit/* entries are peer deps above; these `link:`s exist only so this package can build and typecheck itself. They target THIS repo's own submodule at external/adhsdk, so a `git clone --recursive` builds with no sibling checkout anywhere on disk.",
   "devDependencies": {
-    "@agenticdevelopertoolkit/avatar": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/avatar",
-    "@agenticdevelopertoolkit/chat": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/chat",
-    "@agenticdevelopertoolkit/themes": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/themes",
-    "@agenticdevelopertoolkit/viewport": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/viewport",
+    "@agenticdevelopertoolkit/avatar": "link:../../../../external/adhsdk/packages/web/packages/avatar",
+    "@agenticdevelopertoolkit/chat": "link:../../../../external/adhsdk/packages/web/packages/chat",
+    "@agenticdevelopertoolkit/themes": "link:../../../../external/adhsdk/packages/web/packages/themes",
+    "@agenticdevelopertoolkit/viewport": "link:../../../../external/adhsdk/packages/web/packages/viewport",
     "@types/react": "19.2.16",
     "@types/react-dom": "19.2.3",
     "esbuild-plugin-preserve-directives": "^0.0.11",

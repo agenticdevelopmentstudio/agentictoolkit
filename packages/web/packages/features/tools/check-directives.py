@@ -45,7 +45,7 @@ be. The only observable difference is the first line of a built file and the
 import list beneath it. Hence a check, and hence the transitive walk: asserting
 only the entry's own first line would have passed on the broken build.
 
-Sibling of `external/agenticdevelopertoolkit/packages/web/packages/landing/tools/check-directives.py`, which asserts the same
+Sibling of `external/adhsdk/packages/web/packages/landing/tools/check-directives.py`, which asserts the same
 property for a package whose entries are declared in its own tsup config.
 """
 from __future__ import annotations

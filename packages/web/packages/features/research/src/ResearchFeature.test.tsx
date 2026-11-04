@@ -524,20 +524,20 @@ describe("ResearchFeature", () => {
   // nothing anywhere in this file observed either call's RESOLVED VALUE, only that the calls
   // happened. That is a coverage hole over `markdownApi.categories()` / `markdownApi.tags()` →
   // `ResearchPane`'s `accountCategories`/`accountTags` → `ResearchDetail`'s `categoryOptions`/
-  // `tagOptions` → `CategoriesAndTags` (`external/agenticdevelopertoolkit/packages/web/packages/ui/src/blocks/categories-and-tags.tsx`) — the
-  // seam `external/agenticdevelopertoolkit/packages/web/packages/ui/src/__tests__/categoriesAndTags.test.tsx` cannot cover, because it renders
+  // `tagOptions` → `CategoriesAndTags` (`external/adhsdk/packages/web/packages/ui/src/blocks/categories-and-tags.tsx`) — the
+  // seam `external/adhsdk/packages/web/packages/ui/src/__tests__/categoriesAndTags.test.tsx` cannot cover, because it renders
   // the control directly and never touches `markdownApi`.
   //
   // What's queryable: `CategoryField`/`TagSetField` (read via `ResearchDetail.tsx` and
   // `categories-and-tags.tsx`) each pair a `Combobox` autocomplete with an `EntityChooser`
   // "Choose…" browser. The browser is the one that renders its full option list as real DOM —
   // `role="option"` rows inside a `role="listbox"` — once its trigger is clicked (see
-  // `external/agenticdevelopertoolkit/packages/web/packages/ui/src/components/list-chooser.tsx`, exercised the same way by
-  // `external/agenticdevelopertoolkit/packages/web/packages/ui/src/__tests__/listChooser.test.tsx`'s `open()` helper). The category trigger's
+  // `external/adhsdk/packages/web/packages/ui/src/components/list-chooser.tsx`, exercised the same way by
+  // `external/adhsdk/packages/web/packages/ui/src/__tests__/listChooser.test.tsx`'s `open()` helper). The category trigger's
   // accessible name is "Browse categories" (`Browse ${label.toLowerCase()}` off
   // `CategoriesAndTags`'s `label: "Categories"`); the tags trigger's is "Tags" (`EntityChooser`'s
   // multi-mode `ariaLabel` is the row's own `label`) — both per
-  // `external/agenticdevelopertoolkit/packages/web/packages/ui/src/__tests__/categoriesAndTags.test.tsx`.
+  // `external/adhsdk/packages/web/packages/ui/src/__tests__/categoriesAndTags.test.tsx`.
   it("wires markdownApi's categories and tags into the classification control's Choose… pickers", async () => {
     categories.mockResolvedValue(["Physics", "Chemistry"]);
     tags.mockResolvedValue(["alpha", "beta"]);

@@ -40,7 +40,7 @@ with prebuilt `dist/` output (no `transpilePackages` required for
 Next.js consumers).
 
 The shared UI vocabulary they build on lives in the
-`external/agenticdevelopertoolkit` submodule and is named
+`external/adhsdk` submodule and is named
 `@agenticdevelopertoolkit/*` — `ui`, `themes`, `model`, `controls`, `landing`,
 `markdown`, `search`, `editing`. It is a separate repo and a separate pnpm
 workspace, reached from here by `link:`.

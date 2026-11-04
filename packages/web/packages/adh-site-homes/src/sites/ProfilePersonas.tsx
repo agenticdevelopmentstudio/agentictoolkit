@@ -18,7 +18,7 @@ import { useClientHost } from '@agentic-toolkit/adh/header'
  *
  * `ProfileView` (`packages/web/packages/adh/src/profile/ProfileView.tsx`) renders `UserCard`
  * directly above whatever this returns, and `UserCard` already draws a `Personas` section
- * (`external/agenticdevelopertoolkit/packages/web/packages/ui/src/blocks/user-card.tsx`) listing each persona's `name`, a `Badge`
+ * (`external/adhsdk/packages/web/packages/ui/src/blocks/user-card.tsx`) listing each persona's `name`, a `Badge`
  * for its `visibility`, and its `description`. Repeating those here would be the same list twice,
  * one scroll apart, so this section renders what the card does NOT: each persona's public
  * ADDRESS — where to go and read it. That is genuinely this site's own contribution; the card

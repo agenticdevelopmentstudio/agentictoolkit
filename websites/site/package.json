@@ -9,14 +9,14 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@agenticdevelopertoolkit/chat": "file:../../external/agenticdevelopertoolkit/packages/web/packages/chat",
+    "@agenticdevelopertoolkit/chat": "file:../../external/adhsdk/packages/web/packages/chat",
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "@agenticdevelopertoolkit/controls": "file:../../external/agenticdevelopertoolkit/packages/web/packages/controls",
-    "@agenticdevelopertoolkit/model": "file:../../external/agenticdevelopertoolkit/packages/web/packages/model",
-    "@agenticdevelopertoolkit/themes": "file:../../external/agenticdevelopertoolkit/packages/web/packages/themes",
-    "@agenticdevelopertoolkit/ui": "file:../../external/agenticdevelopertoolkit/packages/web/packages/ui"
+    "@agenticdevelopertoolkit/controls": "file:../../external/adhsdk/packages/web/packages/controls",
+    "@agenticdevelopertoolkit/model": "file:../../external/adhsdk/packages/web/packages/model",
+    "@agenticdevelopertoolkit/themes": "file:../../external/adhsdk/packages/web/packages/themes",
+    "@agenticdevelopertoolkit/ui": "file:../../external/adhsdk/packages/web/packages/ui"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",

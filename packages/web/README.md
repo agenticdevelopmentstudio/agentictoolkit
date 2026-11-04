@@ -10,12 +10,12 @@ Foundation — everything else builds on these. **These are not in this
 workspace.** They moved to the public
 [agenticdevelopertoolkit](https://github.com/agenticdevelopmentstudio/adhsdk)
 in 2026-08 and are named `@agenticdevelopertoolkit/*`. This repo reaches them
-through its `external/agenticdevelopertoolkit` submodule — a separate repo and
+through its `external/adhsdk` submodule — a separate repo and
 a separate pnpm workspace, so manifests here depend on them by `link:` rather
 than `workspace:*` (pnpm cannot nest workspaces). Sources are on disk after a
 `git clone --recursive`, under
-`external/agenticdevelopertoolkit/packages/web/packages/<name>/`, and that
-repo's [`README.md`](../../external/agenticdevelopertoolkit/README.md) is the
+`external/adhsdk/packages/web/packages/<name>/`, and that
+repo's [`README.md`](../../external/adhsdk/README.md) is the
 authority on what each contains.
 
 | Package | Description | Depends on |
@@ -103,7 +103,7 @@ packages/web/            # workspace root — pnpm/build config lives here
     messaging/ persona/  # DMs + presence; the persona crossing
     deploy-platform/     # deployment/tier helpers
     features/            # one package per product area — chat, bitbag, personas, teams, ...
-external/agenticdevelopertoolkit/   # submodule — the shared UI vocabulary
+external/adhsdk/   # submodule — the shared UI vocabulary
   packages/web/packages/            # ui, themes, model, markdown, search,
                                     # controls, editing, landing, and more
 websites/site/           # Next.js 15 App Router examples site
@@ -123,7 +123,7 @@ clean and leaves room for the other platforms alongside.
 through `file:` refs, so its wiring mirrors what an external consumer does
 rather than what a workspace member gets for free. Since the 2026-08
 extraction **every one of those refs points into
-`external/agenticdevelopertoolkit/packages/web/packages/<name>`**: the site's
+`external/adhsdk/packages/web/packages/<name>`**: the site's
 five dependencies are `chat`, `controls`, `model`, `themes` and `ui`, and it
 names no `packages/web/packages/<name>` target at all.
 
@@ -163,7 +163,7 @@ from the submodule instead:
 
 ```bash
 # In one shell — package(s) in watch mode, from
-# external/agenticdevelopertoolkit/packages/web/
+# external/adhsdk/packages/web/
 pnpm --filter '@agenticdevelopertoolkit/ui...' run dev
 # In another shell — site dev server, from websites/site/
 npm run dev

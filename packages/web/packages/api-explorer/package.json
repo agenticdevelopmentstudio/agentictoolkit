@@ -56,7 +56,7 @@
     "@agentic-toolkit/auth": "workspace:*",
     "lucide-react": "^1.16.0",
     "shiki": "^1.0.0",
-    "@agenticdevelopertoolkit/ui": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui"
+    "@agenticdevelopertoolkit/ui": "link:../../../../external/adhsdk/packages/web/packages/ui"
   },
   "peerDependencies": {
     "next": ">=15.0.0",

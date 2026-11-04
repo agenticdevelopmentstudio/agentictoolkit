@@ -45,7 +45,7 @@
     "@agentic-toolkit/resource": "workspace:*",
     "@tanstack/react-query": "^5.62.0",
     "lucide-react": "^1.16.0",
-    "@agenticdevelopertoolkit/ui": "link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui"
+    "@agenticdevelopertoolkit/ui": "link:../../../../../external/adhsdk/packages/web/packages/ui"
   },
   "peerDependencies": {
     "next": ">=15",

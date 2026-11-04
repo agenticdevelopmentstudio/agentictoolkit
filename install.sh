@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # Submodules FIRST — packages/web/packages/{features/bitbag,adh} carry `link:` deps that
-# point into external/agenticdevelopertoolkit. A `link:` to a directory that does not
+# point into external/adhsdk. A `link:` to a directory that does not
 # exist fails at pnpm-install time, not at build time, so an uninitialised submodule
 # breaks the web bootstrap below with an error that names a path rather than a cause.
 # Safe to run in a clone made without --recursive, and a no-op once initialised.
@@ -34,9 +34,9 @@ if command -v pnpm >/dev/null && command -v node >/dev/null; then
   # so tsc cannot find ADT's .d.ts until this runs once. `pnpm install` + `pnpm run build`
   # are both idempotent (build-tokens/build-theme-data report "unchanged" on a rerun), so
   # this is safe to run on every ./install.sh, not just the first.
-  if [ -d external/agenticdevelopertoolkit/packages/web ]; then
+  if [ -d external/adhsdk/packages/web ]; then
     echo "==> Installing + building the vendored agenticdevelopertoolkit web workspace"
-    ( cd external/agenticdevelopertoolkit/packages/web && pnpm install && pnpm run build )
+    ( cd external/adhsdk/packages/web && pnpm install && pnpm run build )
   fi
 
   echo "==> Installing web workspace deps in packages/web/"

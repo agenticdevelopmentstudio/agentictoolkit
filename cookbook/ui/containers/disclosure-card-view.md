@@ -684,7 +684,7 @@ Not applicable: the source contains no logging call.
   width-floor constraint is `contentWidthFloor`. `color(named:)`'s
   name→role map (`"red"` → `dangerColor`, `"blue"` → `accentColor`, and so
   on) is defined outside this source, in
-  `external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperToolkit/SourcesUI/macOS/Theme/SemanticPalette+NSColor.swift`.
+  `external/adhsdk/packages/apple/AgenticDeveloperToolkit/SourcesUI/macOS/Theme/SemanticPalette+NSColor.swift`.
 
   Public API surface (beyond construction):
   ```swift

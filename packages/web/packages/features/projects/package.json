@@ -41,7 +41,7 @@
     "@agentic-toolkit/teams": "workspace:*",
     "@agentic-toolkit/resource": "workspace:*",
     "lucide-react": "^1.16.0",
-    "@agenticdevelopertoolkit/ui": "link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui"
+    "@agenticdevelopertoolkit/ui": "link:../../../../../external/adhsdk/packages/web/packages/ui"
   },
   "peerDependencies": {
     "next": ">=15",

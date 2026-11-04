@@ -52,7 +52,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",
     "tailwind-merge": "^2.6.0",
-    "@agenticdevelopertoolkit/ui": "link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui"
+    "@agenticdevelopertoolkit/ui": "link:../../../../../external/adhsdk/packages/web/packages/ui"
   },
   "peerDependencies": {
     "next": ">=15",

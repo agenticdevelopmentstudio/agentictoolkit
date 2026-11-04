@@ -206,7 +206,7 @@ const SITES_SRC = sitesWorkspaceRoot()
  * adh's old app tier still RESOLVED after the package moved into the submodule, to a
  * doubled path that exists nowhere, so the assertion below failed on a bookkeeping error
  * rather than on the thing it guards. The upward walk that replaced it then broke in turn
- * when themes left this workspace for `external/agenticdevelopertoolkit` — it is no longer
+ * when themes left this workspace for `external/adhsdk` — it is no longer
  * ABOVE this file at all, it is sideways and down. The `node_modules` link is neither: it
  * is the same edge the import statements at the top of this file travel, so it moves when
  * the dependency moves and fails loudly when the dependency is gone.

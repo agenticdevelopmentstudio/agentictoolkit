@@ -135,7 +135,7 @@
     "@agentic-toolkit/adh-ui": "workspace:*",
     "@agentic-toolkit/auth": "workspace:*",
     "@tanstack/react-query": "^5.62.0",
-    "@agenticdevelopertoolkit/ui": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui"
+    "@agenticdevelopertoolkit/ui": "link:../../../../external/adhsdk/packages/web/packages/ui"
   },
   "peerDependencies": {
     "react": "^19.0.0"

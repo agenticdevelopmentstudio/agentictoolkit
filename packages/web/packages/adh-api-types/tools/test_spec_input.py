@@ -5,7 +5,7 @@ failure mode for a `pnpm --filter … gen:… -- <spec>` invocation is the
 unhelpful `spec not found: <cwd>/--` (the separator itself read as the path).
 
 Pattern matches the sibling precedent:
-external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperHubClient/scripts/test_generate_spec_arg.py
+external/adhsdk/packages/apple/AgenticDeveloperHubClient/scripts/test_generate_spec_arg.py
 """
 
 import sys

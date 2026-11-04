@@ -40,9 +40,9 @@ The Web platform is a pnpm monorepo. Libraries live under
 `controls`, `landing`, `markdown`, `search` and `editing` now live in the
 public [agenticdevelopertoolkit](https://github.com/agenticdevelopmentstudio/adhsdk)
 toolkit and are named `@agenticdevelopertoolkit/*`. This repo reaches them
-through its `external/agenticdevelopertoolkit` submodule, so a
+through its `external/adhsdk` submodule, so a
 `git clone --recursive` still has every one of them on disk — look under
-`external/agenticdevelopertoolkit/packages/web/packages/<name>/`, and read
+`external/adhsdk/packages/web/packages/<name>/`, and read
 that repo's `README.md` for what each one contains.
 
 The full table, with each package's dependencies, is in

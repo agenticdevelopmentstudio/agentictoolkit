@@ -1,5 +1,5 @@
 // The chat contract types this package's chat backends speak, copied VERBATIM from
-// `external/agenticdevelopertoolkit/packages/web/packages/chat/src/types.ts` (and its
+// `external/adhsdk/packages/web/packages/chat/src/types.ts` (and its
 // `src/backends/types.ts` for `ChatBackend`) — this repo's OWN submodule, so the paths
 // resolve in any recursive clone, with or without adh.
 //

@@ -67,11 +67,11 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
-  "//devDependencies": "The two @agenticdevelopertoolkit/* entries are peer deps above — consumers supply them; these link:s exist only so this package can build and test itself. They target THIS repo's own nested submodule at external/agenticdevelopertoolkit, so a recursive clone builds with no sibling checkout anywhere on disk. link: rather than workspace:* because that toolkit is a SEPARATE pnpm workspace and pnpm cannot nest workspaces. @agentic-toolkit/auth is a devDependency, not a runtime one: only the ContactComposer test imports AuthHttpError from it, and the component itself reads a thrown failure structurally so the shipped code carries no auth dependency at all.",
+  "//devDependencies": "The two @agenticdevelopertoolkit/* entries are peer deps above — consumers supply them; these link:s exist only so this package can build and test itself. They target THIS repo's own nested submodule at external/adhsdk, so a recursive clone builds with no sibling checkout anywhere on disk. link: rather than workspace:* because that toolkit is a SEPARATE pnpm workspace and pnpm cannot nest workspaces. @agentic-toolkit/auth is a devDependency, not a runtime one: only the ContactComposer test imports AuthHttpError from it, and the component itself reads a thrown failure structurally so the shipped code carries no auth dependency at all.",
   "devDependencies": {
     "@agentic-toolkit/auth": "workspace:*",
-    "@agenticdevelopertoolkit/registry-profile": "link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/registry-profile",
-    "@agenticdevelopertoolkit/registry-types": "link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/registry-types",
+    "@agenticdevelopertoolkit/registry-profile": "link:../../../../../external/adhsdk/packages/web/packages/registry-profile",
+    "@agenticdevelopertoolkit/registry-types": "link:../../../../../external/adhsdk/packages/web/packages/registry-types",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

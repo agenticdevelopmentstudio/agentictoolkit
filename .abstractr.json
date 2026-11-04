@@ -2,8 +2,8 @@
   "version": 1,
   "shared_packages": [
     {
-      "name": "agenticdevelopertoolkit",
-      "path": "external/agenticdevelopertoolkit"
+      "name": "adhsdk",
+      "path": "external/adhsdk"
     }
   ],
   "tiers": [

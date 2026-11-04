@@ -58,11 +58,11 @@ Cross-platform repo with per-platform directories under `packages/`:
 - `packages/android/` — TBD
 
 Plus one non-platform directory:
-- `external/agenticdevelopertoolkit/` — git submodule (see below).
+- `external/adhsdk/` — git submodule (see below).
 
 ### The `agenticdevelopertoolkit` submodule
 
-`external/agenticdevelopertoolkit` is this repo's only submodule. It is a
+`external/adhsdk` is this repo's only submodule. It is a
 **separate, public product**, not a vendored copy of ours, and the dependency is
 strictly one-way — it imports nothing from this repo. As of the 2026-08
 extraction it holds **the majority of this repo's former web surface**: sixteen
@@ -75,7 +75,7 @@ packages, eight of which were ours until that move.
   `registry-profile`, `registry-types`, `textlens`, `viewport`.
 
 A reader who came looking for `packages/web/packages/ui` should look in
-`external/agenticdevelopertoolkit/packages/web/packages/ui` instead. The names
+`external/adhsdk/packages/web/packages/ui` instead. The names
 changed with the address: `@agentic-toolkit/ui` is now
 `@agenticdevelopertoolkit/ui`, and so on for all eight.
 
@@ -232,7 +232,7 @@ Common commands (from `packages/web/`):
 workspace. It depends on the packages via `file:` refs so its wiring mirrors
 what external consumers will use — `file:../../packages/web/packages/<name>`
 for what is still here, and
-`file:../../external/agenticdevelopertoolkit/packages/web/packages/<name>` for
+`file:../../external/adhsdk/packages/web/packages/<name>` for
 the four `@agenticdevelopertoolkit/*` packages it shows off.
 
 #### The `landing`/`viewport` scroll contract, and the four rules the extraction broke
@@ -240,7 +240,7 @@ the four `@agenticdevelopertoolkit/*` packages it shows off.
 Both live in ADT now, with `landing` itself. The contract (a page may load
 `landing` and `viewport` but never on the same element) and the four
 invisible-to-tooling rules the port taught are in
-`external/agenticdevelopertoolkit/packages/web/packages/landing/README.md`.
+`external/adhsdk/packages/web/packages/landing/README.md`.
 That is the only copy: a second one here would drift, and this is the repo
 that no longer contains either package to notice.
 

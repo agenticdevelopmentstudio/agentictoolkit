@@ -18,7 +18,7 @@ export type SiteLandingProps = {
 // The type below reads the shared LANDING scale (--type-landing-*), the same one
 // the .text-landing-* classes carry, so this hero and a site that hand-writes its
 // own landing render the identical tier. The scale is defined once in the toolkit
-// (external/agenticdevelopertoolkit/packages/web/packages/themes/tokens/semantic/typography.json) — resize it THERE.
+// (external/adhsdk/packages/web/packages/themes/tokens/semantic/typography.json) — resize it THERE.
 //
 // THE FALLBACK CONVENTION, for every consumer of this scale in the repo: the literal
 // after a --type-landing-* var is THE VALUE THE DEFAULT THEME SETS FOR THAT TOKEN, so

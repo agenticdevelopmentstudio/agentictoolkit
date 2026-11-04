@@ -41,7 +41,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 COPY = REPO / "packages/web/packages/adh/src/persona-chat/chat-types.ts"
-CHAT = REPO / "external/agenticdevelopertoolkit/packages/web/packages/chat/src"
+CHAT = REPO / "external/adhsdk/packages/web/packages/chat/src"
 SOURCES = (CHAT / "types.ts", CHAT / "backends/types.ts")
 
 DECL = re.compile(r"^export\s+(?:interface|type)\s+(\w+)", re.M)

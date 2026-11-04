@@ -41,12 +41,12 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
-  "//devDependencies": "The four @agenticdevelopertoolkit/* entries are peer deps above — consumers supply them; these `link:`s exist only so this package can build and test itself. They target THIS repo's own submodule at external/agenticdevelopertoolkit, so a `git clone --recursive` builds with no sibling checkout anywhere on disk. They used to climb six levels OUT of the repo to a sibling clone, which resolved inside adh (both toolkits sit side by side under frontend/src/external/) and nowhere else by guarantee. `link:` rather than workspace:* because that toolkit is a SEPARATE pnpm workspace and pnpm cannot nest workspaces. bitbag is the one package that owns this crossing on purpose: everything else in this repo reaches persona vocabulary through bitbag's re-exports, which is what keeps the persona toolkit out of every other consumer's shipped graph.",
+  "//devDependencies": "The four @agenticdevelopertoolkit/* entries are peer deps above — consumers supply them; these `link:`s exist only so this package can build and test itself. They target THIS repo's own submodule at external/adhsdk, so a `git clone --recursive` builds with no sibling checkout anywhere on disk. They used to climb six levels OUT of the repo to a sibling clone, which resolved inside adh (both toolkits sit side by side under frontend/src/external/) and nowhere else by guarantee. `link:` rather than workspace:* because that toolkit is a SEPARATE pnpm workspace and pnpm cannot nest workspaces. bitbag is the one package that owns this crossing on purpose: everything else in this repo reaches persona vocabulary through bitbag's re-exports, which is what keeps the persona toolkit out of every other consumer's shipped graph.",
   "devDependencies": {
-    "@agenticdevelopertoolkit/avatar": "link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/avatar",
-    "@agenticdevelopertoolkit/chat": "link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/chat",
-    "@agenticdevelopertoolkit/themes": "link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/themes",
-    "@agenticdevelopertoolkit/viewport": "link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/viewport",
+    "@agenticdevelopertoolkit/avatar": "link:../../../../../external/adhsdk/packages/web/packages/avatar",
+    "@agenticdevelopertoolkit/chat": "link:../../../../../external/adhsdk/packages/web/packages/chat",
+    "@agenticdevelopertoolkit/themes": "link:../../../../../external/adhsdk/packages/web/packages/themes",
+    "@agenticdevelopertoolkit/viewport": "link:../../../../../external/adhsdk/packages/web/packages/viewport",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/react": "19.2.16",

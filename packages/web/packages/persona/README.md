@@ -13,9 +13,9 @@ adh holds `agenticdevelopertoolkit` twice on disk — its own submodule, and the
 one nested inside this repo:
 
 ```
-frontend/src/external/agenticdevelopertoolkit                 ← adh's submodule
+frontend/src/external/adhsdk                 ← adh's submodule
 frontend/src/external/agentictoolkit
-    └── external/agenticdevelopertoolkit                      ← this repo's
+    └── external/adhsdk                      ← this repo's
 ```
 
 A bare specifier in a shipped `dist` resolves from the **importing file's real

@@ -34,7 +34,7 @@
  *
  * `build:css` is a plain `cp`, so these specifiers survive verbatim into
  * `dist/css/bitbag-dock.css` and resolve from THIS package's realpath — the toolkit's own
- * `external/agenticdevelopertoolkit` submodule — for every consumer, which is the same
+ * `external/adhsdk` submodule — for every consumer, which is the same
  * one-copy guarantee `@agentic-toolkit/persona` gives the JS side. */
 @import "@agenticdevelopertoolkit/chat/css/base.css";
 @import "@agenticdevelopertoolkit/chat/css/modes/inline.css";

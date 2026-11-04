@@ -10,7 +10,7 @@
 // HierarchicalTopicDetail (which ServicesSection renders through) measures its container's
 // clientWidth via ResizeObserver to choose wide vs. narrow layout; jsdom's default clientWidth is 0,
 // which reads as narrow and would hide the selected leaf's detail pane behind a push-nav this test
-// never drives. Force wide mode the same way external/agenticdevelopertoolkit/packages/web/packages/ui/src/__tests__/hierarchicalTopicDetail.test.tsx
+// never drives. Force wide mode the same way external/adhsdk/packages/web/packages/ui/src/__tests__/hierarchicalTopicDetail.test.tsx
 // does — override clientWidth before the first (useLayoutEffect) measurement.
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";

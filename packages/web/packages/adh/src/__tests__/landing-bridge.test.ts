@@ -23,7 +23,7 @@ const CSS = readFileSync(join(__dirname, '../styles/adh-landing-bridge.css'), 'u
  *
  * Reached through this package's own `node_modules` link rather than by counting
  * `..` hops: landing is no longer a sibling in this workspace — it lives in the
- * `external/agenticdevelopertoolkit` submodule, which is a different depth and a
+ * `external/adhsdk` submodule, which is a different depth and a
  * different repo. The link is the same one the import statements use, so it cannot
  * point somewhere the code does not.
  */

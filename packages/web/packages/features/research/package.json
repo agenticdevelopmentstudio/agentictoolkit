@@ -43,8 +43,8 @@
     "@agentic-toolkit/data": "workspace:*",
     "@agentic-toolkit/resource": "workspace:*",
     "lucide-react": "^1.16.0",
-    "@agenticdevelopertoolkit/markdown": "link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/markdown",
-    "@agenticdevelopertoolkit/ui": "link:../../../../../external/agenticdevelopertoolkit/packages/web/packages/ui"
+    "@agenticdevelopertoolkit/markdown": "link:../../../../../external/adhsdk/packages/web/packages/markdown",
+    "@agenticdevelopertoolkit/ui": "link:../../../../../external/adhsdk/packages/web/packages/ui"
   },
   "peerDependencies": {
     "next": ">=15",

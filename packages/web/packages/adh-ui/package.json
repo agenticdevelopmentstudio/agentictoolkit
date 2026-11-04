@@ -62,7 +62,7 @@
   },
   "comment:dependencies": "`link:`, not `workspace:*`: agenticdevelopertoolkit is a SEPARATE pnpm workspace reached through this repo's own submodule, and pnpm cannot nest workspaces. Same shape as persona, adh, features/bitbag and features/registry already use — note the depth is four levels here and five under packages/features/.",
   "dependencies": {
-    "@agenticdevelopertoolkit/ui": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui",
+    "@agenticdevelopertoolkit/ui": "link:../../../../external/adhsdk/packages/web/packages/ui",
     "@base-ui/react": "1.5.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",

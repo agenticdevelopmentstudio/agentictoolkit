@@ -23,7 +23,7 @@
     "@agentic-toolkit/next-env": "workspace:*",
     "@agentic-toolkit/next-headers": "workspace:*",
     "@agentic-toolkit/next-preflight": "workspace:*",
-    "@agenticdevelopertoolkit/themes": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/themes"
+    "@agenticdevelopertoolkit/themes": "link:../../../../external/adhsdk/packages/web/packages/themes"
   },
   "peerDependencies": {
     "next": "^16.0.0"

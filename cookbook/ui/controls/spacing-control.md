@@ -521,7 +521,7 @@ Not applicable: source contains no logging call anywhere.
   `palette.nsColor(.windowBackground)`, `palette.font(.code)`,
   `palette.font(.body)`. The open contrast question
   (minimum-contrast-ratio) concerns `SemanticPalette.derive(_:theme:)`
-  (`external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperToolkit/Sources/Theme/SemanticPalette.swift`)
+  (`external/adhsdk/packages/apple/AgenticDeveloperToolkit/Sources/Theme/SemanticPalette.swift`)
   and would need a `SemanticPalette`-derived Increase-Contrast variant
   sourced from `NSWorkspace.accessibilityDisplayShouldIncreaseContrast`.
 

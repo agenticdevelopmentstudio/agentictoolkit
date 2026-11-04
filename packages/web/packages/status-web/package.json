@@ -55,8 +55,8 @@
   "comment:dependencies": "`link:`, not `workspace:*`: agenticdevelopertoolkit is a SEPARATE pnpm workspace reached through this repo's own submodule, and pnpm cannot nest workspaces. Same shape as adh-ui, api-explorer and persona — four levels up from packages/web/packages/<pkg>.",
   "dependencies": {
     "@agentic-toolkit/deploy-platform": "workspace:*",
-    "@agenticdevelopertoolkit/themes": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/themes",
-    "@agenticdevelopertoolkit/ui": "link:../../../../external/agenticdevelopertoolkit/packages/web/packages/ui",
+    "@agenticdevelopertoolkit/themes": "link:../../../../external/adhsdk/packages/web/packages/themes",
+    "@agenticdevelopertoolkit/ui": "link:../../../../external/adhsdk/packages/web/packages/ui",
     "lucide-react": "^1.16.0"
   },
   "peerDependencies": {

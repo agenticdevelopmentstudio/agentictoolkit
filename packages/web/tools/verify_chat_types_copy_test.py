@@ -21,7 +21,7 @@ GUARD = HERE / "verify_chat_types_copy.py"
 REAL = HERE.parents[2]  # <repo>/packages/web/tools -> <repo>
 
 REAL_COPY = REAL / "packages/web/packages/adh/src/persona-chat/chat-types.ts"
-REAL_CHAT = REAL / "external/agenticdevelopertoolkit/packages/web/packages/chat/src"
+REAL_CHAT = REAL / "external/adhsdk/packages/web/packages/chat/src"
 
 cases: list[tuple[str, object, object]] = []
 
@@ -39,7 +39,7 @@ def build(tmp: Path, *, with_sources: bool = True) -> Path:
     shutil.copy(GUARD, tools_dir / GUARD.name)
     shutil.copy(REAL_COPY, copy_dir / "chat-types.ts")
     if with_sources:
-        chat = tmp / "external/agenticdevelopertoolkit/packages/web/packages/chat/src"
+        chat = tmp / "external/adhsdk/packages/web/packages/chat/src"
         (chat / "backends").mkdir(parents=True)
         shutil.copy(REAL_CHAT / "types.ts", chat / "types.ts")
         shutil.copy(REAL_CHAT / "backends/types.ts", chat / "backends/types.ts")
@@ -64,7 +64,7 @@ def scenario(mutate=None, *, with_sources: bool = True) -> tuple[int, str]:
         if mutate:
             mutate(
                 tmp / "packages/web/packages/adh/src/persona-chat/chat-types.ts",
-                tmp / "external/agenticdevelopertoolkit/packages/web/packages/chat/src/types.ts",
+                tmp / "external/adhsdk/packages/web/packages/chat/src/types.ts",
             )
         return run(tmp)
 

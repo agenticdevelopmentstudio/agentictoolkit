@@ -419,7 +419,7 @@ Not applicable: source contains no logging call (no `print`, `os_log`, or
   presented with `arrowEdge: .bottom`. The unmodified default type sizes
   cited under Appearance's **Font** entry come from
   `ThemeTypography.defaultStyle(_:)` in
-  `external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperToolkit/Sources/Theme/ThemeTypography.swift`.
+  `external/adhsdk/packages/apple/AgenticDeveloperToolkit/Sources/Theme/ThemeTypography.swift`.
   The app's `\.theme` environment value is applied to that content via the
   shared `.themedRoot()` helper (once on `MCPChipsBar`'s root, and again on
   `MCPServerPicker` inside the popover, since a popover is its own window —

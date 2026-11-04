@@ -325,7 +325,7 @@ console output, no logger import).
   `placeholder?: string`, `hint?: React.ReactNode`,
   `error?: React.ReactNode`, `disabled?: boolean`, `id?: string`.
   Composes `Input` from `@agenticdevelopertoolkit/ui`
-  (`external/agenticdevelopertoolkit/packages/web/packages/ui/src/components/input.tsx`)
+  (`external/adhsdk/packages/web/packages/ui/src/components/input.tsx`)
   for the field shell and `FieldFootnote` from
   `@agenticdevelopertoolkit/ui` for the hint/error slot, plus
   `fieldCaptionClass` from `@agenticdevelopertoolkit/ui`'s typography

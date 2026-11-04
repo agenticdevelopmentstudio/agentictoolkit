@@ -56,11 +56,11 @@ projectReferences:
   #
   # This climbs OUT of this repo, to the superproject's sibling checkout of
   # agenticdevelopertoolkit — deliberately, not for want of a nearer copy.
-  # This repo carries its own `external/agenticdevelopertoolkit` submodule
+  # This repo carries its own `external/adhsdk` submodule
   # (a web-surface dependency), and pointing here at that copy is what a
   # standalone clone would want. It cannot be done: the superproject that
   # consumes both repos already puts ADT's xcodeproj in its workspace at
-  # `external/agenticdevelopertoolkit/…`, and a second xcodeproj at a
+  # `external/adhsdk/…`, and a second xcodeproj at a
   # different path builds a second `AgenticDeveloperToolkit-macOS` target
   # into the same products directory. Xcode fails the whole workspace with
   # ~16 "Multiple commands produce …/AgenticDeveloperToolkit.framework"
@@ -70,14 +70,14 @@ projectReferences:
   # this repo does not build. `xcodegen generate` fails naming this path.
   # A standalone build needs ADT checked out as a sibling of this repo.
   AgenticDeveloperToolkit:
-    path: ../../../../../external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperToolkit/AgenticDeveloperToolkit.xcodeproj
+    path: ../../../../../external/adhsdk/packages/apple/AgenticDeveloperToolkit/AgenticDeveloperToolkit.xcodeproj
 
   # The generated hub API client. Climbs to the superproject's checkout for the
   # same reason as AgenticDeveloperToolkit above: the superproject's workspace
   # already contains this xcodeproj at that path, and a second copy would
   # build a second AgenticDeveloperHubClient into the same products directory.
   AgenticDeveloperHubClient:
-    path: ../../../../../external/agenticdevelopertoolkit/packages/apple/AgenticDeveloperHubClient/AgenticDeveloperHubClient.xcodeproj
+    path: ../../../../../external/adhsdk/packages/apple/AgenticDeveloperHubClient/AgenticDeveloperHubClient.xcodeproj
 
 packages:
   CodeEditLanguages:
